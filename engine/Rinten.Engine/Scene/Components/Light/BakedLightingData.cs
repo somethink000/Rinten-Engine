@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-/// <summary>What a bake produced: the atlas and its directions, the volume, and which renderer has which square of the atlas. Kept in the scene's binary half - see BlobData - rather than in its text.</summary>
+/// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
 	public override int Version => 2;
@@ -16,7 +16,7 @@ public sealed class BakedLightingData : BlobData
 		/// <summary>The renderer, by its component's id.</summary>
 		public Guid Renderer;
 
-		/// <summary>The model it drew then. Another model has another unwrap, and reads the volume until the next bake.</summary>
+		/// <summary>The model it drew; another model has another unwrap and reads the volume until rebaked.</summary>
 		public string Model;
 
 		/// <summary>Scale in xy, offset in zw - see ModelRenderer.LightmapRect.</summary>
@@ -29,7 +29,7 @@ public sealed class BakedLightingData : BlobData
 	/// <summary>Four halves a texel: the light arriving, over pi, and one where the texel is a surface's.</summary>
 	public Half[] Sheet { get; set; } = [];
 
-	/// <summary>Four halves a texel: which way that light mostly came from, and its lean onto the surface's own normal.</summary>
+	/// <summary>Four halves a texel: where that light mostly came from, and its lean onto the normal.</summary>
 	public Half[] Ways { get; set; } = [];
 
 	public List<Place> Places { get; set; } = new();
@@ -45,7 +45,7 @@ public sealed class BakedLightingData : BlobData
 	public Half[] VolumeGreen { get; set; } = [];
 	public Half[] VolumeBlue { get; set; } = [];
 
-	/// <summary>How much of each light with baked shadows the still world lets reach each texel of the sheet, a channel a light, four bytes a texel - empty where no light has them. See Light.Baked.</summary>
+	/// <summary>Four bytes a texel: each masked light's share through the still world; empty where none.</summary>
 	public byte[] SheetMask { get; set; } = [];
 
 	/// <summary>The same at each point of the volume, for what moves - laid out as its colours are.</summary>
@@ -57,7 +57,7 @@ public sealed class BakedLightingData : BlobData
 		/// <summary>The light component.</summary>
 		public Guid Light;
 
-		/// <summary>Which channel of the mask holds its shadow - nought to three - or -1 where the whole light is baked.</summary>
+		/// <summary>The mask channel holding its shadow, nought to three, or -1 where it is baked whole.</summary>
 		public int Channel;
 	}
 
@@ -123,7 +123,7 @@ public sealed class BakedLightingData : BlobData
 		writer.Stream = s;
 	}
 
-	/// <summary>A version 1 bake: no masks, and every light it took it took whole - which is what Baked meant then. The lights are not named in it, so the frame treats a Baked light of such a bake as whole until it is baked again.</summary>
+	/// <summary>A version 1 bake: no masks and no lights named, so every light stays in the frame.</summary>
 	public override void Upgrade( ref Reader reader, int fromVersion )
 	{
 		if ( fromVersion >= 2 )

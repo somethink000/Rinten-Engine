@@ -11,7 +11,7 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	internal SceneLight SceneObject => _sceneObject;
 
 	//Source size drives highlight size and shadow penumbra (see surface_shading.slang, frame.slang)
-	/// <summary>How wide the light itself is, in metres - which is how big its highlight is in a glossy surface, and how soft the edge of its shadow is.</summary>
+	/// <summary>How wide the light is, in metres: its highlight's size and its shadow's softness.</summary>
 	[Property, Group( "Shadows" ), Range( 0.0f, 2.0f ), Title( "Source Width" )]
 	public float SourceRadius { get; set; } = 0.05f;
 
@@ -47,7 +47,7 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	internal Color EmittedColor => new( LightColor.r * Brightness, LightColor.g * Brightness,
 		LightColor.b * Brightness, LightColor.a );
 
-	/// <summary>Whether this light lights the volumetric fog, and whether its shadow shows in it. Kept for that fog, which does not draw yet.</summary>
+	/// <summary>Whether this light lights the volumetric fog and shows its shadow in it.</summary>
 	[Property, Category( "Fog Settings" )]
 	public FogInfluence FogMode { get; set; } = FogInfluence.Enabled;
 
@@ -70,17 +70,17 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 		}
 	} = true;
 
-	//Bakes the static world's shadow from this light (stationary/mixed light); max four may overlap
-	/// <summary>Whether this light's shadows of the still world are baked.</summary>
-	[Property, Order( -4 )]
-	public bool Baked { get; set; }
+	//A baked light keeps its bounces and its still world's shadow in the bake and stays lit in the frame; four may overlap
+	/// <summary>Whether this light is kept out of the bake, lighting only as the frame draws it.</summary>
+	[Property, Order( -4 ), Title( "Not Baked" )]
+	public bool NotBaked { get; set; }
 
-	//For a lamp filling a corridor, which wants no shadow of what walks past: it costs nothing to draw however many there are, and what moves under it is lit by it out of the bake's volume, softly, and casts no shadow from it. A light that keeps a character's shadow wants Baked alone.
-	/// <summary>Whether the whole of a baked light lives in the bake rather than in the frame - its light as well as its shadows.</summary>
-	[Property, Order( -3 ), ShowIf( nameof( Baked ), true ), Title( "Whole Light In Bake" )]
+	//For a corridor lamp that needs no shadow of what walks past: free to draw, movers lit by it from the bake's volume
+	/// <summary>Whether the whole light lives in the bake rather than the frame, shadows and all.</summary>
+	[Property, Order( -3 ), HideIf( nameof( NotBaked ), true ), Title( "Whole Light In Bake" )]
 	public bool BakedWhole { get; set; }
 
-	//Diffuse and specular are kept apart in the frame's shading - a light without specular lights a surface and leaves no highlight on it, one without diffuse leaves only the highlight - and the bake leaves a light without diffuse out altogether. Nothing here has a transmission term to switch.
+	//Diffuse and specular are kept apart in shading; the bake leaves out a light without diffuse
 	/// <summary>Which lighting terms this light is allowed to contribute to.</summary>
 	[Property, EnumButtonGroup, Title( "Contributes" )]
 	public LightContribution Contribution { get; set; } = LightContribution.Diffuse | LightContribution.Specular | LightContribution.Transmissive;

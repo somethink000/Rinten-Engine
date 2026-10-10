@@ -31,6 +31,10 @@
 							{
 								<NetworkSettingsButton />
 							}
+							else if ( item.BuildMenu )
+							{
+								<BuildMenuButton SceneView="@Tools.SceneView" />
+							}
 							else if ( item.ViewSettingsMenu )
 							{
 								<ViewSettingsButton SceneView="@Tools.SceneView" />
@@ -127,6 +131,7 @@
 				hash.Add( item.Panel );
 				hash.Add( item.GizmoSettingsMenu );
 				hash.Add( item.NetworkSettingsMenu );
+				hash.Add( item.BuildMenu );
 				hash.Add( item.ViewSettingsMenu );
 				hash.Add( item.ResolutionMenu );
 				hash.Add( item.SnapStep );

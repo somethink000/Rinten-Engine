@@ -217,7 +217,7 @@ internal sealed class CoreLampMaps : IDisposable
 
 			lamp.Seen = frameNumber;
 
-			//The mask has its still world - see Light.Baked
+			//The mask has its still world - see Light.NotBaked
 			var masked = CoreSceneRenderer.MaskChannelOf( kind ) >= 0;
 			if ( masked != lamp.Masked ) Forget( lamp );
 

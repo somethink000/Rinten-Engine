@@ -1,0 +1,29 @@
+@using Rinten.UI
+@namespace Editor
+@inherits Panel
+
+<root class="build-menu-button">
+	<ToolbarButton Icon="hardware" ToolTip="Build" Active="@popup.IsValid()" OnPressed="@Toggle" />
+</root>
+
+@code
+{
+	/// <summary>The view whose scene the build panel works on.</summary>
+	public SceneViewPanel SceneView { get; set; }
+
+	BuildPopup popup;
+
+	void Toggle()
+	{
+		if ( popup.IsValid() )
+		{
+			popup.Delete();
+			popup = null;
+			return;
+		}
+
+		popup = BuildPopup.Open( this, SceneView );
+	}
+
+	protected override int BuildHash() => HashCode.Combine( popup.IsValid() );
+}

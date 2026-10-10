@@ -5,6 +5,7 @@ partial class ViewportToolsPanel
 	Item PlayButton { get; set; }
 	Item PauseButton { get; set; }
 	Group PlayToolbar { get; set; }
+	Group BuildToolbar { get; set; }
 
 	enum PlayControlState
 	{
@@ -30,6 +31,10 @@ partial class ViewportToolsPanel
 		PlayButton = AddButton( PlayToolbar, "Play", "play_arrow", PlayStop );
 		PauseButton = AddButton( PlayToolbar, "Pause", "pause", Pause );
 
+		//To the right of play, apart from it: what gets built for the scene
+		BuildToolbar = AddGroup( section );
+		BuildToolbar.Items.Add( new Item { BuildMenu = true } );
+
 		UpdateState();
 	}
 
@@ -53,6 +58,9 @@ partial class ViewportToolsPanel
 
 		_playState = CurrentPlayState;
 		PlayToolbar.Visible = _playState != PlayControlState.Hidden;
+
+		//A prefab has no lighting of its own to build
+		if ( BuildToolbar is not null ) BuildToolbar.Visible = !sceneView.Session.IsPrefabSession;
 
 		if ( _playState == PlayControlState.Hidden )
 		{

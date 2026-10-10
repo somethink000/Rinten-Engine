@@ -42,6 +42,9 @@ public partial class ViewportToolsPanel : EditorPanel
 		/// <summary>The network settings popup on the scene toolbar.</summary>
 		public bool NetworkSettingsMenu { get; set; }
 
+		/// <summary>The build panel - baking the scene's lighting and the like - beside the play controls.</summary>
+		public bool BuildMenu { get; set; }
+
 		/// <summary>The view settings popup on the scene toolbar.</summary>
 		public bool ViewSettingsMenu { get; set; }
 

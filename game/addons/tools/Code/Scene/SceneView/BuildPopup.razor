@@ -1,0 +1,152 @@
+@using System.Threading
+@using Rinten
+@using Rinten.UI
+@using Editor.Inspectors
+@namespace Editor
+@attribute [StyleSheet( "BuildPopup.razor.scss" )]
+@inherits Popup
+
+<root class="build-popup">
+	<div class="body">
+		<div class="head">
+			<i>wb_iridescent</i>
+			<span class="heading">Lighting</span>
+		</div>
+
+		@if ( Lighting.IsValid() )
+		{
+			<ControlSheet Target="@settings" />
+		}
+
+		<div class="status">
+			<i class="@( baking is not null ? "busy" : Baked ? "done" : "" )">@( baking is not null ? "hourglass_top" : Baked ? "check_circle" : "radio_button_unchecked" )</i>
+			<label>@Status</label>
+		</div>
+
+		<div class="buttons">
+			@if ( baking is not null )
+			{
+				<div class="button" onclick="@Cancel"><i>close</i><label>Cancel</label></div>
+			}
+			else
+			{
+				<div class="button @( Baked ? "" : "disabled" )" onclick="@Clear"><i>delete</i><label>Clear</label></div>
+				<div class="button primary" onclick="@Bake"><i>lightbulb</i><label>Bake Lighting</label></div>
+			}
+		</div>
+	</div>
+</root>
+
+@code
+{
+	/// <summary>The view whose scene this builds.</summary>
+	public SceneViewPanel SceneView { get; set; }
+
+	BakedLighting lighting;
+	SerializedObject settings;
+	CancellationTokenSource baking;
+
+	//The scene being edited, not a game played from it
+	Scene EditedScene => SceneView?.TabSession?.Scene;
+
+	BakedLighting Lighting
+	{
+		get
+		{
+			if ( !lighting.IsValid() || lighting.Scene != EditedScene )
+			{
+				lighting = EditedScene?.GetAllComponents<BakedLighting>().FirstOrDefault();
+				settings = lighting.IsValid() ? lighting.GetSerialized() : null;
+			}
+
+			return lighting;
+		}
+	}
+
+	bool Baked => Lighting is { HasBake: true };
+
+	string Status
+	{
+		get
+		{
+			if ( baking is not null ) return "Baking - progress is at the bottom of the editor";
+			if ( Lighting?.Data is not { IsEmpty: false } data ) return "Not baked";
+
+			var sheet = data.HasSheet ? $"{data.SheetWidth}x{data.SheetHeight} atlas" : "no atlas";
+			var volume = data.HasVolume ? $"{data.VolumeX}x{data.VolumeY}x{data.VolumeZ} volume" : "no volume";
+
+			return $"Baked: {sheet}, {volume}";
+		}
+	}
+
+	/// <summary>Opens the panel under the button that asked for it.</summary>
+	public static BuildPopup Open( Panel anchor, SceneViewPanel view )
+	{
+		if ( anchor is null || !anchor.IsValid() ) return null;
+
+		var popup = new BuildPopup { SceneView = view };
+		popup.SetPositioning( anchor, PositionMode.BelowCenter, 4 );
+		popup.AnchorPanel = anchor;
+		popup.CloseWhenParentIsHidden = true;
+		popup.AddClass( "editor-popup" );
+		popup.SyncAnchor();
+
+		return popup;
+	}
+
+	//The scene's first bake makes the object that keeps it, undoably
+	BakedLighting Ensure()
+	{
+		if ( Lighting.IsValid() ) return lighting;
+
+		var scene = EditedScene;
+		if ( !scene.IsValid() ) return null;
+
+		using ( SceneView.TabSession.UndoScope( "Add Baked Lighting" ).WithGameObjectCreations().Push() )
+		{
+			var holder = scene.CreateObject();
+			holder.Name = "Baked Lighting";
+			holder.Components.Create<BakedLighting>();
+		}
+
+		lighting = null;
+		return Lighting;
+	}
+
+	//Async void as a click handler: everything it can throw is caught here
+	async void Bake()
+	{
+		if ( baking is not null || Ensure() is not { } target ) return;
+
+		baking = new CancellationTokenSource();
+		StateHasChanged();
+
+		try
+		{
+			await target.Bake( baking.Token );
+		}
+		catch ( OperationCanceledException )
+		{
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( $"baked lighting: the bake failed - {e.Message}" );
+		}
+		finally
+		{
+			baking.Dispose();
+			baking = null;
+			StateHasChanged();
+		}
+	}
+
+	void Cancel() => baking?.Cancel();
+
+	void Clear()
+	{
+		if ( Lighting is { HasBake: true } target ) target.Clear();
+		StateHasChanged();
+	}
+
+	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, lighting?.Data );
+}

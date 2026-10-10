@@ -174,10 +174,10 @@ internal static class CoreBakedLighting
 	//A light's shadow mask channel in the current bake, BakedWhole, or NotBaked; valid after Write
 	internal static int ChannelOf( Light light )
 	{
-		if ( writing is null || light is null || !light.Baked ) return NotBaked;
+		if ( writing is null || light is null || light.NotBaked ) return NotBaked;
 
-		//A bake from before the masks took every Baked light whole.
-		if ( writing.Old ) return BakedWhole;
+		//A bake from before the masks names no lights: each stays in the frame until baked again
+		if ( writing.Old ) return NotBaked;
 
 		if ( !writing.Lights.TryGetValue( light.Id, out var channel ) ) return NotBaked;
 

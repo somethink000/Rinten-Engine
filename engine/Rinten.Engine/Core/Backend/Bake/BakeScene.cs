@@ -516,7 +516,7 @@ internal sealed class BakeScene
 	{
 		foreach ( var light in scene.GetAllComponents<Light>() )
 		{
-			if ( !light.IsValid() || !light.Enabled || !light.Active ) continue;
+			if ( !light.IsValid() || !light.Enabled || !light.Active || light.NotBaked ) continue;
 			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
 
 			var colour = light.EmittedColor;
@@ -534,8 +534,8 @@ internal sealed class BakeScene
 				Id = light.Id,
 
 				//A shadowless baked light bakes only its bounces and stays in the frame as it is
-				Whole = light.Baked && light.BakedWhole,
-				Mask = light.Baked && !light.BakedWhole && light.Shadows ? 0 : -1,
+				Whole = light.BakedWhole,
+				Mask = !light.BakedWhole && light.Shadows ? 0 : -1,
 			};
 
 			switch ( light )
@@ -617,9 +617,9 @@ internal sealed class BakeScene
 
 			if ( light.Mask >= 0 ) continue;
 
-			light.Whole = true;
-			Log.Warning( $"baked lighting: a light at {light.Position.X:0.#},{light.Position.Y:0.#},{light.Position.Z:0.#} overlaps {MaskChannels} other " +
-				"lights with baked shadows, which is all a texel holds - it is baked whole, and what moves casts no shadow from it" );
+			//Its bounces stay baked; its still world's shadow is drawn in the frame
+			Log.Info( $"baked lighting: a light at {light.Position.X:0.#},{light.Position.Y:0.#},{light.Position.Z:0.#} overlaps {MaskChannels} other " +
+				"lights with baked shadows, which is all a texel holds - its shadows stay realtime" );
 		}
 	}
 

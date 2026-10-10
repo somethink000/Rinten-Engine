@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 namespace Rinten;
 
-//Bakes sky, bounces, emissives and shadow masks; statics get atlas squares, the rest a probe lattice
+//Holds a scene's bake settings and result; the scene view's build panel bakes it
 /// <summary>The scene's baked lighting: everything a frame cannot work out about light, worked out once and kept.</summary>
 [Expose]
 [Title( "Baked Lighting" )]
@@ -73,8 +73,7 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 
 	protected override void OnDisabled() => CoreBakedLighting.Unplace( this );
 
-	/// <summary>Traces the scene's light and keeps it. Takes as long as it takes - every core, off the main thread - and says how far it has got.</summary>
-	[Button( "Bake", "lightbulb" )]
+	/// <summary>Traces the scene's light and keeps it, off the main thread, reporting progress.</summary>
 	public async Task Bake( CancellationToken cancel = default )
 	{
 		if ( !Scene.IsValid() ) return;
@@ -88,8 +87,7 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 		if ( Scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
 	}
 
-	/// <summary>Throws the bake away, which puts every light back in the frame and every surface back on the frame's guess at the sky.</summary>
-	[Button( "Clear", "delete" )]
+	/// <summary>Throws the bake away: every light back in the frame, every surface back on the frame's sky.</summary>
 	public void Clear()
 	{
 		Data = null;

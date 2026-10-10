@@ -533,7 +533,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		float shadow;
 
-		//Where the bake holds this light's static shadow (Light.Baked); its maps then hold only movers
+		//Where the bake holds this light's static shadow (Light.NotBaked); its maps then hold only movers
 		int channel = LightMaskChannel( light );
 
 		if ( light.colour.w < 0.5 )

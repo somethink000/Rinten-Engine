@@ -360,7 +360,7 @@ uint LightWithholds( Light light )
 }
 
 //Which channel of the baked mask holds a light's shadow of the still world, out of the hundredths of its kind word:
-//one more than the channel, nought for none - see Light.Baked and CoreSceneRenderer.MaskChannelOf. -1 where none does.
+//one more than the channel, nought for none - see Light.NotBaked and CoreSceneRenderer.MaskChannelOf. -1 where none does.
 int LightMaskChannel( Light light )
 {
 	uint hundredths = uint( round( frac( light.colour.w ) * 100.0 ) );
@@ -1834,7 +1834,7 @@ bool HasBakedVolume()
 #endif
 }
 
-//Whether lights' static shadows were baked into a mask rather than maps - see Light.Baked
+//Whether lights' static shadows were baked into a mask rather than maps - see Light.NotBaked
 bool HasBakedMask()
 {
 #ifdef PORTABLE

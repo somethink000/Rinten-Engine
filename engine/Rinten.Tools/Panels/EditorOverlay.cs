@@ -225,6 +225,9 @@ public sealed class EditorOverlay : Panel
 	//What the pointer rests on and its tooltip; panels first, since they are deeper than widgets
 	private (object Hovered, string Text) Resting()
 	{
+		//Every window has a layer and the hover is global: only the layer of the window under the pointer explains it
+		if ( WidgetSurface.HoveredSurface?.FindRootPanel() != FindRootPanel() ) return (null, null);
+
 		for ( var panel = DeepestHovered(); panel is not null; panel = panel.Parent )
 		{
 			if ( !string.IsNullOrWhiteSpace( panel.Tooltip ) )

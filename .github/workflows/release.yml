@@ -108,7 +108,7 @@ jobs:
           if-no-files-found: error
 
   linux:
-    needs: [ shared, windows ]
+    needs: [ shared, windows-core ]
     runs-on: ubuntu-latest
     env:
       DOTNET_INSTALL_DIR: /home/runner/.dotnet
@@ -136,6 +136,12 @@ jobs:
             libwayland-dev libxkbcommon-dev libegl-dev libgl-dev libdrm-dev libgbm-dev \
             libdbus-1-dev libudev-dev libasound2-dev libpulse-dev
 
+      # Before the build, which puts the restored Skia and HarfBuzz for Windows beside them
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-win64
+          path: game/bin/win64
+
       - name: Build
         run: dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build
 
@@ -143,11 +149,6 @@ jobs:
         with:
           name: shared
           path: .
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: bin-win64
-          path: game/bin/win64
 
       - name: Package
         run: dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- package-release --version "${TAG#v}" --output dist
@@ -186,7 +187,19 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-      # Windows' natives for the Linux zip, so a game can be exported for Windows from Linux
+  # Windows' core and natives for the Linux zip, so a game can be exported for Windows from Linux; from the start, beside shared
+  windows-core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build the core
+        run: dotnet run --project .\engine\Tools\RintenBuild\RintenBuild.csproj -- build --skip-managed
+
       - uses: actions/upload-artifact@v4
         with:
           name: bin-win64

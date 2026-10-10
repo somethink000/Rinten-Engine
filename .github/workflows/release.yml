@@ -205,7 +205,8 @@ jobs:
 
       - name: Publish
         env:
-          GH_TOKEN: ${{ github.token }}
+          # A fine-grained token (Contents: read and write) where the workflow's own is refused creating releases
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           # A tag with a dash (v0.2-beta) is a pre-release; v0.2 is a release
           PRERELEASE: ${{ github.event_name == 'push' && contains( github.ref_name, '-' ) || github.event_name == 'workflow_dispatch' && inputs.prerelease }}
         run: |

@@ -8,8 +8,7 @@ namespace Rinten;
 //The renderer facade: Vulkan or WebGPU, picked by a static readonly bool so the JIT folds the branch
 internal static unsafe class CoreRender
 {
-	//-- what the renderer's shapes are called -------------------------------- The renderer itself is C# now, in Core/Backend/Render/Vulkan;
-	//these stay because the callers name them and because the numbers are what the shader compiler and the pipeline baker agree on.
+	//-- the renderer's shapes: callers name them, and the shader compiler and pipeline baker agree on the numbers --
 
 	/// <summary>Matches sbc_vertex_layout.</summary>
 	public enum VertexLayoutKind
@@ -33,8 +32,8 @@ internal static unsafe class CoreRender
 		Lines = 1,
 	}
 
-	//Which picture a pass draws into. Matches sbc_render_target. What a picture of the frame's is made in - see CoreRenderDevice.AcquirePicture.
-	//A format the device cannot use the way it is asked to is made in half floats instead, and the picture says which it got.
+	//Which picture a pass draws into, as sbc_render_target; a format the device cannot use as asked is made
+	//in half floats instead, and the picture says which - see CoreRenderDevice.AcquirePicture
 	internal enum PictureKind
 	{
 		/// <summary>Four half floats: light past white, what the world is shaded in.</summary>
@@ -61,7 +60,7 @@ internal static unsafe class CoreRender
 		/// <summary>Ten bits a colour channel, two of alpha.</summary>
 		Ten = 7,
 
-		/// <summary>One whole unsigned integer: a counter, or a depth kept by an atomic minimum. Stored into and read as stored - the table reads floats, and cannot.</summary>
+		/// <summary>One unsigned integer: a counter or an atomic-min depth, read as stored, not as float.</summary>
 		Whole = 8,
 	}
 
@@ -74,31 +73,31 @@ internal static unsafe class CoreRender
 		/// <summary>Where what moved says how far - see TargetVelocity.</summary>
 		Velocity = 5,
 
-		/// <summary>The other full-size picture, which a chain of post-process passes alternates with - see CorePostBlit. Made the first time one is drawn.</summary>
+		/// <summary>The other full-size picture a post chain alternates with - see CorePostBlit.</summary>
 		Post = 6,
 
-		/// <summary>The world's own picture with only its colour attached - the other half of that alternation, and never the world's pass itself.</summary>
+		/// <summary>The world's picture with only its colour attached, the other half of that alternation.</summary>
 		SceneColour = 7,
 
-		//The world's two are in half floats at the world's size, before the tonemap and before the upscale; these are after both, which is where an effect that works on what the player sees belongs. Made the first time something is hung on Stage.AfterPostProcess.
-		/// <summary>The finished picture, at the window's size, and the one beside it - what the passes after the compose alternate between.</summary>
+		//After tonemap and upscale at window size, for effects on what the player sees; made on first use
+		/// <summary>The finished picture at window size and its partner, for passes after the compose.</summary>
 		Final = 11,
 		FinalSecond = 12,
 
-		/// <summary>The world's picture and its other at the window's size, before the curve: what the effects run over once a temporal upscaler has carried the world up - see VkDevice.TargetDisplay. The full frame's only.</summary>
+		/// <summary>World and partner at window size, pre-curve, after a temporal upscale; full frame only.</summary>
 		Display = 13,
 		DisplaySecond = 14,
 
 
 
-		/// <summary>The sky's colour by elevation and sun angle, drawn once a frame - see VkDevice.TargetSkyTable.</summary>
+		/// <summary>Sky colour by elevation and sun angle, drawn once a frame - see VkDevice.TargetSkyTable.</summary>
 		SkyTable = 17,
 
 
-		/// <summary>A layer of one of a drawer's shadow maps - a level of the sun's pages, or a zone of the map of what moves. Opened with BeginShadow, which names the map and the layer, rather than with BeginTarget. See CoreSunPages.</summary>
+		/// <summary>A layer of a drawer's shadow map, opened with BeginShadow - see CoreSunPages.</summary>
 		Shadow = 19,
 
-		/// <summary>A level of one of the frame's pictures - see CoreRenderDevice.AcquirePicture. A pipeline for one is baked against the picture's own format, which PipelineKind.PictureFormat carries.</summary>
+		/// <summary>A level of a frame picture; its pipeline is baked for the picture's format.</summary>
 		Picture = 20,
 	}
 
@@ -112,7 +111,7 @@ internal static unsafe class CoreRender
 	//Whether this is the portable frame. Read where a call belongs to the full one alone.
 	private static bool Portable => web || VkDevice.Tier == RenderTier.Portable;
 
-	//The language this device's shaders are in: in a browser whichever its device takes, and on Vulkan the SPIR-V of whichever frame the device holds.
+	//The device's shader language: a browser's own, or SPIR-V of the frame the Vulkan device holds
 	internal static CoreShaderCompiler.Format ShaderFormat
 		=> web ? BrowserDevice.ShaderFormat
 			: VkDevice.Tier == RenderTier.Portable ? CoreShaderCompiler.Format.SpirvPortable
@@ -120,8 +119,7 @@ internal static unsafe class CoreRender
 
 	//Routes each call to a backend; a 0 on the web means the browser renderer lacks that path
 
-	//The device is already open by the time anything here asks. WebGPU is brought up through promises, and a page may not
-	//block on one - so the launcher awaits BrowserDevice.Init before the engine starts and this only reports what came of it.
+	//WebGPU opens through promises a page cannot block on, so the launcher awaits BrowserDevice.Init first
 	internal static int Init( int enableValidation )
 		=> web ? ( BrowserDevice.Ready ? 1 : 0 ) : ( VkDevice.Init( enableValidation != 0 ) ? 1 : 0 );
 
@@ -158,7 +156,7 @@ internal static unsafe class CoreRender
 	internal static int SwapchainVsync( ulong swapchain, int enabled )
 		=> web ? BrowserSwapchain.SwapchainVsync( swapchain, enabled ) : VkSwapchain.Vsync( swapchain, enabled );
 
-	//The web canvas is whatever size the page made it and there is no second set of pictures behind it to shrink, so the scale is always one there.
+	//The web canvas is the page's size with no pictures behind it to shrink, so its scale is one
 	internal static int SwapchainScale( ulong swapchain, float scale )
 		=> Portable ? 0 : VkSwapchain.Scale( swapchain, scale );
 
@@ -176,8 +174,7 @@ internal static unsafe class CoreRender
 		else VkSwapchain.Destroy( swapchain );
 	}
 
-	//How big the thing being drawn into is. On the web that is the canvas, asked of the page rather than of the backend: the
-	//page is what resizes it, and it is the size a frame will be told to draw at whether or not the swapchain has caught up yet.
+	//On the web, the canvas size from the page, which resizes it and is the size a frame draws at
 	internal static void SwapchainInfo( ulong swapchain, int* outInfo )
 	{
 		if ( !web ) { VkSwapchain.Info( swapchain, outInfo ); return; }
@@ -228,7 +225,7 @@ internal static unsafe class CoreRender
 	internal static ulong FrameCount( ulong swapchain )
 		=> web ? BrowserSwapchain.FrameCount( swapchain ) : VkSwapchain.FrameCount( swapchain );
 
-	//A page has no timestamp queries and nothing to hang a zone off, so the profiler is told there is nothing to time here.
+	//A page has no timestamp queries, so there is nothing to time
 	[System.Runtime.CompilerServices.MethodImpl( System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining )]
 	internal static int ZoneBegin( string name )
 		=> web ? 0 : VkFrame.ZoneBegin( name );
@@ -283,7 +280,7 @@ internal static unsafe class CoreRender
 			&& !CoreSceneRenderer.StereoIncomplete
 		: VkDevice.multiview && VkDevice.Tier == RenderTier.Portable;
 
-	/// <summary>Whether the work a headset's two eyes have in common is done once a frame.</summary>
+	//Whether the work a headset's two eyes have in common is done once a frame
 	[ConVar( "r_share_views", Help = "Do the work a headset's two eyes share once a frame instead of twice." )]
 	internal static bool ShareViews { get; set; } = true;
 
@@ -423,11 +420,11 @@ internal static unsafe class CoreRender
 	internal static uint ShadowMapIndex( ulong map, bool depth )
 		=> Portable ? 0 : VkTextures.ShadowMapIndex( map, depth );
 
-	//One layer of a shadow map as the target - see VkFrame.ShadowBegin. In the portable frame the only map there is is the sun's - see PortableSunMap.
+	//One shadow map layer as the target - see VkFrame.ShadowBegin; the portable frame has only the sun's
 	internal static int ShadowBegin( ulong map, int layer )
 		=> web ? BrowserSwapchain.ShadowBegin( map, layer ) : VkFrame.ShadowBegin( map, layer );
 
-	//Narrows where the open shadow area's draws land, cleared first where asked - see VkFrame.ShadowScissor. The browser's map is drawn whole.
+	//Narrows the open shadow area's draws, clearing first where asked - see VkFrame.ShadowScissor
 	internal static void ShadowScissor( int x, int y, int width, int height, int clear )
 	{
 		if ( !web ) VkFrame.ShadowScissor( x, y, width, height, clear );
@@ -439,7 +436,7 @@ internal static unsafe class CoreRender
 		if ( !web ) VkFrame.ShadowArea( x, y, width, height, clear );
 	}
 
-	//The portable frame's one sun map, which every lit surface there reads - see CorePortableSun. Nought in the full frame, whose sun has pages of its own.
+	//The portable frame's one sun map - see CorePortableSun; nought in the full frame, which has pages
 	internal static ulong PortableSunMap()
 		=> !Portable ? 0 : web ? BrowserSwapchain.PortableSunMap() : VkDevice.portableSunMap;
 
@@ -486,7 +483,7 @@ internal static unsafe class CoreRender
 	internal static ulong BackdropTexture()
 		=> Portable ? 0 : VkFrame.BackdropTexture();
 
-	//A page reads the block formats where its device does - a desktop's browser - and unpacks them where it does not; see BrowserTextures.CreateMips.
+	//A page reads BC where its device does and unpacks where not - see BrowserTextures.CreateMips
 	internal static int SupportsBc()
 		=> web ? ( BrowserDevice.BlockCompression ? 1 : 0 ) : VkDevice.SupportsBc();
 
@@ -523,6 +520,12 @@ internal static unsafe class CoreRender
 
 	internal static ulong SkyTableTexture()
 		=> Portable ? 0 : VkDevice.SkyTableTexture();
+
+	//A table made on the CPU bound in place of the drawn one; the page is sent its bytes instead - see SendSkyTable
+	internal static void UseSkyTable( ulong texture )
+	{
+		if ( !web ) VkTextures.portableSkyTable = texture;
+	}
 
 	//The portable frame's sky table onto the device - see CoreSkyTable.
 	internal static void SendSkyTable( byte* texels, int side )
@@ -922,7 +925,7 @@ internal static unsafe class CoreRender
 				var room = new ulong[portablePictures.Length * 2];
 				Array.Copy( portablePictures, room, portableCount );
 
-				//Published whole and only once it is filled: a reader holding the one before it reads a shorter array, never a half-copied one.
+				//Published only once filled, so a reader sees the old array or the full new one
 				System.Threading.Volatile.Write( ref portablePictures, room );
 			}
 

@@ -6,7 +6,7 @@ using Vec4 = System.Numerics.Vector4;
 
 namespace Rinten.Bake;
 
-//A picture a material reads, as light rather than bytes: linear colour and the alpha beside it, small enough to keep for a whole bake.
+//A picture a material reads as linear light with its alpha, small enough to keep for a whole bake
 internal sealed class BakePicture
 {
 	public int Width, Height;
@@ -15,7 +15,7 @@ internal sealed class BakePicture
 	//The biggest a picture is kept: bounced light is soft, and a cut-out leaf needs no more.
 	private const int Largest = 256;
 
-	/// <summary>Reads a texture off the card's copy at the first level no wider than the bake wants. Colour is sRGB on disk and light in here.</summary>
+	/// <summary>Reads a texture at the first level no wider than the bake wants, colour linearised.</summary>
 	public static BakePicture Of( Texture texture, bool colour )
 	{
 		if ( texture is null || !texture.IsValid() || texture.Width <= 0 || texture.Height <= 0 ) return null;
@@ -110,7 +110,7 @@ internal sealed class BakeMaterial
 
 	public bool Glows => Emission.X > 0.0f || Emission.Y > 0.0f || Emission.Z > 0.0f;
 
-	/// <summary>Reads what the bake needs out of a material, the way the surface shader reads it - see complex.shader.</summary>
+	/// <summary>What the bake needs of a material, read as the surface shader reads it - see complex.shader.</summary>
 	public static BakeMaterial Of( Material material, Dictionary<Texture, BakePicture> pictures )
 	{
 		var made = new BakeMaterial();
@@ -178,7 +178,7 @@ internal sealed class BakeLight
 	/// <summary>The whole of it is in the bake, and none of it in the frame - see Light.BakedWhole.</summary>
 	public bool Whole;
 
-	/// <summary>Which channel of the mask its shadow of the still world is baked into, or -1 where it has none - see Light.Baked and <see cref="BakeScene.AssignMasks"/>.</summary>
+	/// <summary>The mask channel its static-world shadow bakes into, or -1 - see BakeScene.AssignMasks.</summary>
 	public int Mask = -1;
 }
 
@@ -228,6 +228,11 @@ internal sealed class BakeScene
 	private Vec3 zenith, horizon, ground, sunDirection, sunLight;
 	private float night;
 
+	//A panorama sky's picture, light and turn, where the sky is one - see CorePanoramaSky
+	private CorePanorama panorama;
+	private Vec3 panoramaLight;
+	private float panoramaTurn;
+
 	private Vec4 ambient;
 
 	public float SkyStrength = 1.0f;
@@ -252,7 +257,7 @@ internal sealed class BakeScene
 	private readonly Dictionary<Material, int> materialIndex = new();
 	private readonly Dictionary<Texture, BakePicture> pictures = new();
 
-	/// <summary>Takes everything that stands still out of a scene. Main thread: it reads components, materials and pictures.</summary>
+	/// <summary>Takes everything static out of a scene. Main thread: reads components and materials.</summary>
 	public void Gather( Scene scene )
 	{
 		ThreadSafe.AssertIsMainThread();
@@ -342,7 +347,7 @@ internal sealed class BakeScene
 		}
 	}
 
-	//One model's triangles into the world, where the renderer draws them. True where it has a sheet to be baked onto - a second set of coordinates.
+	//One model's triangles into the world; true where it has a lightmap sheet (a second UV set)
 	private bool AddModel( Model model, Transform transform, Color tint, ulong bodyGroups, Material over, string materialGroup )
 	{
 		var vertices = model.GetVertices();
@@ -490,7 +495,7 @@ internal sealed class BakeScene
 				Shadows = light.Shadows,
 				Id = light.Id,
 
-				//A baked light that casts no shadow has nothing to bake but its bounces, which every light gives; it stays in the frame as it is.
+				//A shadowless baked light bakes only its bounces and stays in the frame as it is
 				Whole = light.Baked && light.BakedWhole,
 				Mask = light.Baked && !light.BakedWhole && light.Shadows ? 0 : -1,
 			};
@@ -576,7 +581,7 @@ internal sealed class BakeScene
 		return Vec3.DistanceSquared( a.Position, b.Position ) < reach * reach;
 	}
 
-	/// <summary>One shadow ray toward a random point on the light: 1 if it gets through. Averages into the mask</summary>
+	/// <summary>One shadow ray toward a random point on the light: 1 if it gets through.</summary>
 	public float Visible( BakeLight light, Vec3 position, Vec3 geometric, ref BakeRandom random )
 	{
 		Vec3 aim;
@@ -617,7 +622,7 @@ internal sealed class BakeScene
 		return Bvh.Blocked( from, aim, distance - ( Lift * 2.0f ) ) ? 0.0f : 1.0f;
 	}
 
-	/// <summary>The light a channel of the mask holds at a point: the one of that channel whose reach takes it in - lights sharing a channel never overlap, so there is one at most. Null where none does, and the channel says nothing there.</summary>
+	/// <summary>The light a mask channel holds at a point (channels never overlap), or null.</summary>
 	public BakeLight MaskedAt( int channel, Vec3 position )
 	{
 		foreach ( var light in Lights )
@@ -652,6 +657,12 @@ internal sealed class BakeScene
 		sunDirection = Read3( CoreSceneRenderer.SunAt );
 		sunLight = Read3( CoreSceneRenderer.SunLightAt );
 		night = sky[CoreSceneRenderer.SunLightAt + 3];
+
+		var drawn = CoreSceneRenderer.HasPanorama( sky ) ? CorePanoramaSky.Find( CoreSceneRenderer.SkyMaterialOf( scene ) ) : null;
+
+		panorama = drawn?.Panorama;
+		panoramaLight = drawn?.Light ?? Vec3.Zero;
+		panoramaTurn = drawn?.Turn ?? 0.0f;
 
 		var at = CoreSceneRenderer.AmbientAt;
 		ambient = new Vec4( sky[at], sky[at + 1], sky[at + 2], sky[at + 3] );
@@ -768,7 +779,7 @@ internal sealed class BakeScene
 
 		var albedo = new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t] * vertex;
 
-		//Never quite white: a surface that throws back all it gets makes a room whose bounces never end, and no paint does.
+		//Never quite white: a fully reflective surface makes bounces that never end, and no paint does
 		s.Albedo = Vec3.Min( albedo * material.Diffuse * AlbedoBoost, new Vec3( 0.95f ) );
 
 		s.Emission = Vec3.Zero;
@@ -794,12 +805,12 @@ internal sealed class BakeScene
 		return position + ( geometric * ( side * ( Lift + ( scale * 2e-6f ) ) ) );
 	}
 
-	/// <summary>Sky plus flat ambient from one direction, matching what the frame's sky table uses</summary>
+	/// <summary>Sky plus flat ambient from one direction, scaled as SkyAmbientScale in frame.slang scales it.</summary>
 	public Vec3 Environment( Vec3 direction )
 	{
-		var around = hasSky
-			? SkyColourOf( direction.Y, BakeMath.Saturate( Vec3.Dot( direction, sunDirection ) ) ) * 0.25f
-			: Vec3.Zero;
+		var around = !hasSky ? Vec3.Zero
+			: panorama is not null ? panorama.Radiance( direction, panoramaTurn ) * panoramaLight
+			: SkyColourOf( direction.Y, BakeMath.Saturate( Vec3.Dot( direction, sunDirection ) ) ) * 0.25f;
 
 		around = BakeMath.Lerp( around, new Vec3( ambient.X, ambient.Y, ambient.Z ), ambient.W );
 
@@ -812,7 +823,7 @@ internal sealed class BakeScene
 			new CoreSkyTable.Air( zenith, horizon, ground, sunDirection, sunLight, night, hasSun ),
 			height, mu );
 
-	/// <summary>Direct lamp light over pi at a point plus its dominant direction; matches surface_shading.slang</summary>
+	/// <summary>Direct lamp light over pi at a point, and its dominant direction; as surface_shading.slang.</summary>
 	public Vec3 Direct( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, bool bakedOnly, ref Vec3 towards )
 	{
 		var sum = Vec3.Zero;
@@ -904,7 +915,7 @@ internal sealed class BakeScene
 		}
 	}
 
-	/// <summary>Path-traced radiance from one direction with lamp sampling and Russian roulette past bounce two</summary>
+	/// <summary>Path-traced radiance from one direction, lamps sampled, Russian roulette past bounce two.</summary>
 	public Vec3 Arriving( Vec3 origin, Vec3 direction, ref BakeRandom random, out bool inside )
 	{
 		inside = false;
@@ -954,7 +965,7 @@ internal sealed class BakeScene
 	}
 }
 
-//A renderer that stands still and has a sheet of its own - where its triangles are in the world, and where its sheet lands in the atlas.
+//A static renderer with its own lightmap sheet: its triangles in the world and where its sheet lands in the atlas
 internal sealed class BakeReceiver
 {
 	public readonly ModelRenderer Renderer;

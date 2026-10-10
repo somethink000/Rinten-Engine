@@ -13,7 +13,7 @@ internal static class CoreSkyTable
 	//How many bytes the picture is: four halves a texel.
 	internal const int Bytes = Side * Side * 8;
 
-	//What the sky is made of this frame, which is everything the colour below depends on besides the direction being asked about.
+	//Everything the colour depends on besides the direction asked about
 	internal readonly struct Air
 	{
 		public readonly Vec3 Zenith, Horizon, Ground, SunDirection, SunLight;
@@ -77,8 +77,7 @@ internal static class CoreSkyTable
 			var band = 1.0f - up;
 			var haze = band * band * MathF.Sqrt( band ) * ( 0.12f + ( low * 0.30f ) );
 
-			//And the glow round the sun, which this used to leave out and the shader's table now holds - see SkyLight in sky.shader. It
-			//is what a mirror shows of a sunny sky, and the two skies have to agree or a page reflects a different day from a desktop.
+			//The glow round the sun, as sky.shader's SkyLight has it, so a page reflects the same day as a desktop
 			var mu2 = mu * mu;
 			haze += mu2 * mu2 * mu2 * ( 0.20f + ( low * 0.50f ) );
 
@@ -113,21 +112,39 @@ internal static class CoreSkyTable
 	private static bool Near( Vec3 a, Vec3 b )
 		=> Near( a.X, b.X ) && Near( a.Y, b.Y ) && Near( a.Z, b.Z );
 
-	//The table onto the device, where the sky it was last sent for has changed. A sun that has not moved and a sky nobody has retinted
-	//give the same thousand colours, so the frame that changes one pays for the bake and every other frame pays nothing at all.
+	//Bakes and sends the table only when the sky changed since the last send
 	internal static unsafe void Send( in Air air )
 	{
-		if ( filled && Same( air, last ) ) return;
+		if ( filled && sent is null && Same( air, last ) ) return;
 
 		Bake( air );
 		last = air;
 		filled = true;
+		sent = null;
 
 		fixed ( byte* bytes = texels ) CoreRenderDevice.SendSkyTable( bytes, Side );
 	}
 
+	//Sends a panorama's table in place of the baked one, once per table
+	internal static unsafe void Send( Half[] table )
+	{
+		if ( table is null || table.Length < Side * Side * 4 || ReferenceEquals( table, sent ) ) return;
+
+		sent = table;
+		filled = false;
+
+		fixed ( Half* texels = table ) CoreRenderDevice.SendSkyTable( (byte*)texels, Side );
+	}
+
+	//The table made elsewhere that the device holds, or null where it holds the baked one.
+	private static Half[] sent;
+
 	//Sent again after a device came back, whatever the sky is doing.
-	internal static void Forget() => filled = false;
+	internal static void Forget()
+	{
+		filled = false;
+		sent = null;
+	}
 
 	private static readonly byte[] texels = new byte[Bytes];
 

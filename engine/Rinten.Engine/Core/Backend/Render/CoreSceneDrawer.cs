@@ -35,13 +35,13 @@ internal sealed partial class CoreSceneDrawer
 	/// <summary>Whether the grid is cut into the faces of the editable meshes.</summary>
 	public Func<bool> SurfaceGridSource { get; set; }
 
-	/// <summary>What is selected, for the outlines. Same shape as the camera: asked every frame, owned by the scene view.</summary>
+	/// <summary>What is selected, for the outlines; asked every frame, owned by the scene view.</summary>
 	public System.Func<System.Collections.Generic.IEnumerable<GameObject>> SelectionSource { get; set; }
 
-	/// <summary>Whose gizmos to catch and draw. The scene view's own instance - the capture follows this so tool previews keep their gizmos.</summary>
+	/// <summary>Whose gizmos to draw: the scene view's instance, so tool previews keep their gizmos.</summary>
 	public System.Func<Gizmo.Instance> GizmoSource { get; set; }
 
-	/// <summary>Whether a watched per-frame viewport (not a one-off thumbnail), so the profiler reads the right one</summary>
+	/// <summary>A watched per-frame viewport, not a one-off thumbnail, so the profiler reads the right one.</summary>
 	public bool Watched { get; set; }
 
 
@@ -69,7 +69,7 @@ internal sealed partial class CoreSceneDrawer
 		for ( var i = 0; i < count; i++ ) into.Add( (int)( sortKeys[i] & 0xFFFFFFFFu ) );
 	}
 
-	//A float as an unsigned number that sorts the same way it does - the sign bit flipped where it is positive, every bit flipped where it is not.
+	//A float as a uint that sorts the same: sign bit flipped when positive, every bit when not
 	private static uint Sortable( float value )
 	{
 		var bits = (uint)System.BitConverter.SingleToInt32Bits( value );
@@ -100,7 +100,7 @@ internal sealed partial class CoreSceneDrawer
 		public Color Tint;
 		public bool Moves;
 
-		/// <summary>Whether the thing itself moves - posed, or put somewhere else since it last held still - rather than a shader bending its vertices, which is <see cref="Moves"/>. Which of the shadow maps it is drawn into: the still world's, or the ones drawn again every frame.</summary>
+		/// <summary>The thing itself moves (posed or moved), not a shader bending it; picks its shadow maps.</summary>
 		public bool InMotion;
 		public bool NoShadow;
 		public bool ShadowOnly;
@@ -109,10 +109,10 @@ internal sealed partial class CoreSceneDrawer
 		public bool EditableMesh;
 		public float Distance;
 
-		/// <summary>How many copies one draw makes - a model drawn many times over where the shader tells the copies apart by SV_InstanceID. Nought and one are one.</summary>
+		/// <summary>Copies one draw makes, told apart by SV_InstanceID; nought and one are one.</summary>
 		public int Instances;
 
-		/// <summary>A project's buffer of draw arguments the number of copies is read out of, by the card, and where in it - see CoreInstanceArgs. Nought for a count said here. <see cref="ArgsAt"/> is where this draw's own arguments were put with that number copied in; minus one until they have been.</summary>
+		/// <summary>A project buffer the copy count is read from, and where; else nought.</summary>
 		public ulong CountFrom;
 		public long CountAt;
 		public ulong ArgsBuffer;
@@ -127,8 +127,8 @@ internal sealed partial class CoreSceneDrawer
 	private readonly List<Queued> overlayLayer = new();
 	private readonly List<Queued> afterUiLayer = new();
 
-	//How near the layers laid over the world are squeezed: their depth runs from nought to this, and the world's from nought to one - see
-	//CoreRenderDevice.SetDepthCeiling. Small enough to be in front of anything the world wrote, large enough that a model's parts still sort among themselves.
+	//Overlay layers squeeze into depth nought to this, the world nought to one (SetDepthCeiling): in front of
+	//the world, with room for a model's parts to sort
 	private const float LayerDepth = 0.001f;
 
 	//The frame's push blocks, one after another - see Queued.PushAt.
@@ -153,8 +153,7 @@ internal sealed partial class CoreSceneDrawer
 	//The viewport this frame is being drawn into.
 	private ulong drawingView;
 
-	//Pixels on the screen a metre of error is, a metre from the eye - what the cull scales a cluster's error by - for the draws of a model whole,
-	//which pick between it and its impostor by the same rule. Nought for a view that is not a perspective one, which draws every model as itself.
+	//Screen pixels per metre of error a metre away, for whole-model impostor choice; nought if not perspective
 	private float looseErrorScale;
 
 	private static bool warnedMaterials;
@@ -163,8 +162,8 @@ internal sealed partial class CoreSceneDrawer
 	private CoreSceneTables tables;
 	private readonly CoreMeshRender meshRender = new();
 
-	//What a part drawn the classic way wants of its material's pictures - see CoreTextureStreaming.Wear: this camera's pixels a
-	//metre at its distance, times its scale and the metres a unit of its coordinates covers. Only on the turn the streaming asks.
+	//What a classic draw wants of its pictures (CoreTextureStreaming.Wear): pixels per metre at its distance,
+	//times scale and UV metres. Only when streaming asks
 	private void Wears( in CoreSceneRenderer.MeshDraw drawn, in System.Numerics.Matrix4x4 world, Vector3 centre, float radius, Vector3 eye )
 	{
 		if ( !CoreTextureStreaming.Collecting || drawn.Texture == 0 || !( looseErrorScale > 0.0f ) ) return;
@@ -219,8 +218,8 @@ internal sealed partial class CoreSceneDrawer
 			}
 		}
 
-		//Off the renderer's object, or off the object itself where there is no renderer - a particle drawn as a model is a loose SceneModel and drives
-		//its shapes the same way. None on a device that cannot blend them - see CoreRender.DrawsMorphs - which draws the mesh at its rest shape instead.
+		//From the renderer's object, or the object where none (a particle drawn as a model); none where the device
+		//cannot blend (CoreRender.DrawsMorphs), drawing the rest shape
 		var morphs = CoreRender.DrawsMorphs && mesh.MorphCount > 0 &&( ( entry.Renderer?.SceneObject ?? entry.Object ) as SceneModel )?.Morphs is SceneObjectMorphCollection held
 			? held.Weights()
 			: null;
@@ -353,8 +352,8 @@ internal sealed partial class CoreSceneDrawer
 		if ( renderer is not ModelRenderer model || !model.IsValid() ) return;
 		if ( !material.IsValid() || string.IsNullOrWhiteSpace( material.core?.Shader ) ) return;
 
-		//Into the picture the list named, or the picture the frame is in, over the world's depth where the draw tests against it - see CorePasses. Where there
-		//is no depth to test against - a picture not the world's size, the pictures the frame moves into after the world - only a draw that tests nothing goes.
+		//Into the list's picture or the frame's, over world depth where the draw tests it (CorePasses); where there is
+		//no depth to test, only depth-free draws go
 		if ( !CorePasses.OpenForDraw( depth: true, orNone: noDepth, out var target, out var pictureFormat,
 			out var withDepth, out var finishes ) )
 		{
@@ -505,7 +504,7 @@ internal sealed partial class CoreSceneDrawer
 
 			Wears( in drawn, in world, center, radius, eye );
 
-			//What the draw set for itself, where it set anything, is read under the names this part's shader declared - each part may be another shader.
+			//The draw's own numbers, read under this part's shader's names, as each part may be another shader
 			scoped ReadOnlySpan<float> drawnNumbers = placement;
 
 			if ( attributes is not null )
@@ -562,8 +561,8 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//Which instances the camera being drawn leaves out by its tags, a bit a table slot - see CoreSceneTables.Hidden. Kept between frames
-	//and worked out again only when something it depends on changed: the tables' slots, any scene object's tags, or the camera's own tags.
+	//Instances the camera hides by tag, a bit a slot (CoreSceneTables.Hidden); redone only when slots, tags or
+	//the camera's tags change
 	private uint[] hiddenBits = [];
 	private bool hiding;
 	private (CoreSceneTables Tables, int Slots, int Count, int TagVersion, string Include, string Exclude) hiddenFor;
@@ -675,7 +674,7 @@ internal sealed partial class CoreSceneDrawer
 			var mesh = CoreResources.Mesh( drawn.Model );
 			if ( mesh is null ) continue;
 
-			//A material of the draw's own over every part, the way an override on a renderer is: its descriptor set, its shader and the features it wants.
+			//A material over every part, as a renderer override is: its set, shader and features
 			ulong overrideTexture = 0;
 			string overrideShader = null;
 			string overrideCombo = null;
@@ -696,7 +695,7 @@ internal sealed partial class CoreSceneDrawer
 			var countFrom = drawn.CountFrom is { } buffer ? buffer.Handle : 0;
 			counted |= countFrom != 0;
 
-			//Drawn by code every frame, wherever it says: what it casts goes in the maps drawn every frame, never in a page.
+			//Drawn by code every frame, so its casting goes in the per-frame maps, never in a page
 			QueueMesh( mesh, drawn.Transform, drawn.Tint, ulong.MaxValue, eye,
 				overrideTexture: overrideTexture, overrideTwoSided: twoSided, overrideTranslucent: translucent,
 				overrideShader: overrideShader, overrideCombo: overrideCombo, inMotion: true,
@@ -704,7 +703,7 @@ internal sealed partial class CoreSceneDrawer
 				pose: drawn.Pose );
 		}
 
-		//The arguments of what a project's buffer counts, before any pass opens - every draw below takes them from where they were put.
+		//Arguments for what a project buffer counts, before any pass opens
 		if ( counted )
 		{
 			PrepareCounted( opaque );
@@ -968,7 +967,7 @@ internal sealed partial class CoreSceneDrawer
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 20 ), (uint)sourceTall );
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 24 ), (uint)System.Math.Max( 0, lod - 1 ) );
 
-			//Only the first level reads anything but the pyramid itself, and only it may be reading a rectangle of a bigger picture.
+			//Only the first level reads beyond the pyramid, and only it may read part of a bigger picture
 			var from = lod == 0 ? read : (X: 0, Y: 0, Wide: sourceWide, Tall: sourceTall);
 
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 28 ), (uint)from.X );
@@ -985,8 +984,8 @@ internal sealed partial class CoreSceneDrawer
 		if ( built ) depthKnown = true;
 	}
 
-	//Draws what moved into the picture of velocities, where it stands now over where it stood - and says whether it
-	//drew, because a frame in which nothing moved leaves the picture as it was, and what it held was some other frame's.
+	//Draws movers into the velocity picture, now over then, and says whether it drew, as an idle frame leaves
+	//another frame's contents
 	private bool DrawVelocities( ulong viewport )
 	{
 		if ( velocityPipeline == 0 || tables is null || tables.Moved.Count == 0 ) return false;
@@ -1064,7 +1063,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private bool wantNearWins;
 
-	//Whether this frame's cull tests what the depth already covers, and so whether the depth is worth folding down at all - see KeepDepth.
+	//Whether this frame's cull tests against depth, and so whether folding the depth is worth it - see KeepDepth
 	private bool occluding;
 
 	//Distance slices of still clusters drawn in the depth pre-pass; 0 none, MaxValue all (see DepthTuner)
@@ -1181,8 +1180,7 @@ internal sealed partial class CoreSceneDrawer
 				part.IndexCount, copies, block[..( copies * CoreSceneRenderer.PushSize )], pass,
 				part.FirstIndex, part.FirstVertex, part.Texture ) )
 			{
-				//Nothing of this block was drawn. The first block failing is a run that cannot be drawn at all, and the caller falls back; a
-				//later one failing has already drawn part of the field, and drawing the rest one at a time would draw the first copies twice.
+				//None of this block drew: at the first the caller falls back; later, one by one would redraw copies
 				return at > 0;
 			}
 		}
@@ -1223,7 +1221,7 @@ internal sealed partial class CoreSceneDrawer
 		SubmitAs( queued, kind );
 	}
 
-	//The same, with the pipeline said rather than worked out - for a pass that draws a named thing its own way. See DrawRendererNow.
+	//The same with the pipeline given, for a pass drawing a named thing its own way - see DrawRendererNow
 	private void SubmitAs( in Queued queued, in CoreSceneRenderer.PipelineKind kind )
 	{
 		var baked = CoreResources.Pipeline( kind );
@@ -1303,8 +1301,8 @@ internal sealed partial class CoreSceneDrawer
 	private static int FirstRun( in Queued queued )
 		=> queued.Mesh.Pooled ? queued.Part.FirstVertex - (int)queued.Mesh.PoolVertexAt : queued.Part.FirstVertex;
 
-	//A part drawn as many copies - the number said here, or read by the card out of a project's buffer into arguments of its own,
-	//see PrepareCounted. Rigid, in the pose it was modelled in: which copy is which is the shader's business, by SV_InstanceID.
+	//A part drawn as copies, counted here or by the card from a project buffer (PrepareCounted); rigid, copies
+	//told apart by SV_InstanceID
 	private static void SubmitCopies( in Queued queued, ulong pipeline, ReadOnlySpan<byte> push )
 	{
 		var mesh = queued.Mesh;
@@ -1335,7 +1333,7 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( queued.CountFrom != 0 )
 		{
-			//Its arguments were never put - the frame would not take them - and a count it cannot read is not one to guess.
+			//Its arguments were never put, and an unreadable count is not guessed
 			if ( queued.ArgsAt < 0 || queued.ArgsBuffer == 0 ) return;
 
 			draw.Arguments = queued.ArgsBuffer;
@@ -1346,7 +1344,7 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.DrawBuffers( draw, push );
 	}
 
-	//The arguments of every part in a queue whose copies a project's buffer counts, put where the frame is before any pass opens - see CoreInstanceArgs.
+	//Arguments of every part whose copies a project buffer counts, put before any pass opens - see CoreInstanceArgs
 	private static void PrepareCounted( List<Queued> queue )
 	{
 		var parts = CollectionsMarshal.AsSpan( queue );
@@ -1392,7 +1390,7 @@ internal sealed partial class CoreSceneDrawer
 	//The arguments of what QueueModelNow queued, outside every pass.
 	internal void PrepareNamed() => PrepareCounted( named );
 
-	//What QueueModelNow queued, drawn into the target that is open: the solid parts, then the see-through ones furthest first.
+	//What QueueModelNow queued, into the open target: solid parts, then see-through ones far to near
 	internal void SubmitNamed( CoreRender.TargetKind target, int pictureFormat, bool noDepth, bool finishes )
 	{
 		for ( var pass = 0; pass < 2; pass++ )
@@ -1542,8 +1540,8 @@ internal sealed partial class CoreSceneDrawer
 	private static ulong gizmoTrianglesOverlayTwo;
 	private static ulong billboardTwo;
 
-	//The overlay billboards and the screen's own text and shapes, the panels standing in the world and the sheets in front of the head - all drawn in a
-	//headset, so all built twice too. A screen-space draw into both eyes is the same picture in both layers, which is what a mode-nought push already says.
+	//Overlay billboards, screen text and shapes, world panels and head sheets, all built twice for a headset;
+	//a screen-space draw into both eyes is one picture, as a mode-nought push says
 	private static ulong screenTwo;
 	private static ulong uiWorldTwo;
 	private static ulong uiSheetTwo;
@@ -1560,10 +1558,10 @@ internal sealed partial class CoreSceneDrawer
 	private static ulong screenPipeline;
 	private static ulong uiPipeline;
 
-	//The UI shader with the depth test on, for a panel standing in the world: a sign on a wall is behind the wall when the wall is in front of it.
+	//The UI shader with depth test on, for a panel in the world: behind a wall when the wall is in front
 	private static ulong uiWorldPipeline;
 
-	//The same world build without the depth test, for a screen panel hung in front of a headset's eyes - see DrawHeadsetPanels. Read over everything.
+	//The world build without depth test, for a screen panel before a headset's eyes - see DrawHeadsetPanels
 	private static ulong uiSheetPipeline;
 
 	//UI vertex stride taken from the struct, so it can't drift from the layout again
@@ -1577,6 +1575,30 @@ internal sealed partial class CoreSceneDrawer
 	//- read off the scene at the top of the frame. See CoreSceneRenderer.SkyMaterialOf.
 	private string skyShader = CoreSceneRenderer.SkyShader;
 	private ulong skyDevice;
+
+	//This frame's sky where it is a panorama, whose table is made from its picture rather than drawn - see SkyTableSlot
+	private CorePanoramaSky.Sky skyPanorama;
+
+	//The sky table's bindless index, one as a flag in the portable frame, nought for none
+	private int SkyTableSlot()
+	{
+		if ( skyPanorama?.Table is { } )
+		{
+			//The page is sent the table's bytes instead - see CoreSceneRenderer.SetSky
+			if ( !CoreRenderDevice.DrawsSkyTable ) return 1;
+
+			var table = CorePanoramaSky.TableTexture( skyPanorama );
+			CoreRenderDevice.UseSkyTable( table );
+
+			return table == 0 ? 0 : CoreRenderDevice.PortableFrame ? 1 : Indexed( table );
+		}
+
+		CoreRenderDevice.UseSkyTable( 0 );
+
+		return SkyTablePipeline( skyShader ) == 0 ? 0
+			: CoreRenderDevice.PortableFrame ? 1
+			: Indexed( CoreRenderDevice.SkyTableTexture );
+	}
 
 	//The same material as its numbers stand on this side - what a fold is read off; see CoreResources.FoldBits.
 	private CoreMaterial skyCore;
@@ -1601,7 +1623,7 @@ internal sealed partial class CoreSceneDrawer
 	//The sun's one map in the portable frame, which has neither of those - see RenderTier.
 	private readonly CorePortableSun portableSun = new();
 
-	//The classic draws a light's view takes, handed to the maps once rather than made a delegate a frame - see DrawLooseView.
+	//The classic draws a light's view takes, handed over once rather than as a delegate a frame - see DrawLooseView
 	private readonly CoreMeshRender.LooseView looseView;
 
 	//This frame's block as it went up, and the copy of it a light's view draws the classic draws with.
@@ -1632,7 +1654,7 @@ internal sealed partial class CoreSceneDrawer
 	private static int composeCurve = -1;
 
 
-	//The picture the compose reads, as a material - see MakePostInputs. Rebuilt with the window, because the picture is the window's size.
+	//The picture the compose reads, as a material - see MakePostInputs; window-sized, so rebuilt with it
 	private ulong composeInputs;
 
 	//The same, reading the other full-size picture instead of the world's own - see frameIn.
@@ -1652,7 +1674,7 @@ internal sealed partial class CoreSceneDrawer
 	//Screen exposure: a fixed number now, no auto-exposure
 	private float exposure = Rinten.Rendering.DrawSettings.Exposure;
 
-	//Which picture the world's own draws are going into this frame - its own, or straight at the screen when the passes in between could not be had.
+	//Where the world's draws go this frame: its own picture, or the screen where intermediate passes failed
 	private CoreRender.TargetKind worldTarget = CoreRender.TargetKind.Screen;
 
 	//Whether the world's own passes leave the picture finished - the exposure and the curve applied
@@ -1696,7 +1718,7 @@ internal sealed partial class CoreSceneDrawer
 	//Rasterised text labels by content, kept between frames since the same label repeats every frame
 	private static readonly System.Collections.Generic.Dictionary<int, (ulong Texture, Vector2 Size, long Used)> textCache = new();
 
-	//The loop frame used to age the text cache
+	//The loop frame ages the text cache by
 	private static long textFrame => Rinten.EngineLoop.LoopFrames;
 
 	//The loop frame the old labels were last retired on - once a frame, whoever asks first.
@@ -1705,8 +1727,8 @@ internal sealed partial class CoreSceneDrawer
 	//Frames a label must go unused before its texture is freed; well past frames in flight
 	private const long TextKeptFor = 30;
 
-	//The engine's own textures, copied onto our device and kept by identity. Keyed by the Texture object rather than by its path: UI images
-	//are as often generated - an atlas, a render target, an SVG somebody rasterised - as loaded from a file, and those have no path to key on.
+	//Engine textures on our device by Texture identity, since UI images are as often generated (atlases,
+	//render targets, SVGs) as loaded, with no path to key on
 	private static readonly System.Collections.Generic.Dictionary<Texture, ulong> uiTextures = new();
 
 	//The floor's lines, worked out once and drawn by everyone.
@@ -1726,21 +1748,21 @@ internal sealed partial class CoreSceneDrawer
 	private static readonly Color32 AxisX = new( 255, 112, 150, 255 );
 	private static readonly Color32 AxisZ = new( 0, 168, 232, 255 );
 
-	//Which viewport is being drawn, and how big it is. Set for the length of one drawing - a viewport is what it draws into, not what it is.
+	//The viewport being drawn and its size, set for one drawing
 	private ulong viewport;
 	private (int Width, int Height) size;
 
 	//The size of the view being drawn, in its own pixels - what a HUD is laid out in.
 	internal (int Width, int Height) ViewSize => size;
 
-	/// <summary>Device-wide resources made once: furniture shaders, icon glyphs, and the passes from world to screen</summary>
+	/// <summary>Device-wide resources made once: furniture shaders, icon glyphs, world-to-screen passes.</summary>
 	public static bool EnsureResources()
 	{
 		if ( !CoreNative.Available ) return false;
 
 		if ( linePipeline != 0 ) return true;
 
-		//Registered on the way in rather than at startup: nothing else in the editor has to know this exists, and by here it certainly does.
+		//Registered on first use, so nothing else in the editor need know this exists
 		if ( !listening )
 		{
 			CoreResources.Clearing += ReleaseResources;
@@ -1788,7 +1810,7 @@ internal sealed partial class CoreSceneDrawer
 					CoreRender.Topology.Triangles, blend: true );
 			} );
 
-			//And the screen's too: an overlay billboard - depth off, drawn over everything - is drawn with it in a headset as anywhere else.
+			//And the screen's: an overlay billboard draws with it in a headset as anywhere
 			CompileStereo( EngineShaders.Billboard, null, ( vs, ps ) =>
 			{
 				billboardTwo = CoreRenderDevice.CreatePipeline( vs, ps,
@@ -1810,8 +1832,8 @@ internal sealed partial class CoreSceneDrawer
 					CoreRender.Topology.Triangles, blend: true );
 			} );
 
-			//A panel standing in the world is built with UI_WORLD, which can take its view from the eye being drawn - see UiPush - so a pass that draws both eyes
-			//at once puts it where each eye sees it. The screen's own build above never includes the frame block, and an editor window needs nothing bound for it.
+			//A world panel builds with UI_WORLD, taking its view from the eye (UiPush), so a two-eye pass places it
+			//per eye; the screen build reads no frame block, so editor windows bind nothing
 			Compile( EngineShaders.Ui, EngineShaders.UiWorld, ( vs, ps ) =>
 			{
 				//Tested against the world, never written: a panel is a stack of boxes on one plane,
@@ -1843,7 +1865,7 @@ internal sealed partial class CoreSceneDrawer
 
 		Compile( EngineShaders.Line, ( vs, ps ) =>
 		{
-			//The grid respects depth - it lies under the world. Selection outlines ignore it - what is picked stays visible through walls.
+			//The grid respects depth, under the world; selection outlines ignore it, visible through walls
 			linePipeline = CoreRenderDevice.CreatePipeline( vs, ps,
 				CoreRender.VertexLayoutKind.Line, depthTest: true,
 				CoreRender.Topology.Lines, blend: true );
@@ -1855,8 +1877,7 @@ internal sealed partial class CoreSceneDrawer
 
 		Compile( EngineShaders.SurfaceGrid, ( vs, ps ) =>
 		{
-			//The same triangles the surface was drawn with, a second time. It reads depth and writes none - what is in front of the surface hides its grid,
-			//and the grid is not something anything else should be hidden by - and it is drawn from both sides, because a room is worked on from inside.
+			//The surface's triangles again, depth read not written, both sides, as rooms are worked from inside
 			surfaceGridPipeline = CoreRenderDevice.CreatePipeline( vs, ps,
 				CoreRender.VertexLayoutKind.Engine, depthTest: true,
 				CoreRender.Topology.Triangles, blend: true, depthWrite: false, cullBack: false );
@@ -1909,7 +1930,7 @@ internal sealed partial class CoreSceneDrawer
 		if ( vs is not null && ps is not null ) made( vs, ps );
 	}
 
-	/// <summary>Lets go of everything held for the device. Called when the device goes, not when a viewport does.</summary>
+	/// <summary>Lets go of everything held for the device, when the device goes.</summary>
 	public static void ReleaseResources()
 	{
 		CoreRenderDevice.DestroyPipeline( linePipeline );
@@ -1997,7 +2018,7 @@ internal sealed partial class CoreSceneDrawer
 		whiteTexture = 0;
 	}
 
-	/// <summary>Lets go of what this drawing held of its own: the materials naming its viewport's pictures. Nothing else here is its own.</summary>
+	/// <summary>Lets go of the materials naming this viewport's pictures, all this drawing owns.</summary>
 	public void Release()
 	{
 		DropPostInputs();
@@ -2067,11 +2088,12 @@ internal sealed partial class CoreSceneDrawer
 			: CoreSceneRenderer.SkyShader;
 
 		skyCore = skyDevice == 0 ? null : skyMaterial.core;
+		skyPanorama = skyDevice == 0 ? null : CorePanoramaSky.Find( skyMaterial );
 
-		//What the project asked for, the first time anything draws - a bool here rather than a setting read in the frame.
+		//The project's settings, applied on first draw
 		RenderingSettings.EnsureApplied();
 
-		//Before anything reads the shape: the views are written before the pyramid is built and the two have to agree on it.
+		//Before anything reads the shape: views and pyramid must agree
 		CoreDepthPyramid.Fit( width, height );
 
 		var gameView = GameViewSource?.Invoke() ?? false;
@@ -2084,8 +2106,7 @@ internal sealed partial class CoreSceneDrawer
 		var aspect = pixels.Height > 0 ? pixels.Width / (float)pixels.Height : 1.0f;
 		var overlayOnly = camera.OverlayOnly;
 
-		//The view the camera is drawn from - its modifiers and the scene's shakes and punches applied - rather than the
-		//component's own transform; see CameraComponent.RenderView. Everything below that faces the eye takes it from here.
+		//The camera's view with modifiers, shakes and punches (CameraComponent.RenderView), used below
 		eyeView = camera.RenderView;
 
 		//A headset's eye, where there is one: the headset says where it is and how wide it sees, and the camera says
@@ -2100,7 +2121,7 @@ internal sealed partial class CoreSceneDrawer
 
 		var position = eyeView.Position;
 
-		//Kept for the passes that queue something after the walk is over - see DrawRendererNow, which sorts nothing but takes the same argument.
+		//Kept for passes queuing after the walk - see DrawRendererNow
 		lastEye = position;
 		var forward = eyeView.Rotation.Forward;
 		var up = eyeView.Rotation.Up;
@@ -2187,11 +2208,8 @@ internal sealed partial class CoreSceneDrawer
 
 		var curveAlone = CurveOf( camera, out frameCurve );
 
-		//No occlusion yet (see LayOcclusion); sky table slot: bindless index, or 1 as a flag if portable
-		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height,
-			SkyTablePipeline( skyShader ) == 0 ? 0
-				: CoreRenderDevice.PortableFrame ? 1
-				: Indexed( CoreRenderDevice.SkyTableTexture ) );
+		//No occlusion yet (see LayOcclusion)
+		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
 
 		//Upload the point effects the world's shading may carry, whichever way the frame ends up drawn
 		foldKey = FoldChain( camera );
@@ -2247,10 +2265,10 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 		}
 
-		//What the camera leaves out by its tags, for the cull and for the classic draws alike - worked out once the tables are this frame's.
+		//What the camera hides by tag, for the cull and classic draws, once the tables are this frame's
 		UpdateHidden( camera );
 
-		//What is drawn the classic way: the loose instances, the ground, the models drawn by hand - or everything, for a bake and for edges.
+		//The classic draws: loose instances, ground, hand-drawn models; everything for a bake or edges
 		var everything = wireframe != 0;
 
 		looseErrorScale = perspective ? pixels.Height * 0.5f * MathF.Abs( projection.M22 ) : 0.0f;
@@ -2305,7 +2323,7 @@ internal sealed partial class CoreSceneDrawer
 
 			lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
 				!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
-				//The frustum is one eye's: with two, a face only the other sees would be left undrawn - see CoreLampMaps.Meets - so a headset gets none.
+				//The frustum is one eye's, so a headset passes none, or faces only the other eye sees go undrawn
 				position, looseErrorScale, BothEyes ? default : planes, in clipToWorld );
 		}
 
@@ -2316,8 +2334,8 @@ internal sealed partial class CoreSceneDrawer
 		//None for a bake or an overlay: what those draw is not surfaces the decals would land on.
 		CoreDecals.Gather( overlayOnly ? null : scene?.SceneWorld, position, planes );
 
-		//And the lights themselves, which every world shader reads out of a buffer rather than out of the block, with the grid saying which of
-		//them reach where - see CoreLights. A bake has no screen to cut up and a flat view no depth to slice, and both read every light instead.
+		//The lights, read from a buffer with the grid saying which reach where (CoreLights); a bake or a flat view
+		//reads every light instead
 		CoreLights.Frame( CoreSceneRenderer.LightBlock, CoreSceneRenderer.LightsInFrame, shaded,
 			view, projection.M11, projection.M22, near, far,
 			grid: !overlayOnly && perspective );
@@ -2360,14 +2378,14 @@ internal sealed partial class CoreSceneDrawer
 			var pyramid = EnsurePyramid();
 			var canOcclude = pyramid != 0 && perspective;
 
-			//Which way this view draws its depth and culls by it, where the settings leave it to the frame - measured on the card,
-			//see DepthTuner. Occlusion is one of the ways where the project has not turned it on for good and has not ruled it out.
+			//This view's depth and cull way where settings leave it to the frame, measured on the card (DepthTuner);
+			//occlusion is a candidate unless set or ruled out
 			var way = depthTuner.Pick( CoreRenderDevice.ReadFrameSummary( viewport )?.GpuMs ?? 0.0f,
 				canOcclude && !Rinten.Rendering.DrawSettings.Occlusion ? 4 : 3 );
 
 			occluding = canOcclude && ( Rinten.Rendering.DrawSettings.Occlusion || way == DepthWay.Occlusion );
 
-			//A pyramid nobody folded this frame is not this frame's depth any more, and the frame that turns occlusion on again must not cull by it.
+			//A pyramid not folded this frame is stale, so turning occlusion back on must not cull by it
 			if ( !occluding ) depthKnown = false;
 
 			var useDepth = occluding && depthKnown;
@@ -2376,8 +2394,8 @@ internal sealed partial class CoreSceneDrawer
 			var depthFirst = occluding || Rinten.Rendering.Wireframe.Clusters > 0 || ( camera.PostProcess is not null &&
 				Hung( camera, Rinten.Rendering.Stage.AfterDepthPrepass ) );
 
-			//Otherwise what the tuner picked: nothing, or the clusters nearer than the far cut - the ones that cover the screen
-			//and hide things, where the far ones are small, hide little, and have their depth written by the pass that shades them.
+			//Else the tuner's pick: nothing, or clusters nearer than the far cut, which cover the screen and hide; far
+			//ones hide little and get depth from their shading pass
 			PrepassSlices = depthFirst || way == DepthWay.FullPrepass ? uint.MaxValue
 				: way == DepthWay.NoPrepass ? 0u : (uint)CoreMeshShaders.FarSlice;
 
@@ -2421,8 +2439,7 @@ internal sealed partial class CoreSceneDrawer
 		//Whether anything reads the world picture; if not, the world is shaded straight onto the window
 		var worldSize = CoreRenderDevice.WorldSize();
 
-		//Stretching is the compose reading a smaller picture at the window's size, which needs the picture: drawn
-		//straight onto the window, the world was the window's size whatever the scale said, and the setting did nothing.
+		//Stretching needs the world's own picture: drawn onto the window, the world is window-sized whatever the scale
 		var stretching = upscaledSmaller && upscaler.Kind == CoreUpscale.Kind.Stretch;
 
 		var carryingUp = Rinten.Rendering.DrawSettings.Upscaler == 2 &&
@@ -2483,8 +2500,7 @@ internal sealed partial class CoreSceneDrawer
 				Log.Info( $"the frame's {foldPoints.Count} point effects are carried by the world's own shading - no compose" );
 		}
 
-		//Nothing reads the world's picture where there is none to read: the portable frame - see RenderTier - shades straight
-		//onto the screen whatever a camera has been given, and says so below rather than claiming a picture it cannot make.
+		//The portable frame (RenderTier) shades onto the screen, so it has no world picture to read
 		var readsWorld = !CoreRenderDevice.PortableFrame &&
 			( softening || carryingUp || stretching || upscaling || ( staged && !folds ) || inspecting || blending || !fills );
 
@@ -2494,7 +2510,7 @@ internal sealed partial class CoreSceneDrawer
 			saidReads = true;
 			saidReadsWorld = readsWorld;
 
-			//Trace: a view that comes and goes - play, a preview - said it again each time it came back. The bisect convars are how it is chased.
+			//Trace: views that come and go would repeat it; chased with the bisect convars
 			Log.Trace( readsWorld
 				? "the world is drawn into a picture of its own: " +
 					( softening ? "edges " : "" ) + ( carryingUp ? "upscale " : "" ) +
@@ -2508,7 +2524,7 @@ internal sealed partial class CoreSceneDrawer
 		var wantsOffscreen = composePipeline != 0 && composeInputs != 0 && readsWorld;
 		worldTarget = wantsOffscreen ? CoreRender.TargetKind.Scene : CoreRender.TargetKind.Screen;
 
-		//And so whether the world's own passes are the last ones over the picture, which is what makes them apply the exposure and the curve.
+		//So whether the world's passes are the last, applying exposure and curve
 		worldFinishes = !wantsOffscreen;
 
 		//Let the pre-pass write the screen's depth directly when the frame shades onto the window
@@ -2518,7 +2534,7 @@ internal sealed partial class CoreSceneDrawer
 		//The shape of the world before its colour: the clusters, then the loose draws beside them, into the depth.
 		var clustersDrawn = false;
 
-		//Whether the lights' views were drawn - after the bin, inside the depth's block. A frame that never got there has bakes planned that nobody drew.
+		//Whether light views drew, after the bin in the depth block; if not, planned bakes were never drawn
 		var lightsDrawn = false;
 
 		if ( !overlayOnly && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth ) )
@@ -2555,8 +2571,7 @@ internal sealed partial class CoreSceneDrawer
 			//cull pass, whichever it was - with the lights' lists filled into their run in the same pass.
 			if ( drawn ) meshRender.Bin( depthPyramid );
 
-			//And the depth of everything that moves its own vertices, out of its own shader, now that the bin has sorted them - see
-			//DrawMoverDepth, which is what lets the pass that shades them be tested early instead of shading a canopy four times over.
+			//Movers' depth from their own shaders after the bin (DrawMoverDepth), so their shading pass tests early
 			if ( drawn && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false ) )
 			{
 				meshRender.DrawMoverDepth();
@@ -2572,14 +2587,13 @@ internal sealed partial class CoreSceneDrawer
 
 			clustersDrawn = drawn;
 
-			//The air, into its own sheet of slices: one march a froxel rather than one a fragment, read by every surface that follows in a
-			//single tap. After the sun's maps, because a froxel asks them what reaches it, and before anything shades. See CoreVolumeFog.
+			//The air into its slice sheet, a march per froxel read in one tap; after the sun maps, before shading
 			var air = CoreVolumeFog.Draw( pixels, far );
 
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
 
-			//A picture named Occlusion, drawn at that stage by whatever drew it, is what the world's surfaces darken by - see AmbientOcclusion.
-			//Said in the frame block now it exists, and the block put up again: nothing drawn before this reads either lane it changes.
+			//An "Occlusion" picture drawn here darkens surfaces (AmbientOcclusion); laid into the block, re-sent,
+			//since nothing drawn before reads those lanes
 			var laid = false;
 
 			if ( air.Picture > 0 )
@@ -2611,14 +2625,14 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 		}
 
-		//Bakes planned for a frame whose depth never opened are given back, or their slots would be read as holding a shadow nobody drew.
+		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn
 		if ( !lightsDrawn )
 		{
 			sunPages.Draw( null, 1, null );
 			lampMaps.Draw( null, 1, null );
 		}
 
-		//The portable frame has no depth block to draw its sun in: it is drawn here, before anything of the world, which reads it.
+		//The portable frame has no depth block, so its sun draws here before the world reads it
 		if ( CoreRenderDevice.PortableFrame && !overlayOnly ) portableSun.Draw( looseView, looseSignature );
 
 		//The clusters' pixels first, a material at a time over the depth of material numbers; then the world's
@@ -2628,8 +2642,8 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.ZoneBegin( "world opaque" );
 
 
-		//Whether the world's picture needs clearing at all. With a sky every pixel the materials leave alone is the sky's, so the clear of the colour
-		//is a screen of writes nobody reads, and so are the normals beside it: a pass that reads them checks the depth first - see SceneSurface.
+		//Whether the world's picture needs a clear: under a sky every untouched pixel is sky, and normal readers
+		//test depth first - see SceneSurface
 		var skyCovers = !overlayOnly && CoreSceneRenderer.HasSky( frame );
 
 		if ( wantsOffscreen )
@@ -2645,13 +2659,13 @@ internal sealed partial class CoreSceneDrawer
 			}
 		}
 
-		//The clusters first, a material at a time over the depth each was drawn into; then everything drawn the classic way over the same depth.
+		//Clusters first, a material at a time over their depth, then the classic draws over the same depth
 		if ( clustersDrawn && ( offscreen || worldFinishes ) )
 			meshRender.DrawMaterials( worldTarget, worldFinishes, worldFinishes ? worldChain : null, warmChain );
 
 		if ( drawn ) meshRender.Debug();
 
-		//What is drawn a draw at a time rather than out of the clusters - see SubmitLoose - under a name of its own in the frame's report.
+		//Classic draws (SubmitLoose), under their own name in the report
 		if ( !overlayOnly )
 		{
 			CoreRenderDevice.ZoneBegin( "loose" );
@@ -2672,7 +2686,7 @@ internal sealed partial class CoreSceneDrawer
 		}
 		else if ( !overlayOnly && worldFinishes )
 		{
-			//No sky, and nothing behind this pass to fill what the world left - see DrawBackground, which is the clear the world's own picture would have had.
+			//No sky and nothing to fill what the world left: the clear its own picture would have had
 			CoreRenderDevice.ZoneBegin( "background" );
 			DrawBackground( camera, frameCurve );
 			CoreRenderDevice.ZoneEnd();
@@ -2680,7 +2694,7 @@ internal sealed partial class CoreSceneDrawer
 
 		CoreRenderDevice.ZoneEnd();
 
-		//Whether every pass the run being asked for needs is there now: then the next frame that lays it carries it - see FoldChain.
+		//Whether every pass the wanted run needs exists, so the next frame laying it carries it - see FoldChain
 		if ( warmChain is not null && CoreMeshRender.ChainWaiting == 0 &&
 			SkyChainPipeline( skyShader, warmChain, CoreSceneRenderer.SkySpecialize( skyCore ) ) != 0 )
 			readyChain = warmChain;
@@ -2711,7 +2725,7 @@ internal sealed partial class CoreSceneDrawer
 			instancedInWorld = true;
 		}
 
-		//And what is laid over the world with depth of its own - a weapon held up to the eye - into the same picture, so the frame's effects reach it too.
+		//What lies over the world with its own depth (a held weapon), into the same picture so effects reach it
 		CoreRenderDevice.ZoneBegin( "world overlay" );
 		DrawLayer( overlayLayer );
 		CoreRenderDevice.ZoneEnd();
@@ -2755,12 +2769,10 @@ internal sealed partial class CoreSceneDrawer
 				world.x > 1.0f && world.y > 1.0f &&
 				( world.x < pixels.Width - 0.5f || world.y < pixels.Height - 0.5f );
 
-			//Nothing drawn is nothing to soften: the picture is one colour, and the filter would spend five reads a pixel
-			//finding that out. Its own early-out does the same thing a tap later, per pixel; this does it once for the frame.
+			//Nothing drawn, nothing to soften: one test a frame instead of FXAA finding a flat picture per pixel
 			var soften = Rinten.Rendering.DrawSettings.Fxaa && !carrying && !upscaling && !worldEmpty;
 
-			//Everything still held - every point effect since the last pass that read the frame, and the curve - goes into
-			//the compose itself: its arithmetic on every pixel of a pass that reads every pixel anyway. See CorePointChain.
+			//Every held point effect and the curve go into the compose, which reads every pixel anyway
 			if ( display )
 				RunStage( camera, Rinten.Rendering.Stage.Tonemapping, CoreRender.TargetKind.Display, near, far,
 					settle: false, pair: displayPair, holds: true );
@@ -2779,7 +2791,7 @@ internal sealed partial class CoreSceneDrawer
 
 			var split = CorePointChain.WithCurve( composeChain, frameCurve ) + 1;
 
-			//Whether anything runs after the compose. Where nothing does, the compose draws straight onto the window and the two finished pictures are never made.
+			//Anything after the compose? If not, it draws onto the window and the finished pair is never made
 			var after = Hung( camera, Rinten.Rendering.Stage.AfterPostProcess );
 
 			//No edge filter where an effect moved where the frame is read: the blocks of a pixelation are the point.
@@ -2825,7 +2837,7 @@ internal sealed partial class CoreSceneDrawer
 			var finishing = after && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Final, Color.Transparent,
 				clearFirst: false, discard: true );
 
-			//Asked for the finished picture and could not have it: the compose onto the window after all, and nothing after it.
+			//The finished picture was asked for but not had: compose onto the window, nothing after
 			if ( after && !finishing )
 			{
 				pipeline = CorePointChain.Compose( CollectionsMarshal.AsSpan( composeChain ), split, CoreRender.TargetKind.Screen, carrying );
@@ -2844,7 +2856,7 @@ internal sealed partial class CoreSceneDrawer
 					near, far, settle: false,
 					pair: ( CoreRender.TargetKind.Final, CoreRender.TargetKind.FinalSecond ), holds: true );
 
-				//And onto the window, out of whichever of the two the chain left it in - with the point effects asked for after the compose laid on the way.
+				//Onto the window from the finished picture the chain left, post-compose point effects on the way
 				FinalToScreen( near, far );
 			}
 			else
@@ -2875,7 +2887,7 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneBegin( "overlay grid" );
 			if ( !overlayOnly && ( GroundGridSource?.Invoke() ?? true ) ) DrawGrid( camera, viewProjection );
 
-			//And the same grid where it meets the level: on the faces of the meshes being laid out, which is what the ground grid was for and could not do.
+			//The same grid on the faces of meshes being laid out, which the ground grid could not do
 			if ( !overlayOnly ) DrawSurfaceGrid( viewProjection, planes );
 			CoreRenderDevice.ZoneEnd();
 
@@ -2943,7 +2955,7 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( overlayBlock != 0 ) CoreRenderDevice.UseFrame( blockBefore );
 
-		//A headset's eye has no screen for the game's panels: each becomes a sheet in front of the head instead - see ScreenPanel.
+		//A headset has no screen for game panels: each becomes a sheet before the head - see ScreenPanel
 		if ( Eye is not null )
 		{
 			CoreRenderDevice.ZoneBegin( "headset ui" );
@@ -3084,8 +3096,7 @@ internal sealed partial class CoreSceneDrawer
 		//these is made, and the world's own passes finish the picture as they do in any frame with no compose.
 		if ( CoreRenderDevice.PortableFrame ) return;
 
-		//The compose carries the tonemap curve in it, and that is a file a project may replace - so a compose baked before
-		//the project was mounted, or before somebody edited the curve, is out of date and the pipeline goes with it.
+		//The compose carries the tonemap curve, a replaceable file, so a compose baked before mount or edit is stale
 		if ( composePipeline != 0 && composeCurve == CoreShaderCache.Revision ) return;
 
 		if ( composePipeline != 0 )
@@ -3105,7 +3116,7 @@ internal sealed partial class CoreSceneDrawer
 
 		composeCurve = CoreShaderCache.Revision;
 
-		//Not a full-screen pass: this one draws the meshes that moved, with the depth the world left, and writes only where they are.
+		//Not full-screen: draws the meshes that moved with the world's depth, writing only where they are
 		{
 			var vs = CoreShaderCache.Pass( EngineShaders.Velocity, "MainVs",
 				CoreShaderCompiler.Stage.Vertex );
@@ -3127,7 +3138,7 @@ internal sealed partial class CoreSceneDrawer
 			var pyramid = CoreShaderCache.Pass( EngineShaders.DepthPyramid, "main",
 				CoreShaderCompiler.Stage.Compute );
 
-			//Its own maker: a level of the pyramid is read and written through set one, where every other compute pass has a material.
+			//Its own maker: a pyramid level is read and written through set one, not a material
 			pyramidPipeline = pyramid is null ? 0 : CoreRenderDevice.CreatePyramidPipeline( pyramid );
 			if ( pyramidPipeline == 0 )
 				Log.Warning( $"the depth pyramid did not compile: {CoreRenderDevice.ShaderError}" );
@@ -3135,11 +3146,10 @@ internal sealed partial class CoreSceneDrawer
 
 		composePipeline = BakePost( EngineShaders.Compose, CoreRender.TargetKind.Screen );
 
-		//The same pass into the finished picture rather than onto the window, for a frame with something hung after it - see Stage.AfterPostProcess.
+		//The same pass into the finished picture, for frames with something after - see Stage.AfterPostProcess
 		composeFinalPipeline = BakePost( EngineShaders.Compose, CoreRender.TargetKind.Final );
 
-		//And the compose with the engine's curve in it, which is what a frame with no effect of its own draws - made here
-		//rather than on the first frame, where a compile on a machine with no cache would be a hitch. See CorePointChain.
+		//The compose with the engine's curve, made here not on the first frame, where an uncached compile would hitch
 		CorePointChain.WarmUp();
 	}
 
@@ -3351,8 +3361,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private void DrawSky()
 	{
-		//What this frame's sky can reach, which is what its pipeline is baked with - see CoreSceneRenderer.SkySpecialize.
-		//Read once here rather than in each of the two asks below, so both cannot be baked differently.
+		//This sky's reachable features, baked into its pipeline (SkySpecialize); read once so both asks agree
 		var specialize = CoreSceneRenderer.SkySpecialize( skyCore );
 
 		var pipeline = SkyPipeline( skyShader, worldTarget, specialize, StereoPass );
@@ -3367,7 +3376,7 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( pipeline == 0 ) return;
 
-		//With the sky material's numbers bound, which is what its shader reads its settings from - see SkyBox2D.SkyMaterial.
+		//With the sky material's numbers bound, which its shader reads - see SkyBox2D.SkyMaterial
 		CoreRenderDevice.Draw( pipeline, 3, System.Array.Empty<byte>(), skyDevice );
 	}
 
@@ -3388,8 +3397,7 @@ internal sealed partial class CoreSceneDrawer
 
 		stageLists.Sort( static ( a, b ) => a.Order != b.Order ? a.Order.CompareTo( b.Order ) : a.At.CompareTo( b.At ) );
 
-		//On the stage after the compose, on a frame that copies onto the window after it, the last pass of the last list with anything in it may
-		//draw there itself - see CorePostBlit.Lands. The camera's HUD list is hung after every effect and is empty on every frame nobody drew a HUD.
+		//After the compose, the last pass of the last non-empty list may draw onto the window - see CorePostBlit.Lands
 		var last = -1;
 
 		for ( var i = stageLists.Count - 1; beforeWindow && i >= 0; i-- )
@@ -3404,8 +3412,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			var (order, _, list) = stageLists[i];
 
-			//The camera's HUD is a screen's, painted at the window's pixels: in a headset's eye it would be stuck to the eye, the same
-			//in both, at the edge of the lens. A HUD for a headset is a ScreenPanel, which becomes a sheet in front of the head there.
+			//A HUD is painted at window pixels and would stick to a headset's lens; there a ScreenPanel is a sheet
 			if ( Eye is not null && ( list.Flags & Rinten.Rendering.CommandList.Flag.Hud ) != 0 ) continue;
 
 			CorePasses.Unwant();
@@ -3426,8 +3433,7 @@ internal sealed partial class CoreSceneDrawer
 		if ( camera is null ) return;
 		if ( camera.PostProcess is null ) return;
 
-		//Nothing hung on this stage, which is the ordinary case and every stage of a scene with no post-process of its own. Asked
-		//before anything is set up: four picture lookups and a push block times nine stages, a frame, to find nine empty lists.
+		//Nothing hung on this stage, the usual case, asked before any setup
 		if ( !Hung( camera, stage ) ) return;
 
 		var finished = pair is { First: CoreRender.TargetKind.Final };
@@ -3441,8 +3447,8 @@ internal sealed partial class CoreSceneDrawer
 
 			RunLists( camera, stage, beforeWindow: finished );
 
-			//A stage whose point effects do not outlive it draws them now, before asking where the frame was left: drawn at its end, after the copy back below, they
-			//landed in the other picture of the pair while the world reopened in its own - and every point effect hung inside the world drew nothing anybody saw.
+			//Point effects not outliving the stage draw now, before asking where the frame is; after the copy back
+			//they landed in the other picture and showed nothing
 			if ( !holds ) CorePostBlit.Flush();
 
 			//On the window-size pair the frame stays wherever the chain left it - the compose reads either of the two.
@@ -3452,8 +3458,7 @@ internal sealed partial class CoreSceneDrawer
 			}
 			else if ( into != CoreRender.TargetKind.Screen && !finished )
 			{
-				//An odd number of effects leaves the frame in the other picture. Where what comes next can be told - see
-				//frameIn - it is; where it cannot, one pass puts the frame back where the world's pass will look for it.
+				//An odd effect count leaves the frame in the other picture; one pass moves it back where untold
 				if ( settle && CorePostBlit.Settled == CoreRender.TargetKind.Post )
 					CopyBack();
 
@@ -3495,7 +3500,7 @@ internal sealed partial class CoreSceneDrawer
 			}
 		}
 
-		//What the frame is read as. For the stages before the compose that is the world's own picture; after it, the finished one this pass drew.
+		//What the frame is read as: the world's picture before the compose, after it the finished one
 		var colour = reads != 0
 			? reads
 			: windowSized
@@ -3554,8 +3559,7 @@ internal sealed partial class CoreSceneDrawer
 		return Hung( camera, Rinten.Rendering.Stage.Tonemapping );
 	}
 
-	//The upscaler's picture into the window-size pair, for the effects to run over: one pass, the copy the world's own chain uses -
-	//see CopyBack. False where it could not be, and the frame is composed from the upscaler's picture with the effects left out of it.
+	//The upscaler's picture into the window pair for effects, as CopyBack; false and composed without effects where not
 	private bool IntoDisplay( ulong upscaledTexture, float near, float far )
 	{
 		if ( upscaledTexture == 0 ) return false;
@@ -3640,7 +3644,7 @@ internal sealed partial class CoreSceneDrawer
 
 		try
 		{
-			//The point effects asked for after the compose, laid on the way; the picture copied across where there are none.
+			//Post-compose point effects laid on the way; a plain copy where there are none
 			if ( CorePostBlit.Pending ) CorePostBlit.Flush();
 			else CopyBack();
 		}
@@ -3662,8 +3666,8 @@ internal sealed partial class CoreSceneDrawer
 
 		RunStage( camera, stage, CoreRender.TargetKind.Scene, near, far );
 
-		//What the reflections left for the water and glass still to come - the chain they traced through, and the solid world copied once
-		//they are in - said in the frame block before those draw. Only on a frame that has any: see ScreenSpaceReflections.SceneCopy.
+		//What reflections left for water and glass (the traced chain and the solid world copy), laid before they draw
+		//- see ScreenSpaceReflections.SceneCopy
 		if ( stage == Rinten.Rendering.Stage.AfterOpaque && frameNow is not null && translucent.Count > 0 &&
 			CorePasses.Find( ScreenSpaceReflections.DepthPicture ) is { Index: > 0 } chain )
 		{
@@ -3696,11 +3700,11 @@ internal sealed partial class CoreSceneDrawer
 	private void RunStages( CameraComponent camera, CoreRender.TargetKind into,
 		float near, float far, bool settle, params Rinten.Rendering.Stage[] stages )
 	{
-		//Nothing reopens the world's pass after these, so a point effect asked for in one is held for the next reader of the frame - see CorePostBlit.Begin.
+		//Nothing reopens the world pass after these, so a point effect is held for the frame's next reader
 		foreach ( var stage in stages ) RunStage( camera, stage, into, near, far, settle, holds: true );
 	}
 
-	//The stages run over the world's picture before the post chain, as one array for the life of the process - a params list is a new array at every call.
+	//The pre-post stages as one array for the process, not a params array per call
 	private static readonly Rinten.Rendering.Stage[] beforePostStages =
 	{
 		Rinten.Rendering.Stage.AfterTransparent,
@@ -3759,7 +3763,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private void DropPostInputs()
 	{
-		//A material is destroyed the way a texture is - they share a handle space, and the material owns none of the images it names.
+		//A material is destroyed as a texture; they share handles and it owns none of its images
 		if ( composeInputs != 0 ) CoreRenderDevice.DestroyTexture( composeInputs );
 
 		composeInputs = 0;
@@ -3775,15 +3779,14 @@ internal sealed partial class CoreSceneDrawer
 	{
 		var (width, height) = size;
 
-		//The other cameras' boxes, made each frame - see CoreUiRenderer.Recycle, which keeps their vertex lists for the next.
+		//Other cameras' boxes each frame; Recycle keeps their vertex lists
 		CoreUiRenderer.Recycle( batches );
 		CoreUiRenderer.BuildCameraLayers( scene, batches );
 
 		screenBatches.Clear();
 		screenBatches.AddRange( batches );
 
-		//And each screen's panels as its root last left them while nothing in its tree moved, or walked again - the kept path an editor window and
-		//a headset's sheet take. A HUD that changes ten times a second was walked into boxes from nothing on every frame: 0.9 ms of a browser's.
+		//Each screen's panels as last walked while its tree held still, else walked again: the kept path
 		foreach ( var screen in scene.GetAllComponents<ScreenPanel>() )
 		{
 			if ( !screen.IsValid() || screen.GetPanel() is not Rinten.UI.RootPanel root ) continue;
@@ -3834,19 +3837,18 @@ internal sealed partial class CoreSceneDrawer
 
 			using ( Diagnostics.Performance.Scope( "ui record" ) )
 			{
-				//With the world, as the ordinary branch below does it. An editor window is the only kind that ever holds the world, so dropping it here
-				//dropped it everywhere: the batch that says "the world goes at this point" was in the list and reached, and nothing was ever handed to draw it.
+				//With the world: an editor window is the only kind holding it
 				DrawPanels( editor.Frame.Batches, width, height, world );
 			}
 
 			return;
 		}
 
-		//Handed back before the walk rather than after it, so a set of batches stays readable for as long as anything might still want to look at it.
+		//Handed back before the walk, so batches stay readable as long as anything might look
 		CoreUiRenderer.Recycle( windowBatches );
 
-		//Building is walking the panels and making geometry out of them; recording is handing that geometry to the device. The first is where
-		//a widget that rebuilds itself every frame shows up and the second is where a batch per panel does, and they are not the same fault.
+		//Building walks panels into geometry, recording hands it to the device; per-frame rebuilds show in the first,
+		//per-panel batches in the second
 		using ( Diagnostics.Performance.Scope( "ui build" ) )
 		{
 			CoreUiRenderer.Build( root, windowBatches, RasteriseCached, UploadUiTexture );
@@ -3867,7 +3869,7 @@ internal sealed partial class CoreSceneDrawer
 		/// <summary>Last frame's batches as they stand, over a picture that has new pixels.</summary>
 		KeptChanged,
 
-		/// <summary>Last frame's batches, and every picture on them as it was: the window's picture is the one already on the screen.</summary>
+		/// <summary>Last frame's batches and pictures unchanged; the window's picture is already on screen.</summary>
 		KeptSame,
 	}
 
@@ -3940,8 +3942,8 @@ internal sealed partial class CoreSceneDrawer
 	//game's panels are part of the world. One list for both was cleared under the window's own iteration.
 	private static readonly System.Collections.Generic.List<CoreUiRenderer.UiBatch> windowBatches = new();
 
-	//The batches themselves, drawn in order. origin is where on the window the target's corner is - nothing for a window's own frame,
-	//the layer's place for a layer's. From the world on, only what comes after the world's marker is drawn: the rest is under the layer.
+	//The batches in order; origin is the target's corner on the window (nothing for a window, the layer's place
+	//for a layer); from the world on, only what follows its marker draws
 	private static void DrawPanels( System.Collections.Generic.List<CoreUiRenderer.UiBatch> batches,
 		int width, int height, System.Action<Rect> world = null, Vector2 origin = default, bool fromWorld = false )
 	{
@@ -3970,7 +3972,7 @@ internal sealed partial class CoreSceneDrawer
 
 		foreach ( var batch in batches )
 		{
-			//The world, drawn where a panel wears it - see Panel.WearsWorld. Its own passes close the screen's and reopen it, so the panels after it land on top.
+			//The world where a panel wears it (Panel.WearsWorld); its passes reopen the screen, later panels on top
 			if ( batch.Texture == CoreUiRenderer.WorldTexture )
 			{
 				reached = true;
@@ -3992,7 +3994,7 @@ internal sealed partial class CoreSceneDrawer
 
 				texture = CoreRenderDevice.BackdropTexture();
 
-				//No copy, nothing to filter: the panel drops out rather than drawing whatever happened to be in the texture slot.
+				//No copy, nothing to filter: the panel drops out rather than drawing a stale slot
 				if ( texture == 0 ) continue;
 			}
 
@@ -4002,7 +4004,7 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.ZoneEnd();
 	}
 
-	//One batch of panels: out of the device buffer its kept walk put it in, or written into the frame's ring where it has none - see KeepOnDevice.
+	//One panel batch, from its kept device buffer or written into the frame ring - see KeepOnDevice
 	private static void DrawUiBatch( ulong pipeline, in CoreUiRenderer.UiBatch batch, ulong texture, ReadOnlySpan<byte> push )
 	{
 		if ( batch.Buffer != 0 )
@@ -4059,8 +4061,7 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//Screen pixels to clip space, for everything drawn in the view's own pixels: the gizmo labels and shapes, the profiler, the immediate quads.
-	//Vulkan's clip Y points down, and so does the screen's - for once, no flip. Was written out by hand wherever it was wanted, four times over.
+	//Screen pixels to clip space for labels, profiler and quads; Vulkan clip Y points down like the screen
 	private static System.Numerics.Matrix4x4 ScreenProjection( int width, int height )
 		=> new()
 		{
@@ -4200,7 +4201,7 @@ internal sealed partial class CoreSceneDrawer
 		static Vector3 ToPoint( Vector2 at ) => new( at.x, at.y, 0 );
 	}
 
-	//Where a picture this big starts, from the point it is anchored to: how far right and how far down its top-left corner is, as the flags say.
+	//Where a picture this big starts from its anchor: its top-left's offset right and down, per the flags
 	private static (float Left, float Top) Anchored( TextFlag flags, Vector2 size )
 	{
 		var left = flags.Contains( TextFlag.CenterHorizontally ) ? -size.x * 0.5f
@@ -4212,7 +4213,7 @@ internal sealed partial class CoreSceneDrawer
 		return (left, top);
 	}
 
-	//The labels that stand in the world: turned to the eye, or lying in a plane of their own - a pixel of text Scale metres.
+	//World labels, turned to the eye or in a plane of their own; a text pixel is Scale metres
 	private void DrawWorldLabels( List<DebugDrawList.Label> labels, System.Numerics.Matrix4x4 viewProjection, bool overlay )
 	{
 		if ( labels.Count == 0 ) return;
@@ -4293,7 +4294,7 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//Text into pixels: measured by the engine's own text machinery, drawn by it too, uploaded once. The colour is baked in - the scope carries it.
+	//Text into pixels by the engine's text machinery, uploaded once; the scope carries the colour
 	private static (ulong Texture, Vector2 Size) RasteriseText( in TextRendering.Scope scope )
 	{
 		var rasterStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -4326,7 +4327,7 @@ internal sealed partial class CoreSceneDrawer
 	{
 		if ( sprites.Count == 0 ) return;
 
-		//The same shader either way; the overlay one is the copy with the depth test off, which is what a handle drawn over the world wants.
+		//One shader; the overlay copy has depth test off, as a handle over the world wants
 		var pipeline = overlay ? Pick( screenPipeline, screenTwo ) : Pick( billboardPipeline, billboardTwo );
 		if ( pipeline == 0 ) return;
 
@@ -4338,12 +4339,11 @@ internal sealed partial class CoreSceneDrawer
 
 		var push = LinePush( stackalloc byte[80], viewProjection, world: true );
 
-		//Built into one buffer and drawn in runs of a shared picture rather than a call each: a mesh tool puts a dot on every
-		//vertex it can see, and on a dense mesh that is thousands of sprites a frame with the same blank texture on all of them.
+		//One buffer drawn in runs of a shared picture, as mesh tools put thousands of same-texture dots a frame
 		var built = 0;
 		ulong running = 0;
 
-		//The push block is handed in rather than captured: it lives on the stack, and a local function cannot hold on to its caller's span.
+		//The push block is passed in: it lives on the stack, and a local function cannot hold its caller's span
 		void Flush( ReadOnlySpan<byte> block )
 		{
 			if ( built == 0 || running == 0 ) return;
@@ -4359,7 +4359,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			if ( sprite.IgnoreDepth != overlay ) continue;
 
-			//White where no picture was named: a sprite with no texture is a plain square, which is what the mesh tools draw their dots as.
+			//White where no picture is named: a plain square, the mesh tools' dots
 			var picture = UploadUiTexture( sprite.Picture );
 			if ( picture == 0 ) picture = whiteTexture;
 			if ( picture == 0 ) continue;
@@ -4367,7 +4367,7 @@ internal sealed partial class CoreSceneDrawer
 			var half = HalfExtents( sprite, viewProjection, right, up, width, height );
 			if ( half.x <= 0.0f || half.y <= 0.0f ) continue;
 
-			//A different picture ends the run: what is already built is drawn with the texture it was built for, in the order it was asked for.
+			//A different picture ends the run, drawn with its texture in asked order
 			if ( picture != running )
 			{
 				Flush( push );
@@ -4397,7 +4397,7 @@ internal sealed partial class CoreSceneDrawer
 			var at = sprite.Position;
 			var tint = (Color32)sprite.Tint;
 
-			//Two triangles, the same winding and the same v-down as the text beside them: the top of the picture gets v = 0.
+			//Two triangles, same winding and v-down as the text: the picture's top is v = 0
 			spriteScratch[built + 0] = IconVertex( at - r + u, 0, 0, tint );
 			spriteScratch[built + 1] = IconVertex( at + r + u, 1, 0, tint );
 			spriteScratch[built + 2] = IconVertex( at - r - u, 0, 1, tint );
@@ -4426,7 +4426,7 @@ internal sealed partial class CoreSceneDrawer
 		//Behind the eye, where a projection says nothing anybody can draw with.
 		if ( centre.W <= 0.0001f ) return default;
 
-		//Right and up are square to the way the camera looks, so a step along either leaves w alone and the clip-space step is the whole answer.
+		//Right and up are square to the view, so a step along either leaves w alone
 		var alongRight = Clip( viewProjection, sprite.Position + right ).X - centre.X;
 		var alongUp = Clip( viewProjection, sprite.Position + up ).Y - centre.Y;
 
@@ -4449,7 +4449,7 @@ internal sealed partial class CoreSceneDrawer
 	//The UI shader's push block: the matrix, the target, the mode.
 	private const int UiPushSize = 96;
 
-	//The interface's pipeline for a target other than the screen, made the first time something draws boxes into one and kept - see DrawBoxes.
+	//The UI pipeline for a non-screen target, made on first use and kept - see DrawBoxes
 	private static readonly Dictionary<(CoreRender.TargetKind Target, int Format), ulong> uiTargetPipelines = new();
 
 	private static ulong UiPipelineFor( CoreRender.TargetKind target, int pictureFormat )
@@ -4670,7 +4670,7 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( total == 0 ) return;
 
-		//One array for every walk, grown when a walk needs more: the device takes a copy, so what is left in it after is nobody's.
+		//One array for every walk, grown as needed; the device copies it
 		var need = total * UiVertexStride;
 		if ( sheetBytes.Length < need ) sheetBytes = new byte[need];
 
@@ -4775,7 +4775,7 @@ internal sealed partial class CoreSceneDrawer
 
 			var transform = renderer.WorldTransform;
 
-			//Which way the words face: their own rotation, the camera's, or the camera's with the vertical axis left alone.
+			//Which way the words face: their own rotation, the camera's, or the camera's with vertical kept
 			var rotation = renderer.Billboard switch
 			{
 				TextRenderer.BillboardMode.Always => eyeView.Rotation,
@@ -4805,7 +4805,7 @@ internal sealed partial class CoreSceneDrawer
 				_ => height * 0.5f,
 			};
 
-			//Right and up in the text's own frame. Up is the quad's, so the top of the picture - where v is zero - is the top of the words.
+			//Right and up in the text's frame; up is the quad's, so v zero is the top of the words
 			var right = rotation.Right;
 			var up = rotation.Up;
 
@@ -4840,8 +4840,8 @@ internal sealed partial class CoreSceneDrawer
 	{
 		CoreImmediate.Begin();
 
-		//The view being drawn, not the camera's: in a headset each eye is where the headset says, and what faces the viewer or pins itself to a point
-		//on the screen asks Graphics where that is. The projection goes with it, since an eye's field is off centre and no field of view describes it.
+		//The view drawn, not the camera's: in a headset each eye, with its own off-centre projection, so facing and
+		//pinned things ask Graphics
 		Graphics.BeginView( new Transform( view.Position, view.Rotation ),
 			camera.RenderFieldOfView( viewport.Height > 0 ? viewport.Width / viewport.Height : 0.0f ), viewport, frustum,
 			viewProjection );
@@ -4866,8 +4866,8 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//The models a gizmo instance drew: scene objects in the instance's own world, which nothing walks as a scene, so they are handed over
-	//as what they are - a model, standing here, this colour, in this material, lit with the world, in the pose its caller set.
+	//The models a gizmo instance drew, in its own world nothing walks, handed over as model, place, colour,
+	//material and pose
 	private static void AddGizmoModels( DebugDrawList draws )
 	{
 		if ( draws is null ) return;
@@ -4906,8 +4906,8 @@ internal sealed partial class CoreSceneDrawer
 		return into;
 	}
 
-	//The ones of those that draw themselves, copied out the same way. The world keeps them apart, so this copies the few rather than the whole world - see
-	//SceneWorld.InternalHandDrawn. Copied all the same, because what these draw is game and tool code and it may add to the world while it is being walked.
+	//The world's self-drawing objects, copied since their game and tool code may add to the world while walked
+	//- see SceneWorld.InternalHandDrawn
 	private static List<SceneObject> HandDrawnOf( SceneWorld world, List<SceneObject> into )
 	{
 		into.Clear();
@@ -4970,11 +4970,10 @@ internal sealed partial class CoreSceneDrawer
 			//The layer the object sits on decides whether what it draws is part of the world or written over it.
 			Graphics.IgnoreDepth = custom.RenderLayer == SceneRenderLayer.OverlayWithoutDepth;
 
-			//And which layer its draw is, for an object that asks: it is called once a view, not once a layer, so it is told the one it is in.
+			//Which layer its draw is: called once per view, so it is told the one it is in
 			Graphics.CurrentLayer = custom.Flags.IsTranslucent ? SceneLayerType.Translucent : SceneLayerType.Opaque;
 
-			//Where it stands, for what it draws as a world panel - and a clean slate of view attributes, so the combo one object sets on them
-			//is not read by the next. Their render context was made afresh for each object; this is the same thing for the one set we have.
+			//Where it stands, for world panels, and cleared view attributes so one object's combo stays its own
 			Graphics.ObjectTransform = custom.Transform;
 			Graphics.Attributes.Clear();
 
@@ -4994,7 +4993,7 @@ internal sealed partial class CoreSceneDrawer
 		if ( !float.IsFinite( size.x ) || !float.IsFinite( size.y ) || !float.IsFinite( size.z ) )
 			return true;
 
-		//The sphere around it: centre plus half the diagonal, which is the same generous shape the queue tests everything else by.
+		//A sphere of centre plus half the diagonal, as the queue tests everything
 		return view.IsInside( bounds.Center, size.Length * 0.5f, partially: true );
 	}
 
@@ -5087,10 +5086,10 @@ internal sealed partial class CoreSceneDrawer
 				var chosen = overlay ? Pick( screenPipeline, screenTwo ) : Pick( billboardPipeline, billboardTwo );
 				if ( chosen == 0 ) continue;
 
-				//The textured shader has no tint of its own, so the batch's goes into the colours - which are this frame's copy anyway.
+				//The textured shader has no tint, so the batch's goes into this frame's copy of the colours
 				if ( batch.Tint != Color.White )
 				{
-					//Into scratch rather than a copy: the batch's array is the pool's and is drawn again by the next view.
+					//Into scratch: the batch's array is the pool's and the next view draws it again
 					if ( tintedScratch.Length < batch.Count ) tintedScratch = new Vertex[batch.Count * 2];
 					System.Array.Copy( vertices, tintedScratch, batch.Count );
 					vertices = tintedScratch;
@@ -5101,13 +5100,13 @@ internal sealed partial class CoreSceneDrawer
 					}
 				}
 
-				//In the order they were asked for, so a textured batch between two line batches still lands between them.
+				//In asked order, so a textured batch between two line batches lands between them
 				FlushDynamic();
 
 				CoreRenderDevice.DrawDynamic( chosen,
 					System.Runtime.InteropServices.MemoryMarshal.AsBytes( vertices.AsSpan( 0, batch.Count ) ),
 					batch.Count, 76,
-					//The textured shader is the billboard's, whose block is the matrix and the mode and no tint - see LinePush.
+					//The textured shader is the billboard's: matrix and mode, no tint - see LinePush
 					LinePush( push, projection, !batch.Screen, batch.Transform ),
 					texture );
 
@@ -5120,7 +5119,7 @@ internal sealed partial class CoreSceneDrawer
 
 			if ( pipeline == 0 ) continue;
 
-			//What the push block is made of, not the block: building one is a matrix multiply and these nearly all carry the same one.
+			//Join on what the push block is made of, not the block: building one is a matrix multiply
 			var joins = pipeline == batchPipeline && batch.Transform == batchTransform &&
 				batch.Tint == batchTint && batch.Screen == batchScreen &&
 				batchCount + batch.Count <= MostBatchedVertices;
@@ -5172,7 +5171,7 @@ internal sealed partial class CoreSceneDrawer
 		for ( var i = 0; i < grabs.Count; i++ ) grabs[i].Into.Point( texture, width, height );
 	}
 
-	//The draws out of a project's own buffers, onto the finished picture with the rest of the immediate draws - see CoreImmediate.BufferBatch.
+	//Draws from a project's own buffers onto the finished picture - see CoreImmediate.BufferBatch
 	private static void DrawBuffered( bool overlay )
 	{
 		var draws = CoreImmediate.Buffered;
@@ -5217,8 +5216,7 @@ internal sealed partial class CoreSceneDrawer
 		//Which engine frame this was gathered in, or -1 for none.
 		internal long Frame = -1;
 
-		//How many hand-drawn objects the world held when it was. A render callback may put one there between the two
-		//eyes, and then this is not their frame's gather any more - cheaper to notice than to gather again and find out.
+		//The world's hand-drawn count when gathered; a callback may add one between eyes, cheap to notice
 		internal int Seen = -1;
 	}
 
@@ -5250,7 +5248,7 @@ internal sealed partial class CoreSceneDrawer
 		IssueDynamicObjects( record, viewProjection );
 	}
 
-	//Every hand-drawn object of one layer, merged into runs that share a pipeline, a transform and a tint - see DynamicRecord.
+	//Every hand-drawn object of one layer, merged into runs sharing pipeline, transform and tint - see DynamicRecord
 	private void GatherDynamicObjects( SceneWorld world, bool overlay, DynamicRecord record )
 	{
 		record.Batches.Clear();
@@ -5307,8 +5305,8 @@ internal sealed partial class CoreSceneDrawer
 				if ( vertices.IsEmpty ) continue;
 			}
 
-			//Whether this one can join what is being gathered is decided on what the push block would be *made of*, not on the block: a thousand
-			//objects a frame nearly all carry the same identity transform and the same white tint, and the block itself is not built until the draw.
+			//Join on what the push block would be made of: most objects share the identity transform and white tint,
+			//and the block is built only at the draw
 			var joins = chosen == pipeline && dynamic.Transform == transform &&
 				dynamic.ColorTint == tint && record.Used - at + vertices.Length <= MostBatchedVertices;
 
@@ -5373,20 +5371,20 @@ internal sealed partial class CoreSceneDrawer
 		batchCount = 0;
 	}
 
-	//The most vertices one merged draw holds, so that a scene drawing a great many of them does not ask the device for one enormous copy.
+	//The most vertices a merged draw holds, so the device is never asked for one enormous copy
 	private const int MostBatchedVertices = 64 * 1024;
 
 	private ulong batchPipeline;
 	private Transform batchTransform;
 	private Color batchTint;
 
-	//Whether what is being gathered is drawn in screen pixels - see DrawImmediate, which is the only thing that fills it.
+	//Whether the gathered run is in screen pixels; only DrawImmediate fills it
 	private bool batchScreen;
 	private int batchCount;
 	private Vertex[] batchScratch = System.Array.Empty<Vertex>();
 	private readonly byte[] batchPush = new byte[96];
 
-	//A line strip as the pairs it joins, into an array kept for the purpose. The result is only good until the next call.
+	//A line strip as the pairs it joins, in a reused array valid until the next call
 	private ReadOnlySpan<Vertex> LinePairs( ReadOnlySpan<Vertex> strip )
 	{
 		if ( strip.Length < 2 ) return default;
@@ -5405,8 +5403,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private Vertex[] stripScratch = System.Array.Empty<Vertex>();
 
-	//Whether this view is one of a headset's eyes, drawn beside the other in the same engine frame - see CorePortableSun,
-	//which shares its square by the same test, and CoreSceneRenderer.BuildFrame, which shares the scene's block.
+	//A headset eye drawn beside the other in one engine frame; CorePortableSun and BuildFrame share by the same test
 	private static bool SharingViews => CoreRender.SharingViews && Rinten.VR.VRSystem.IsRendering;
 
 	//Which engine frame the sky's table was last drawn in, or -1 for none.
@@ -5435,7 +5432,7 @@ internal sealed partial class CoreSceneDrawer
 		return into[..96];
 	}
 
-	/// <summary>Why the gizmos are not on the screen, in numbers. Everything this path can fail at fails quietly - a pipeline that never compiled, a frame nobody recorded - so there has to be somewhere to read it.</summary>
+	/// <summary>Why gizmos are not on screen, in numbers, as every failure on this path is quiet.</summary>
 	[ConCmd( "editor_gizmos_status" )]
 	public static void GizmoStatus()
 	{
@@ -5463,7 +5460,7 @@ internal sealed partial class CoreSceneDrawer
 	private static int lastGizmoVertices;
 	private static int lastGizmoDrawn;
 
-	/// <summary>Whether the gizmo bounds are worked out for <c>editor_gizmo_status</c> to print - see MeasureGizmos.</summary>
+	/// <summary>Whether gizmo bounds are worked out for editor_gizmo_status - see MeasureGizmos.</summary>
 	[ConVar( "editor_gizmo_bounds", ConVarFlags.Protected,
 		Help = "Work out the world bounds of the frame's gizmo geometry, for editor_gizmo_status; a transform and two compares for every gizmo vertex in the frame" )]
 	private static bool GizmoBounds { get; set; }
@@ -5504,8 +5501,8 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//One owner's debug drawing that lives in the world - a gizmo instance's or a scene's overlay - either the part that respects depth or the part drawn
-	//over everything. Lines and triangles, spheres, sprites, and the labels that stand in the world. What is flat on the screen is DrawDebugScreen.
+	//One owner's world debug drawing (a gizmo instance's or scene overlay), depth-tested or over all: lines,
+	//triangles, spheres, sprites, world labels. Screen-flat is DrawDebugScreen
 	private void DrawDebug( DebugDrawList list, CameraComponent camera,
 		System.Numerics.Matrix4x4 viewProjection, bool overlay )
 	{
@@ -5641,7 +5638,7 @@ internal sealed partial class CoreSceneDrawer
 			var a = lines[i * 2];
 			var b = lines[i * 2 + 1];
 
-			//x: which side of the line, y: +1 at the start and -1 at the end, so the shader always turns the same way across it; z: the width in pixels.
+			//x: line side; y: +1 at the start, -1 at the end, so the shader turns one way across; z: width in pixels
 			var startLeft = Corner( a, b.Position, 1, 1, thickness );
 			var startRight = Corner( a, b.Position, -1, 1, thickness );
 			var endLeft = Corner( b, a.Position, 1, -1, thickness );
@@ -5675,7 +5672,7 @@ internal sealed partial class CoreSceneDrawer
 	//Where DrawWideLines builds its strips - grown and kept.
 	private static Vertex[] wideScratch;
 
-	//The overlay's spheres, whose outline is a ring square to the eye - so they are built here, for this view, into world-space lines.
+	//Overlay spheres, outlined by a ring square to the eye, so built per view as world lines
 	private void DrawRings( List<DebugDrawList.Ring> rings, System.Numerics.Matrix4x4 viewProjection, bool overlay )
 	{
 		if ( rings.Count == 0 ) return;
@@ -5838,8 +5835,7 @@ internal sealed partial class CoreSceneDrawer
 			? System.MathF.Max( camera.OrthographicHeight, 0.01f )
 			: System.MathF.Max( System.MathF.Abs( eye.y ), 0.01f );
 
-		//Up in doubles until a cell is a hundredth of what is on screen. Below that the lines are closer together than
-		//they are thick and the grid reads as a grey wash - which is what a centimetre grid seen from across a level did.
+		//Doubled until a cell is a hundredth of the screen; finer lines crowd into a grey wash
 		var cell = spacing;
 		while ( cell < onScreen * 0.01f ) cell *= 2.0f;
 
@@ -5892,8 +5888,7 @@ internal sealed partial class CoreSceneDrawer
 
 			if ( !queued.EditableMesh || queued.ShadowOnly ) continue;
 
-			//Its own vertices, in the layout this pipeline was baked for. A mesh being posed or morphed or read out of a buffer is none
-			//of those things, and an editable mesh is never any of them anyway - this is what keeps that true rather than assuming it.
+			//Its own vertices in this pipeline's layout: posed, morphed or buffer-read meshes are skipped
 			if ( queued.Skinned || queued.Morphs is not null ) continue;
 
 			var mesh = queued.Mesh;

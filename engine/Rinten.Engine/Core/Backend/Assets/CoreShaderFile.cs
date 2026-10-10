@@ -26,19 +26,19 @@ internal static partial class CoreShaderFile
 		SkinnedVertex = 2,
 		SkinnedPixel = 3,
 
-		/// <summary>The pixel stage again, writing the world's second attachment: the normal and how much of a mirror the surface is, for the passes that come after the world and never saw it drawn.</summary>
+		/// <summary>The pixel stage also writing normal and mirror amount, for later passes.</summary>
 		ScenePixel = 4,
 		SkinnedScenePixel = 5,
 
-		//Compute stage, optional: a shader may declare MainCs, MainVs, or both
-		/// <summary>A pass that runs rather than draws: <c>MainCs</c>, with its own <c>[numthreads]</c>.</summary>
+		//Optional: a shader may declare MainCs, MainVs or both
+		/// <summary>A pass that runs rather than draws: <c>MainCs</c> with its own <c>[numthreads]</c>.</summary>
 		Compute = 6,
 
-		//Depth pre-pass uses the surface's own vertex stage (e.g. terrain heights), built with DEPTH_ONLY
+		//Uses the surface's own vertex stage (e.g. terrain heights), built with DEPTH_ONLY
 		/// <summary>The pixel stage with nothing to write: what the depth pre-pass runs.</summary>
 		DepthPixel = 7,
 
-		//Separate stage so models without blend shapes pay no extra binding or branch; rigid only
+		//A stage of its own so models without blend shapes pay no binding or branch; rigid only
 		/// <summary>The vertex stage with the model's blend shapes on top.</summary>
 		MorphedVertex = 8,
 
@@ -49,28 +49,28 @@ internal static partial class CoreShaderFile
 		ClusterVertex = 10,
 		ClusterPixel = 11,
 
-		//A separate stage rather than a branch: what a pixel stage writes is baked into it, and a shader compiled for two attachments cannot be handed one.
-		/// <summary>The cluster pixel stage again for a frame that shades straight onto the screen: one attachment, eight bits a channel, and the curve applied here because there is no pass afterwards to apply it - see TARGET_SCREEN in frame.slang and CoreSceneDrawer's wantsOffscreen.</summary>
+		//A stage, not a branch: what a pixel stage writes is baked in - see TARGET_SCREEN in frame.slang
+		/// <summary>The cluster pixel stage for a frame shaded straight onto the screen.</summary>
 		ClusterScreenPixel = 12,
 
-		//Not Pixel with a define, because Pixel is what every pass that is not the world's picture already runs - a mask, a preview, the editor's overlay over a finished frame - and none of those wants the curve applied a second time.
-		/// <summary>And the classic pixel stages for the same frame: what the sky and everything drawn loose beside the clusters run when the world is being shaded straight onto the screen.</summary>
+		//Not Pixel with a define: masks, previews and the editor overlay run Pixel and must not get the curve twice
+		/// <summary>The classic pixel stages for that frame: the sky and loose draws beside the clusters.</summary>
 		ScreenPixel = 13,
 		SkinnedScreenPixel = 14,
 
-		//Separate stages because a stage bakes in where its draw numbers come from; portable frame only
-		/// <summary>Portable frame instanced draw: the surface's Vertex and Shade over copies from the bone ring</summary>
+		//Stages of their own, since a stage bakes in where its draw numbers come from; portable frame only
+		/// <summary>Portable instanced draw: the surface's Vertex and Shade over copies from the bone ring.</summary>
 		InstancedVertex = 15,
 		InstancedScreenPixel = 16,
 		InstancedDepthPixel = 17,
 
-		//Only sky shaders have these, so the sky lighting and backdrop come from one function
-		/// <summary>The pass that fills the sky's table: <c>MainSkyTableVs</c> and <c>MainSkyTablePs</c>, the engine's entries round a sky's own <c>SkyLight</c> - see sky_surface.slang.</summary>
+		//Only skies have these, so sky lighting and backdrop come from one function
+		/// <summary>The sky table pass round a sky's SkyLight - see sky_surface.slang.</summary>
 		SkyTableVertex = 18,
 		SkyTablePixel = 19,
 
-		//Lets alpha-cut surfaces write depth first so the shading pass can use early depth testing
-		/// <summary>The cluster pass's pixel stage with <c>DEPTH_ONLY</c> defined: the same MainClusterPs, run for a pre-pass that writes depth and nothing else.</summary>
+		//Lets alpha-cut surfaces write depth first so shading gets early depth testing
+		/// <summary>The cluster pixel stage with DEPTH_ONLY: MainClusterPs for a depth-only pre-pass.</summary>
 		ClusterDepthPixel = 20,
 
 	}
@@ -106,8 +106,7 @@ internal static partial class CoreShaderFile
 		var cluster = IsCluster( stage );
 		var instanced = IsInstanced( stage );
 
-		//The stages that finish the picture themselves: one attachment, eight bits a channel, and the exposure and the curve applied here because
-		//there is no compose behind them - see CoreSceneDrawer, which draws this way only when nothing is going to read the world's picture.
+		//Stages finishing the picture themselves: one 8-bit target, exposure and curve here, as no compose follows
 		var screen = stage is Stage.ClusterScreenPixel or Stage.ScreenPixel or Stage.SkinnedScreenPixel
 			or Stage.InstancedScreenPixel;
 
@@ -152,8 +151,7 @@ internal static partial class CoreShaderFile
 	//And for the sky's table, round the sky's own SkyLight - see sky_surface.slang.
 	private const string SkySurface = "\n#include \"engine/sky_surface.slang\"\n";
 
-	//Whether a shader file is a pass over the frame - written against postprocess.slang - which as a compute shader is bound as a blit is. What
-	//a pass's outputs declared in "compact" are compiled as, where not the device's own - the bake compiles both, since it has no device to ask.
+	//The format a pass's "compact" outputs compile to where not the device's own; the bake compiles both
 	internal static string CompactName { get; set; }
 
 	internal static bool IsPass( string resourcePath )
@@ -176,7 +174,7 @@ internal static partial class CoreShaderFile
 		=> System.Text.RegularExpressions.Regex.IsMatch( Declared( path ),
 			@"\b" + System.Text.RegularExpressions.Regex.Escape( name ) + @"\s*\(" );
 
-	//A file's text with its comments blanked, read once while the file is unchanged. The path is the file on disk, the same one Build reads.
+	//A file's text with comments blanked, read once while unchanged; the same disk file Build reads
 	private static string Declared( string path )
 	{
 		if ( string.IsNullOrEmpty( path ) ) return "";
@@ -237,10 +235,10 @@ internal static partial class CoreShaderFile
 	/// <summary>The six stages in one language, or null if the shader does not compile at all.</summary>
 	public static byte[][] Compile( string path, CoreShaderCompiler.Format format, string combo = null )
 	{
-		//What every stage is written in front of: the features, and the block the shader reads its own numbers from - see Preludes.
+		//Every stage is prefixed with the features and the block its numbers come from - see Preludes
 		var (draws, runs) = Preludes( path, combo );
 
-		//No compiler is not the end of it: every stage is looked for in the cache first, and only a miss needs one - see CoreShaderCache.Words.
+		//Without a compiler, stages still come from the cache; only a miss needs one - see CoreShaderCache.Words
 		if ( !CoreNative.Available || string.IsNullOrWhiteSpace( path ) ) return null;
 
 		//World surfaces always get the engine-written cluster stages; non-surfaces have no Vertex for them
@@ -249,12 +247,11 @@ internal static partial class CoreShaderFile
 		//What a machine with no compiler does with a combination that was never baked - see the tail of this function.
 		var instead = string.IsNullOrEmpty( combo ) ? null : "drawn with the shader's own features instead";
 
-		//The build, not just the file. A machine with no compiler says once per name what it has not got, and every combination of one shader shares its
-		//path: "complex.shader is not in the cache" was said once however many of its builds were missing, and named none of them. See CoreShaderCache.
+		//The build, not just the file, so a missing-from-cache message names the combo - see CoreShaderCache
 		var build = string.IsNullOrEmpty( combo ) ? path : $"{path} ({combo})";
 
-		//Every stage at once, on the compile threads: none reads another's words, and one after another they were a quarter of a second each - see
-		//CoreShaderThreads. The pixel stages of a pair that has a vertex stage of its own wait for it instead, and are not compiled where it failed.
+		//All stages at once on the compile threads (CoreShaderThreads); pixel stages paired with a vertex stage
+		//wait for it and are skipped where it failed
 		var compiling = new Task<(byte[] Words, string Error)>[StageCount];
 		var none = Task.FromResult<(byte[] Words, string Error)>( (null, null) );
 
@@ -264,16 +261,14 @@ internal static partial class CoreShaderFile
 
 			var (entry, kind) = Which( stage );
 
-			//The portable frame draws a part at a time and computes nothing - see RenderTier - so it has no cluster stages
-			//and no compute stage to build, and a surface written for both frames is not broken for lacking them there.
+			//The portable frame has no cluster or compute stages (see RenderTier); lacking them is fine there
 			if ( CoreShaderCompiler.IsPortable( format ) && ( IsCluster( stage ) || IsCompute( stage ) ) )
 			{
 				compiling[i] = none;
 				continue;
 			}
 
-			//And the other way round for the instanced pair: they are the portable frame's answer to a field of copies, and the full frame draws one
-			//off its instance table as clusters. Built for the portable languages only, so a desktop build carries neither the stages nor the bake.
+			//The instanced pair is how the portable frame draws copies; the full frame uses clusters
 			if ( IsInstanced( stage ) )
 			{
 				compiling[i] = surface && CoreShaderCompiler.IsPortable( format )
@@ -284,11 +279,10 @@ internal static partial class CoreShaderFile
 				continue;
 			}
 
-			//And the sky's table, for a file that says it is a sky. The entries are the engine's, round the one function a sky
-			//declares - see sky_surface.slang - so a sky shader carries no pass of its own and there is nothing for one to leave out.
+			//Sky table stages round SkyLight (sky_surface.slang); a panorama's table comes from its picture
 			if ( IsSkyTable( stage ) )
 			{
-				compiling[i] = CoreResources.IsSky( path )
+				compiling[i] = CoreResources.IsSky( path ) && !CoreResources.IsPanorama( path )
 					? After( stage is Stage.SkyTableVertex ? null : compiling[(int)Stage.SkyTableVertex],
 						() => Build( path, entry, kind, draws + Defines( stage ), format, SkySurface, instead, build ) )
 					: none;
@@ -298,7 +292,7 @@ internal static partial class CoreShaderFile
 
 			if ( IsCluster( stage ) )
 			{
-				//Without the vertex stage the pass cannot be drawn whatever the pixel stages would do, so they are not built for nothing.
+				//Without the vertex stage the pass cannot draw, so its pixel stages are not built
 				compiling[i] = surface
 					? After( stage is Stage.ClusterVertex ? null : compiling[(int)Stage.ClusterVertex],
 						() => Build( path, entry, kind, draws + Defines( stage ), format, ClusterSurface, instead, build ) )
@@ -307,8 +301,7 @@ internal static partial class CoreShaderFile
 				continue;
 			}
 
-			//A pixel or compute entry the file does not declare is not there to be found - the vertex one may come from an include, postprocess.slang's. Tried
-			//anyway it is a compile per stage for nothing, every run, and on a machine with no compiler a warning that something is missing when nothing is.
+			//A pixel or compute entry the file does not declare is skipped; a vertex one may come from an include
 			if ( !IsVertex( stage ) && !Declares( path, entry ) )
 			{
 				compiling[i] = none;
@@ -329,8 +322,7 @@ internal static partial class CoreShaderFile
 		if ( compiling.Select( x => x.Result.Error ).FirstOrDefault( x => !string.IsNullOrEmpty( x ) ) is { } why )
 			CoreShaderCompiler.Failed( why );
 
-		//A shader is either something that draws or something that runs. The rigid pair has to compile for the first; the compute stage on its
-		//own is the second, which is what a mesher or a cull pass is - and asking it for a vertex stage it never had is not a broken shader.
+		//A shader draws (rigid pair) or runs (compute stage, e.g. a mesher or cull pass); neither alone is broken
 		var drawn = stages[(int)Stage.Vertex] is not null && stages[(int)Stage.Pixel] is not null;
 
 		//And a pass over the frame whose entries all have names of their own - a bloom's three passes in one
@@ -393,8 +385,7 @@ internal static partial class CoreShaderFile
 			: Build( path, entry, kind, draws, format );
 	}
 
-	//The entries a file declares beyond the ones every file has, and what each is. Read off the text: a fragment entry is what follows [shader("fragment")]
-	//, a compute one what follows [numthreads(...)] . MainVs, MainPs and MainCs are the file's ordinary stages and are left to Compile.
+	//Entries a file declares beyond MainVs, MainPs and MainCs: what follows [shader("fragment")] or [numthreads(...)]
 	internal static (string Entry, CoreShaderCompiler.Stage Kind)[] EntriesOf( string path )
 	{
 		if ( string.IsNullOrWhiteSpace( path ) || !File.Exists( path ) ) return Array.Empty<(string, CoreShaderCompiler.Stage)>();
@@ -472,7 +463,7 @@ internal static partial class CoreShaderFile
 
 		if ( words[0] == 0x07230203 )
 		{
-			//Past the five words of header, one instruction after another: its length in words in the top half of its first word, what it is in the bottom half.
+			//After the five header words, each instruction: word count in the high half of its first word, opcode low
 			for ( var at = 5; at < words.Length; )
 			{
 				var count = (int)( words[at] >> 16 );
@@ -503,8 +494,8 @@ internal static partial class CoreShaderFile
 	[System.Text.RegularExpressions.GeneratedRegex( @"@workgroup_size\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?(?:,\s*(\d+)\s*)?\)" )]
 	private static partial System.Text.RegularExpressions.Regex WorkgroupSize();
 
-	//What is wrong with a file that has a world surface's two functions and is not one - or null. Such a file draws nothing and nothing else says
-	//why: the engine builds the cluster pass only around a file that says it is a surface. See CoreResources.IsSurface and cluster_surface.slang.
+	//Why a file with a surface's two functions is not one, or null; the cluster pass is built only round a file
+	//that says it is a surface - see CoreResources.IsSurface and cluster_surface.slang
 	internal static string SurfaceDoubt( string path )
 	{
 		var text = Declared( path );
@@ -560,7 +551,7 @@ internal static partial class CoreShaderFile
 			}
 			catch ( System.Exception )
 			{
-				//A host with no engine filesystem - a test - has no library to point at, and a shader that includes nothing does not need one.
+				//A host with no engine filesystem (a test) has no library, and a shader including nothing needs none
 			}
 		}
 
@@ -590,8 +581,8 @@ internal static partial class CoreShaderFile
 		}
 	}
 
-	//One stage, compiled. Anything with something defined goes through the source with the defines on the front - in memory, because a temporary file beside
-	//the original would appear in an asset folder the editor watches, and one in a temporary directory would break every relative include in the file.
+	//One stage compiled; with defines, the prefixed source goes in memory, as a temp file would land in a watched
+	//asset folder or break relative includes
 	private static byte[] Build( string path, string entry, CoreShaderCompiler.Stage stage, string defines,
 		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv, string after = "", string instead = null,
 		string name = null )
@@ -604,8 +595,7 @@ internal static partial class CoreShaderFile
 				CoreShaderFeatures.Without( CompiledFile.TextOf( path ) ),
 				CoreShaderParams.BlockName ), CoreShaderState.BlockName );
 
-			//Whether the target has specialization constants at all - SPIR-V, and a page's WGSL and GLSL too; see HasSpecialization.
-			//A pipeline baked from it may then be told what a branch is going to answer - see kProbesOn in frame.slang.
+			//Whether the target has specialization constants (SPIR-V, WGSL, GLSL), so pipelines can bake branch answers
 			var specialized = CoreShaderCompiler.HasSpecialization( format )
 				? "#define SPECIALIZED 1\n"
 				: "";
@@ -619,8 +609,7 @@ internal static partial class CoreShaderFile
 		}
 	}
 
-	//The text one of a surface's screen stages is compiled from with the frame's point effects after it - see CorePointChain.ScreenText, and FinishToScreen
-	//in frame.slang, which ENGINE_SCREEN_CHAIN hands to them. Made on the thread that asks; the compile may run on another - see CoreShaderJobs.
+	//A surface's screen stage source with the frame's point effects after it - see CorePointChain.ScreenText
 	internal static (string Text, string Directory, string Entry, CoreShaderCompiler.Stage Kind)? ScreenChainText(
 		string resourcePath, string combo, Stage stage, string chain )
 	{
@@ -651,7 +640,7 @@ internal static partial class CoreShaderFile
 		}
 	}
 
-	/// <summary>Every language a shader is kept in, together. A stage with nothing in it is written as an empty run rather than left out, so reading never has to ask which.</summary>
+	/// <summary>Every language a shader is kept in; an empty stage is written as an empty run, not left out.</summary>
 	public static byte[] Write( byte[][] spirv, byte[][] wgsl = null, byte[][] portable = null,
 		byte[][] glsl = null, byte[][] stereo = null )
 	{
@@ -783,8 +772,7 @@ internal static partial class CoreShaderFile
 			["sprite"] = "engine/unlit",
 			["spritecard"] = "engine/unlit",
 
-			//And the engine's own, which used to sit beside the surfaces and now sit under them - see the folder note
-			//above. A material naming one by the name it had still finds it, which is the whole of what this table is for.
+			//The engine's own shaders, now under engine/, still found by their old names
 			["unlit"] = "engine/unlit",
 			["vertex_color"] = "engine/vertex_color",
 			["sky"] = "engine/sky",
@@ -825,8 +813,7 @@ internal static partial class CoreShaderFile
 	//Whether this draws over a finished picture rather than a surface in it.
 	internal static bool IsPost( string resourcePath ) => Under( resourcePath, PostFolder );
 
-	//Whether a .shader file is in the legacy shader format rather than ours - with modes and HLSL includes - which
-	//nothing here can build. The asset compiler passes such a file on to the external compiler, and the bake leaves it out; see CoreShaderCache.BakeAll.
+	//Whether a .shader is the legacy format (modes, HLSL includes) nothing here builds; the bake leaves it out
 	internal static bool IsForeign( string path )
 	{
 		try
@@ -836,7 +823,7 @@ internal static partial class CoreShaderFile
 			//Any Slang include means it is ours, even if it has FEATURES/PARAMETERS blocks like theirs
 			if ( text.Contains( ".slang\"", System.StringComparison.Ordinal ) ) return false;
 
-			//As block headers - each on a line of its own, which is how their format writes them and how nothing in Slang ever would.
+			//As block headers on lines of their own, as that format writes them and Slang never would
 			foreach ( var line in text.Split( '\n' ) )
 			{
 				var trimmed = line.Trim();
@@ -852,7 +839,7 @@ internal static partial class CoreShaderFile
 		}
 	}
 
-	//The shader a name actually means: itself where there is a file, and whatever it is an alias for where there is not.
+	//The shader a name means: its file if there is one, else what it aliases
 	internal static string Real( string resourcePath )
 	{
 		if ( string.IsNullOrWhiteSpace( resourcePath ) ) return resourcePath;
@@ -901,7 +888,7 @@ internal static partial class CoreShaderFile
 			return null;
 		}
 
-		//Shortest first, so a file is called what the engine would call it: "shaders/frame.slang", not the folders above Assets as well.
+		//Shortest first, so a file gets the engine's name for it: "shaders/frame.slang"
 		var at = slashed.Length;
 
 		while ( ( at = slashed.LastIndexOf( '/', at - 1 ) ) > 0 )
@@ -921,14 +908,14 @@ internal static partial class CoreShaderFile
 				continue;
 			}
 
-			//Resolved back to something else - a project's file of the same name in front of this one. Then this file has no portable name.
+			//Resolved to something else, a project file of the same name in front; then this one has no portable name
 			if ( back.Equals( slashed, StringComparison.Ordinal ) ) return candidate;
 		}
 
 		return null;
 	}
 
-	/// <summary>The compiled shader at a resource path, however it was written - straight out, or inside the resource container the editor writes through.</summary>
+	/// <summary>The compiled shader at a resource path, raw or inside the editor's resource container.</summary>
 	public static byte[] Load( string resourcePath )
 	{
 		if ( string.IsNullOrWhiteSpace( resourcePath ) ) return null;
@@ -952,7 +939,7 @@ internal static partial class CoreShaderFile
 			return null;
 		}
 
-		//A packed source wears the same name in a build - it is the shader's text, not its stages, and the stages are in the cache. See CompiledFile.
+		//A packed source has the same name in a build: the shader's text, with stages in the cache - see CompiledFile
 		if ( CompiledFile.IsCompiled( bytes ) ) return null;
 
 		return IsOurs( bytes ) ? bytes : CoreResource.Unwrap( bytes, Magic );
@@ -976,8 +963,7 @@ internal static partial class CoreShaderFile
 			if ( CoreModel.ResolveOnDisk( written ) is { } found ) return found;
 			if ( Shipped( written ) is { } shipped ) return shipped;
 
-			//And the packed one a build carries in place of the text - see CompiledFile. Handed back under its own name,
-			//because everything that reads a shader's text reads it through CompiledFile.TextOf, which knows both names.
+			//And the packed text a build carries, under its own name, which CompiledFile.TextOf knows
 			if ( CoreModel.ResolveOnDisk( written + "_c" ) is { } packed ) return packed;
 			if ( Shipped( written + "_c" ) is { } shippedPacked ) return shippedPacked;
 		}
@@ -1001,7 +987,7 @@ internal static partial class CoreShaderFile
 			return false;
 		}
 
-		//Breadth first, and each file only once: the includes make a graph, not a tree - every surface pulls in frame.slang and so does everything it pulls in.
+		//Breadth first, each file once: includes form a graph, as everything pulls in frame.slang
 		var seen = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
 		var queue = new Queue<string>();
 
@@ -1038,8 +1024,8 @@ internal static partial class CoreShaderFile
 		return false;
 	}
 
-	//The files a shader source pulls in, as paths on disk. Beside the including file first, which is how the compiler
-	//resolves them, and then as a resource path - the engine's own shaders include each other by their place under Assets.
+	//Files a source includes, as disk paths: beside the includer first, as the compiler resolves them, then
+	//as a resource path, since engine shaders include each other by place under Assets
 	private static IEnumerable<string> Includes( string text, string at )
 		=> IncludesBeside( text, Path.GetDirectoryName( at ) );
 
@@ -1115,7 +1101,7 @@ internal static partial class CoreShaderFile
 		return ( hash, includes );
 	}
 
-	//Forgets where every include was found - a project mounted or let go may answer a name differently. See CoreShaderCache.Changed.
+	//Forgets where includes were found, since mounting a project may change the answer - see CoreShaderCache.Changed
 	internal static void ForgetIncludes()
 	{
 		lock ( known ) known.Clear();
@@ -1136,7 +1122,7 @@ internal static partial class CoreShaderFile
 			var open = text.IndexOf( '"', from );
 			if ( open < 0 ) yield break;
 
-			//On a later line than the directive, so a commented-out include three lines down is not read as this one's argument.
+			//On a later line than the directive, so a commented-out include below is not read as its argument
 			if ( text.AsSpan( from, open - from ).IndexOf( '\n' ) >= 0 ) continue;
 
 			var close = text.IndexOf( '"', open + 1 );

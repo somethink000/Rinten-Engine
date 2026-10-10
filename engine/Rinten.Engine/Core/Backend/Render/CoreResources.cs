@@ -17,14 +17,14 @@ internal static class CoreResources
 	//What a live material was built into, weak on the material so play-mode copies don't leak
 	private static readonly ConditionalWeakTable<Material, LiveEntry> liveByMaterial = new();
 
-	//Handles whose material nobody holds any more, waiting for the main thread.
+	//Handles whose material nobody holds, waiting for the main thread
 	private static readonly ConcurrentQueue<ulong> droppedLive = new();
 
 	//The colour picture each live material was built with, by the handle it was built into - see LiveColour.
 	private static readonly Dictionary<ulong, ulong> liveColours = new();
 
-	//One live material's device material and what was worked out building it. Updated in place when the material is rebuilt, never replaced: the
-	//finalizer gives back whatever handle the entry holds when it goes, and a replaced entry would give back one that had been destroyed already.
+	//One live material's device material and what building it worked out; updated in place, never replaced,
+	//since the finalizer gives back whatever handle it holds and a replaced one may be destroyed already
 	private sealed class LiveEntry
 	{
 		public int Revision;
@@ -51,7 +51,7 @@ internal static class CoreResources
 		}
 	}
 
-	/// <summary>Gives back what a live material was built into, now, rather than when it is collected - for an owner that knows the material is finished with.</summary>
+	/// <summary>Gives back a live material's device material now, for an owner done with it.</summary>
 	public static void Forget( Material material )
 	{
 		if ( material is null || !liveByMaterial.TryGetValue( material, out var entry ) ) return;
@@ -65,8 +65,8 @@ internal static class CoreResources
 	}
 	private static readonly Dictionary<CoreSceneRenderer.PipelineKind, ulong> pipelines = new();
 
-	//Compiled shaders by the path they are written under. Kept because the stages are the same words for every pipeline baked out of
-	//them, and because where there is no compiled file the alternative is running the Slang compiler again for every kind of draw.
+	//Compiled shaders by path: every pipeline bakes from the same stages, and without a compiled file the
+	//alternative is running Slang again per kind of draw
 	private static readonly Dictionary<string, byte[][]> shaders = new();
 
 	/// <summary>Magenta/black checkerboard for a material whose texture can't be read; made on first use</summary>
@@ -139,7 +139,7 @@ internal static class CoreResources
 		return pixels;
 	}
 
-	/// <summary>Material for a missing material: checkerboard colour and emission, neutral normal and roughness</summary>
+	/// <summary>Material for a missing material: checkerboard colour and emission, neutral normal.</summary>
 	public static ulong MissingMaterial
 	{
 		get
@@ -150,7 +150,7 @@ internal static class CoreResources
 
 			numbers.Clear();
 
-			//Entirely matte, no metal, and as much emission as it has albedo - so what it emits is the picture itself and nothing has to be picked to make it read.
+			//Matte, no metal, emission equal to albedo, so the picture itself shows
 			numbers[0] = 1.0f;
 			numbers[1] = 0.0f;
 			numbers[2] = 1.0f;
@@ -163,7 +163,7 @@ internal static class CoreResources
 			missingMaterial = CoreRenderDevice.CreateMaterial( Fallback, DefaultNormal,
 				0, Fallback, numbers );
 
-			//Where even that will not build, the bare picture is still better than nothing at all - which is what it always was.
+			//Where even that will not build, the bare picture
 			if ( missingMaterial == 0 ) missingMaterial = Fallback;
 
 			return missingMaterial;
@@ -176,7 +176,7 @@ internal static class CoreResources
 	public static CoreSceneRenderer.SceneMesh Mesh( string resourcePath )
 		=> CoreSceneRenderer.LoadMesh( resourcePath, meshes, textures, Fallback, materials );
 
-	/// <summary>The same, for a model already in hand - which is the only way to reach one built while the game is running, since there is no file to find it by.</summary>
+	/// <summary>The same for a model in hand, the only way to reach one built at runtime.</summary>
 	public static CoreSceneRenderer.SceneMesh Mesh( Model model )
 	{
 		if ( model is null ) return null;
@@ -266,7 +266,7 @@ internal static class CoreResources
 		return Rebuild( material, core );
 	}
 
-	//A material's numbers as its GPU material carries them, into numbers; and the third picture, which a shader may declare as one of them.
+	//A material's numbers as its GPU material carries them; returns the third picture a shader may declare among them
 	private static ulong Numbers( CoreMaterial core, float cutoff, System.Span<float> numbers )
 	{
 		//With the defaults a material that never mentioned them would have: a material made in
@@ -283,8 +283,7 @@ internal static class CoreResources
 		var third = 0ul;
 
 		CoreShaderParams.Into( numbers, Declared( core.Shader ),
-			//Under the name the shader declared or without its prefix - g_vTileArea or TileArea - the way a pass's numbers are read (CorePostBlit).
-			//Only the first was tried, and a number set in code under the short name was dropped without a word: the shader drew its default.
+			//By declared name or without its prefix (g_vTileArea or TileArea), as CorePostBlit reads them
 			name => core.Values.TryGetValue( name, out var value ) || core.Values.TryGetValue( CoreShaderParams.Bare( name ), out value ) ? value : null,
 			name => PictureNumber( Device( core, name, CoreShaderParams.Bare( name ) ), ref third ) );
 
@@ -340,7 +339,7 @@ internal static class CoreResources
 			var cutoff = entry.Masked ? core.Value( "AlphaCutoff", 0.5f ) : 0.0f;
 			var third = Numbers( core, cutoff, numbersValues.AsSpan( count * floats, floats ) );
 
-			//A third picture named among the numbers changed which picture it is: that is what the material is made of, not a number.
+			//The third picture changed, which is what the material is made of, not a number
 			if ( third != 0 && third != MaterialPart( entry.Handle, 2 ) )
 			{
 				core.Revision++;
@@ -404,7 +403,7 @@ internal static class CoreResources
 		System.Span<float> numbers = stackalloc float[CoreRenderDevice.MaterialParamFloats];
 		var third = Numbers( core, cutoff, numbers );
 
-		//A slot the material has nothing for gets the value that changes nothing, not the colour map - see DefaultColour and the rest.
+		//A slot with nothing gets the value that changes nothing, not the colour map - see DefaultColour
 		var handle = CoreRenderDevice.CreateMaterial(
 			colour,
 			Or( Device( core, "Normal", "g_tNormal" ), DefaultNormal ),
@@ -427,15 +426,15 @@ internal static class CoreResources
 		return made;
 	}
 
-	//Ask Live first; this only reads what that worked out.
-	/// <summary>Which build of its shader a live material asks for, worked out when the material was last built.</summary>
+	//Read after Live, which works this out
+	/// <summary>The build of its shader a live material asks for, as of its last build.</summary>
 	public static string LiveCombo( Material material )
 		=> material is not null && liveByMaterial.TryGetValue( material, out var seen )
 			? seen.Combo
 			: null;
 
-	//Ask Live first; this only reads what that worked out.
-	/// <summary>Whether a live material cuts pixels out, is see-through and is drawn from both sides - the features of its shader that are the draw's own state, worked out when the material was last built.</summary>
+	//Read after Live, which works this out
+	/// <summary>A live material's draw-state features (cut-out, see-through, two-sided).</summary>
 	public static (bool Masked, bool Translucent, bool TwoSided) LiveFlags( Material material )
 		=> material is not null && liveByMaterial.TryGetValue( material, out var seen )
 			? (seen.Masked, seen.Translucent, seen.TwoSided)
@@ -518,7 +517,7 @@ internal static class CoreResources
 				//Check the shader's field name too: complex.shader says Map( ColorMap ), live materials use "Color"
 				"Color" or "ColorMap" => Names( core, "Color", "Colour", "ColorMap", "g_tColor" ),
 
-				//Anything else is one of the shader's own pictures, under the name the shader gave it or that name without its prefix.
+				//Any other is one of the shader's own pictures, by its declared name or without its prefix
 				_ => Names( core, field, CoreShaderParams.Bare( field ) ),
 			},
 
@@ -534,7 +533,7 @@ internal static class CoreResources
 	{
 		if ( handle == 0 ) return 0;
 
-		//A number carried in the material's own numbers must not move, and nothing counts what the shader reads by it: see CoreTextureStreaming.KeepWhole.
+		//Its index is carried in the material's numbers, so it must not move: see CoreTextureStreaming.KeepWhole
 		CoreTextureStreaming.KeepWhole( handle );
 
 		if ( !CoreRenderDevice.PortableFrame ) return CoreRender.TextureIndex( handle );
@@ -555,8 +554,8 @@ internal static class CoreResources
 		return 0;
 	}
 
-	//Whether the material mentioned any of these at all, however badly. The difference between a slot left out and a slot
-	//naming an image that will not load. Device cannot tell them apart - both are zero to it - and they want opposite answers.
+	//Whether the material named any of these, even an unreadable one: a slot left out and a broken slot are both
+	//zero to Device but want opposite answers
 	static bool Names( CoreMaterial core, params string[] names )
 	{
 		foreach ( var name in names )
@@ -570,7 +569,7 @@ internal static class CoreResources
 	//The numbers a shader declares, read from disk once and kept
 	private static readonly Dictionary<string, CoreShaderParams.Parameter[]> declared = new();
 
-	//The pictures a shader's compute pass stores into, read once and kept - the other half of what declared holds, and forgotten with it.
+	//Pictures a shader's compute pass stores into, read once, forgotten with declared
 	private static readonly Dictionary<string, CoreShaderParams.Parameter[]> stored = new();
 
 	//The named entries of shaders compiled so far, by path, combo, entry and stage - see Entry.
@@ -579,7 +578,7 @@ internal static class CoreResources
 	//What each shader's STATE block says, by path - see State.
 	private static readonly Dictionary<string, CoreShaderState> states = new();
 
-	//One entry of a shader by its own name - the pass of a file holding more than one - compiled and kept. Null where it does not compile.
+	//One entry of a shader by name (a pass of a multi-pass file), compiled and kept; null where it fails
 	internal static byte[] Entry( string resourcePath, string combo, string entry, CoreShaderCompiler.Stage kind )
 	{
 		if ( string.IsNullOrWhiteSpace( resourcePath ) || string.IsNullOrWhiteSpace( entry ) ) return null;
@@ -730,11 +729,17 @@ internal static class CoreResources
 	//What a world draw says before it includes frame.slang - the define, not the test frame.slang makes of it.
 	private const string WorldPushMarker = "#define ENGINE_WORLD_PUSH";
 
-	//Whether a shader file is a sky (ENGINE_SKY) declaring SkyLight, used to build the table stages
+	//Whether a shader file is a sky (ENGINE_SKY) declaring SkyLight, which the table stages are built round
 	internal static bool IsSky( string onDisk ) => Mentions( onDisk, 0, SkyMarker );
 
 	//What a sky says at the top of itself - see sky.shader.
 	private const string SkyMarker = "#define ENGINE_SKY";
+
+	//Whether a sky is a panorama, whose table is made from its picture - see CorePanoramaSky
+	internal static bool IsPanorama( string onDisk ) => Mentions( onDisk, 0, PanoramaMarker );
+
+	//What a panorama sky says besides ENGINE_SKY, which this begins with - see sky_hdri.shader.
+	private const string PanoramaMarker = "#define ENGINE_SKY_PANORAMA";
 
 	//Whether a shader moves vertices (ENGINE_MOVES_VERTICES, maybe per feature); those skip the pre-pass
 	internal static bool MovesVertices( string shaderPath, string combo )
@@ -751,7 +756,7 @@ internal static class CoreResources
 
 			if ( feature.Index < 0 ) return true;
 
-			//A combo is the shader's features' values in the order it declared them, dot between; none at all is every default.
+			//A combo is the features' values in declared order, dot-separated; empty is every default
 			if ( string.IsNullOrEmpty( combo ) ) return feature.Default != 0;
 
 			var at = 0;
@@ -769,7 +774,7 @@ internal static class CoreResources
 		}
 	}
 
-	//Which feature a mover moves by, as its place among the shader's features and its default - or index -1 where it moves in every build.
+	//The feature a mover moves by, as its index among the shader's features and its default; -1 if always
 	private static (int Index, int Default) MoverFeature( string shaderPath )
 	{
 		var written = CoreShaderFile.Real( System.IO.Path.ChangeExtension( shaderPath, ".shader" ).Replace( '\\', '/' ) );
@@ -874,6 +879,14 @@ internal static class CoreResources
 	internal static bool IsSkyShader( string shaderPath )
 		=> Marked( shaderPath, SkyMarker, skies, skiesAsked );
 
+	//Which shaders were found to be panoramas, by name, and when one could not be found.
+	private static readonly Dictionary<string, bool> panoramas = new();
+	private static readonly Dictionary<string, long> panoramasAsked = new();
+
+	//Whether the shader a material wears is a panorama sky, off the file and remembered by name.
+	internal static bool IsPanoramaShader( string shaderPath )
+		=> Marked( shaderPath, PanoramaMarker, panoramas, panoramasAsked );
+
 	//Specialization bits from marked material numbers (set where nonzero); ids below 13 are the frame's
 	internal static int FoldBits( CoreMaterial core )
 	{
@@ -883,7 +896,7 @@ internal static class CoreResources
 
 		foreach ( var one in Declared( core.Shader ) )
 		{
-			if ( one.Fold < FirstShaderFold || one.Fold >= CoreRenderDevice.SpecializationCount ) continue;
+			if ( one.Fold < FirstShaderFold || one.Fold >= ShaderFoldsEnd ) continue;
 
 			if ( Number( core, one.Name, one.Default.x ) != 0.0f ) bits |= 1 << one.Fold;
 		}
@@ -894,11 +907,13 @@ internal static class CoreResources
 	//The lowest specialization constant a shader may claim - everything under it is the frame's, said in frame.slang.
 	internal const int FirstShaderFold = 15;
 
+	//Past the shader's folds, the frame's again: kPanoramaOn - see CoreSceneRenderer.PanoramaFold
+	internal const int ShaderFoldsEnd = 18;
+
 	//What a surface's interpolants are declared with - see depth_id.slang.
 	private const string DepthIdMarker = "DEPTH_ID_FIELD";
 
-	//What a surface that multiplies by the mesh's corner tint says. A marker rather than anything the compile reads, the same as the
-	//include above: a shader that declares it promises to read location one of the engine vertex and multiply its albedo by what is there.
+	//A surface multiplying albedo by the mesh's corner tint (vertex location one) says this; nothing compiles it
 	private const string VertexTintMarker = "ENGINE_VERTEX_TINT";
 
 	//Which shaders were found to tint per corner, by name.
@@ -911,7 +926,7 @@ internal static class CoreResources
 			? CoreSceneRenderer.StandardShader
 			: shaderPath;
 
-		//Whatever its own file was going to do stopped mattering: the standard surface is drawing it, and that reads the tint.
+		//Drawn by the standard surface, which reads the tint, whatever its own file says
 		if ( stands.Contains( name ) ) name = CoreSceneRenderer.StandardShader;
 
 		if ( tints.TryGetValue( name, out var found ) ) return found;
@@ -1010,15 +1025,13 @@ internal static class CoreResources
 	{
 		if ( string.IsNullOrWhiteSpace( resourcePath ) ) return null;
 
-		//One build per set of features, because that is what a feature is: a different shader, not a different number handed to the same
-		//one. And one more per language, because the stereo build is a different set of stages and not the same ones read differently.
+		//One build per feature set, since a feature is a different shader, and one more for stereo's own stages
 		var key = string.IsNullOrEmpty( combo ) ? resourcePath : resourcePath + "#" + combo;
 		if ( stereo ) key += "@stereo";
 
 		if ( shaders.TryGetValue( key, out var cached ) ) return cached;
 
-		//The two-view run is asked for out of the file and never compiled: a build that has none draws an eye at a time,
-		//which is ordinary, and a warning about it sends whoever reads the log after a shader with nothing wrong with it.
+		//The two-view run is optional: without one a build draws an eye at a time, so no warning
 		var stages = stereo
 			? CoreShaderFile.Stages( resourcePath, combo, CoreShaderCompiler.Format.GlslStereo, optional: true )
 			: CoreShaderFile.Stages( resourcePath, combo );
@@ -1099,7 +1112,7 @@ internal static class CoreResources
 		priorPipeline = 0;
 	}
 
-	/// <summary>The bare colour map of a material, for the draws that light nothing and want a picture rather than a descriptor set - whole, since the cull's wants say nothing of those draws: see CoreTextureStreaming.KeepWhole.</summary>
+	/// <summary>A material's bare colour map, whole, for draws that light nothing.</summary>
 	public static ulong Colour( string materialPath )
 		=> Whole( CoreSceneRenderer.ResolveMaterialTexture( materialPath, textures, Fallback ) );
 
@@ -1113,11 +1126,11 @@ internal static class CoreResources
 		return handle;
 	}
 
-	/// <summary>The same draw with the material one of the model's groups puts on it. The colour texture a material names, for the raster that cuts out by its alpha.</summary>
+	/// <summary>The colour texture a material names, for the raster that cuts out by its alpha.</summary>
 	public static ulong ColourTexture( string materialPath )
 		=> string.IsNullOrWhiteSpace( materialPath ) ? 0 : CoreSceneRenderer.ResolveMaterialTexture( materialPath, textures, Fallback );
 
-	/// <summary>The colour texture a live material was built with; the depth pre-pass cuts masked pixels by it</summary>
+	/// <summary>A live material's colour texture; the depth pre-pass cuts masked pixels by it.</summary>
 	public static ulong LiveColour( ulong liveHandle )
 		=> liveHandle != 0 && liveColours.TryGetValue( liveHandle, out var colour ) ? colour : 0;
 
@@ -1178,7 +1191,7 @@ internal static class CoreResources
 		foreach ( var model in holders ) meshesByModel.Remove( model );
 	}
 
-	/// <summary>Drops everything built from one file so it reloads, including meshes holding its material handle</summary>
+	/// <summary>Drops everything built from one file so it reloads, including meshes holding its material.</summary>
 	public static void Forget( string resourcePath )
 	{
 		if ( string.IsNullOrWhiteSpace( resourcePath ) ) return;
@@ -1186,8 +1199,7 @@ internal static class CoreResources
 		var path = Stem( resourcePath );
 		if ( path.Length == 0 ) return;
 
-		//What the material files said. Kept by path and cheap to rebuild, so it goes wholesale rather than by key - and it has to go for
-		//an edited shader as well as an edited material, because the cull numbers in it are read off the shader's declared parameters.
+		//Material fields go wholesale, for edited shaders too: their cull numbers come from the shader's parameters
 		CoreSceneRenderer.ForgetMaterialFields();
 
 		//And where each shader a material names was found on disk, for the same reason and wholesale too: a
@@ -1237,7 +1249,7 @@ internal static class CoreResources
 			CoreSceneRenderer.ForgetBuilds();
 			CoreMaterialTable.ForgetPipelines();
 
-			//And the passes the drawer bakes for itself out of the engine's own shaders - the sky, its table - which are not in the table above.
+			//And the drawer's own sky passes, which are not in the table above
 			CoreSceneDrawer.ForgetSkyPipelines();
 
 			dropped = true;
@@ -1257,7 +1269,7 @@ internal static class CoreResources
 		{
 			declared.Remove( key );
 
-			//And where its numbers sit in a full-screen pass's push block, which was worked out from the same declaration.
+			//And its numbers' place in a full-screen pass's push block, worked out from the same declaration
 			CorePostBlit.Forget( key );
 		}
 
@@ -1278,6 +1290,8 @@ internal static class CoreResources
 		//And whether it is a sky, and whether it sways, for the same reason and in the same
 		//breath: a file edited into one, or out of one, is answered off the file again.
 		foreach ( var key in Naming( skies, path ) ) skies.Remove( key );
+		foreach ( var key in Naming( panoramas, path ) ) panoramas.Remove( key );
+		foreach ( var key in Naming( panoramasAsked, path ) ) panoramasAsked.Remove( key );
 		foreach ( var key in Naming( skiesAsked, path ) ) skiesAsked.Remove( key );
 		foreach ( var key in Naming( movers, path ) ) movers.Remove( key );
 		foreach ( var key in Naming( moversAsked, path ) ) moversAsked.Remove( key );
@@ -1400,7 +1414,7 @@ internal static class CoreResources
 
 	static void Destroy( CoreSceneRenderer.SceneMesh mesh ) => CoreSceneRenderer.ReleaseMesh( mesh );
 
-	/// <summary>Raised before everything here goes, for whoever else holds something on the device. The editor does; the engine has no way to reach into it.</summary>
+	/// <summary>Raised before everything here goes, for the editor's own device resources.</summary>
 	public static event System.Action Clearing;
 
 	//Bumped when all device resources are released, so cached draws know their handles are stale
@@ -1419,7 +1433,7 @@ internal static class CoreResources
 	//Generation bumps that were only texture swaps, so scene tables needn't rebake shadows for them
 	internal static int PictureGeneration { get; private set; } = 1;
 
-	/// <summary>Lets go of all of it. For shutting the device down, and for a test that wants the next one to start from nothing.</summary>
+	/// <summary>Lets go of all of it, for device shutdown and for tests starting from nothing.</summary>
 	public static void Clear()
 	{
 		//Whatever else is held for the device goes with it. The editor keeps pipelines and images of its own
@@ -1438,7 +1452,7 @@ internal static class CoreResources
 		//the images first would leave it naming nothing for as long as it took to free it.
 		foreach ( var material in materials.Values ) CoreRenderDevice.DestroyTexture( material );
 
-		//Live materials belong to objects, not names: scene copies can share a name. Zeroed as they go, so their finalizers have nothing left to give back.
+		//Live materials belong to objects, not names; zeroed so their finalizers have nothing to give back
 		foreach ( var (_, live) in liveByMaterial )
 		{
 			if ( live.Handle != 0 && live.Handle != fallback )
@@ -1468,8 +1482,7 @@ internal static class CoreResources
 		if ( defaultNormal != 0 ) CoreRenderDevice.DestroyTexture( defaultNormal );
 		if ( defaultEmission != 0 ) CoreRenderDevice.DestroyTexture( defaultEmission );
 
-		//And what the envmap probes captured, which is a texture each and a bindless slot each. Held in a dictionary of
-		//its own rather than in textures above, because a probe's picture is not a file and nothing asks for it by name.
+		//And the probes' captures, a texture and bindless slot each, kept apart since nothing asks for them by name
 		CoreEnvmap.Release();
 
 		//And the scene's baked lighting, which is pictures a bake made rather than files, for the same reason.
@@ -1487,7 +1500,7 @@ internal static class CoreResources
 		states.Clear();
 		CorePostBlit.Forget( null );
 
-		//And what the engine's own passes include, which may have been found in the engine's folder before a project with a file of its own was mounted.
+		//And the engine passes' includes, which may have resolved before a project with its own file was mounted
 		CoreShaderCache.Changed();
 		meshes.Clear();
 		meshesByModel.Clear();
@@ -1499,13 +1512,15 @@ internal static class CoreResources
 		guessed.Clear();
 		skies.Clear();
 		skiesAsked.Clear();
+		panoramas.Clear();
+		panoramasAsked.Clear();
 		movers.Clear();
 		moversAsked.Clear();
 		sprites.Clear();
 		spritesAsked.Clear();
 		CoreSceneRenderer.ForgetMaterialFields();
 
-		//The runs every one of those meshes was cut into go with them: they are offsets into one buffer, and a mesh loaded again lands somewhere else.
+		//Those meshes' cluster runs go too: offsets into one buffer, and a reloaded mesh lands elsewhere
 		CoreClusters.Drop();
 		CoreGeometryPool.Drop();
 		CoreLights.Drop();

@@ -32,27 +32,27 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Whether the backs of its faces are drawn.</summary>
 		public bool TwoSided;
 
-		/// <summary>Whether it only ever stands in for the rest - the model's impostor, see ModelFormat.MeshFlags.StandsIn. The cull picks it by its clusters; a draw that takes the model whole leaves it out.</summary>
+		/// <summary>Only ever stands in for the rest (the impostor); a whole-model draw leaves it out.</summary>
 		public bool StandsIn;
 
-		/// <summary>Which body-group choices claim this mesh. Zero - which is nearly every mesh - means nobody does and it is always drawn.</summary>
+		/// <summary>The body-group choices claiming this mesh; zero, nearly always, means always drawn.</summary>
 		public ulong Group;
 
 
-		/// <summary>What each material group puts on this mesh, by group index, or null where the model has no groups. Names rather than handles: a group nobody selects should not cost a texture load.</summary>
+		/// <summary>Each material group's material for this mesh, by name; or null.</summary>
 		public string[] GroupMaterials;
 
 		/// <summary>Which shader the material asked for, or null for the standard one.</summary>
 		public string Shader;
 
-		/// <summary>Shader features the material enabled, in declared order; null = defaults. A string for pipeline keys</summary>
+		/// <summary>Shader features the material enabled, in declared order; null = defaults. A pipeline key.</summary>
 		public string Combo;
 
-		/// <summary>How many vertices the shader is to be run for, where this mesh's vertices are read by the shader rather than fed to it. Zero on every ordinary mesh, which is drawn by its indices.</summary>
+		/// <summary>Vertices to run where the shader reads them itself; zero for meshes drawn by index.</summary>
 		public int PulledVertices;
 
 
-		//Zero on nearly every mesh there is, and zero is the behaviour there was before a shader could say anything - see CoreShaderParams.Cull.
+		//Zero on nearly every mesh, the behaviour before shaders could say anything - see CoreShaderParams.Cull
 		/// <summary>What its shader said about culling it: grow, never, fade.</summary>
 		public Vector3 Cull;
 
@@ -63,7 +63,7 @@ internal static unsafe class CoreSceneRenderer
 		public bool Masked;
 		public float Cutoff;
 
-		/// <summary>How many metres of the model one whole unit of its first texture coordinates covers, over the part's surface - what a texture's levels are wanted by at a distance; see CoreTextureStreaming. Nought where it could not be told.</summary>
+		/// <summary>Metres one unit of its first UVs covers, for texture streaming; nought if unknown.</summary>
 		public float MetresPerUv;
 	}
 
@@ -117,7 +117,7 @@ internal static unsafe class CoreSceneRenderer
 		return -1;
 	}
 
-	//The same draw with the material a group puts on it, resolved the first time it is asked for and kept in the same caches as everything else.
+	//The draw with a group's material on it, resolved once and kept in the usual caches
 	internal static MeshDraw WithGroupMaterial( MeshDraw part, int group,
 		Dictionary<string, ulong> textures, ulong fallback, Dictionary<string, ulong> materials )
 	{
@@ -150,16 +150,16 @@ internal static unsafe class CoreSceneRenderer
 	//Which pipeline a mesh needs. Three things decide it, so there are eight - baked when first asked for and kept.
 	internal readonly record struct PipelineKind( bool Skinned, bool Translucent, bool TwoSided )
 	{
-		/// <summary>Which shader draws it, as a resource path, or null for the standard one. Part of what makes a pipeline distinct, so two materials with different shaders get different pipelines and the same one shares.</summary>
+		/// <summary>The shader, as a resource path, or null for standard; part of the pipeline key.</summary>
 		public string Shader { get; init; }
 
-		/// <summary>Which of the shader's entries draws a pass over the frame, where its file holds more than one - a bloom's BrightPs. Null is MainPs. See CoreShaderFile.EntryWords.</summary>
+		/// <summary>The entry for a frame pass in a multi-pass file (bloom's BrightPs); null is MainPs.</summary>
 		public string Entry { get; init; }
 
 		/// <summary>Whether the surface moves its own vertices - see CoreResources.MovesVertices.</summary>
 		public bool Moves { get; init; }
 
-		/// <summary>Portable frame instanced run (instanced_surface.slang); stages read numbers from the bone ring</summary>
+		/// <summary>Portable instanced run (instanced_surface.slang); stages read numbers from the bone ring.</summary>
 		public bool Instanced { get; init; }
 
 		/// <summary>Whether this pass draws both of a headset's eyes at once.</summary>
@@ -168,30 +168,30 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Whether the draw ignores the depth it is drawn over.</summary>
 		public bool NoDepth { get; init; }
 
-		/// <summary>Post pass blend mode (see BasePostProcess.PassBlend); lets a pass add glow without reading the frame</summary>
+		/// <summary>Post pass blend mode (BasePostProcess.PassBlend), e.g. adding glow unread.</summary>
 		public int PostBlend { get; init; }
 
-		/// <summary>For a pass into one of the frame's pictures, the format it was made in - the Vulkan format's number, as CoreRenderDevice.PictureShape answers it. Part of the key: two pictures of different formats are two pipelines.</summary>
+		/// <summary>A frame picture pass's Vulkan format, as PictureShape answers; part of the key.</summary>
 		public int PictureFormat { get; init; }
 
-		/// <summary>Whether the shader reads its own vertices. Part of what makes a pipeline distinct because it decides the vertex layout, and a pipeline built for one is not a pipeline for the other.</summary>
+		/// <summary>Whether the shader reads its own vertices; sets the vertex layout.</summary>
 		public bool Pulled { get; init; }
 
-		/// <summary>Which picture it draws into. The world's has two attachments and half floats; the screen has one and eight bits a channel, so a pipeline for one is not a pipeline for the other.</summary>
+		/// <summary>The picture drawn into: world (two half-float targets) or screen (one 8-bit).</summary>
 		public CoreRender.TargetKind Target { get; init; }
 
 		/// <summary>Whether the mesh is moved by blend shapes before anything else.</summary>
 		public bool Morphed { get; init; }
 
-		/// <summary>DepthOnly: the depth pre-pass with the surface's shader. Wireframe: edges only, baked on demand</summary>
+		/// <summary>DepthOnly: pre-pass with the surface's shader. Wireframe: edges, baked on demand.</summary>
 		public bool DepthOnly { get; init; }
 
 		public bool Wireframe { get; init; }
 
-		/// <summary>Whether it draws a list of lines rather than of triangles - a project's own buffer of them, see Graphics.Draw( GpuBuffer ). Part of the key because the topology is baked in.</summary>
+		/// <summary>Draws lines rather than triangles (Graphics.Draw( GpuBuffer )); topology is baked in.</summary>
 		public bool Lines { get; init; }
 
-		/// <summary>The pass that shades the world's clusters over the depth the pre-pass wrote - see cluster_main.slang.</summary>
+		/// <summary>The pass shading the world's clusters over the pre-pass depth - see cluster_main.slang.</summary>
 		public bool Cluster { get; init; }
 
 
@@ -201,16 +201,16 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Pass applies exposure and tonemap itself (no compose after it); only for screen targets</summary>
 		public bool Finishes { get; init; }
 
-		/// <summary>The run of point effects this finishing pass carries, by CorePointChain's key - null for none, which is the curve alone. See CorePointChain.ScreenText.</summary>
+		/// <summary>Point effects this finishing pass carries, by CorePointChain key; null: curve only.</summary>
 		public string ScreenChain { get; init; }
 
-		/// <summary>And whether it does that through whatever is in front of it: no depth test, so every triangle the pass draws shows its edges wherever it is.</summary>
+		/// <summary>Draws edges through what is in front: no depth test.</summary>
 		public bool Through { get; init; }
 
-		/// <summary>Full-screen pass over a finished picture, with no depth, for project post-processes (CorePostBlit)</summary>
+		/// <summary>Full-screen pass over a finished picture, no depth, for post-processes (CorePostBlit).</summary>
 		public bool Post { get; init; }
 
-		/// <summary>Shader feature values in declared order (null = defaults); each combo is a different shader</summary>
+		/// <summary>Shader feature values in declared order (null = defaults); a combo is a shader.</summary>
 		public string Combo { get; init; }
 	}
 
@@ -223,10 +223,10 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Whether its skin follows its bones as dual quaternions - see PoseBones.</summary>
 		public bool DualQuaternion;
 
-		/// <summary>Whether the shader reads this mesh's vertices itself rather than being fed them. True where the vertex is not the engine's, which the device has no vertex layout for and no need of one.</summary>
+		/// <summary>Whether the shader reads this mesh's vertices itself, having no device layout.</summary>
 		public bool Pulled;
 
-		/// <summary>In the geometry pool: the buffers are the pool's and the parts count from these. See CoreGeometryPool.</summary>
+		/// <summary>In the geometry pool, whose buffers these are; parts count from these.</summary>
 		public bool Pooled;
 		public long PoolVertexAt, PoolIndexAt;
 		public int PoolVertexCount, PoolIndexCount;
@@ -236,35 +236,35 @@ internal static unsafe class CoreSceneRenderer
 		public List<MeshDraw> Meshes = new();
 		public BBox Bounds;
 
-		/// <summary>The skin, when the model has one: a parallel buffer of bone indices and weights, and the skeleton they index.</summary>
+		/// <summary>The skin, where the model has one: bone indices and weights, and the skeleton they index.</summary>
 		public ulong Skin;
 		public BoneRest[] Bones = System.Array.Empty<BoneRest>();
 
-		/// <summary>Blend shape deltas sorted by vertex, plus per-vertex runs; per model, while weights are per object</summary>
+		/// <summary>Blend shape deltas sorted by vertex, plus per-vertex runs; per model, weights per object.</summary>
 		public ulong MorphDeltas;
 		public ulong MorphRuns;
 
 		/// <summary>How many shapes the model has, which is how many weights a draw writes.</summary>
 		public int MorphCount;
 
-		/// <summary>Deltas again sorted by shape, for the pose pass (mesh_shapes.slang), which walks set shapes</summary>
+		/// <summary>Deltas sorted by shape, for the pose pass (mesh_shapes.slang), which walks set shapes.</summary>
 		public ulong ShapeDeltas;
 		public int[] ShapeRuns;
 
-		/// <summary>What is drawn when nobody has chosen a body group - the first choice of each of them. Zero on a model with no groups, where every mesh is drawn regardless.</summary>
+		/// <summary>Drawn when no body group is chosen: each group's first choice. Zero without groups.</summary>
 		public ulong DefaultGroupMask;
 
 		/// <summary>The alternative material sets, by index.</summary>
 		public string[] MaterialGroupNames = System.Array.Empty<string>();
 
-		/// <summary>Material paths used, so CoreResources.Forget can rebuild this mesh when a material file changes</summary>
+		/// <summary>Material paths used, so CoreResources.Forget can rebuild this mesh when one changes.</summary>
 		public readonly HashSet<string> Materials = new( System.StringComparer.OrdinalIgnoreCase );
 
-		//Read once when the model is uploaded, for the fallback in Chosen - which needs to know which bits belong together and cannot work that out from a mask.
-		/// <summary>Every bit each body group owns, one entry per group, or null on a model with no groups.</summary>
+		//Read once at upload for Chosen's fallback, which cannot tell from a mask which bits belong together
+		/// <summary>Every bit each body group owns, one entry per group, or null without groups.</summary>
 		public ulong[] PartMasks;
 
-		/// <summary>Mask with unlisted body groups set to their defaults; 0 = nothing, MaxValue = model default</summary>
+		/// <summary>Mask with unlisted body groups at their defaults; 0 = nothing, MaxValue = model default.</summary>
 		public ulong Chosen( ulong mask )
 		{
 			if ( mask == 0 || PartMasks is null ) return mask;
@@ -280,7 +280,7 @@ internal static unsafe class CoreSceneRenderer
 			return mask;
 		}
 
-		/// <summary>Its record on the device - see CoreClusters - or -1 where it has none, which is what a morphed mesh is.</summary>
+		/// <summary>Its device record (CoreClusters), or -1 where it has none, as a morphed mesh.</summary>
 		public int MeshSlot = -1;
 
 		/// <summary>Its clusters in the arenas: where they start and how many, all levels.</summary>
@@ -289,7 +289,7 @@ internal static unsafe class CoreSceneRenderer
 		public int ClusterTriangleAt, ClusterTriangleCount;
 		public int ClusterLevels;
 
-		/// <summary>What each level of its chain holds - see CoreClusters.Tally - kept to be taken off the totals when it goes.</summary>
+		/// <summary>What each chain level holds (CoreClusters.Tally), to take off the totals when it goes.</summary>
 		public CoreClusters.LevelTally[] LevelTallies;
 		public long UnnamedVertices;
 
@@ -306,7 +306,7 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>How many of the levels are the model's own meshes - the rest, one at most, its impostor.</summary>
 		public int MeshLevels;
 
-		/// <summary>The parts of the level a model drawn whole wears, placed by <paramref name="world"/> and seen from <paramref name="eye"/> at <paramref name="pixelsPerMetre"/> - a metre at a metre away - within <paramref name="allowed"/> pixels of error; or the <paramref name="level"/> asked for. <see cref="Meshes"/> where it has no chain.</summary>
+		/// <summary>The level's parts for a whole-model draw within <paramref name="allowed"/> pixels.</summary>
 		public List<MeshDraw> PartsAt( System.Numerics.Matrix4x4 world, Vector3 eye, float pixelsPerMetre, float allowed, int level = -1 )
 		{
 			if ( !Chain || Levels is null ) return Meshes;
@@ -330,7 +330,7 @@ internal static unsafe class CoreSceneRenderer
 
 				if ( deep > 0.01f && pixelsPerMetre > 0.0f )
 				{
-					//The impostor's level is not among these: a model drawn whole stands its impostor in by its own test - see CoreSceneDrawer.
+					//The impostor level is not among these; a whole-model draw tests it separately
 					for ( var l = 1; l < MeshLevels; l++ )
 						if ( Levels[l] is not null && pixelsPerMetre * LevelErrors[l] * scale / deep <= allowed ) level = l;
 				}
@@ -344,7 +344,7 @@ internal static unsafe class CoreSceneRenderer
 
 		public float BoundRadius;
 
-		/// <summary>Whether a mesh shows under a given body-group mask. A mesh nobody claimed shows always; one that was claimed shows when the mask has any of the bits that claimed it.</summary>
+		/// <summary>Whether a mesh shows under a body-group mask: unclaimed, or any claim bit set.</summary>
 		public static bool Shows( in MeshDraw mesh, ulong mask )
 			=> mesh.Group == 0 || ( mesh.Group & mask ) != 0;
 
@@ -369,8 +369,8 @@ internal static unsafe class CoreSceneRenderer
 			$"in one pass - drawing an eye at a time instead: {why}" );
 	}
 
-	//How many lights the frame block carries. Matches MaxLights in the core. The block's own, which is what the browser reads and what
-	//the shadow tiles are handed out among. Everything else reads the buffer, which holds CoreLights.MostLights - see CoreLights.
+	//Lights the frame block carries, as the core's MaxLights; the browser reads these and shadow tiles go
+	//among them, everything else reads CoreLights.MostLights from the buffer
 	internal const int MaxLights = 16;
 
 	//Where the block's own lights sit - see CoreLights, which sends them on.
@@ -409,7 +409,7 @@ internal static unsafe class CoreSceneRenderer
 	{
 		if ( !Sharing || sharedFrame != EngineLoop.LoopFrames )
 		{
-			//Named, so the report says outright how many times a frame the scene half is built: one on a headset, one per view everywhere else.
+			//Named, so the report shows how often the scene half is built: once on a headset, once per view elsewhere
 			CoreRenderDevice.ZoneBegin( "frame scene" );
 			BuildScene( scene, camera );
 			CoreRenderDevice.ZoneEnd();
@@ -472,8 +472,7 @@ internal static unsafe class CoreSceneRenderer
 			return;
 		}
 
-		//Each under its own name. The scene half is built once a frame now, and what it is made of has never been broken out - it
-		//is six walks of the scene's components wearing one zone, and on a page that is the largest thing left in a frame's block.
+		//Each under its own zone: the scene half is six walks of components, the biggest part of a page's block
 		CoreRenderDevice.ZoneBegin( "block sky" );
 		SetSky( block, scene );
 		CoreRenderDevice.ZoneEnd();
@@ -496,10 +495,9 @@ internal static unsafe class CoreSceneRenderer
 
 		CoreRenderDevice.ZoneBegin( "block lights" );
 
-		//A light that cannot reach anything being looked at is not worth one of the sixteen slots. Distance to the camera minus the light's own
-		//radius is a rough measure of that - a big lamp far away still counts, a small one just out of shot does not. Every light is in the frame.
+		//A light that cannot reach anything in view is not worth a slot: distance to the camera less its radius
 
-		//Which end of the scene the sixteen are measured from: the eye, because a lamp three rooms behind the camera is not worth a slot.
+		//Measured from the eye, as a lamp three rooms behind the camera is not worth a slot
 		var from = camera;
 
 		var wanted = lightScratch;
@@ -552,7 +550,7 @@ internal static unsafe class CoreSceneRenderer
 				$"the {wanted.Count - CoreLights.MostLights} furthest away are not in it" );
 		}
 
-		//The block's own count is what the browser reads, and its block holds sixteen; everything else reads the buffer, which holds them all.
+		//The block's count is the browser's and holds sixteen; everything else reads the buffer, which holds all
 		LightsInFrame = lights.Count;
 		block[19] = Math.Min( lights.Count, MaxLights );
 
@@ -567,8 +565,8 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 4] = source.Colour.r;
 			LightBlock[at + 5] = source.Colour.g;
 			LightBlock[at + 6] = source.Colour.b;
-			//The kind, and in its fraction what the light is kept out of - see LightWithholds in frame.slang - and in its hundredths which
-			//channel of the baked mask holds its shadow of the still world, one more than the channel and nought for none: see LightMaskChannel.
+			//Kind; in its fraction what the light is withheld from (LightWithholds); in its hundredths the baked mask
+			//channel plus one, nought for none - see LightMaskChannel
 			var channel = BakedOn && lights[i] is { } baked ? CoreBakedLighting.ChannelOf( baked ) : CoreBakedLighting.NotBaked;
 			LightBlock[at + 7] = source.Kind + ( source.Withholds * 0.1f ) + ( channel >= 0 ? ( channel + 1 ) * 0.01f : 0.0f );
 
@@ -579,7 +577,7 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 9] = source.Forward.y;
 			LightBlock[at + 10] = source.Forward.z;
 
-			//How wide the light itself is, which is what the softness of its shadow is worked out from - see LampShadow.
+			//The light's own width, which its shadow's softness comes from - see LampShadow
 			LightBlock[at + 13] = source.SourceRadius;
 
 			//Where in the lamps' map its faces are, where it has any - the first of their squares and their size;
@@ -598,18 +596,18 @@ internal static unsafe class CoreSceneRenderer
 				LightBlock[at + 1] = source.Position.y;
 				LightBlock[at + 2] = source.Position.z;
 
-				//Where it stops being worth lighting, which is nearer than where it was told to stop - see EffectiveRange.
+				//Where it stops being worth lighting, nearer than its radius - see EffectiveRange
 				LightBlock[at + 3] = EffectiveRange( source.Radius, source.Colour, source.Falloff );
 			}
 
 			if ( source.Kind == 2 )
 			{
-				//The cones arrive in degrees, half-angles from the axis; the shader compares cosines, which is the same test without the trigonometry.
+				//Cones in half-angle degrees; the shader compares cosines, the same test without trigonometry
 				LightBlock[at + 11] = MathF.Cos( source.ConeInner.DegreeToRadian() );
 				LightBlock[at + 12] = MathF.Cos( source.ConeOuter.DegreeToRadian() );
 			}
 
-			//And into the frame's own block where it still fits: the browser has no buffer to read and takes its lights from there - see frame.slang.
+			//And into the block where it fits: the browser has no buffer and reads lights from there
 			if ( i < MaxLights )
 				LightBlock.AsSpan( at, floatsPerLight ).CopyTo( block.AsSpan( lightsAt + ( i * floatsPerLight ), floatsPerLight ) );
 		}
@@ -677,8 +675,8 @@ internal static unsafe class CoreSceneRenderer
 	{
 		var count = 0;
 
-		//How far the air reaches from the eye and where it begins, which is what the sheet of slices is laid out between - see CoreVolumeFog.
-		//The slices are worth nothing where there is no fog, so they start at the near face of the nearest volume rather than at the camera.
+		//How far the air reaches from the eye and where it starts, which the slices span - see CoreVolumeFog;
+		//they start at the nearest volume's near face, as fog-free slices are worth nothing
 		var reach = 0.0f;
 		var nearest = float.MaxValue;
 
@@ -719,7 +717,7 @@ internal static unsafe class CoreSceneRenderer
 				block[at + 14] = volume.Color.b;
 				block[at + 15] = 0.0f;
 
-				//The farthest corner of the box from the eye: past that there is no air of this volume's to walk through.
+				//The box's farthest corner from the eye: past it there is none of this volume's air
 				var away = Vector3.DistanceBetween( centre, eye );
 				var corner = MathF.Max( MathF.Abs( extents.x ), MathF.Max( MathF.Abs( extents.y ), MathF.Abs( extents.z ) ) ) * 1.7321f;
 
@@ -735,8 +733,8 @@ internal static unsafe class CoreSceneRenderer
 		block[FogVolumeInfoAt + 2] = 0.0f;
 		block[FogVolumeInfoAt + 3] = 0.0f;
 
-		//The sheet's own numbers are written once it is drawn - see LayFogVolumeSheet, which runs after the sun's maps and before anything
-		//shades. Nought here means "no sheet", which is what a view that draws none leaves behind, and the reader marches instead.
+		//The sheet's numbers are written once it is drawn (LayFogVolumeSheet, before shading); nought means no
+		//sheet, and the reader marches instead
 		block[FogSheetAt + 0] = 0.0f;
 		block[FogSheetAt + 1] = 0.0f;
 		block[FogSheetAt + 2] = 0.0f;
@@ -795,7 +793,7 @@ internal static unsafe class CoreSceneRenderer
 	//Exposure and tonemap curve for passes that finish the picture themselves; written every frame
 	internal const int FinishAt = AmbientAt + 4;
 
-	//Where the point effects' numbers start, and how many slots of four there are for them - see FrameData.effects and CorePointChain.Upload.
+	//Where the point effects' numbers start, and their slot count - see FrameData.effects and CorePointChain.Upload
 	internal const int EffectsAt = FinishAt + 4;
 	internal const int EffectSlots = 128;
 
@@ -815,9 +813,13 @@ internal static unsafe class CoreSceneRenderer
 	//What water and glass trace their reflections through - see LayScreenTrace.
 	internal const int ScreenTraceAt = SunDepthAt + 4;
 
-	internal const int FrameFloats = ScreenTraceAt + 4;
+	//A panorama sky's picture, turn and levels, and the light it is drawn at - see LayPanorama.
+	internal const int PanoramaAt = ScreenTraceAt + 4;
+	internal const int PanoramaLightAt = PanoramaAt + 4;
 
-	//The exposure and the curve, for the passes that finish the picture themselves. The exposure a block was written with - see SetFinish.
+	internal const int FrameFloats = PanoramaLightAt + 4;
+
+	//The exposure a block was written with - see SetFinish
 	internal static float ExposureOf( float[] frame )
 		=> frame is null || frame.Length < FrameFloats ? 1.0f : frame[FinishAt + 0];
 
@@ -827,7 +829,7 @@ internal static unsafe class CoreSceneRenderer
 
 		frame[FinishAt + 0] = exposure;
 		frame[FinishAt + 1] = curve;
-		//Where the run of point effects the world's shading carries starts in the block's effects, where it carries one - see CorePointChain.UploadInto.
+		//Where the world shading's point-effect run starts in the effects - see CorePointChain.UploadInto
 		frame[FinishAt + 2] = chain;
 		frame[FinishAt + 3] = 0.0f;
 	}
@@ -900,8 +902,8 @@ internal static unsafe class CoreSceneRenderer
 		MoversOn = false;
 	}
 
-	//Where the lamps' faces are in the picture table, compared and read as depth, and the movers' map beside them the same two ways - see
-	//CoreLampMaps and LampShadow in frame.slang. Which layer a lamp's faces start at, and which of them read the movers' map, is in its own record.
+	//Lamp faces' table indices, compared and as depth, and the movers map's the same - see CoreLampMaps,
+	//LampShadow; each lamp's record holds its first layer and which faces read movers
 	internal static void SetLampMaps( float[] frame, uint mapIndex, uint depthIndex, uint moversIndex, uint moversDepthIndex )
 	{
 		if ( frame is null || frame.Length < FrameFloats ) return;
@@ -965,7 +967,7 @@ internal static unsafe class CoreSceneRenderer
 		frame[ScreenTraceAt + 0] = 0.0f;
 		frame[ScreenTraceAt + 1] = 0.0f;
 
-		//The sky's table by its place in the indexed table, nought for none - the lane the cascade count had, which nothing reads any more.
+		//The sky table's bindless index, nought for none
 		frame[SettingsAt + 3] = skyTable;
 
 		frame[ShadowAt + 1] = 0.0f;
@@ -974,8 +976,8 @@ internal static unsafe class CoreSceneRenderer
 		SkyTableOn = skyTable != 0;
 	}
 
-	//The picture the world's surfaces darken by this frame: one of the frame's pictures, by its place in the table - see g_occlusionMap in frame.slang.
-	//Said after the depth pre-pass's stage, where whatever draws it has drawn it, and before anything shades. How much it darkens is in the picture.
+	//The occlusion picture surfaces darken by, by table index (g_occlusionMap), laid after the pre-pass
+	//stage and before shading; its strength is in the picture
 	internal static void LayOcclusion( float[] frame, int picture )
 	{
 		if ( frame is null || frame.Length < FrameFloats || picture <= 0 ) return;
@@ -1025,10 +1027,16 @@ internal static unsafe class CoreSceneRenderer
 	//Writes the sky's three colours and sun; shader-specific sky settings come from its material
 	internal static void SetSky( float[] frame, Scene scene )
 	{
+		PanoramaOn = false;
+
 		var sky = FirstEnabled<SkyBox2D>( scene );
 		if ( sky is null ) return;
 
 		var tint = sky.Tint;
+
+		//Before the colours below, whose table it stands in for - see FillSkyTable
+		var panorama = CorePanoramaSky.Of( sky.SkyMaterial, tint );
+		if ( panorama is not null ) LayPanorama( frame, panorama );
 
 		var sun = FirstEnabled<DirectionalLight>( scene );
 
@@ -1039,9 +1047,32 @@ internal static unsafe class CoreSceneRenderer
 			new Color( 0.16f, 0.15f, 0.14f ) * tint,
 			//Where the sun is, rather than where it points: a sky draws the disc.
 			sun is null ? default : -sun.WorldRotation.Forward.Normal,
-			//The light's own colour, at the strength everything else is lit at. It used to arrive here multiplied by eight, which was the disc being made
-			//bright enough to see; the sky works out its own brightness now, and it can only do that against the light the world is actually lit by.
+			//The light's own colour at world strength; the sky derives its brightness from the light the world gets
 			sun is null ? default : sun.EmittedColor );
+
+		if ( panorama?.Table is not null && !CoreRenderDevice.DrawsSkyTable && CoreRenderDevice.PortableFrame )
+			CoreSkyTable.Send( panorama.Table );
+	}
+
+	//Whether this frame's sky is a panorama, whose table is laid out by direction and made from the picture
+	internal static bool HasPanorama( float[] frame )
+		=> frame is not null && frame.Length >= FrameFloats && frame[PanoramaAt + 3] > 0.0f;
+
+	//A panorama sky into the block - see frame_data.slang's panorama
+	private static void LayPanorama( float[] frame, CorePanoramaSky.Sky sky )
+	{
+		//The portable frame has no picture table to name them in; its reflections read the sky table
+		var reflections = CoreRenderDevice.PortableFrame || !CoreNative.Available ? 0 : CorePanoramaSky.ReflectionTexture( sky );
+
+		frame[PanoramaAt + 0] = reflections == 0 ? 0.0f : CoreRender.TextureIndex( reflections );
+		frame[PanoramaAt + 1] = sky.Turn;
+		frame[PanoramaAt + 2] = sky.Panorama?.Reflections?.MipCount ?? 1;
+		frame[PanoramaAt + 3] = 1.0f;
+		PanoramaOn = true;
+
+		frame[PanoramaLightAt + 0] = sky.Light.X;
+		frame[PanoramaLightAt + 1] = sky.Light.Y;
+		frame[PanoramaLightAt + 2] = sky.Light.Z;
 	}
 
 	//What the scene's sky is drawn with - the SkyBox2D's material - or null where the scene has no sky. Bound
@@ -1099,27 +1130,26 @@ internal static unsafe class CoreSceneRenderer
 
 		WriteColour( frame, SunAt + 4, sunColour );
 
-		//How wide the disc is, in cosines. Half a degree is the real one; a little wider reads better at any sensible resolution.
+		//The disc's width as a cosine: wider than the real half degree, which reads better
 		frame[SunAt + 7] = MathF.Cos( 1.5f.DegreeToRadian() );
 
 		//Air mass the sunlight crosses; the 0.12 offset keeps it finite at and below the horizon
 		var height = Math.Clamp( towards.y, 0.0f, 1.0f );
 		var air = ( 1.0f / ( height + 0.12f ) ) - ( 1.0f / 1.12f );
 
-		//Blue scatters out of a beam about four times as readily as red, which is the ratio these three carry, and is the whole of why a low sun is orange
-		//and a setting one red. Divided through by the overhead crossing above, so a sun at noon is the colour it was given rather than a fraction of it.
+		//Blue scatters out of a beam about four times as readily as red, which is why a low sun is orange;
+		//divided by the overhead crossing so a noon sun is its given colour
 		frame[SunLightAt + 0] = sunColour.r * MathF.Exp( -0.15f * air );
 		frame[SunLightAt + 1] = sunColour.g * MathF.Exp( -0.29f * air );
 		frame[SunLightAt + 2] = sunColour.b * MathF.Exp( -0.66f * air );
 
-		//And how far into the night this leaves the frame. A band either side of the horizon rather than a step: the light does not stop when the sun touches
-		//it, it goes on lighting the sky from below for a while, and that while is dusk. Nine degrees under, which is about where the last of it goes.
+		//How far into night: a band about the horizon, as dusk lights the sky from below; gone nine degrees under
 		var dusk = Math.Clamp( ( towards.y + 0.16f ) / 0.22f, 0.0f, 1.0f );
 
 		frame[SunLightAt + 3] = 1.0f - ( dusk * dusk * ( 3.0f - ( 2.0f * dusk ) ) );
 
-		//Which halves of the sky's pixel stage this frame can reach, read back out of the word the shader's NightFactor will read: above
-		//nought there is a moon and stars to draw, below one there is a sun. Both, through dusk; one of the two at every other hour.
+		//Which halves of the sky's pixel stage this frame reaches, from NightFactor's word: moon and stars above
+		//nought, sun below one, both through dusk
 		NightOn = frame[SunLightAt + 3] > 0.0f;
 		SunDiscOn = frame[SunLightAt + 3] < 1.0f;
 
@@ -1129,7 +1159,7 @@ internal static unsafe class CoreSceneRenderer
 	//Bakes the CPU sky table for the browser from the block's colours; only resent when the sky changes
 	private static void FillSkyTable( float[] frame )
 	{
-		if ( CoreRenderDevice.DrawsSkyTable || !CoreRenderDevice.PortableFrame ) return;
+		if ( CoreRenderDevice.DrawsSkyTable || !CoreRenderDevice.PortableFrame || HasPanorama( frame ) ) return;
 
 		var air = new CoreSkyTable.Air(
 			Read3( frame, SkyAt + 0 ), Read3( frame, SkyAt + 4 ), Read3( frame, SkyAt + 8 ),
@@ -1149,7 +1179,7 @@ internal static unsafe class CoreSceneRenderer
 		frame[at + 2] = colour.b;
 	}
 
-	//The eight clip-space corners of the view, pushed into the world. Vulkan depth runs 0 to 1, so near is z = 0 and far is z = 1.
+	//The view's eight clip corners in the world; Vulkan depth is 0 to 1, near z = 0, far z = 1
 	internal static bool FillFrustumCorners( System.Numerics.Matrix4x4 clipToWorld, Span<Vector3> corners )
 	{
 		if ( corners.Length < 8 ) return false;
@@ -1205,8 +1235,7 @@ internal static unsafe class CoreSceneRenderer
 		return mask & 0x3F;
 	}
 
-	//Which tiles of the shadow atlas each light held the last time one was built. There is one atlas per device and one owner of it at a
-	//time, so this is one map rather than one per view - the same reasoning that lets the tile cache keep what it was last filled from.
+	//The shadow atlas tiles each light held last build; one atlas and owner per device, so one map
 	private static readonly Dictionary<Light, (int At, int Count)> lampHeld = new();
 
 	internal static int KeepBestFaces( int mask, int remaining, Vector3 towardCamera )
@@ -1293,8 +1322,7 @@ internal static unsafe class CoreSceneRenderer
 		//Four per-object numbers for the shader (e.g. voxel size, effect progress); usually zero
 		System.Runtime.InteropServices.MemoryMarshal.Write( push[80..], in numbers );
 
-		//And the numbers this draw set for itself, which is what a shader declared with Attribute( … ) reads. Cleared rather
-		//than left, because the arena these are written into is reused between frames and a stale wetness is worse than none.
+		//The draw's own Attribute( ... ) numbers, cleared since the arena is reused across frames
 		var tail = push[96..];
 
 		tail.Clear();
@@ -1310,7 +1338,7 @@ internal static unsafe class CoreSceneRenderer
 	//entirely. Planes face inward; a sphere is visible when it is not fully behind any of them.
 	internal static void FrustumPlanes( in System.Numerics.Matrix4x4 vp, Span<System.Numerics.Vector4> planes )
 	{
-		//Row-vector convention: clip.x = dot(v, column 0) and so on, so the planes are sums and differences of columns 0..2 with column 3.
+		//Row vectors: clip.x = dot(v, column 0), so the planes are sums and differences of columns 0..2 with column 3
 		var c0 = new System.Numerics.Vector4( vp.M11, vp.M21, vp.M31, vp.M41 );
 		var c1 = new System.Numerics.Vector4( vp.M12, vp.M22, vp.M32, vp.M42 );
 		var c2 = new System.Numerics.Vector4( vp.M13, vp.M23, vp.M33, vp.M43 );
@@ -1369,11 +1397,10 @@ internal static unsafe class CoreSceneRenderer
 
 		if ( cutoff <= 0.0f || radius <= 0.0f ) return radius;
 
-		//The solve below is the inverse square's. A light told to die slower than that carries further than any of it says - at
-		//nought it is at full strength right up to the window - so there is nothing to take away and the answer is the radius itself.
+		//The solve is for inverse square; a slower falloff carries further, so the radius itself
 		if ( falloff < 1.0f ) return radius;
 
-		//The colour carries the brightness - see BuildFrame - so the brightest channel is what decides how far this one can still be seen.
+		//The colour carries the brightness (see BuildFrame), so the brightest channel sets how far it is seen
 		var brightness = MathF.Max( MathF.Max( colour.r, colour.g ), colour.b );
 
 		if ( brightness <= 0.0f ) return 0.0f;
@@ -1381,7 +1408,7 @@ internal static unsafe class CoreSceneRenderer
 		return radius / ( 1.0f + ( radius * MathF.Sqrt( cutoff / brightness ) ) );
 	}
 
-	//How far a light is from mattering: zero for the sun, and for the rest the distance to the camera less their own reach. Beyond that they are dropped.
+	//How far a light is from mattering: zero for the sun, else camera distance less its reach; beyond, dropped
 	private static float Reach( Light light, Vector3 camera )
 	{
 		if ( light is DirectionalLight ) return 0.0f;
@@ -1410,7 +1437,7 @@ internal static unsafe class CoreSceneRenderer
 		return distance > 200.0f ? float.MaxValue : MathF.Max( distance, 0.0f );
 	}
 
-	//A light as the frame block holds it, whichever kind of thing it came from: a Light component, or a light put into the world by itself.
+	//A light as the frame block holds it, from a Light component or a scene light
 	private readonly record struct LightSource( int Kind, Vector3 Position, Vector3 Forward, Color Colour,
 		float Radius, float Falloff, float SourceRadius, float ConeInner, float ConeOuter, int Withholds = 0 )
 	{
@@ -1430,7 +1457,7 @@ internal static unsafe class CoreSceneRenderer
 				0, light.Falloff, MathF.Max( light.SourceRadius, 0.0f ), 0, 0, WithheldBy( light ) ),
 		};
 
-		/// <summary>A light object's colour is its brightness too, and it has no width: one of these casts no shadow, so there is no edge for a width to soften.</summary>
+		/// <summary>A scene light's colour is its brightness; it casts no shadow, so it has no width.</summary>
 		public static LightSource Of( SceneLight light ) => light switch
 		{
 			SceneSpotLight spot => new( 2, spot.Position, spot.Rotation.Forward.Normal, spot.LightColor,
@@ -1462,6 +1489,11 @@ internal static unsafe class CoreSceneRenderer
 	//Whether the last written frame block asks for a debug view; gates the kDebugOn pipeline variant
 	internal static bool DebugViewOn { get; private set; }
 
+	//Whether the frame's sky is a panorama - see kPanoramaOn, constant 18, past the shader folds
+	internal static bool PanoramaOn { get; private set; }
+
+	internal const int PanoramaFold = CoreResources.ShaderFoldsEnd;
+
 	//Whether the frame drew itself a sky table - see kSkyTableOn.
 	internal static bool SkyTableOn { get; private set; }
 
@@ -1471,8 +1503,8 @@ internal static unsafe class CoreSceneRenderer
 	//Whether it has fog volumes in it - what a pixel would march through.
 	internal static bool FogVolumes { get; private set; }
 
-	//Whether the sheet of slices has been laid into the block the frame is being shaded with - see kFogMarch. False from the start of each
-	//frame's block until LayFogVolumeSheet, which runs before anything shades; a pipeline baked in between marches, which is right, only slower.
+	//Whether the fog sheet is in this frame's block (see kFogMarch); false until LayFogVolumeSheet, and a
+	//pipeline baked before marches, correctly but slower
 	internal static bool FogSheetLaid { get; private set; }
 
 	//Whether the sun drew a map of what moves - see kMoversOn.
@@ -1490,8 +1522,7 @@ internal static unsafe class CoreSceneRenderer
 	//And whether it has any day - see kSunDiscOn.
 	internal static bool SunDiscOn { get; private set; }
 
-	//The bit that bakes a pass for the far calls of a material's clusters - kFarShading, constant thirteen, see frame.slang. Not
-	//one of ShadeSpecialize's, because it is not something the frame holds: it is which of a material's calls this pipeline is for.
+	//Bakes a pass for a material's far calls (kFarShading, constant 13); not ShadeSpecialize's, as it is the call's
 	internal const int FarShading = 1 << 13;
 
 	//World pixel stage specialization bits, taken from what the frame block actually holds
@@ -1508,7 +1539,8 @@ internal static unsafe class CoreSceneRenderer
 			| ( MoversOn ? 256 : 0 )
 			| ( CoreLights.Decals > 0 ? 512 : 0 )
 			| ( BakedOn ? 1024 : 0 )
-			| ( FogVolumes && !FogSheetLaid ? 16384 : 0 );
+			| ( FogVolumes && !FogSheetLaid ? 16384 : 0 )
+			| ( PanoramaOn ? 1 << PanoramaFold : 0 );
 
 	//Sky pass specialization: the world bits, the frame's sky bits, and the sky material's Fold() ids
 	internal static int SkySpecialize( CoreMaterial sky = null )
@@ -1522,8 +1554,8 @@ internal static unsafe class CoreSceneRenderer
 
 	internal static ulong MakeScenePipeline() => MakePipeline( new PipelineKind( false, false, false ) );
 
-	//The pipeline for a kind of mesh, baked once and kept. Translucency is where the states diverge for real: it blends, and it
-	//tests depth without writing it, so one pane of glass does not hide the next. Everything solid writes depth and is drawn first.
+	//A mesh kind's pipeline, baked once; translucency blends and tests depth without writing, so panes do
+	//not hide each other; solid writes depth and draws first
 	internal static ulong PipelineFor( in PipelineKind kind, Dictionary<PipelineKind, ulong> cache )
 	{
 		//Cache failures too, so a broken shader isn't recompiled every frame; cleared when the device resets
@@ -1588,7 +1620,7 @@ internal static unsafe class CoreSceneRenderer
 		//none at all - it writes depth - so it wants the plain stage whatever it is drawing into.
 		var scene = kind.Target == CoreRender.TargetKind.Scene && !kind.DepthOnly;
 
-		//And whether this pass is the last one over the picture, so the curve is its own business - see PipelineKind.Finishes.
+		//Whether this pass is the last over the picture, so it applies the curve - see PipelineKind.Finishes
 		var finishes = kind.Finishes && !kind.DepthOnly;
 
 		var pixel = ( kind.Skinned, scene, finishes ) switch
@@ -1601,8 +1633,7 @@ internal static unsafe class CoreSceneRenderer
 			(false, false, false) => CoreShaderFile.Stage.Pixel,
 		};
 
-		//A pass with nothing to write wants the stage that writes nothing - the surface's own, compiled with DEPTH_ONLY, so the pre-pass does not shade
-		//the world a second time. A shader that never heard of it falls back to the one above, which is correct and merely no cheaper than before.
+		//Nothing to write: the surface's DEPTH_ONLY stage, so the pre-pass does not shade; without one, the above
 		if ( kind.DepthOnly )
 			pixel = CoreShaderFile.Stage.DepthPixel;
 
@@ -1655,7 +1686,7 @@ internal static unsafe class CoreSceneRenderer
 
 		//The depth pre-pass keeps the surface's shader, since its vertex stage may place the geometry
 
-		//A shadow is depth and nothing else, drawn by the engine's own shader, so the material's features are none of its business.
+		//A shadow is depth only, by the engine's shader, so material features do not apply
 		var combo = kind.Combo;
 
 		//Whether this is that pass, and so whether the states below are the depth-only ones.
@@ -1706,11 +1737,11 @@ internal static unsafe class CoreSceneRenderer
 
 		var (vertexStage, pixelStage) = StagesFor( kind );
 
-		//What the driver is about to compile, for whoever is reading its own statistics beside ours - see VkPipelines.Label.
+		//What the driver is about to compile, for its own statistics - see VkPipelines.Label
 		VkPipelines.Label = VkPipelines.Labelling ? $"{name} {vertexStage}/{pixelStage} spec {kind.Specialize}" : null;
 
-		//The frame's point effects carried by the pass that finishes the picture: the same stage compiled with the run after it - see CorePointChain.ScreenText.
-		//Compiled beside the frame; until then this is nought and not remembered, and the frame draws through its compose meanwhile - see PipelineFor.
+		//The finishing pass's point effects, compiled with the stage (CorePointChain.ScreenText) beside the frame;
+		//nought and not remembered until then, the frame drawing through its compose
 		byte[] chained = null;
 
 		if ( kind.ScreenChain is not null && kind.Finishes && !kind.DepthOnly )
@@ -1735,7 +1766,7 @@ internal static unsafe class CoreSceneRenderer
 
 			if ( clusterVertex is null || clusterPixel is null )
 			{
-				//Named, because a cluster pass that will not bake takes the surface off the cluster path and the frame says nothing else about why.
+				//Said, since a cluster pass that will not bake drops the surface off the cluster path silently
 				if ( SaysBroken( $"{name}|{vertexStage}|{pixelStage}", null ) )
 					Log.Warning( $"{name}: no {( clusterVertex is null ? vertexStage : pixelStage )} stage, so no cluster pass" );
 
@@ -1748,18 +1779,16 @@ internal static unsafe class CoreSceneRenderer
 				depthWrite: kind.DepthOnly || kind.Moves,
 				cullBack: !kind.TwoSided,
 
-				//Said as well as the target: the mover pre-pass draws into the depth alone, and a pipeline baked with the target's
-				//colour attachment there does not match the pass it is drawn in - which validation reported on every draw of it.
+				//Passed with the target: the mover pre-pass draws depth alone, and a colour attachment would not match
 				depthOnly: kind.DepthOnly,
 				target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1,
 				compare: CoreRenderDevice.DepthCompare.LessOrEqual,
 
-				//This is the pass that covers the screen, so it is the one worth baking more than one way - see ShadeSpecialize.
+				//The screen-covering pass, so worth baking several ways - see ShadeSpecialize
 				specialize: kind.Specialize );
 		}
 
-		//A shader with no skinned half draws a skinned mesh in its bind pose, which is wrong but visible; one with no picture-of-the-world half
-		//writes the colour and leaves the second attachment alone, which costs it reflections and nothing else. Both beat drawing nothing.
+		//No skinned stage draws the bind pose; no world-picture stage writes colour only, losing reflections
 		var vertex = stages[(int)vertexStage] ?? stages[(int)CoreShaderFile.Stage.Vertex];
 		var pixel = chained ?? stages[(int)pixelStage]
 			?? stages[(int)( kind.Skinned ? CoreShaderFile.Stage.SkinnedPixel : CoreShaderFile.Stage.Pixel )]
@@ -1790,7 +1819,7 @@ internal static unsafe class CoreSceneRenderer
 				cullBack: !kind.TwoSided, depthOnly: true, target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1 );
 		}
 
-		//A full-screen pass reads a finished picture and writes over it: no vertices, no depth on either side, nothing culled.
+		//A full-screen pass over a finished picture: no vertices, no depth, no culling
 		if ( kind.Post )
 		{
 			return CoreRenderDevice.CreatePipeline( vertex, pixel, CoreRender.VertexLayoutKind.None,
@@ -1804,8 +1833,7 @@ internal static unsafe class CoreSceneRenderer
 		//the edges of things that are behind other things, and depth is exactly what would stop that.
 		if ( kind.Wireframe )
 		{
-			//It writes depth as well as reading it, which is what lets the edges arbitrate between themselves where nothing else filled the buffer
-			//in first - see Wireframe.NearWins. Where something did, an edge writes the depth the surface under it already wrote and nothing moves.
+			//Writes depth too, so edges arbitrate among themselves where nothing drew first - see Wireframe.NearWins
 			return CoreRenderDevice.CreatePipeline( vertex, pixel, layout, depthTest: !kind.Through,
 				blend: kind.Translucent, depthWrite: !kind.Through, cullBack: false,
 				target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1, lines: true );
@@ -1847,7 +1875,7 @@ internal static unsafe class CoreSceneRenderer
 		var next = new int[morphCount];
 		for ( var shape = 0; shape < morphCount; shape++ ) next[shape] = runs[shape * 2];
 
-		//By vertex, as the file has them - so within a shape the vertices come out in order, which is the order the sums are written in.
+		//By vertex, as in the file, so a shape's vertices come out in order, as the sums are written
 		for ( var v = 0; v < vertexCount; v++ )
 		{
 			var first = runsOf[v * 2];
@@ -1957,8 +1985,7 @@ internal static unsafe class CoreSceneRenderer
 		mesh.BoundCentre = mesh.Bounds.Center;
 		mesh.BoundRadius = mesh.Bounds.Size.Length * 0.5f;
 
-		//The pool, which is where everything the clusters read lives. A mesh with blend shapes goes in it too - the morphed draw
-		//binds past the offset rather than asking the draw for it - so a shape nobody drives no longer costs the model its clusters.
+		//The pool, where everything the clusters read lives; morphed meshes go in too, binding past the offset
 		{
 			var positions = new float[vertices.Length * 3];
 
@@ -2028,7 +2055,7 @@ internal static unsafe class CoreSceneRenderer
 			}
 		}
 
-		//No pool: a backend without storage buffers, which is the browser. Its own buffers, and no clusters - see CoreGeometryPool.Place.
+		//No pool on a backend without storage buffers (the browser): its own buffers, no clusters
 		mesh.Vertices = CoreRenderDevice.CreateBuffer( vertexBytes );
 		mesh.Indices = CoreRenderDevice.CreateBuffer( indexBytes );
 		if ( skin is not null ) mesh.Skin = CoreRenderDevice.CreateBuffer( skin );
@@ -2098,7 +2125,7 @@ internal static unsafe class CoreSceneRenderer
 	{
 		if ( model is null || !model.IsValid ) return null;
 
-		//A mesh the format could not hold is drawn from what the builder kept, and from nothing else: the model beside it holds a placeholder.
+		//A mesh the format could not hold is drawn from what the builder kept; the model holds a placeholder
 		if ( model.pulled is { Length: > 0 } )
 			return PulledMesh( model, meshes );
 
@@ -2163,7 +2190,7 @@ internal static unsafe class CoreSceneRenderer
 		var model = ready ?? builtIn?.Loaded;
 		var owned = false;
 
-		//Where the compiled model is on disk - what its levels are kept beside, whether or not the model itself arrived as a handle.
+		//The compiled model on disk, which its levels sit beside
 		var full = builtIn is null && !string.IsNullOrWhiteSpace( resourcePath )
 			? CoreModel.ResolveOnDisk( CompiledPaths.Model( resourcePath ).Replace( '\\', '/' ) )
 			: null;
@@ -2204,7 +2231,7 @@ internal static unsafe class CoreSceneRenderer
 				new Vector3( bounds[0], bounds[1], bounds[2] ),
 				new Vector3( bounds[3], bounds[4], bounds[5] ) );
 
-			//The skin, if the model has one. Both halves or neither: a skeleton with no weights poses nothing, weights with no skeleton index into emptiness.
+			//The skin: both halves or neither, as either alone poses nothing
 			var boneCount = model.BoneCount;
 			var skinCount = model.SkinCount;
 
@@ -2249,7 +2276,7 @@ internal static unsafe class CoreSceneRenderer
 
 				if ( !CoreRenderDevice.PortableFrame ) ShapeMajor( mesh, deltas, deltaCount, runs, vertexCount, morphCount );
 
-				//One without the other draws nothing sensible, so a buffer that would not be made takes the other down with it.
+				//One without the other draws nothing sensible, so a failed buffer takes the other with it
 				if ( mesh.MorphDeltas == 0 || mesh.MorphRuns == 0 )
 				{
 					CoreRenderDevice.DestroyBuffer( mesh.MorphDeltas );
@@ -2288,8 +2315,8 @@ internal static unsafe class CoreSceneRenderer
 				mesh.MaterialGroupNames[g] = model.MaterialGroupName( g );
 			}
 
-			//The impostor's sheet onto a shared page, before the vertices go up: its corners' coordinates moved onto the page and its
-			//quads wearing the page's material - see CoreImpostor. A sheet that would not go leaves the model drawn without its impostor.
+			//The impostor sheet onto a shared page before the vertices go up (CoreImpostor); a failed one leaves
+			//the model without its impostor
 			var impostorMesh = -1;
 			var impostorMaterial = (string)null;
 
@@ -2321,7 +2348,7 @@ internal static unsafe class CoreSceneRenderer
 				if ( !string.IsNullOrWhiteSpace( material ) )
 					mesh.Materials.Add( material.Replace( '\\', '/' ).TrimStart( '/' ) );
 
-				//What the art said this surface is in numbers, where the model's build decided the mesh wears it - see ModelFormat.Surface.
+				//The art's surface numbers, where the model's build says the mesh wears them - see ModelFormat.Surface
 				var surface = model.MeshSurface( i );
 				if ( !surface.Worn ) surface = default;
 
@@ -2334,8 +2361,8 @@ internal static unsafe class CoreSceneRenderer
 						? ResolveMaterial( material, in surface, materials, textures, fallback )
 						: ResolveMaterialTexture( material, textures, fallback );
 
-				//Its colour is one more thing the draw is multiplied by, and the tint is where every one of those already meets - the material's
-				//own, the flat colour of its slot, the instance's. So forty colours are forty tints over one material, and nothing is made.
+				//Its colour is another tint multiplier, with the material's, its slot's and the instance's, so forty
+				//colours are forty tints over one material
 				var tint = ( live != 0 ? CoreResources.LiveTint( made ) : ReadMaterialTint( material ) ) * surface.Colour;
 				var how = Wearing( ReadMaterial( material ), in surface );
 
@@ -2397,8 +2424,8 @@ internal static unsafe class CoreSceneRenderer
 			//A chain's levels as ranges of the index buffer, after the model's own.
 			if ( model.IsChain ) indices = ChainLevels( mesh, model, indices );
 
-			//The index buffer went up before the parts were known; if the cut put the indices in another order, it goes up again in that order.
-			//The pool wants the vertices as they are; the clusters name them by number and are moved to where the mesh lands - see Place.
+			//The indices went up before the parts were known; reordered by the cut, they go up again. Vertices stay
+			//as they are, the clusters naming them by number - see Place
 			if ( !Place( mesh, model, vertices, indices, skin ) ) return null;
 
 			meshes[key] = mesh;
@@ -2411,7 +2438,7 @@ internal static unsafe class CoreSceneRenderer
 		}
 		finally
 		{
-			//A built-in belongs to CoreDevModels and is handed out again next time; only a model read for this mesh is this mesh's to free.
+			//A built-in is CoreDevModels' to keep; only a model read for this mesh is freed here
 			if ( owned ) model.Dispose();
 		}
 	}
@@ -2447,12 +2474,12 @@ internal static unsafe class CoreSceneRenderer
 		if ( NamesItsOwnShader( definition.Shader )
 			&& CoreResources.Shader( definition.Shader, definition.Combo ) is null )
 		{
-			//Not marked missing: the combo below is written against the standard surface's features, and this material named a
-			//surface of its own - which exists, and merely will not build. Its own combo is the one the pipeline is asked for.
+			//Not marked missing: the combo below is the standard surface's, and this material's own surface exists
+			//but will not build
 			return CoreResources.MissingMaterial;
 		}
 
-		//Nothing in the colour slot, and three quite different faults used to wear the same checkerboard for it. They are told apart here.
+		//Nothing in the colour slot; three different faults are told apart here
 		if ( colour == fallback )
 		{
 			//There is no such material. That is a model naming a file the project does not have, and it should be seen.
@@ -2465,7 +2492,7 @@ internal static unsafe class CoreSceneRenderer
 			}
 			else if ( string.IsNullOrWhiteSpace( definition.Shader ) )
 			{
-				//It names a picture we could not read, and has no shader that could make a surface without one. Broken, and it says so.
+				//Names an unreadable picture with no shader that could do without it: broken, and it says so
 				return Missing( materialPath );
 			}
 
@@ -2489,7 +2516,7 @@ internal static unsafe class CoreSceneRenderer
 		numbers[2] = definition.EmissionStrength;
 		numbers[3] = definition.Masked ? definition.AlphaCutoff : 0.0f;
 
-		//And whatever its shader declared for itself, a slot each, in the order it declared them - see CoreShaderParams.
+		//And the shader's declared numbers, a slot each in declared order - see CoreShaderParams
 		var written = definition.Numbers;
 		var pictures = definition.Pictures;
 
@@ -2519,7 +2546,7 @@ internal static unsafe class CoreSceneRenderer
 
 		var worn = how;
 
-		//In steps of a two-hundred-and-fifty-fifth, so two exports of the same grey are one material rather than two that differ in the sixth place.
+		//In 1/255 steps, so two exports of one grey are one material
 		if ( surface.Says( ModelFormat.SurfaceSays.Roughness ) ) worn = worn with { Roughness = Step( surface.roughness ) };
 		if ( surface.Says( ModelFormat.SurfaceSays.Metalness ) ) worn = worn with { Metalness = Step( surface.metalness ) };
 
@@ -2529,7 +2556,7 @@ internal static unsafe class CoreSceneRenderer
 
 			if ( most > 0.0f )
 			{
-				//The colour at full brightness in the picture, and how bright in the number: a picture holds nothing over one.
+				//Colour at full brightness in the picture, brightness in the number, as pictures stop at one
 				var glow = new Color( surface.emissionR / most, surface.emissionG / most, surface.emissionB / most, 1.0f );
 
 				worn = worn with
@@ -2595,7 +2622,7 @@ internal static unsafe class CoreSceneRenderer
 		return $"#r{Steps( worn.Roughness, 255.0f ):x2}m{Steps( worn.Metalness, 255.0f ):x2}e{Steps( worn.EmissionStrength, 64.0f ):x}{glow}";
 	}
 
-	//Whether a material named one of its shader's own pictures, under the name the shader gave it or that name without its prefix.
+	//Whether a material named one of its shader's pictures, by declared name or without its prefix
 	private static bool Names( IReadOnlyDictionary<string, string> pictures, string field )
 	{
 		if ( pictures is null || string.IsNullOrWhiteSpace( field ) ) return false;
@@ -2699,34 +2726,34 @@ internal static unsafe class CoreSceneRenderer
 		return texture;
 	}
 
-	//How big the picture a material names by path is, as it was compiled - see ResolveMap. False where it is not a picture that compiles.
+	//The compiled size of a picture a material names by path - see ResolveMap; false if it does not compile
 	internal static bool MapSize( string imagePath, bool srgb, out int width, out int height )
 	{
 		width = height = 0;
-		if ( !CoreDevTextures.IsPicture( imagePath ) ) return false;
+
+		return MapBlocks( imagePath, srgb ) is { } blocks && CoreRenderDevice.TextureSize( blocks, out width, out height );
+	}
+
+	//The compiled file of a picture a material names by path - see ResolveMap; null where it is not a picture
+	internal static string MapBlocks( string imagePath, bool srgb )
+	{
+		if ( !CoreDevTextures.IsPicture( imagePath ) ) return null;
 
 		var full = CoreModel.ResolveOnDisk( imagePath.Replace( '\\', '/' ) );
 
-		string blocks;
+		if ( full is null ) return CorePictures.ShippedBlocks( imagePath, srgb );
 
-		if ( full is null )
-		{
-			blocks = CorePictures.ShippedBlocks( imagePath, srgb );
-		}
-		else
-		{
-			blocks = CompiledPaths.TextureBlocks( full, srgb );
+		var blocks = CompiledPaths.TextureBlocks( full, srgb );
 
-			//Compiled names the file it made by whether the device takes blocks.
-			if ( Rinten.Rendering.TextureSettings.Compress && CoreNative.Available && CoreRender.SupportsBc() != 0 )
-				blocks = CompiledPaths.Compressed( blocks );
-		}
+		//Compiled names the file it made by whether the device takes blocks.
+		if ( Rinten.Rendering.TextureSettings.Compress && CoreNative.Available && CoreRender.SupportsBc() != 0 )
+			blocks = CompiledPaths.Compressed( blocks );
 
-		return blocks is not null && CoreRenderDevice.TextureSize( blocks, out width, out height );
+		return blocks;
 	}
 
-	//A colour cut by a mask, on the device - the blocks ResolveMaterialTexture draws a material's colour from - with its size; nought where
-	//either cannot be found or compiled. For a live material, which holds its pictures as textures rather than by path: see Material.Fill.
+	//A colour cut by a mask on the device, with its size; nought where either fails. For live materials,
+	//which hold textures rather than paths - see Material.Fill
 	internal static ulong CutColour( string colour, string cut, out int width, out int height )
 	{
 		width = height = 0;
@@ -2756,7 +2783,7 @@ internal static unsafe class CoreSceneRenderer
 
 		if ( handle != 0 ) CoreRenderDevice.TextureSize( blocks, out width, out height );
 
-		//A live material's picture is a texture the game holds and may show anywhere: whole - see CoreTextureStreaming.KeepWhole.
+		//A live material's picture may show anywhere, so whole - see CoreTextureStreaming.KeepWhole
 		CoreTextureStreaming.KeepWhole( handle );
 
 		return handle;
@@ -2773,18 +2800,18 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Which build of that shader - see CoreShaderFeatures.</summary>
 		public string Combo { get; init; }
 
-		/// <summary>The features it set by hand, which the build above was worked out from - kept so it can be worked out again where a mesh's art changes the numbers under it. See <see cref="Wearing"/>.</summary>
+		/// <summary>Features set by hand, kept to rework the build where a mesh's art changes numbers.</summary>
 		public IReadOnlyDictionary<string, int> Told { get; init; }
 
 
 		/// <summary>No material at all, so the glowing checkerboard is drawn and the build needs F_EMISSION</summary>
 		public bool Missing { get; init; }
 
-		//Null on a material that set none of them, which is every material drawn by a shader that declares none - and on those, every number there is is one of the four below. See CoreShaderParams.
-		/// <summary>The numbers its shader declared, by the name the shader gave them.</summary>
+		//Null where it set none; for a shader declaring none, every number is one of the four below
+		/// <summary>The numbers its shader declared, by declared name.</summary>
 		public Dictionary<string, Vector4> Numbers { get; init; }
 
-		/// <summary>And the pictures it declared beyond the four every material has, by the same names - see MaterialDefinition.Textures.</summary>
+		/// <summary>Pictures it declared beyond the standard four, by name - see MaterialDefinition.Textures.</summary>
 		public Dictionary<string, string> Pictures { get; init; }
 
 		/// <summary>And what those of them the cull pass reads come to.</summary>
@@ -2793,7 +2820,7 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>Colour slot path, needed here because F_COLOR_MAP is implied from it</summary>
 		public string Colour { get; init; }
 
-		/// <summary>The mask its colour is cut by, by the name the material gives it, or null - see MaterialDefinition.OpacityMask. Not a picture of its own on the device: it is folded into the colour's alpha where the colour is compiled, so the surface reads one picture.</summary>
+		/// <summary>The mask its colour is cut by, folded into the colour's alpha at compile; or null.</summary>
 		public string Cut { get; init; }
 
 		/// <summary>Built without the colour sample, so the flat colour must reach the draw via the tint</summary>
@@ -2818,7 +2845,7 @@ internal static unsafe class CoreSceneRenderer
 			if ( materialFields.TryGetValue( key, out var found ) ) return found;
 		}
 
-		//Read outside the lock: this touches the disk, and holding a lock across a file read is how one slow material stalls every other one.
+		//Read outside the lock, as it touches the disk and one slow file would stall every material
 		var read = ReadMaterialFile( key, out var onDisk );
 		var made = ( read, Folded( read, ReadMaterialTintFile( key ) ) );
 
@@ -2833,7 +2860,7 @@ internal static unsafe class CoreSceneRenderer
 	//Pictures a material reads and whether each is sRGB; must match ResolveMaterial and the exporter
 	internal static IEnumerable<(string Picture, bool Srgb, string Cut)> PicturesOf( MaterialFields how )
 	{
-		//The colour cut by its mask where it has one: those are the blocks it is drawn from - see ResolveMaterialTexture.
+		//The colour cut by its mask where it has one, as drawn - see ResolveMaterialTexture
 		if ( CoreDevTextures.IsPicture( how.Colour ) ) yield return (how.Colour, true, how.Cut);
 		if ( CoreDevTextures.IsPicture( how.Normal ) ) yield return (how.Normal, false, null);
 		if ( CoreDevTextures.IsPicture( how.Emission ) ) yield return (how.Emission, true, null);
@@ -2920,12 +2947,12 @@ internal static unsafe class CoreSceneRenderer
 				theirs.Roughness, theirs.Metalness, theirs.EmissionStrength, theirs.AlphaCutoff,
 				theirs.Masked, theirs.Translucent, theirs.TwoSided )
 			{
-				//Their shader name is theirs - shaders/skin.shader and the like - and nothing here compiles one. Empty is this engine's
-				//standard shader, which is the honest answer for a surface whose own shader cannot be built: it draws with the maps it brought.
+				//Their shader names (shaders/skin.shader...) do not compile here; empty is the standard shader, which
+				//draws with the maps they brought
 				Shader = "",
 				Colour = theirs.ColorMap,
 
-				//Their roughness, metalness and occlusion, under the names the standard shader reads them by - see CoreImportedMaterial.
+				//Their roughness, metalness and occlusion, named as the standard shader reads them
 				Pictures = theirs.Pictures,
 			};
 
@@ -2994,8 +3021,7 @@ internal static unsafe class CoreSceneRenderer
 					? Text( nameof( MaterialDefinition.OpacityMask ) )
 					: null,
 
-				//Before the combo below is asked for, not after: a feature over one of the shader's own pictures - Map( g_tAO ) on either surface - is
-				//on where the material names that picture, and asked of a material whose pictures were not read yet it was off for every one of them.
+				//Before the combo: a feature over a shader picture (Map( g_tAO )) is on where the material names it
 				Pictures = Named( root ),
 			};
 
@@ -3009,7 +3035,7 @@ internal static unsafe class CoreSceneRenderer
 					( what, field ) => Implies( built, what, field ) ),
 				Told = told,
 
-				//How it is drawn is what its shader is built with - F_ALPHA, F_TRANSLUCENT, F_BACKFACES - and nothing of the material's own.
+				//How it draws comes from its shader's features (F_ALPHA, F_TRANSLUCENT, F_BACKFACES), not the material
 				Masked = masked,
 				Translucent = translucent,
 				TwoSided = twoSided,
@@ -3024,8 +3050,8 @@ internal static unsafe class CoreSceneRenderer
 		}
 	}
 
-	//The numbers a material set on its shader, by name. Written as an object under Numbers, each either one number or four -
-	//"Numbers": { "g_flSway": 2.5, "g_vTint": [1, 0, 0, 1] } . What a material does not mention is what its shader said it should be.
+	//A material's shader numbers by name under Numbers, each one number or four:
+	//"Numbers": { "g_flSway": 2.5, "g_vTint": [1, 0, 0, 1] }; unmentioned ones take the shader's default
 	private static Dictionary<string, Vector4> Written( JsonElement root )
 	{
 		if ( !root.TryGetProperty( nameof( MaterialDefinition.Numbers ), out var listed ) ||
@@ -3062,7 +3088,7 @@ internal static unsafe class CoreSceneRenderer
 			}
 			else if ( field.Value.ValueKind == JsonValueKind.String && Vector4.TryParse( field.Value.GetString(), out var parsed ) )
 			{
-				//"x,y,z,w" - which is how the engine's own serializer writes a Vector4, so a material saved by the editor reads back.
+				//"x,y,z,w", as the engine's serializer writes a Vector4
 				value = parsed;
 			}
 			else
@@ -3077,13 +3103,13 @@ internal static unsafe class CoreSceneRenderer
 		return written;
 	}
 
-	//What a material says about its shader's features, by name. Written as an object of numbers under Features, keyed by the define the shader
-	//tests - "Features": { "F_PARALLAX": 1 } . What the material says wins over what its own maps imply; see Implies for the other half.
+	//A material's shader features under Features by define, e.g. "Features": { "F_PARALLAX": 1 }; these
+	//win over what its maps imply - see Implies
 	private static Dictionary<string, int> Told( JsonElement root )
 	{
 		var told = new Dictionary<string, int>( StringComparer.Ordinal );
 
-		//A file older than these features reads its Blend and TwoSided as the features they became - see MaterialDefinition.LegacyFeatures.
+		//An older file's Blend and TwoSided read as the features they became - see MaterialDefinition.LegacyFeatures
 		if ( !root.TryGetProperty( nameof( MaterialDefinition.Features ), out var listed ) ||
 			listed.ValueKind != JsonValueKind.Object )
 		{
@@ -3124,7 +3150,7 @@ internal static unsafe class CoreSceneRenderer
 
 			CoreShaderFeatures.Implied.Flag => field switch
 			{
-				//A number rather than a switch: any metal at all is metal, so a material that says 0.7 is built with metalness and one that says nothing is not.
+				//Any metal at all is metal: 0.7 builds with metalness, nothing said does not
 				nameof( MaterialDefinition.Metalness ) => fields.Metalness > 0.0f,
 				_ => false,
 			},
@@ -3132,8 +3158,7 @@ internal static unsafe class CoreSceneRenderer
 			_ => false,
 		};
 
-	//Which build of its shader a material is asking for. Null where it asks for nothing unusual, which is the common case and the
-	//one worth keeping cheap: a null combo is the shader as shipped, blob and all, with no source to read and nothing to compile.
+	//The shader build a material asks for; null, the cheap common case, is the shipped shader with nothing to compile
 	internal static string ComboFor( string shaderPath, IReadOnlyDictionary<string, int> told,
 		Func<CoreShaderFeatures.Implied, string, bool> has )
 	{
@@ -3209,7 +3234,7 @@ internal static unsafe class CoreSceneRenderer
 		//colour's alpha as it is compiled, into blocks of their own - see CompiledPaths.TextureBlocks.
 		var cut = ReadMaterial( materialPath ).Cut;
 
-		//The engine's own flat picture, where the material names one - see CoreDevTextures. Nothing to find on a disk and nothing to compile.
+		//The engine's own flat picture where named - see CoreDevTextures; nothing on disk to compile
 		if ( CoreDevTextures.Get( imagePath ) is var built && built != 0 )
 		{
 			textures[materialPath] = built;
@@ -3230,7 +3255,7 @@ internal static unsafe class CoreSceneRenderer
 
 		if ( CoreImportedTexture.IsTheirs( imageFull ) )
 		{
-			//Blocks through unchanged where the format and the device allow it, the same as the map path above; the image round trip otherwise.
+			//Blocks through unchanged where format and device allow, as the map path; else the image round trip
 			var kept = CoreImportedTexture.BlockTexture( imageFull, srgb: true );
 
 			if ( kept != 0 )
@@ -3331,7 +3356,7 @@ internal static unsafe class CoreSceneRenderer
 	{
 		var map = boneMaps.GetOrCreateValue( mesh );
 
-		//The model can be swapped under a renderer, and then the names have to be looked up again - against the skeleton that is there now.
+		//The model can change under a renderer; then names are looked up again against its current skeleton
 		if ( ReferenceEquals( map.Model, model ) && map.At.Length == mesh.Bones.Length ) return map.At;
 
 		var at = new int[mesh.Bones.Length];
@@ -3348,8 +3373,8 @@ internal static unsafe class CoreSceneRenderer
 	//Every bone of one skeleton, read in one go rather than one at a time.
 	private static Transform[] worldBoneScratch = System.Array.Empty<Transform>();
 
-	//A scene model's skin palette for a mesh drawn at toModel - a bone-merged one is drawn where its own object is, not where its skeleton's is.
-	//Kept in an array the scene model holds between frames; at rest where there is no scene model.
+	//A scene model's skin palette for a mesh drawn at toModel; bone-merged ones draw at their own object.
+	//Kept in an array the scene model holds; at rest without one
 	internal static System.Numerics.Matrix4x4[] PoseBones( SceneMesh mesh, SceneModel posed, Transform toModel )
 	{
 		var count = mesh.Bones.Length;
@@ -3360,7 +3385,7 @@ internal static unsafe class CoreSceneRenderer
 
 		var pose = valid ? posed.PoseBuffer : new System.Numerics.Matrix4x4[count];
 
-		//The whole skeleton in one read, and which bone is whose settled once - this used to be a name lookup and a call per bone per frame.
+		//The whole skeleton in one read, with bone mapping settled once
 		var indices = valid && posed.Model is not null ? BoneIndices( mesh, posed.Model ) : null;
 		var world = System.ReadOnlySpan<Transform>.Empty;
 
@@ -3393,7 +3418,7 @@ internal static unsafe class CoreSceneRenderer
 			}
 			else
 			{
-				//At rest: the inverse bind's own inverse, so the two cancel and the vertex stays where the modeller left it.
+				//At rest: the inverse bind's inverse, so they cancel and the vertex stays put
 				if ( !System.Numerics.Matrix4x4.Invert( bone.InverseBind, out current ) )
 					current = System.Numerics.Matrix4x4.Identity;
 			}
@@ -3441,7 +3466,7 @@ internal static unsafe class CoreSceneRenderer
 		}
 	}
 
-	//Sixteen floats laid out row-major into the matrix type, whose fields are named for rows and columns in that same order.
+	//Sixteen row-major floats into the matrix, whose fields are named in that order
 	private static System.Numerics.Matrix4x4 RowMajor( float* m )
 		=> new(
 			m[0], m[1], m[2], m[3],
@@ -3449,8 +3474,7 @@ internal static unsafe class CoreSceneRenderer
 			m[8], m[9], m[10], m[11],
 			m[12], m[13], m[14], m[15] );
 
-	//A material's own tint, or white when the material cannot be read. Colours serialise as strings, so this parses whichever
-	//form is in the file. What a shader and the material drawn by it say between them about culling it: grow, never, fade.
+	//What a shader and its material say about culling: grow, never, fade
 	private static Vector3 CullOf( string shader, Dictionary<string, Vector4> written )
 		=> CoreShaderParams.Cull( CoreResources.Declared( shader ),
 			name => written is not null && written.TryGetValue( name, out var value ) ? value : null );

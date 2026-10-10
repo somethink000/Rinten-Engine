@@ -9,7 +9,7 @@ struct Light
 	float4 colour;    //rgb already multiplied by brightness, kind w (0 sun, 1 point, 2 spot)
 	float4 direction; //xyz, cosine of the inner cone w
 	float4 cone;      //outer cosine x, how wide the source is y, spare zw
-	float4 shape;     //the power distance is raised to x, which faces read the lamps' movers' map y (a bit each), spare zw
+	float4 shape;     //falloff power x, faces reading the lamps' movers map y (a bit each), spare zw
 };
 
 //Envmap probe: an octahedral 2D picture of all directions with blurred mips stacked below
@@ -41,35 +41,35 @@ struct FrameData
 	float4 ground;
 	float4 sunDirection; //xyz, enabled w
 	float4 sunColour;    //rgb, disc cosine a
-	float4 viewInfo;     //which debug view x, the occlusion picture's place in the table y, the depth picture's z, the texture LOD bias w
+	float4 viewInfo;     //debug view x, occlusion picture index y, depth picture index z, texture LOD bias w
 
-	//Where the camera was looking the frame before. A pixel goes back through this to find where it was on the screen last time.
+	//Last frame's view, which a pixel is reprojected through
 	row_major float4x4 previousWorldToClip;
 
-	//The gradient fog, which is a property of the air rather than of any material: rgb and the most of the view it may take,
-	//the two distances and two heights it runs between, and the exponents that shape both falloffs. fogShape.z below one is off.
+	//Gradient fog: rgb and the most of the view it may take, the distances and heights it runs between,
+	//and both falloff exponents. fogShape.z below one is off
 	float4 fogColour;
 	float4 fogRange;  //start distance, end distance, start height, end height
 	float4 fogShape;  //distance exponent, height exponent, enabled, colour from the sky
 
 	//Baked lighting: lightmap sheet for static surfaces, probe volume for moving ones; zero = no bake
-	float4 bakedMaps;    //the sheet's place in the picture table x, its directions' y, spare z, one where there is a sheet w
+	float4 bakedMaps;    //sheet's table index x, its directions' y, spare z, one where there is a sheet w
 	float4 bakedVolume;  //the three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //xyz where the lattice's first point stands, w one over the step between points
 	float4 volumeCount;  //how many points along x, y and z, spare w
-	float4 bakedMask;    //the sheet's mask's place x, the volume's y, one where the sheet has one z, one where there is a mask w
+	float4 bakedMask;    //sheet mask's index x, volume's y, one if the sheet has one z, one if any mask w
 	float4 bakedSun;     //which channel of the mask holds the sun's shadow, plus one - nought for none x, spare yzw
 	float4 bakedSpare[4];
 
-	//The envmap probes. probeInfo.x is how many of the four are filled in, and nothing behind it is worth reading when it is zero.
+	//probeInfo.x is how many of the four probes are filled; nothing after it matters when zero
 	float4 probeInfo; //how many, how wide one picture is, how many bands, RGBM range
 	Probe probes[4];
 
 	//Two clocks: wall time always runs; scene time pauses and scales with the scene
 	float4 time; //seconds since the engine started, the frame's delta, the scene's own seconds, spare
 
-	//The sun, already put through the air it arrives across, and how far into the night that leaves the frame. Both depend on the sun's height and on
-	//nothing else - see CoreSceneRenderer.SetSky, which works them out once a frame because every lit pixel in the world used to work them out again.
+	//The sun's light after the air it crosses, and how far into night; both depend only on the sun's height,
+	//so CoreSceneRenderer.SetSky works them out once a frame
 	float4 sunLight; //rgb what is left of the sun's own light, a how far into night
 
 	//Clip to world ray without the camera position, used by SkyRay; all zero means use clipToWorld
@@ -86,9 +86,9 @@ struct FrameData
 	//added - and in a how much of what the sky and the probes give it replaces; see SceneAmbient in frame.slang.
 	float4 ambient;
 
-	//The exposure and which tonemap curve: the exposure for everything that takes the frame's light to the screen's - the compose,
-	//the curve's point effect - and the curve for a pass that finishes the picture itself; see TARGET_SCREEN in frame.slang.
-	float4 finish; //exposure x, curve y, where a run of point effects the world's shading carries starts in effects z, spare w
+	//Exposure, for every pass taking the frame's light to the screen's, and the tonemap curve for a pass
+	//finishing the picture itself - see TARGET_SCREEN in frame.slang
+	float4 finish; //exposure x, curve y, start of the world shading's point-effect run in effects z, spare w
 
 	//The numbers of the point effects laid over this frame - see CorePointChain. Each chain
 	//of them reads its own run, from the slot its push block names; nothing else reads these.
@@ -98,17 +98,22 @@ struct FrameData
 	FogVolume fogVolumes[8];
 	float4 fogVolumeInfo;
 
-	//The sheet of slices this view's air was worked out into: where the picture sits in the table, how many slices it holds, and the two distances they
-	//are laid out between - see CoreVolumeFog and FogVolumeSheet in frame.slang. A nought in x is "no sheet", and then a surface marches the air itself.
+	//The fog sheet: its table index, slice count, and the two distances the slices span - see CoreVolumeFog
+	//x of nought is no sheet, and a surface marches the air itself
 	float4 fogVolumeSheet;
 
-	//The sun's maps read as depth, for the search for what stands in front of a point that softens the sun's edge: the pages' place in the table and the
-	//map of what moves - nought where a map is not read so - see SunSoft. z and w the lamps' map of what moves, compared and as depth - see LampShadow.
+	//The sun's maps as depth for the penumbra search: pages' table index x, movers' y, nought where not read (SunSoft);
+	//z and w the lamps' movers map, compared and as depth - see LampShadow
 	float4 sunDepth;
 
-	//What water and glass trace their reflections through, once the solid world is shaded: the chain of the nearest depth and the
-	//picture of that world, by their places in the table - nought where no reflections were drawn this frame. See ScreenReflected.
+	//What water and glass trace reflections through: the nearest-depth chain and the shaded world's picture
+	//by table index, nought where no reflections were drawn - see ScreenReflected
 	float4 screenTrace;
+
+	//Panorama sky: reflection levels' table index x (nought when portable), turn y radians, level count z, one w if any
+	//w also lays the sky table out by direction; panoramaLight is brightness by tint - see CorePanoramaSky
+	float4 panorama;
+	float4 panoramaLight;
 };
 
 #ifdef WEBGL
@@ -133,12 +138,12 @@ struct FrameData
 
 //Headset eye being drawn, 0 otherwise; per-eye data reads g_frame[Eye()], the rest g_frame[0]
 #ifdef STEREO
-//<summary> The view a pixel is being drawn for, as the vertex stage handed it over. </summary> <remarks> A global set at the entry, the way InstanceNumbers sets
-//the instance's - and for the same reason: the shading reads it deep inside, where the interpolants are not in scope. STEREO_EYE_IN( i ) is what sets it. </remarks>
+//The view a pixel is drawn for, set at the entry by STEREO_EYE_IN( i ) as InstanceNumbers sets the instance
+//The shading reads it deep inside, where the interpolants are out of scope
 static uint g_eyeId;
 
-//<summary> Which view a vertex is being drawn for. The vertex stage only: this is SPIR-V's ViewIndex, which SPIRV-Cross writes out as gl_ViewID_OVR, and it will
-//only do that for a vertex stage - "OVR_multiview2 can only be used with Vertex shaders", which is why the pixel stage is told rather than asking. </summary>
+//The view a vertex is drawn for: SPIR-V's ViewIndex, which SPIRV-Cross writes as gl_ViewID_OVR for the vertex stage
+//only ("OVR_multiview2 can only be used with Vertex shaders"), so the pixel stage is handed it
 uint ViewOfThisVertex()
 {
 	__stage_switch
@@ -159,7 +164,7 @@ uint ViewOfThisVertex()
 uint Eye()
 {
 #if defined( STEREO )
-	//Asked where it can be asked, and taken from the vertex stage where it cannot - see ViewOfThisVertex and g_eyeId above.
+	//Read where it can be, taken from the vertex stage where not - see ViewOfThisVertex and g_eyeId
 	__stage_switch
 	{
 	case vertex:

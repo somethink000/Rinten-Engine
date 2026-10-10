@@ -2,10 +2,10 @@
 
 FEATURES
 {
-	//Rippled, frosted, cracked - a pane with a shape to it. Turned on by the material naming a normal map, like everywhere else.
+	//Rippled, frosted or cracked glass; on when the material names a normal map
 	Feature( F_NORMAL_MAP, 0..1, "Maps" ) < Map( Normal ); >;
 
-	//Both sides drawn, which a window in a wall does not need and a windscreen does: from the driver's seat you are looking at the inside of it.
+	//Both sides drawn: a windscreen is seen from inside, a window in a wall is not
 	Feature( F_BACKFACES, 0..1, "Rendering" );
 
 	//A pane is see-through by being a pane, so this one is on to begin with - see CoreSceneRenderer.DrawFlags.
@@ -151,7 +151,7 @@ Out Shade( V2F i, bool front )
 	surface.occlusion = 1.0;
 
 	//Pane tint lit by sky and probes, sent through emission since a mirror has no diffuse
-	float3 ambient = SceneAmbient( ProbesOver( ProbesHere( i.world ), HasSky() ? SkyAmbient( normal ) * 0.25 : float3( 0.0, 0.0, 0.0 ),
+	float3 ambient = SceneAmbient( ProbesOver( ProbesHere( i.world ), HasSky() ? SkyAmbient( normal ) * SkyAmbientScale() : float3( 0.0, 0.0, 0.0 ),
 		i.world, normal, 1.0, false ) );
 
 	surface.emission = body * ambient * hold;
@@ -159,14 +159,13 @@ Out Shade( V2F i, bool front )
 	surface.uv = uv;
 	surface.id = i.depthId;
 
-	//Nothing is baked into a window. A pane in a bake is a hole the light went through, and the atlas holds what landed on the far side of it.
+	//Nothing is baked into a pane: in a bake it is a hole the light went through
 	surface.lightmap = float2( 0.0, 0.0 );
 	surface.screen = i.position.xy;
 
 	Shaded lit = ShadeSurface( surface );
 
-	//And what the mirror way meets on the screen, in place of the room or the sky the pane reflected, at the weight it went in with
-	//- a window shows the street behind the eye. Glass is drawn after the reflections' pass and traces its own - see ScreenReflected.
+	//What the mirror direction meets on screen replaces the probe or sky reflection - see ScreenReflected
 	float3 bounce = reflect( -toEye, surface.normal );
 	float4 found = ScreenReflected( i.world, surface.normal, bounce );
 

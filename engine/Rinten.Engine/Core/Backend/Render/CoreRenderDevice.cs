@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//The graphics device, from the managed side. Vulkan, in the core. Nothing above here knows that: this type answers what
-//the device is and whether it opened, and everything else goes through the render seam rather than reaching for the API.
+//The graphics device from the managed side: what it is and whether it opened; everything else goes
+//through the render seam rather than the API
 internal static unsafe class CoreRenderDevice
 {
 	private static readonly Logger log = new( "Render" );
@@ -45,12 +45,12 @@ internal static unsafe class CoreRenderDevice
 		/// <summary>What we asked for, textures and buffers together.</summary>
 		public long Ours => Textures + Buffers;
 
-		//The number worth watching. Ours going up is us allocating; this going up without ours moving is the driver holding something we did not know we had asked for.
-		/// <summary>What the driver counts that we do not: the swapchain, the descriptor pools, the staging rings, alignment, and its own overhead.</summary>
+		//Rising while Ours holds still means the driver is holding something we did not know we asked for
+		/// <summary>Driver memory we do not count: swapchain, pools, staging, alignment, overhead.</summary>
 		public long Unaccounted => DriverAnswered ? Math.Max( 0, DriverUsed - Ours - Targets - ShadowMaps - Pyramids ) : 0;
 	}
 
-	/// <summary>Asks the device what it is holding. Cheap, and asked fresh every time - a budget from a minute ago is a budget from before whatever else on this machine started drawing.</summary>
+	/// <summary>Asks the device what it holds; cheap, and fresh each time, as others draw on this machine.</summary>
 	public static GpuMemory ReadMemory()
 	{
 		if ( !CoreNative.Available ) return default;
@@ -64,14 +64,14 @@ internal static unsafe class CoreRenderDevice
 			given > 7 ? values[7] : 0, given > 8 ? values[8] : 0, given > 9 ? values[9] : 0 );
 	}
 
-	/// <summary>Size of the bindless picture table, or 0 without one (then every picture index in a vertex reads 0)</summary>
+	/// <summary>Size of the bindless picture table, or 0 without one (every vertex picture index reads 0).</summary>
 	public static int BindlessSlots => CoreNative.Available ? CoreRender.BindlessSlots() : 0;
 
 	/// <summary>Whether an indirect draw may name where in the instance buffer its copies start.</summary>
 	public static bool FirstInstance
 		=> CoreNative.Available && CoreRender.FirstInstance() != 0;
 
-	/// <summary>Whether this device draws the portable frame - see <see cref="RenderTier"/>: a browser, or a Vulkan driver that stopped before 1.3. What the full frame is built from - compute, the pools the clusters are drawn out of, the lights' buffer, the passes over the frame's pictures - is not tried there.</summary>
+	/// <summary>Whether this device draws the portable frame (browser, Vulkan before 1.3).</summary>
 	public static bool PortableFrame => CoreRender.Tier == RenderTier.Portable;
 
 	/// <summary>Whether the validation layers are running.</summary>
@@ -108,7 +108,7 @@ internal static unsafe class CoreRenderDevice
 			opened = true;
 			log.Info( Description );
 
-			//Before anything bakes a pipeline: what is handed over here is what the driver does not have to compile again.
+			//Before any pipeline bakes, so the driver need not compile what is cached
 			LoadPipelineCache();
 		}
 
@@ -118,8 +118,7 @@ internal static unsafe class CoreRenderDevice
 	//-- the pipeline cache ------------------------------------------------------
 	//Saves the driver's compiled pipelines between runs; the core validates it, this side owns the file
 
-	//Where the driver's compiled pipelines are kept between runs. Beside the user's own data rather than in the project, because
-	//the bytes belong to this machine's card and driver and mean nothing on anybody else's - they are regenerated, not shipped.
+	//The driver's compiled pipelines between runs, in the user's data: they belong to this card and driver
 	private static string PipelineCachePath
 	{
 		get
@@ -192,7 +191,7 @@ internal static unsafe class CoreRenderDevice
 	//The count this saw last frame, to tell "still baking" from "settled".
 	private static int bakedPipelines;
 
-	//Writes out what the driver compiled this run, so the next one does not have to. Called while the device is still open - the cache goes with it.
+	//Writes out what the driver compiled this run, while the device is still open
 	private static void SavePipelineCache()
 	{
 		try
@@ -214,8 +213,8 @@ internal static unsafe class CoreRenderDevice
 			var path = PipelineCachePath;
 			Directory.CreateDirectory( Path.GetDirectoryName( path ) );
 
-			//Written beside and moved into place, so a run that dies halfway leaves the last good cache rather than half of a new one - under a name of this
-			//process's own, since an editor and a game or a shader bake closing together wrote one `.new` between them - see CoreShaderCache.SaveLocal.
+			//Written beside and moved into place, under this process's own name, so a dying run or two closing together
+			//leave the last good cache - see CoreShaderCache.SaveLocal
 			var temporary = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.new";
 
 			try
@@ -238,7 +237,7 @@ internal static unsafe class CoreRenderDevice
 	//Whether a device has been opened and not shut down.
 	private static bool opened;
 
-	/// <summary>Closes the device. Waits for the GPU to finish first, so it is safe to call while work is still in flight.</summary>
+	/// <summary>Closes the device, waiting for the GPU first, so in-flight work is fine.</summary>
 	public static void Shutdown()
 	{
 		if ( !CoreNative.Available ) return;
@@ -259,7 +258,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- the window ------------------------------------------------------------
 
-	/// <summary>Gives the device a window to draw into, and hands back the swapchain it made for it. Zero means it could not.</summary>
+	/// <summary>Gives the device a window and returns its swapchain; zero on failure.</summary>
 	public static ulong AttachWindow( CoreWindow window, bool transparent = false,
 		int widthPixels = 0, int heightPixels = 0 )
 	{
@@ -290,7 +289,7 @@ internal static unsafe class CoreRenderDevice
 		return swapchain;
 	}
 
-	/// <summary>A swapchain on a surface that is not a window's own - a layer over one, see WaylandLayer. Opaque, and as big as it is told: such a surface has no size of its own.</summary>
+	/// <summary>An opaque swapchain on a surface not a window's own (see WaylandLayer), as big as told.</summary>
 	public static ulong AttachSurface( int kind, ulong display, ulong surface, int widthPixels, int heightPixels )
 	{
 		if ( !IsReady || surface == 0 || widthPixels <= 0 || heightPixels <= 0 ) return 0;
@@ -308,7 +307,7 @@ internal static unsafe class CoreRenderDevice
 		return swapchain;
 	}
 
-	/// <summary>Rebuilds the swapchain at a new size. Everything in flight is waited for first, so this is not something to do every frame.</summary>
+	/// <summary>Rebuilds the swapchain at a new size, waiting for in-flight work; not per frame.</summary>
 	public static bool Resize( ulong swapchain, int width, int height )
 		=> CoreNative.Available && CoreRender.SwapchainResize( swapchain, width, height ) != 0;
 
@@ -320,7 +319,7 @@ internal static unsafe class CoreRenderDevice
 		return CoreRender.SwapchainVsync( swapchain, enabled ? 1 : 0 ) != 0;
 	}
 
-	/// <summary>Where on the window the world is drawn; no size means whole window. Resizes remake world pictures</summary>
+	/// <summary>Where on the window the world is drawn; no size means whole window. Resizes remake pictures.</summary>
 	public static bool SetWorldRect( ulong swapchain, int x, int y, int width, int height )
 	{
 		if ( !CoreNative.Available || swapchain == 0 ) return false;
@@ -328,7 +327,7 @@ internal static unsafe class CoreRenderDevice
 		return CoreRender.SwapchainWorldRect( swapchain, x, y, width, height ) != 0;
 	}
 
-	/// <summary>Closes the screen's pass, if it is open, so the world's own passes can run in the middle of whatever is being drawn over it. The next draw to the screen reopens it with what it had.</summary>
+	/// <summary>Closes the screen pass so world passes can run mid-draw; the next screen draw reopens it.</summary>
 	public static bool InterruptScreen()
 		=> CoreNative.Available && CoreRender.ScreenInterrupt() != 0;
 
@@ -362,7 +361,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.SwapchainDestroy( swapchain );
 	}
 
-	/// <summary>The size the swapchain is actually at, which is not always what was asked for, and how many images it has.</summary>
+	/// <summary>The swapchain's actual size, which may differ from the ask, and its image count.</summary>
 	public static (int Width, int Height, int Images) SwapchainInfo( ulong swapchain )
 	{
 		if ( !CoreNative.Available ) return (0, 0, 0);
@@ -389,7 +388,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- a frame ---------------------------------------------------------------
 
-	/// <summary>Acquires and clears the next image; false means skip the frame (resizing/hidden). One open at a time</summary>
+	/// <summary>Acquires and clears the next image; false means skip the frame. One open at a time.</summary>
 	public static bool BeginFrame( ulong swapchain, Color clear )
 	{
 		poses.Clear();
@@ -405,17 +404,17 @@ internal static unsafe class CoreRenderDevice
 		return true;
 	}
 
-	/// <summary>Finishes the frame and puts it on the screen. False means the swapchain went out of date while the frame was in flight; the frame still happened, and the next one will be at the new size.</summary>
+	/// <summary>Presents the frame; false if the swapchain went out of date in flight, resized next frame.</summary>
 	public static bool EndFrame()
 		=> CoreNative.Available && CoreRender.FrameEnd() != 0;
 
-	/// <summary>Waits until ended frames are presented, for window-system calls that must precede the next present</summary>
+	/// <summary>Waits until ended frames are presented, for window calls that must precede the next present.</summary>
 	public static void FramesHandedOver()
 	{
 		if ( CoreNative.Available ) CoreRender.FramesHandedOver();
 	}
 
-	/// <summary>Tells the frame what it is looked at and lit by - the view-projection matrix, the camera, and the lights. Written once after BeginFrame; every draw of the frame reads it.</summary>
+	/// <summary>The frame's view, camera and lights, written once after BeginFrame for every draw to read.</summary>
 	public static bool SetupFrame( ReadOnlySpan<float> frame )
 	{
 		if ( !CoreNative.Available || frame.IsEmpty ) return false;
@@ -426,7 +425,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//The second eye's block, for a frame drawing both of a headset's eyes in one pass - read at the second layer; see CreateEyesView.
+	//The second eye's block for a two-eye pass, read at the second layer - see CreateEyesView
 	internal static bool SetupSecondEye( ReadOnlySpan<float> frame )
 	{
 		if ( !CoreNative.Available || frame.IsEmpty ) return false;
@@ -437,7 +436,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A run of this frame's block written again, from <paramref name="at"/> floats in - the point effects' numbers, see CorePointChain.Upload.</summary>
+	/// <summary>Rewrites a run of this frame's block from <paramref name="at"/> floats in.</summary>
 	public static bool PatchFrame( int at, ReadOnlySpan<float> values )
 	{
 		if ( !CoreNative.Available || values.IsEmpty ) return false;
@@ -464,11 +463,11 @@ internal static unsafe class CoreRenderDevice
 	internal static ulong UseFrame( ulong offset )
 		=> CoreNative.Available ? CoreRender.FrameBlockUse( offset ) : 0;
 
-	/// <summary>The buffer every world shader reads its lights out of - see CoreLights. Nought puts the binding back to the frame's own scratch.</summary>
+	/// <summary>The buffer world shaders read lights from (CoreLights); nought restores the frame scratch.</summary>
 	public static bool SetLightBuffer( ulong buffer )
 		=> CoreNative.Available && CoreRender.SetLightBuffer( buffer ) != 0;
 
-	/// <summary>Takes a copy of the frame as it stands, for whatever draws over it - the panels that blur or tint what is behind them. After the world, before the UI. False means there was nothing to copy or nowhere to put it.</summary>
+	/// <summary>Copies the frame for panels that blur or tint behind them; false if nothing or nowhere.</summary>
 	public static bool CaptureBackdrop()
 		=> CoreNative.Available && CoreRender.BackdropCapture() != 0;
 
@@ -478,7 +477,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- a view ----------------------------------------------------------------
 
-	/// <summary>A viewport with no window: the same pictures and the same passes, nothing to present to. What a preview or a thumbnail wants instead of a swapchain, which costs a surface, images, frames in flight and a present it has no use for.</summary>
+	/// <summary>A viewport with no window, for previews and thumbnails: same pictures and passes, no present.</summary>
 	public static ulong CreateView( int width, int height )
 		=> CoreNative.Available ? CoreRender.ViewCreate( width, height ) : 0;
 
@@ -486,8 +485,7 @@ internal static unsafe class CoreRenderDevice
 	internal static ulong CreateEyesView( int width, int height )
 		=> CoreNative.Available && Multiview ? CoreRender.ViewCreate( width, height, 2 ) : 0;
 
-	//Whether a headset's two eyes may be drawn in one pass: the portable frame, on a device with multiview - see VkDevice.multiview.
-	//The full frame draws an eye at a time, since everything between its world and its screen is one eye's pictures.
+	//Two eyes in one pass: the portable frame on a multiview device; the full frame draws an eye at a time
 	internal static bool Multiview => CoreNative.Available && CoreRender.Multiview;
 
 	/// <summary>Lets one go. Waits for the device: it may still be being drawn.</summary>
@@ -500,7 +498,7 @@ internal static unsafe class CoreRenderDevice
 	public static bool ResizeView( ulong view, int width, int height )
 		=> CoreNative.Available && CoreRender.ViewResize( view, width, height ) != 0;
 
-	/// <summary>Aims the passes at a view. Inside an open frame, one at a time, and before anything has drawn the window itself.</summary>
+	/// <summary>Aims the passes at a view: inside an open frame, before anything drew the window.</summary>
 	public static bool BeginView( ulong view, Color clear = default )
 		=> CoreNative.Available &&
 			CoreRender.ViewBegin( view, clear.r, clear.g, clear.b, clear.a ) != 0;
@@ -511,7 +509,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.ViewEnd();
 	}
 
-	/// <summary>Begins a standalone view frame outside the window loop, e.g. a thumbnail; per-frame views shouldn't</summary>
+	/// <summary>Begins a standalone view frame outside the window loop, e.g. a thumbnail.</summary>
 	public static bool BeginViewFrame( ulong view, Color clear = default )
 	{
 		//Last frame's poses live in last frame's scratch, which this one is about to write over.
@@ -533,7 +531,7 @@ internal static unsafe class CoreRenderDevice
 	internal static bool CopyViewTo( ulong view, ulong image, int width, int height, int layer = 0 )
 		=> CoreNative.Available && CoreRender.ViewCopyTo( view, image, width, height, layer ) != 0;
 
-	//How a headset eye's view is foveated: how strongly, nought to one, and where each layer's middle is, nought to one across and down. See CoreFovea.
+	//A headset eye view's foveation: strength nought to one, and each layer's centre in nought-to-one - see CoreFovea
 	internal static bool SetViewFovea( ulong view, float strength, bool tracked, Vector2 first, Vector2 second )
 		=> CoreNative.Available && view != 0 &&
 			CoreRender.ViewFovea( view, strength, tracked, first.x, first.y, second.x, second.y ) != 0;
@@ -541,7 +539,7 @@ internal static unsafe class CoreRenderDevice
 	//Whether the device shades an eye coarser away from where it looks.
 	internal static bool Foveates => CoreNative.Available && CoreRender.Foveates;
 
-	//Says which texture the view's picture is copied into as its frame ends - every level of it, left ready to sample. Between BeginViewFrame and the end.
+	//The texture the view's picture copies into as its frame ends, every level, ready to sample
 	internal static bool CopyViewToTexture( ulong view, ulong texture )
 		=> CoreNative.Available && texture != 0 && CoreRender.ViewCopyToTexture( view, texture ) != 0;
 
@@ -559,7 +557,7 @@ internal static unsafe class CoreRenderDevice
 	public static bool ViewFrameReady( ulong view )
 		=> !CoreNative.Available || CoreRender.ViewFrameReady( view ) != 0;
 
-	/// <summary>What it drew, as a texture: the finished picture, for a window to draw somewhere on itself without any of it going through memory.</summary>
+	/// <summary>The finished picture as a texture, for a window to draw without going through memory.</summary>
 	public static ulong ViewTexture( ulong view )
 		=> CoreNative.Available ? CoreRender.ViewTexture( view ) : 0;
 
@@ -573,7 +571,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.DepthOnScreen( viewport, wanted );
 	}
 
-	/// <summary>Where in the picture the depth is read from, and how big that picture is: the world's own corner and size ordinarily, its place in the window where the pre-pass wrote the screen's depth.</summary>
+	/// <summary>Where depth is read from and that picture's size.</summary>
 	public static (int X, int Y, int Wide, int Tall) DepthReadRect( ulong viewport )
 		=> CoreNative.Available ? CoreRender.DepthReadRect( viewport ) : (0, 0, 0, 0);
 
@@ -588,7 +586,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Pixels as premultiplied BGRA for a layered window; swizzled in the core, it's millions per frame</summary>
+	/// <summary>Pixels as premultiplied BGRA for a layered window; swizzled in the core.</summary>
 	public static bool ReadViewLayered( ulong view, Span<byte> pixels )
 	{
 		if ( !CoreNative.Available || pixels.IsEmpty ) return false;
@@ -601,7 +599,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- the pictures a pass draws into ----------------------------------------
 
-	/// <summary>Begins drawing into one of the pictures that are not the screen: the world in half floats, the depth on its own, or the other full-size picture the post-process chain turns to. Before anything draws the screen.</summary>
+	/// <summary>Begins drawing into an off-screen picture (world, depth, post), before the screen is drawn.</summary>
 	public static bool BeginTarget( CoreRender.TargetKind target, Color clear = default, bool clearFirst = true,
 		bool discard = false )
 		=> CoreNative.Available && CoreRender.TargetBegin( (int)target,
@@ -613,7 +611,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.TargetEnd();
 	}
 
-	/// <summary>A picture for this frame's passes, of this shape, until it is given back - see VkPictures. Nought where the device would not make one, or has none. Levels are how many: one is the picture alone, more is a chain of halvings under it. Storage is whether a compute pass stores into it.</summary>
+	/// <summary>A frame picture of this shape until given back - see VkPictures; nought on failure.</summary>
 	public static ulong AcquirePicture( CoreRender.PictureKind kind, int width, int height, int levels = 1, bool storage = false )
 		=> CoreNative.Available ? CoreRender.PictureAcquire( (int)kind, width, height, levels, storage ? 1 : 0 ) : 0;
 
@@ -623,7 +621,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available && picture != 0 ) CoreRender.PictureRelease( picture );
 	}
 
-	/// <summary>Its size, levels and the format it was really made in - what a pipeline for it is baked against.</summary>
+	/// <summary>Its size, levels and actual format, which a pipeline for it is baked against.</summary>
 	public static bool PictureShape( ulong picture, out int width, out int height, out int levels, out int format )
 	{
 		width = height = levels = format = 0;
@@ -634,13 +632,13 @@ internal static unsafe class CoreRenderDevice
 	public static ulong PictureTexture( ulong picture )
 		=> CoreNative.Available ? CoreRender.PictureTexture( picture ) : 0;
 
-	/// <summary>One level of a picture as what the next draws fill; EndTarget closes it. With the world's depth attached, read and not written, where asked - for a picture of the world's size only.</summary>
+	/// <summary>One picture level as the draw target, with the world's depth read-only where asked.</summary>
 	public static bool BeginPicture( ulong picture, int level = 0, Color clear = default, bool clearFirst = false,
 		bool discard = false, bool withDepth = false )
 		=> CoreNative.Available && CoreRender.PictureBegin( picture, level,
 			clear.r, clear.g, clear.b, clear.a, clearFirst ? 1 : discard ? 2 : 0, withDepth ? 1 : 0 ) != 0;
 
-	/// <summary>The Vulkan format a stored picture declared as <paramref name="name"/> - rgba16f, rgba8, r16f and the rest - is made in, or nought for one this engine does not know. See ComputeShader, which checks the picture it is handed against it.</summary>
+	/// <summary>The Vulkan format of a stored picture name (rgba16f, rgba8, r16f...), or nought.</summary>
 	public static int StorageFormat( string name ) => name switch
 	{
 		"rgba16f" => 97,
@@ -655,7 +653,7 @@ internal static unsafe class CoreRenderDevice
 		_ => 0,
 	};
 
-	/// <summary>A stored picture's format as a shader names it, or null for one this engine does not know - the other way from StorageFormat.</summary>
+	/// <summary>A stored picture format's shader name, or null - the reverse of StorageFormat.</summary>
 	public static string StorageName( int format ) => format switch
 	{
 		97 => "rgba16f",
@@ -669,7 +667,7 @@ internal static unsafe class CoreRenderDevice
 		_ => null,
 	};
 
-	/// <summary>A picture's chain of halvings, filled out of its top - by the fold where one is given and the picture can be stored into, by blits where not.</summary>
+	/// <summary>Fills a picture's mip chain from its top, by the fold where given and storable, else blits.</summary>
 	public static bool PictureChain( ulong picture, ulong fold = 0 )
 		=> CoreNative.Available && CoreRender.PictureChain( picture, fold ) != 0;
 
@@ -684,7 +682,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Runs a pass: a material for its textures and numbers, the levels of pictures it stores into, the buffers it writes, and the push block a blit gets.</summary>
+	/// <summary>Runs a pass with a material, stored picture levels, written buffers and a push block.</summary>
 	public static bool DispatchPass( ulong pipeline, ulong material, ReadOnlySpan<ulong> outputs, ReadOnlySpan<int> levels,
 		ReadOnlySpan<ulong> buffers, ReadOnlySpan<byte> push, int groupsX, int groupsY, int groupsZ = 1 )
 	{
@@ -700,7 +698,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A square of depth with this many layers, read whole through the picture table with a sampler that compares and drawn into a layer at a time - a drawer's sun pages, or its map of what moves. See CoreSunPages. Nought where the device cannot make one.</summary>
+	/// <summary>A layered depth square for sun pages or a movers map - see CoreSunPages; nought on failure.</summary>
 	public static ulong CreateShadowMap( int side, int layers, bool readDepth = false )
 		=> CoreNative.Available ? CoreRender.ShadowMapCreate( side, layers, readDepth ) : 0;
 
@@ -713,11 +711,11 @@ internal static unsafe class CoreRenderDevice
 	public static uint ShadowMapIndex( ulong map, bool depth = false )
 		=> CoreNative.Available ? CoreRender.ShadowMapIndex( map, depth ) : 0;
 
-	/// <summary>Begins drawing into one layer of a shadow map. Kept rather than cleared: what is drawn lands in the rectangle <see cref="ShadowArea"/> names. Ended with <see cref="EndTarget"/>, which leaves the whole map readable.</summary>
+	/// <summary>Begins drawing a shadow map layer without clearing; EndTarget leaves the map readable.</summary>
 	public static bool BeginShadow( ulong map, int layer )
 		=> CoreNative.Available && CoreRender.ShadowBegin( map, layer ) != 0;
 
-	/// <summary>Where within the open shadow area the next draws may land - the area's projection unchanged - cleared first where asked.</summary>
+	/// <summary>Limits the open shadow area's next draws to a rectangle, cleared first where asked.</summary>
 	public static void ShadowScissor( int x, int y, int width, int height, bool clear = false )
 	{
 		if ( CoreNative.Available ) CoreRender.ShadowScissor( x, y, width, height, clear ? 1 : 0 );
@@ -729,19 +727,19 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.ShadowArea( x, y, width, height, clear ? 1 : 0 );
 	}
 
-	/// <summary>Makes the depth buffer readable without drawing into it - what a pass wants between a depth pre-pass and whatever asks about the shape.</summary>
+	/// <summary>Makes the depth buffer readable, between the pre-pass and what reads the shape.</summary>
 	public static bool DepthReadable()
 		=> CoreNative.Available && CoreRender.DepthReadable() != 0;
 
-	/// <summary>Makes one of the frame's own pictures - the world's colour, its depth, its motion - readable by a pass that reads it by its place in the table, with no pass open. A picture already readable, or a texture that is not one of the frame's, is left as it is.</summary>
+	/// <summary>Makes a frame picture readable by table index with no pass open; others left alone.</summary>
 	public static bool ReadyToRead( ulong texture )
 		=> CoreNative.Available && texture != 0 && CoreRender.ReadyToRead( texture ) != 0;
 
-	/// <summary>Fills a full-size picture's mip chain from its current contents (bloom); only when an effect asks</summary>
+	/// <summary>Fills a full-size picture's mip chain from its contents (bloom), only when asked.</summary>
 	public static bool PictureMips( CoreRender.TargetKind target )
 		=> CoreNative.Available && CoreRender.PictureMips( (int)target ) != 0;
 
-	/// <summary>One of those pictures as a texture: 0 the colour, 1 the normals, 2 the depth - the last two only for the world's.</summary>
+	/// <summary>One of those pictures as a texture: 0 colour, 1 normals, 2 depth (the last two the world's).</summary>
 	public static ulong TargetTexture( ulong swapchain, CoreRender.TargetKind target, int which = 0 )
 		=> CoreNative.Available ? CoreRender.TargetTexture( swapchain, (int)target, which ) : 0;
 
@@ -782,10 +780,10 @@ internal static unsafe class CoreRenderDevice
 
 	//-- the profiler ------------------------------------------------------------
 
-	/// <summary>Opens a named GPU+CPU timing zone, read back after the fence; nests, and also feeds the CPU profiler</summary>
+	/// <summary>Opens a GPU+CPU timing zone, read back after the fence; nests, and feeds the CPU profiler.</summary>
 	public static void ZoneBegin( string name )
 	{
-		//The profiler asked first, here: nobody is recording nearly always, and then the push is a call for nothing, sixty-odd times a frame.
+		//Ask the profiler first: nobody is recording nearly always, and a push would be sixty calls a frame for nothing
 		if ( zoneDepth < zoneSpans.Length )
 			zoneSpans[zoneDepth++] = Rinten.Diagnostics.FrameProfiler.Enabled ? Rinten.Diagnostics.FrameProfiler.Push( name ) : default;
 
@@ -811,7 +809,7 @@ internal static unsafe class CoreRenderDevice
 		int Dispatches, int Indirect,
 		(string Name, float GpuMs, float CpuMs, int Depth)[] Zones );
 
-	/// <summary>The viewport's last finished frame, measured - null before one has finished. Never waits: the numbers are a frame or two old by design.</summary>
+	/// <summary>The viewport's last finished frame, measured, or null; never waits, so a frame or two old.</summary>
 	public static FrameProfile? ReadProfile( ulong viewport )
 	{
 		if ( !CoreNative.Available || viewport == 0 ) return null;
@@ -860,7 +858,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- pipelines -------------------------------------------------------------
 
-	/// <summary>Whether the device draws by a GPU-written count; else every record draws, unused ones kept empty</summary>
+	/// <summary>Whether the device draws by a GPU-written count; else every record draws, unused kept empty.</summary>
 	public static bool DrawIndirectCount
 	{
 		get
@@ -893,8 +891,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//A picture rather than a buffer: the hardware then knows where the levels are, a sampler takes the farthest of a quad in one fetch, and choosing a level is choosing a number rather than walking an array of offsets.
-	/// <summary>A picture to reduce the frame's depth into, with every level of it.</summary>
+	//A picture, so a sampler takes a quad's farthest in one fetch and a level is just a number
+	/// <summary>A picture to reduce the frame's depth into, with every level.</summary>
 	public static ulong CreatePyramid( int width, int height )
 		=> CoreNative.Available ? CoreRender.PyramidCreate( width, height ) : 0;
 
@@ -903,7 +901,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.PyramidDestroy( pyramid );
 	}
 
-	//Its own maker because its second set is a level - what to read and what to store into - rather than a material, and a pipeline layout is fixed when it is made.
+	//Its own maker, as its second set is a read and store level rather than a material
 	/// <summary>A compute pipeline for building one level of the pyramid.</summary>
 	public static ulong CreatePyramidPipeline( byte[] spirv )
 	{
@@ -927,17 +925,23 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>The smaller format for light past white, as a shader names it: thirty-two bits where the device stores into them, half floats where not.</summary>
+	/// <summary>The compact format for light past white, as a shader names it.</summary>
 	public static string CompactStorageName => CoreNative.Available ? CoreRender.CompactStorageName() : "rgba16f";
 
-	/// <summary>The sky's table of colour by elevation and sun angle, as a texture in the indexed table - see CoreRender.TargetKind.SkyTable.</summary>
+	/// <summary>The sky table by elevation and sun angle, as an indexed texture - see TargetKind.SkyTable.</summary>
 	public static ulong SkyTableTexture => CoreNative.Available ? CoreRender.SkyTableTexture() : 0;
 
-	/// <summary>Whether this device fills that table by drawing it with the scene's own sky shader - see CoreRender.DrawsSkyTable, and CoreSkyTable for what fills it where it does not.</summary>
+	/// <summary>Whether the device draws that table with the sky shader; else CoreSkyTable fills it.</summary>
 	public static bool DrawsSkyTable => CoreNative.Available && CoreRender.DrawsSkyTable;
 
-	//A square of half floats, four channels, side across. The full frame draws its table on the card and never comes here.
-	/// <summary>The portable frame's own sky table onto the device - see <see cref="CoreSkyTable" />, which works it out, and g_skyTable in frame.slang, which reads it.</summary>
+	/// <summary>A CPU-made sky table to bind instead of the drawn one; nought for the drawn one.</summary>
+	public static void UseSkyTable( ulong texture )
+	{
+		if ( CoreNative.Available ) CoreRender.UseSkyTable( texture );
+	}
+
+	//Half floats, four channels, side squared; the full frame draws its table on the card
+	/// <summary>The portable frame's sky table onto the device - see <see cref="CoreSkyTable" />.</summary>
 	public static void SendSkyTable( byte* texels, int side )
 	{
 		if ( CoreNative.Available && PortableFrame ) CoreRender.SendSkyTable( texels, side );
@@ -985,8 +989,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//The pipeline wants no vertex input - see VkFrame.DrawObjectsIndexed. What the shape is comes out of the index buffer and whatever the shader pulls for the vertex it was asked for.
-	/// <summary>One shape, drawn many times, with the buffers each instance reads itself out of at set 2.</summary>
+	//No vertex input (VkFrame.DrawObjectsIndexed): the shape is the index buffer and what the shader pulls
+	/// <summary>One shape drawn many times, each instance reading its buffers at set 2.</summary>
 	public static bool DrawObjectsIndexed( ulong pipeline, ulong indexBuffer, int indexCount,
 		int instanceCount, bool wideIndices, ReadOnlySpan<byte> push,
 		ulong texture, ReadOnlySpan<ulong> buffers )
@@ -1001,10 +1005,10 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>How many bytes of instances one <see cref="DrawBlockInstanced"/> carries: a slot of the bone ring, which is the same size on every backend.</summary>
+	/// <summary>Bytes of instances one DrawBlockInstanced carries: a bone ring slot, alike on every backend.</summary>
 	public const int BlockBytes = 128 * 64;
 
-	/// <summary>A mesh drawn as a run of copies whose data sits in a bone-ring slot; the portable instanced draw</summary>
+	/// <summary>A mesh drawn as copies whose data sits in a bone-ring slot; the portable instanced draw.</summary>
 	public static bool DrawIndexedInstancedBlock( ulong pipeline, ulong vertexBuffer, ulong indexBuffer,
 		int indexCount, int instanceCount, ReadOnlySpan<byte> block, ReadOnlySpan<byte> push,
 		int firstIndex, int firstVertex, ulong texture )
@@ -1056,7 +1060,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A dispatch whose group counts a dispatch before it wrote into a buffer - three words at <paramref name="argsOffset"/> bytes.</summary>
+	/// <summary>A dispatch whose group counts an earlier dispatch wrote: three words at argsOffset bytes.</summary>
 	public static bool DispatchIndirect( ulong pipeline, ReadOnlySpan<ulong> buffers,
 		ulong argsBuffer, int argsOffset, ReadOnlySpan<byte> push = default, ulong texture = 0 )
 	{
@@ -1070,8 +1074,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//Waits for the device on both sides of the copy, so this is for between frames - a test, a tool, a compute pass being asked what it counted.
-	/// <summary>What is in a buffer, copied back to the host.</summary>
+	//Waits for the device both sides of the copy, so between frames only
+	/// <summary>A buffer's contents copied back to the host.</summary>
 	public static bool ReadBuffer( ulong buffer, Span<byte> into )
 	{
 		if ( !CoreNative.Available || buffer == 0 || into.IsEmpty ) return false;
@@ -1082,8 +1086,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//What a frame being recorded right now holds has not run: it runs when that frame is submitted, and AskReadback is what reads after it.
-	/// <summary>Part of a buffer copied back to the host - the same wait on both sides of the copy as <see cref="ReadBuffer(ulong, Span{byte})"/>, from <paramref name="offset"/> bytes in.</summary>
+	//A frame being recorded has not run yet; AskReadback reads after it
+	/// <summary>Part of a buffer from <paramref name="offset"/> bytes, waiting as ReadBuffer does.</summary>
 	public static bool ReadBuffer( ulong buffer, long offset, Span<byte> into )
 	{
 		if ( !CoreNative.Available || buffer == 0 || into.IsEmpty || offset < 0 ) return false;
@@ -1099,7 +1103,7 @@ internal static unsafe class CoreRenderDevice
 	/// <summary>Whether a frame is being recorded right now - a window's, or a view's of its own.</summary>
 	public static bool Recording => CoreNative.Available && CoreRender.Recording() != 0;
 
-	/// <summary>A run of a buffer filled with one word, ahead of the next frame - see VkTextures.FillBuffer. Whole words: the offset and the length are multiples of four.</summary>
+	/// <summary>Fills a buffer run with one word before the next frame; offset and length in whole words.</summary>
 	public static bool FillBuffer( ulong buffer, long offset, long size, uint value )
 		=> CoreNative.Available && buffer != 0 && CoreRender.BufferFill( buffer, offset, size, value ) != 0;
 
@@ -1107,12 +1111,12 @@ internal static unsafe class CoreRenderDevice
 	public static bool FrameFill( ulong buffer, long offset, long size, uint value )
 		=> CoreNative.Available && buffer != 0 && CoreRender.FrameFill( buffer, offset, size, value ) != 0;
 
-	/// <summary>Bytes between two buffers where the frame being recorded is, in its order - see VkFrame.FrameCopy.</summary>
+	/// <summary>Bytes between two buffers in the recording frame's order - see VkFrame.FrameCopy.</summary>
 	public static bool FrameCopy( ulong from, long fromOffset, ulong into, long intoOffset, long bytes )
 		=> CoreNative.Available && from != 0 && into != 0 && bytes > 0 &&
 			CoreRender.FrameCopy( from, fromOffset, into, intoOffset, bytes ) != 0;
 
-	/// <summary>A draw out of a project's own buffers into whichever pass is open - see CoreBufferDraw and VkFrame.DrawBuffers. <paramref name="buffers"/> are what the shader reads at set 2, in the order it declared them; none for a draw that binds its vertices or reads a mesh's own pair.</summary>
+	/// <summary>A draw from a project's own buffers, bound at set 2 in declared order - see CoreBufferDraw.</summary>
 	public static bool DrawBuffers( in CoreBufferDraw draw, ReadOnlySpan<byte> push, ReadOnlySpan<ulong> buffers = default )
 	{
 		if ( !CoreNative.Available || draw.Pipeline == 0 ) return false;
@@ -1126,11 +1130,11 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A run of a buffer asked back without waiting for it - see VkReadbacks. The request's number, or nought where it could not be asked: no device, a run past the end, or a backend that reads nothing back.</summary>
+	/// <summary>Asks for a buffer run back without waiting (VkReadbacks); the request id, or nought.</summary>
 	public static int AskReadback( ulong buffer, long offset, long bytes )
 		=> CoreNative.Available && buffer != 0 ? CoreRender.ReadbackAsk( buffer, offset, bytes ) : 0;
 
-	/// <summary>Whether a request asked with <see cref="AskReadback"/> has arrived: one with its bytes, which stay good until <see cref="ReleaseReadback"/>; nought while it is on its way; minus one for one that never will.</summary>
+	/// <summary>Whether a readback arrived: one with bytes (valid until released), nought pending, -1 never.</summary>
 	public static int PollReadback( int id, out ReadOnlySpan<byte> bytes, out bool recorded )
 	{
 		bytes = default;
@@ -1151,7 +1155,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available && id != 0 ) CoreRender.ReadbackRelease( id );
 	}
 
-	/// <summary>One level of a texture into one level of another on the device - a copy where they are alike, a blit that converts and scales where not. See VkTextures.CopyTexture.</summary>
+	/// <summary>One texture level into another: a copy where alike, a converting blit where not.</summary>
 	public static bool CopyTexture( ulong from, int fromLevel, ulong into, int intoLevel )
 		=> CoreNative.Available && from != 0 && into != 0 && CoreRender.TextureCopy( from, fromLevel, into, intoLevel ) != 0;
 
@@ -1159,15 +1163,15 @@ internal static unsafe class CoreRenderDevice
 	public static bool ClearTexture( ulong texture, Color colour )
 		=> CoreNative.Available && texture != 0 && CoreRender.TextureClear( texture, colour.r, colour.g, colour.b, colour.a ) != 0;
 
-	/// <summary>What one of the frame's pictures holds, into every level of a texture, where the frame is - see VkFrame.PictureToTexture.</summary>
+	/// <summary>A frame picture into every level of a texture, in frame order.</summary>
 	public static bool PictureToTexture( ulong picture, ulong texture )
 		=> CoreNative.Available && picture != 0 && texture != 0 && CoreRender.PictureToTexture( picture, texture ) != 0;
 
-	/// <summary>A texture's levels below <paramref name="first"/> blitted out of it - see VkTextures.GenerateMips.</summary>
+	/// <summary>A texture's levels below <paramref name="first"/> blitted from it.</summary>
 	public static bool GenerateTextureMips( ulong texture, int first = 0, int count = -1 )
 		=> CoreNative.Available && texture != 0 && CoreRender.TextureMips( texture, first, count ) != 0;
 
-	/// <summary>Everything handed to the device so far, finished. A stall, for the calls that promise one - see VkDevice.WaitIdle.</summary>
+	/// <summary>Waits for everything handed to the device so far.</summary>
 	public static bool WaitIdle()
 		=> CoreNative.Available && CoreRender.WaitIdle() != 0;
 
@@ -1181,7 +1185,7 @@ internal static unsafe class CoreRenderDevice
 	}
 
 	//Max specialization constants per pipeline; ids below CoreResources.FirstShaderFold are the frame's
-	internal const int SpecializationCount = 18;
+	internal const int SpecializationCount = 19;
 
 	public static ulong CreatePipeline( byte[] vertexSpirv, byte[] pixelSpirv,
 		CoreRender.VertexLayoutKind vertexLayout = CoreRender.VertexLayoutKind.None, bool depthTest = false,
@@ -1206,7 +1210,7 @@ internal static unsafe class CoreRenderDevice
 				(int)vertexLayout, depthTest ? (int)compare : 0, (int)topology,
 				screen ? 3 : additive ? 2 : addByAlpha ? 5 : multiply ? 6 : blend ? 1 : 0,
 				( depthWrite ?? depthTest ) ? 1 : 0, cullBack ? 1 : 0, depthOnly ? 1 : 0, (int)target,
-				//One int of raster flags: bit nought draws edges, bit one leaves the world's second picture alone - see VkPipelines.
+				//Raster flags: bit 0 draws edges, bit 1 leaves the world's second picture alone - see VkPipelines
 				( lines ? 1 : 0 ) | ( colourAlone ? 2 : 0 ),
 				specialize, pictureFormat );
 
@@ -1250,7 +1254,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- buffers ---------------------------------------------------------------
 
-	/// <summary>Puts these bytes in a buffer on the device, usable as vertices or indices. Zero on failure, with the reason in <see cref="Description"/>.</summary>
+	/// <summary>Puts bytes in a device buffer for vertices or indices; zero on failure, see Description.</summary>
 	public static ulong CreateBuffer( ReadOnlySpan<byte> data )
 	{
 		if ( !CoreNative.Available || data.IsEmpty ) return 0;
@@ -1303,7 +1307,7 @@ internal static unsafe class CoreRenderDevice
 		return false;
 	}
 
-	/// <summary>A draw with no vertex buffer, its counts out of a buffer - see sbc_render_draw_pulled_indirect.</summary>
+	/// <summary>A draw with no vertex buffer, its counts from a buffer - see sbc_render_draw_pulled_indirect.</summary>
 	public static bool DrawPulledIndirect( ulong pipeline, ulong argsBuffer, int argsOffset, int drawCount,
 		ReadOnlySpan<byte> push, ulong texture, ReadOnlySpan<ulong> buffers )
 	{
@@ -1317,7 +1321,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>The same with the corners named by an index buffer the card wrote: one indexed draw whose five words are at argsOffset. What the clusters are drawn with - see CoreMeshRender.</summary>
+	/// <summary>The same with a card-written index buffer, five words at argsOffset; how clusters draw.</summary>
 	public static bool DrawPulledIndexedIndirect( ulong pipeline, ulong argsBuffer, int argsOffset, ulong indexBuffer,
 		ReadOnlySpan<byte> push, ulong texture, ReadOnlySpan<ulong> buffers )
 	{
@@ -1331,7 +1335,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A list's clusters as a workgroup each, by a pipeline whose first stage is a mesh stage: three group counts at argsOffset. See CoreMeshRender.</summary>
+	/// <summary>A list's clusters as workgroups through a mesh-stage pipeline: counts at argsOffset.</summary>
 	public static bool DrawMeshIndirect( ulong pipeline, ulong argsBuffer, int argsOffset,
 		ReadOnlySpan<byte> push, ulong texture, ReadOnlySpan<ulong> buffers )
 	{
@@ -1367,7 +1371,7 @@ internal static unsafe class CoreRenderDevice
 		return false;
 	}
 
-	/// <summary>The most instances one call can carry - what the frame set's bone binding covers. A caller with more splits them across calls.</summary>
+	/// <summary>The most instances one call carries, what the bone binding covers; callers split beyond.</summary>
 	public const int MaxInstances = 128;
 
 	/// <summary>Destroys a buffer; waits for the GPU first</summary>
@@ -1378,7 +1382,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.BufferDestroy( buffer );
 	}
 
-	/// <summary>Draws an indexed mesh inside a begun frame. The push bytes - up to 128, whole floats - land in the pipeline's push constant range, visible to both shader stages; empty is fine.</summary>
+	/// <summary>Draws an indexed mesh in a begun frame; up to 128 push bytes reach both stages.</summary>
 	public static bool DrawIndexed( ulong pipeline, ulong vertexBuffer, ulong indexBuffer,
 		int indexCount, ReadOnlySpan<byte> push = default, int firstIndex = 0, int firstVertex = 0,
 		ulong texture = 0 )
@@ -1405,7 +1409,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Draws a skinned mesh. The bones are row-major 4x4 matrices, each already the product of a bone's inverse bind and its current pose, and are copied into the frame - the caller's array is free on return.</summary>
+	/// <summary>Draws a skinned mesh; bones are row-major skin matrices, copied into the frame.</summary>
 	public static bool DrawSkinned( ulong pipeline, ulong vertexBuffer, ulong skinBuffer, ulong indexBuffer,
 		int indexCount, ReadOnlySpan<System.Numerics.Matrix4x4> bones, ReadOnlySpan<byte> push = default,
 		int firstIndex = 0, int firstVertex = 0, ulong texture = 0 )
@@ -1421,13 +1425,13 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Draws the world of a view smaller than the view, between a quarter and one, and lets the compose pass carry it up.</summary>
+	/// <summary>Draws a view's world at a quarter to one of its size, and the compose carries it up.</summary>
 	public static bool SetViewScale( ulong view, float scale )
 		=> CoreNative.Available && view != 0 &&
 			CoreRender.ViewScale( view, scale ) != 0;
 
-	//The same as the window unless the render scale is below one, and the difference between the two is what an upscaler carries.
-	/// <summary>How big the picture the world is drawn into is, for the viewport being drawn right now.</summary>
+	//The window's size unless the render scale is below one; the difference is what an upscaler carries
+	/// <summary>The size of the picture the current viewport's world is drawn into.</summary>
 	public static Vector2 WorldSize()
 	{
 		if ( !CoreNative.Available ) return default;
@@ -1472,8 +1476,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//Remembered by the array it came in, the same way a pose is: a character is drawn into the world, into the shadow atlas and sometimes into a second view, and all of those want the one set of weights.
-	/// <summary>Hands one object's blend shape weights to the frame and says where they landed, or nought.</summary>
+	//Remembered by array like a pose, as one character draws into the world, shadows and other views
+	/// <summary>Hands one object's blend shape weights to the frame and returns where, or nought.</summary>
 	public static uint MorphWeights( float[] weights )
 	{
 		if ( !CoreNative.Available || weights is null || weights.Length == 0 ) return 0;
@@ -1507,7 +1511,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Draws a skinned mesh moved by its blend shapes, against a pose and weights already in the frame.</summary>
+	/// <summary>Draws a skinned mesh moved by its blend shapes, against a pose and weights in the frame.</summary>
 	public static bool DrawMorphedAt( ulong pipeline, ulong vertexBuffer, ulong skinBuffer,
 		ulong runBuffer, ulong deltaBuffer, ulong indexBuffer,
 		int indexCount, uint boneOffset, uint morphOffset, ReadOnlySpan<byte> push = default,
@@ -1533,7 +1537,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- textures --------------------------------------------------------------
 
-	/// <summary>Loads a compiled .tex_c and puts it on the device - its small levels first where it is streamed, see CoreTextureStreaming.Create. Zero on failure, with the reason in <see cref="Description"/> or the log.</summary>
+	/// <summary>Loads a compiled .tex_c onto the device, small levels first where streamed; zero on failure.</summary>
 	public static ulong CreateTexture( string path )
 	{
 		if ( !CoreNative.Available ) return 0;
@@ -1563,11 +1567,11 @@ internal static unsafe class CoreRenderDevice
 			return 0;
 		}
 
-		//A material's picture by path: up as its small levels, the finer ones fetched while something near wears it - see CoreTextureStreaming.
+		//Up as its small levels, finer ones fetched while something near wears it - see CoreTextureStreaming
 		return CoreTextureStreaming.Create( path, asset );
 	}
 
-	//How big a compiled picture is - a .tex_c's or a web build's KTX2's - read off the file. False where it would not load.
+	//A compiled picture's size, from a .tex_c or a web build's KTX2; false where it will not load
 	internal static bool TextureSize( string path, out int width, out int height )
 	{
 		width = height = 0;
@@ -1588,12 +1592,12 @@ internal static unsafe class CoreRenderDevice
 		return true;
 	}
 
-	//A compiled texture that has been read already, onto the device - for whoever needed its size first. Zero on failure.
+	//A compiled texture already read, onto the device; zero on failure
 	internal static ulong CreateTexture( CoreTextureFile asset )
 	{
 		if ( !CoreNative.Available || asset is null ) return 0;
 
-		//Every level's shape, and every level's bytes as they lie in the file. The pixels are copied to the device and the file is let go of after.
+		//Every level's shape and bytes as in the file; copied to the device, then the file is let go
 		var mipCount = asset.MipCount;
 		Span<int> info = mipCount * 3 <= 96 ? stackalloc int[mipCount * 3] : new int[mipCount * 3];
 
@@ -1644,13 +1648,13 @@ internal static unsafe class CoreRenderDevice
 		fixed ( byte* bytes = pixels )
 		fixed ( int* info = levels )
 		{
-			//Format 0 is plain RGBA8 to the device - the numbers after it are the compressed ones a compiled texture can be.
+			//Format 0 is plain RGBA8; the numbers after it are the compressed formats
 			return CoreRender.TextureCreateMips( width, height, 0, srgb ? 1 : 0,
 				levels.Length / 3, info, bytes, pixels.Length );
 		}
 	}
 
-	/// <summary>Light rather than colour onto the device: four half floats a texel, one level, read through the same table as every other picture. What baked lighting is kept in - eight bits cannot hold a sunlit wall and the corner beside it both. Zero where the device has no table to put it in.</summary>
+	/// <summary>Four half floats a texel, one level, in the picture table: light, such as baked lighting.</summary>
 	public static ulong CreateTextureHalf( ReadOnlySpan<Half> texels, int width, int height )
 	{
 		if ( !CoreNative.Available || width <= 0 || height <= 0 || texels.Length < width * height * 4 ) return 0;
@@ -1679,7 +1683,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>A material; maps but colour may be 0 and fall back to it. Doesn't own its textures: destroy it first</summary>
+	/// <summary>A material; maps but colour may be 0 and fall back to it. Destroy it before its textures.</summary>
 	public static ulong CreateMaterial( ulong colour, ulong normal, ulong third, ulong emission,
 		float roughness, float metalness, float emissionStrength, float alphaCutoff )
 	{
@@ -1697,7 +1701,7 @@ internal static unsafe class CoreRenderDevice
 		return CreateMaterial( colour, normal, third, emission, numbers );
 	}
 
-	/// <summary>Rewrites existing materials' numbers in the current frame; written says which need remaking instead</summary>
+	/// <summary>Rewrites materials' numbers in the current frame; written says which need remaking.</summary>
 	public static void WriteMaterialNumbers( ReadOnlySpan<ulong> materials, ReadOnlySpan<float> numbers, Span<byte> written )
 	{
 		var count = Math.Min( materials.Length, Math.Min( written.Length, numbers.Length / MaterialParamFloats ) );
@@ -1747,7 +1751,7 @@ internal static unsafe class CoreRenderDevice
 		return handle;
 	}
 
-	/// <summary>New RGBA8 pixels into a texture already on the device, which keeps its image rather than getting a new one. False for a texture that cannot be written in place - wrong shape, has mips, is a material - where the caller makes a new one instead.</summary>
+	/// <summary>New RGBA8 pixels into an existing texture in place; false where it cannot be, make a new one.</summary>
 	public static bool UpdateTextureRgba( ulong texture, ReadOnlySpan<byte> pixels, int width, int height )
 	{
 		if ( !CoreNative.Available || texture == 0 || pixels.Length < width * height * 4 ) return false;
@@ -1758,7 +1762,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Writes an RGBA8 rectangle into an existing texture (rows stride apart); false means send it whole</summary>
+	/// <summary>Writes an RGBA8 rectangle into an existing texture; false means send it whole.</summary>
 	public static bool UpdateTextureRgbaRegion( ulong texture, ReadOnlySpan<byte> pixels, int stride,
 		int x, int y, int width, int height )
 	{
@@ -1795,7 +1799,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.TextureDestroy( texture );
 	}
 
-	/// <summary>Destroys a pipeline. Waits for the GPU first, so it is safe - merely slow - while frames are in flight.</summary>
+	/// <summary>Destroys a pipeline, waiting for the GPU first: safe, but slow, with frames in flight.</summary>
 	public static void DestroyPipeline( ulong pipeline )
 	{
 		if ( !CoreNative.Available || pipeline == 0 ) return;
@@ -1803,7 +1807,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.PipelineDestroy( pipeline );
 	}
 
-	/// <summary>Draws vertices with a pipeline, inside a begun frame. The vertex shader is on its own for geometry - there are no buffers to read from, which is exactly what a full-screen pass wants.</summary>
+	/// <summary>Draws vertices with no buffers in a begun frame, as a full-screen pass wants.</summary>
 	public static bool Draw( ulong pipeline, int vertexCount,
 		ReadOnlySpan<byte> push = default, ulong texture = 0 )
 	{
@@ -1817,8 +1821,8 @@ internal static unsafe class CoreRenderDevice
 
 	//-- shaders ---------------------------------------------------------------
 
-	//CoreShaderCompiler is the compiler; this is where the renderer's callers have always asked, and they still do.
-	/// <summary>Compiles one entry point of a Slang file to SPIR-V, or null with the reason in <see cref="ShaderError"/>. Needs slang.dll beside the engine.</summary>
+	//Kept for the renderer's callers; CoreShaderCompiler does the work
+	/// <summary>Compiles a Slang entry point to SPIR-V, or null with the reason in ShaderError.</summary>
 	public static byte[] CompileShader( string path, string entryPoint, CoreShaderCompiler.Stage stage,
 		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv )
 	{
@@ -1827,7 +1831,7 @@ internal static unsafe class CoreRenderDevice
 		return CoreShaderCompiler.Compile( path, entryPoint, stage, format );
 	}
 
-	/// <summary>Compiles an entry point from source text, so variants need no temp files in the watched asset folder</summary>
+	/// <summary>Compiles an entry point from source text, so variants need no temp files in watched folders.</summary>
 	public static byte[] CompileShaderSource( string source, string directory,
 		string entryPoint, CoreShaderCompiler.Stage stage,
 		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv )

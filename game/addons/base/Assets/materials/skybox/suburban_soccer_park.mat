@@ -1,0 +1,16 @@
+{
+  "Shader": "shaders/engine/sky_hdri.shader",
+  "Features": {},
+  "Numbers": {},
+  "Textures": {
+    "g_tSkyTexture": "materials/skybox/suburban_soccer_park_1k.exr"
+  },
+  "Tint": "1,1,1,1",
+  "ColorMap": "",
+  "Normal": "",
+  "Emission": "",
+  "Roughness": 1.0,
+  "Metalness": 0.0,
+  "EmissionStrength": 0.0,
+  "AlphaCutoff": 0.5
+}

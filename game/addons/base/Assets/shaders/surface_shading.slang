@@ -3,8 +3,7 @@
 #ifndef ENGINE_SURFACE_SHADING_INCLUDED
 #define ENGINE_SURFACE_SHADING_INCLUDED
 
-//The two numbers the loop below needs out of roughness, worked out once. Both used to be worked out inside the
-//loop, from the roughness, for every light reaching the pixel - and roughness does not change between lights.
+//What the light loop needs of roughness, worked out once since it is the same for every light
 struct Rough
 {
 	//Trowbridge-Reitz's alpha squared.
@@ -81,7 +80,7 @@ struct Surface
 
 	float3 albedo;
 
-	//Carried through to the output untouched - a surface decides its own transparency and the lighting has no opinion about it.
+	//Passed through untouched: a surface decides its own transparency
 	float alpha;
 
 	float roughness;
@@ -93,11 +92,10 @@ struct Surface
 	//The texture coordinate, for the debug view that shows it. Nothing else reads it.
 	float2 uv;
 
-	//The instance the cull pass named this surface by - what the picture of IDs holds for its pixels - or nought for a draw with no instance.
+	//The instance the cull pass named this surface by, as the ID picture holds it; nought without one
 	uint id;
 
-	//Where this pixel sits in its chart of the second set of coordinates, kept for a surface that wants them - and whether
-	//it has any for it at all. Both have to hold: the scene has an atlas, and this draw had a chart packed into it.
+	//This pixel's place in its lightmap chart, and whether it has one: the scene has an atlas and this draw a chart
 	float2 lightmap;
 
 	//SV_Position.xy, for the screen-space occlusion the frame may have drawn.
@@ -125,7 +123,7 @@ void ApplyDecals( inout Surface s )
 
 	for ( uint i = 0u; i < count; ++i )
 	{
-		//The cheap question first, and most pixels stop here: further from the centre than the box reaches at all, whichever way it turns.
+		//The cheap test first, where most pixels stop: further from the centre than the box reaches at all
 		float4 reach = DecalReach( i );
 		float3 rel = s.world - reach.xyz;
 
@@ -140,7 +138,7 @@ void ApplyDecals( inout Surface s )
 
 		if ( any( abs( box ) > 0.5 ) ) continue;
 
-		//The picture's coordinate, its left at the box's -x and its top at +y, the way a picture is drawn - and its gradients, from the world's.
+		//Picture coordinate, left at the box's -x and top at +y, with gradients from the world's
 		float2 uv = float2( box.x + 0.5, 0.5 - box.y );
 		float2 dx = float2( dot( worldDx, d.axisX ) * d.overWidth, -dot( worldDx, d.axisY ) * d.overHeight );
 		float2 dy = float2( dot( worldDy, d.axisX ) * d.overWidth, -dot( worldDy, d.axisY ) * d.overHeight );
@@ -155,8 +153,8 @@ void ApplyDecals( inout Surface s )
 		//dead, so a decal whose box ends inside a wall does not draw a line across it.
 		fade *= saturate( ( 0.5 - abs( box.z ) ) * 10.0 );
 
-		//The height map, where there is one, does two things: walks the picture along the eye's line for relief, and masks it - coverage
-		//says how much of the height stays, from all of it at one to none at nought, and the range how soft the edge of that is.
+		//The height map walks the picture along the view for relief and masks it: coverage keeps one (all) to
+		//nought (none) of the height, the range softens the edge
 		float mask = 1.0;
 
 		if ( d.heightMap != 0u )
@@ -192,8 +190,8 @@ void ApplyDecals( inout Surface s )
 
 		if ( d.normalMap != 0u )
 		{
-			//The map is in the picture's own frame: across the box for x, down it for y, out of the surface for z - laid against
-			//the surface's normal rather than the box's, because it is the surface that is being bent, wherever the box points.
+			//The map's frame: x across the box, y down it, z out of the surface; laid against the surface normal,
+			//since the surface is what bends
 			float3 sampled = DecalData( DecalSample( d.normalMap, uv, dx, dy, float4( 0.5, 0.5, 1.0, 1.0 ) ).rgb,
 				( d.srgb & 2u ) != 0u ) * 2.0 - 1.0;
 
@@ -249,15 +247,14 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 litDiffuse = float3( 0.0, 0.0, 0.0 );
 	float3 litSpecular = float3( 0.0, 0.0, 0.0 );
 
-	//How far down the view this pixel is, which the grid of lights is cut by and the sun's cascade chosen by - worked out once rather than by each.
+	//View depth, which cuts the light grid and picks the sun's cascade, worked out once
 	float viewDepth = mul( float4( s.world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
 
-	//And which lights reach it. A cell of the grid where the frame built one, every light in the frame where it did not - see CoreLights.
+	//The lights reaching it: a grid cell where the frame built one, else every light - see CoreLights
 	LightWalk walk = LightsHere( s.screen, viewDepth );
 	int count = int( walk.count );
 
-	//And where the frame said one light is the most any pixel walks, this stops being a loop: the compiler sees a trip count
-	//of at most one, drops the back edge, and what is left is a test around a straight run - see kManyLights in frame.slang.
+	//With one light at most per pixel this is no loop: a trip count of one drops the back edge - see kManyLights
 	if ( kManyLights == 0 ) count = min( count, 1 );
 
 	for ( int index = 0; index < count; ++index )
@@ -269,7 +266,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float3 l;
 		float attenuation = 1.0;
 
-		//Out here because the shadow needs it too: how big a texel of this lamp's map is in the world depends on how far away the receiver is.
+		//Out here for the shadow too: a lamp map texel's world size depends on the receiver's distance
 		float distance = 0.0;
 
 		if ( light.colour.w < 0.5 )
@@ -279,13 +276,12 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		}
 		else if ( kLampsOn == 0 )
 		{
-			//A frame whose lights are all directional never reaches here, and saying so at bake time takes the whole of what follows - three
-			//quarters of what a light is read as, the falloff, the window, the cone - out of the pixel stage. See kLampsOn in frame.slang.
+			//A frame of only directional lights never gets here, and kLampsOn bakes the falloff, window and cone out
 			continue;
 		}
 		else
 		{
-			//The three a lamp reads and the sun does not, fetched here rather than with the rest of the light - see LightAt.
+			//The three fields a lamp reads and the sun does not, fetched here - see LightAt
 			LightLamp( which, light );
 
 			float3 toLight = light.position.xyz - s.world;
@@ -328,13 +324,13 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		float shadow;
 
-		//Where the bake holds this light's shadow of the still world - see Light.Baked - and its maps hold what moves alone.
+		//Where the bake holds this light's static shadow (Light.Baked); its maps then hold only movers
 		int channel = LightMaskChannel( light );
 
 		if ( light.colour.w < 0.5 )
 		{
-			//Out of the sun's two maps - the still world's pages and what moves - for every surface alike, whether the
-			//clusters drew it or it was drawn loose. See SunShadow. Not the pages where the mask has the still world's answer.
+			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow; not the pages
+			//where the mask has the static answer
 			shadow = SunShadow( s.world, geometric, geometric, true, channel < 0 );
 			shadow = BakedShadow( shadow, s.world, geometric, s.lightmap, channel );
 		}
@@ -412,16 +408,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		litSpecular += specular * reaching;
 	}
 
-	//A highlight is as bright as the source it mirrors, and a small bright one in a smooth surface is brighter than a half
-	//float holds: kept inside it, so the picture and the bloom after it get the brightest it can say rather than infinity.
+	//A small bright highlight can exceed a half float; clamped so the picture and bloom get the most it can say
 	litSpecular = min( litSpecular, 32768.0.xxx );
 
 	//What the corner of a room can see of the sky, if the frame worked it out. The picture is half the
 	//size of the window, which is why this reads by position rather than by anything the mesh carries.
 	float visible = 1.0;
 
-	//And which way the sky that is left is seen from - the bent normal, out of the same picture: the sky's light is taken along it rather than along the
-	//surface's own, so a crevice is lit from its opening. Its length is how much the directions under the texel agreed, and the normal leans on it that much.
+	//The bent normal from the same picture: sky light is taken along it, so a crevice is lit from its opening;
+	//its length is how far the directions agreed, and the normal leans that much
 	float3 skyward = normal;
 
 	//A picture a pass drew, which the portable frame has none of.
@@ -442,15 +437,13 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 	float3 lit = litDiffuse + litSpecular;
 
-	//Lit by the sky itself where there is one - the same three colours the sky is drawn with, so a wall facing the sky is the
-	//colour of the sky facing it. Where there is none, nothing from the sky: what is left is the scene's flat ambient light, below.
-	float3 sky = HasSky() ? SkyAmbient( skyward ) * 0.25 : float3( 0.0, 0.0, 0.0 );
+	//Lit by the sky table where there is a sky, so a wall facing it takes its colour; none without one
+	float3 sky = HasSky() ? SkyAmbient( skyward ) * SkyAmbientScale() : float3( 0.0, 0.0, 0.0 );
 
-	//And what the room itself reflects, where somebody put a probe in it. The sky is what a surface under the open sky is lit by;
-	//indoors it is the walls, and a probe is a picture of them - so inside a box the probe replaces the sky rather than adding to it.
+	//A probe pictures the room's walls, so inside its box it replaces the sky rather than adding to it
 	ProbeMix probes = ProbesHere( s.world );
 
-	//Along the normal at the roughest band, which is as near as a picture of the room gets to "the average light arriving here".
+	//Along the normal at the roughest band, nearest a probe gets to the average light arriving here
 	sky = ProbesOver( probes, sky, s.world, skyward, 1.0, false );
 
 	//And the scene's own ambient light over both, as much as it asks - see SceneAmbient.
@@ -496,8 +489,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//grazing angle nearly all of whatever it is - which is the whole reason a wet road shines and a dry one does not.
 	float3 mirrorColour = lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness );
 
-	//How much of the reflection the occlusion takes: all of what it takes of the sky on a rough surface, less and less of it as
-	//the surface sharpens and the reflection is one ray that the opening may well let through (Lagarde and de Rousiers 2014).
+	//How much occlusion takes of the reflection: all of the sky's on rough surfaces, less as the surface
+	//sharpens (Lagarde and de Rousiers 2014)
 	float seen = saturate( pow( nDotV + visible, exp2( ( -16.0 * roughness ) - 1.0 ) ) - 1.0 + visible );
 
 	float3 reflectance = EnvBrdf( mirrorColour, roughness, nDotV ) * occlusion * seen * horizon;
@@ -505,8 +498,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 	float3 shaded = lit + ambient + reflected + s.emission;
 
-	//The air between here and the eye, laid over the lot. After the emission on purpose: a lamp seen through fog is dimmed
-	//by it like everything else, and adding it afterwards would leave glowing things floating in front of the haze.
+	//Fog over everything, after emission so a lamp in fog is dimmed rather than floating in front of the haze
 	shaded = ApplyFog( shaded, s.world, EYE_FRAME( camera ).xyz, s.screen );
 
 	//Debug view branch gated by kDebugOn at bake time, so normal frames don't pay its registers

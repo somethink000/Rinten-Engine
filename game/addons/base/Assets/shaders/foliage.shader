@@ -3,8 +3,7 @@
 //With wind on, vertices move, so skip the depth pre-pass and draw once in the shading pass
 #define ENGINE_MOVES_VERTICES F_WIND
 
-//And that it reads kFarShading: the calls past the cut draw a pass baked for the distance, without the normal map and the roughness map. Only a shader
-//that says so gets that second pipeline baked - see CoreResources.ShadesFar; every other surface draws its far calls with the pass it draws near with.
+//Reads kFarShading: draws past the cut use a pipeline without normal and roughness maps - see CoreResources.ShadesFar
 #define ENGINE_SHADES_FAR 1
 
 FEATURES
@@ -15,7 +14,7 @@ FEATURES
 	//Roughness map, on by default; off drops the map, the value and the sample (fully matte)
 	Feature( F_ROUGHNESS, 0..1, "Maps" ) < Default( 1 ); >;
 
-	//Metalness and ambient occlusion, the same two complex.shader has: one on wherever the material is any metal at all, the other turned on by its map.
+	//Metalness and occlusion as complex.shader: one on for any metal, the other by its map
 	Feature( F_METALNESS, 0..1, "Maps" ) < Flag( Metalness ); >;
 	Feature( F_AO, 0..1, "Maps" ) < Map( g_tAO ); >;
 
@@ -24,12 +23,10 @@ FEATURES
 	Feature( F_ALPHA, 0..1, "Rendering" );
 	Feature( F_BACKFACES, 0..1, "Rendering" );
 
-	//Whether this material moves at all. Off is a shader with no clock in it, no sample in the vertex stage and no arithmetic per
-	//vertex - which is what a fern in a pot wants, and what the same material wants while it is being looked at in a thumbnail.
+	//Whether it moves: off removes the clock, the vertex sample and per-vertex maths - a potted fern, a thumbnail
 	Feature( F_WIND, 0..1, "Wind" );
 
-	//Whether light comes through. A leaf is thin, and most of what makes a canopy read as leaves rather than as green paper is the sun coming
-	//through the ones between it and the eye. Off is a leaf lit on the side the light is on and nothing more, which is what a thick or a waxy one is.
+	//Light through the leaf, most of what makes a canopy read as leaves; off for thick or waxy leaves
 	Feature( F_TRANSMISSION, 0..1, "Leaf" );
 }
 
@@ -45,16 +42,14 @@ PARAMETERS
 	float g_flAlphaCutoff < Default( 0.5 ); Range( 0, 1 ); UiGroup( "Rendering" ); Feature( F_ALPHA ); >;
 
 
-	//Which way the air is going, in the world, and how fast it beats. The length of the direction means nothing - only where it points.
+	//Wind direction in the world (only where it points) and how fast it beats
 	float3 g_vWindDirection < Default3( 1, 0, 0 ); UiGroup( "Wind" ); Feature( F_WIND ); >;
 	float g_flWindSpeed < Default( 2.5 ); Range( 0, 10 ); UiGroup( "Wind" ); Feature( F_WIND ); >;
 
-	//How far the top of the thing leans, in metres. In metres, and worth saying: this used to be in inches,
-	//where a sixth of a metre is six units and reads as a sensible small number. Six metres is a tree lying down.
+	//How far the top leans, in metres; six is a tree lying down
 	float g_flWindStrength < Default( 0.15 ); Range( 0, 2 ); UiGroup( "Wind" ); Feature( F_WIND ); >;
 
-	//How tall the thing is, in metres, measured from wherever its origin sits. Nothing below the origin moves and nothing above this moves any further:
-	//it is what turns a height in the mesh into how much of the bend this vertex gets, so the base stays planted and the tip does the swaying.
+	//Height above the origin that takes the full bend, in metres: the base stays planted, the tip sways
 	float g_flWindHeight < Default( 2.0 ); Range( 0.05, 20 ); UiGroup( "Wind" ); Feature( F_WIND ); >;
 
 	//Wind stiffness mask (red): white sways, black stays; defaults to white, bending by height alone
@@ -118,12 +113,11 @@ float3 WindOffset( float3 local, float3 origin, float2 uv )
 
 	if ( mask <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
-	//The scene's clock, so a pause stops the wind and the time scale slows it - and in an editor viewport the wall clock, since the
-	//scene there never plays and grass that sways while it is dressed is what anybody expects. See CoreSceneRenderer.BuildFrame.
+	//Scene clock, so pause and time scale apply; wall clock in an editor viewport - see CoreSceneRenderer.BuildFrame
 	float beat = g_frame[0].time.z * g_flWindSpeed;
 
-	//A metre or so of world is a whole turn of phase, so neighbours planted close together are still visibly out of step. The two multipliers
-	//are deliberately not a ratio of small whole numbers, or rows of plants laid out on a grid come back into step with each other.
+	//About a metre of world is a full phase turn, so close neighbours sway out of step; the factors are not a small
+	//whole-number ratio, so plants on a grid do not fall back into step
 	float phase = dot( origin, float3( 4.7, 0.0, 7.3 ) );
 
 	//Two rates, not one: a single sine reads as a machine.
@@ -161,12 +155,10 @@ V2F Vertex( VIn i )
 
 	float3 world = mul( float4( position, 1.0 ), modelToWorld ).xyz;
 
-	//Where this copy of the thing stands, which is what the wind is phased by and what its own shade of green is drawn from. The
-	//matrix's own translation, so an instanced field of grass gets one origin per blade without anything being passed along for it.
+	//Where this copy stands, from its matrix, so instanced grass gets an origin per blade for phase and tint
 	float3 origin = mul( float4( 0.0, 0.0, 0.0, 1.0 ), modelToWorld ).xyz;
 
-	//This copy's own colour: three numbers hashed out of where it stands, turned into a lean towards yellow or towards blue, and
-	//a little lighter or darker. Small on purpose - a plant is still its material's colour, just not exactly its neighbour's.
+	//A small per-copy lean toward yellow or blue, lighter or darker, hashed from where it stands
 	float3 variation = float3( 1.0, 1.0, 1.0 );
 
 	if ( g_flVariation > 0.0 )
@@ -220,7 +212,7 @@ struct Out
 
 };
 
-//The pixel stage's body - run by MainPs below for a rasterised pixel, and by the engine's MainClusterPs for a cluster's. See cluster_surface.slang.
+//The pixel body, run by MainPs for a raster pixel and by MainClusterPs for a cluster's - see cluster_surface.slang
 Out Shade( V2F i, bool front )
 {
 	float2 uv = i.uv;
@@ -243,8 +235,7 @@ Out Shade( V2F i, bool front )
 
 		if ( cutoff > 0.0 )
 		{
-			//What the picture's small levels cover is kept where the picture is compiled - see CoreTextureFile.KeepCoverage
-			//- so the alpha read here is the leaf's at any distance, and nothing is lifted by the mip.
+			//Small levels keep the leaf's coverage (CoreTextureFile.KeepCoverage), so alpha holds at any distance
 			float opacity = texel.a;
 
 			//How fast the cut-out changes across this pixel - see complex.shader. A full-screen pass has no
@@ -295,8 +286,7 @@ Out Shade( V2F i, bool front )
 #if !F_ROUGHNESS
 	float roughness = 1.0;
 #else
-	//The picture read at face value, times the number beside it - see complex.shader. The far calls take the number alone: a
-	//roughness map read at a pixel a leaf is the map's own average, and its own average is what the material's number is set to.
+	//The map times the number, as complex.shader; far draws take the number alone, the map's average at that size
 	float roughness = kFarShading != 0
 		? clamp( g_flRoughness, 0.04, 1.0 )
 		: clamp( SampleUv( g_tRoughness, uv ).r * g_flRoughness, 0.04, 1.0 );
@@ -362,7 +352,7 @@ Out Shade( V2F i, bool front )
 			}
 
 			if ( HasSky() )
-				gain += SceneAmbient( SkyAmbient( -n ) * 0.25 ) * 0.25;
+				gain += SceneAmbient( SkyAmbient( -n ) * SkyAmbientScale() ) * 0.25;
 
 			lit.colour += filter * gain * through;
 		}
@@ -378,7 +368,7 @@ Out Shade( V2F i, bool front )
 
 	//Tonemap when drawing straight to screen; alpha must be opaque or the Linux window shows through
 #ifdef TARGET_SCREEN
-	//Its alpha is the surface's own where this draw blends - see ScreenAlpha in frame.slang, and the comment above for why everything else leaves one.
+	//The surface's own alpha where this draw blends - see ScreenAlpha in frame.slang
 #if F_TRANSLUCENT
 	bool blends = true;
 #else

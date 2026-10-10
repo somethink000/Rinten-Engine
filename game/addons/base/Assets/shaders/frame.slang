@@ -49,8 +49,8 @@ struct VIn
 
 #ifdef CLUSTER
 
-//Drawn as a cluster, a draw's own numbers come out of the instance the cluster belongs to rather than out of the push
-//block - cluster_main.slang fills these before either of the surface's stages runs. The push carries the pass's numbers.
+//For a cluster, a draw's numbers come from its instance, filled by cluster_main.slang before either stage;
+//the push carries the pass's numbers
 [[vk::push_constant]]
 cbuffer Push
 {
@@ -94,14 +94,14 @@ cbuffer Push
 {
 	row_major float4x4 g_modelToWorld;
 
-	//The colour this draw is multiplied by. The material's own Tint is read into it as well, so there is one tint and not two.
+	//The draw's colour multiplier, with the material's Tint folded in so there is one tint
 	float4 g_tint;
 
-	//Where this draw sits in the baked atlas: scale in xy, offset in zw. A scale of nothing means it has no chart and nothing was baked for it.
+	//The draw's place in the baked atlas: scale xy, offset zw; a zero scale means no chart, nothing baked
 	float4 g_object;
 
-	//And the numbers the draw set for itself - what a shader declared with Attribute( … ) reads out of these. Eight floats, which
-	//is what is left of the block; the engine writes them in the order the shader declared them. See CoreShaderParams.DrawSlots.
+	//Numbers the draw set itself, read by Attribute( ... ) parameters: eight floats in declared order
+	//- see CoreShaderParams.DrawSlots
 	float4 g_draw0;
 	float4 g_draw1;
 };
@@ -112,8 +112,8 @@ cbuffer Push
 #include "frame_data.slang"
 #include "picture_size.slang"
 
-//The numbers a material carries. Declared here for a shader that declares none of its own; a shader with a PARAMETERS block
-//gets this written for it instead, with a slot per number it asked for, and says so with this define - see CoreShaderParams.
+//A material's numbers, for a shader without its own; a PARAMETERS block writes its own and sets this define
+//- see CoreShaderParams
 #ifndef ENGINE_MATERIAL_BLOCK
 
 struct MaterialParams
@@ -151,7 +151,7 @@ struct BoneBlock
 
 #ifdef INSTANCED
 
-//How many matrices one copy's numbers take in the ring: the world matrix, and one more holding the four float4s the push block would have carried.
+//Matrices per copy in the ring: the world matrix, and one holding the push block's four float4s
 static const uint InstanceMatrices = 2u;
 
 //Per-copy instance numbers from the ring skinned draws use for bones; the two never overlap
@@ -183,11 +183,11 @@ struct MorphDelta
 static const uint MorphsPerVertex = 64;
 static const uint MorphsPerObject = 256;
 
-//How far each of this object's shapes is pushed, out of the frame's scratch at an offset of its own - the same arrangement the bones arrive by.
+//How far each shape of this object is pushed, from the frame scratch at its own offset, like the bones
 [[vk::binding(6,1)]] StructuredBuffer<float> g_morphWeights;
 
-//And the deltas, which belong to the model rather than to the frame, so they come in at set 2 with the draw that reads them. Read as bytes
-//and unpacked by hand: the struct is twenty-eight bytes on disk and a float3 in a structured buffer is not promised to be packed that way.
+//The deltas belong to the model, so they bind at set 2 with the draw; read as bytes since the 28-byte
+//on-disk struct is not packed as a structured buffer's float3
 [[vk::binding(0,2)]] ByteAddressBuffer g_morphDeltas;
 
 //MorphDelta byte layout; must match sbc::assets::MorphDelta (checked by ModelMorphLayoutTests)
@@ -210,8 +210,7 @@ MorphDelta LoadMorphDelta( uint index )
 
 #endif
 
-//Which debug view this frame is drawn in, or nought for the ordinary one. The numbers are SceneCameraDebugMode's, so what the editor's menu offers
-//and what a shader answers to are the same list. Uniform across the frame, so the branch below costs a predicted jump rather than divergence.
+//The debug view, nought for none, numbered as SceneCameraDebugMode; frame-uniform, so a predicted branch
 int DebugView() { return int( g_frame[0].viewInfo.x ); }
 
 //Debug view colours; a distinct colour per culled instance, magenta for no instance
@@ -251,7 +250,7 @@ float3 DebugSurface( int view, float3 albedo, float3 normal, float roughness,
 		case 13: return float3( metalness, metalness, metalness );
 		case 14: return float3( occlusion, occlusion, occlusion );
 
-		//The normal after the map has had its say, in world space, in the usual half-and-half encoding: flat ground is pale blue-green.
+		//The mapped world normal in the half-and-half encoding: flat ground is pale blue-green
 		case 21: return normal * 0.5 + 0.5;
 
 		default: return shaded;
@@ -260,8 +259,8 @@ float3 DebugSurface( int view, float3 albedo, float3 normal, float roughness,
 
 #include "skin_blend.slang"
 
-//Four weighted bones, clamped to the 128 the draw's descriptor covers - blended as the palette says, matrices or dual quaternions: see skin_blend.slang.
-//A zero-weight slot is not fetched: unused links often sit at 255, and that index is a lost device on this driver even multiplied by zero.
+//Four weighted bones, clamped to the descriptor's 128, as matrices or dual quaternions (skin_blend.slang);
+//zero-weight slots are not fetched, as index 255 loses the device on this driver even times zero
 float4x4 SkinAt( uint4 bones, float4 weights )
 {
 	float4x4 first = g_bones[min( bones.x, 127u )];
@@ -288,8 +287,8 @@ float3 TangentAgainst( float3 n, float3 tangent )
 //palettes both pick a slot per sample, so the table lives here with the frame.
 [[vk::binding(0,3)]] Sampler2D g_textures[];
 
-//What the surfaces darken by: the picture named "Occlusion" a pass drew after the depth pre-pass - see AmbientOcclusion - by its place in the table,
-//which the drawer writes into viewInfo.y once it exists. Nought, and settings.x with it, where nobody drew one - see CoreSceneRenderer.LayOcclusion.
+//The "Occlusion" picture drawn after the pre-pass (AmbientOcclusion), by table index in viewInfo.y; nought,
+//with settings.x, where none was drawn - see CoreSceneRenderer.LayOcclusion
 #define g_occlusionMap g_textures[uint( g_frame[0].viewInfo.y )]
 
 
@@ -317,7 +316,7 @@ uint LightCount()
 #endif
 }
 
-//Whether this frame kept a picture of the world's depth after the pre-pass - a DepthPicture on the camera - for a surface to read what is behind it.
+//Whether the frame kept the world's depth after the pre-pass (a camera DepthPicture), for reading what is behind
 bool HasDepthBehind()
 {
 #ifdef PORTABLE
@@ -400,7 +399,7 @@ void LightLamp( uint index, inout Light one )
 #endif
 }
 
-//Which lights a pixel has to walk: the cell of the grid it falls in, or all of them where the frame built no grid - see CoreLights.
+//The lights a pixel walks: its grid cell, or all of them without a grid - see CoreLights
 struct LightWalk
 {
 	//How many to walk.
@@ -507,7 +506,7 @@ uint DecalCount()
 #endif
 }
 
-//Where the centre of one decal is and how far it reaches, which is all a pixel outside it needs to read - see DecalAt for the rest.
+//A decal's centre and reach, all a pixel outside it reads - see DecalAt for the rest
 float4 DecalReach( uint index )
 {
 #ifdef PORTABLE
@@ -689,14 +688,13 @@ bool HasSun()
 	return g_frame[0].sunDirection.w > 0.0;
 }
 
-//Whether that sun casts a shadow at all - its Shadows box. Off, it lights everything it faces, and neither map is baked or read - see SunShadow.
+//Whether the sun casts shadows (its Shadows box); off, it lights all it faces and no map is read - see SunShadow
 bool SunCasts()
 {
 	return g_frame[0].sunEye.w > 0.5;
 }
 
-//The three colours, and nothing else: zenith above, ground below, horizon between. What the sky was before it had a sun to answer to, and what it
-//still is in a frame without one - a material preview, a bake of a scene nobody put a light in. A sky with no sun has no time of day to be at.
+//Zenith, horizon and ground colours only: the sky of a frame without a sun, a preview or an unlit bake
 float3 SkyGradientOf( float height )
 {
 	float3 upper = lerp( g_frame[0].horizon.rgb, g_frame[0].zenith.rgb, saturate( height ) );
@@ -718,7 +716,7 @@ float NightFactor()
 	return g_frame[0].sunLight.a;
 }
 
-//How many samples the table holds across each of its two numbers - see VkDevice.SkyTableSide, which sizes the picture the card draws it into.
+//Samples across each of the table's two axes - see VkDevice.SkyTableSide
 static const float SkyTableSide = 64.0;
 
 #ifdef PORTABLE
@@ -726,9 +724,30 @@ static const float SkyTableSide = 64.0;
 [[vk::binding(5,1)]] Sampler2D g_skyTable;
 #endif
 
-//Sky table UV: x sun cosine, y sqrt of height; must match sky_surface.slang
+//Where a direction lands on a panorama turned about up by turn radians: u round from -X the way Blender lays one out,
+//v straight down from the zenith. CorePanorama.Uv is the same on the CPU
+float2 PanoramaUv( float3 direction, float turn )
+{
+	float s = sin( turn );
+	float c = cos( turn );
+
+	float x = ( direction.x * c ) - ( direction.z * s );
+	float z = ( direction.x * s ) + ( direction.z * c );
+
+	return float2( ( atan2( -z, -x ) * 0.15915494 ) + 0.5, 0.5 - ( asin( clamp( direction.y, -1.0, 1.0 ) ) * 0.31830989 ) );
+}
+
+//Sky table UV: x sun cosine, y sqrt of height, as sky_surface.slang; a panorama's table is laid out as a panorama
 float2 SkyTableUv( float3 direction )
 {
+	if ( kPanoramaOn != 0 && g_frame[0].panorama.w > 0.5 )
+	{
+		float2 uv = PanoramaUv( direction, 0.0 );
+
+		//Held to the first and last rows' centres: the picture's sampler may wrap, and the zenith is not the ground
+		return float2( uv.x, clamp( uv.y, 0.5 / SkyTableSide, 1.0 - ( 0.5 / SkyTableSide ) ) );
+	}
+
 	float up = saturate( direction.y * 0.5 + 0.5 );
 
 	float2 at = float2( saturate( dot( direction, g_frame[0].sunDirection.xyz ) ), sqrt( up ) );
@@ -764,6 +783,12 @@ bool SkyTableAt( float3 direction, out float3 colour )
 #endif
 }
 
+//A quarter of the procedural sky, whose colours are tuned to be seen; all of a panorama's, already irradiance over pi
+float SkyAmbientScale()
+{
+	return kPanoramaOn != 0 && g_frame[0].panorama.w > 0.5 ? 1.0 : 0.25;
+}
+
 //Sky ambient for a normal, read from the sky table so each sky's maths stays in its own shader
 float3 SkyAmbient( float3 normal )
 {
@@ -771,7 +796,7 @@ float3 SkyAmbient( float3 normal )
 
 	if ( SkyTableAt( normal, held ) ) return held;
 
-	//The three colours the scene's sky was set to and nothing else: a frame with no table is a preview, a bake, a scene whose sky never drew.
+	//The scene's sky colours alone: a frame without a table is a preview, a bake, or a sky that never drew
 	return SkyGradientOf( normal.y );
 }
 
@@ -785,9 +810,31 @@ float3 SkyDrawn( float3 direction )
 	return SkyGradientOf( direction.y );
 }
 
+//A panorama's GGX levels, roughness level / ( levels - 1 ) - see CorePanorama.Prefilter; any other sky's table
+float3 SkyReflected( float3 direction, float roughness )
+{
 #ifndef PORTABLE
-//Every picture the device has, as depth to compare against: the same table as g_textures, read through the sampler a shadow map was put in it with
-//- see VkTextures.ShadowMapCreate. A drawer's shadow maps are its own, so the frame block says where they are rather than a binding of the frame.
+	uint picture = uint( g_frame[0].panorama.x );
+
+	if ( kPanoramaOn != 0 && picture != 0 )
+	{
+		float level = saturate( roughness ) * ( g_frame[0].panorama.z - 1.0 );
+		float2 uv = PanoramaUv( direction, g_frame[0].panorama.y );
+
+		//Held to the first and last rows' centres, as the sampler wraps; the last level is 8x4, each above twice as tall
+		float rows = 4.0 * exp2( g_frame[0].panorama.z - 1.0 - ceil( level ) );
+		uv.y = clamp( uv.y, 0.5 / rows, 1.0 - ( 0.5 / rows ) );
+
+		return g_textures[picture].SampleLevel( uv, level ).rgb * g_frame[0].panoramaLight.rgb;
+	}
+#endif
+
+	return SkyDrawn( direction );
+}
+
+#ifndef PORTABLE
+//Every picture as depth to compare against, through the shadow sampler (VkTextures.ShadowMapCreate);
+//a drawer's maps are its own, so the frame block says where they are
 [[vk::binding(0,3)]] Sampler2DArrayShadow g_shadowMaps[];
 
 //And the same maps read as plain depth - no compare - through their second place in the table, for
@@ -795,8 +842,8 @@ float3 SkyDrawn( float3 direction )
 [[vk::binding(0,3)]] Sampler2DArray g_depthMaps[];
 #endif
 
-//The sun's pages as CoreSunPages lays them out: texels a page, pages a level across, and how far from the eye a level may be read in its own
-//pages - ReachPages there, which this has to agree with, or a tap at the edge of a level lands on the slot holding the far side of its torus.
+//CoreSunPages' layout: texels a page, pages a level across, and how far a level reads (ReachPages there),
+//which must agree or an edge tap lands on the torus's far side
 static const float SunPageTexels = 32.0;
 static const float SunPageGrid = 64.0;
 static const float SunReachPages = 30.875;
@@ -807,7 +854,7 @@ static const float MoverTexels = 1024.0;
 //Shadow receiver step back along the light, in map texels; slopes are handled per tap instead
 static const float ShadowBiasTexels = 1.0;
 
-//How far the sun's reads step off the surface, in texels of the level read: out past the four texels a compared tap reads about its middle.
+//How far sun reads step off the surface, in the read level's texels: past a compared tap's four
 static const float SunLiftTexels = 2.0;
 
 //One hard shadow compare (1 lit), against the receiver's plane via slope to avoid self-shadow streaks
@@ -820,7 +867,7 @@ float ShadowSharp( uint map, float3 at, float compare, float2 slope )
 #endif
 }
 
-//The widest a shadow's edge spreads each side of where it falls, in texels of the map read - as far as ShadowEdge looks.
+//The widest a shadow edge spreads each side, in the read map's texels, as far as ShadowEdge looks
 static const float ShadowSoftestTexels = 2.0;
 
 //Five taps detect a shadow edge; when they agree, that's the final lit value and filtering is skipped
@@ -882,8 +929,7 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 
 	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
 
-	//Weighed one, three, three, one each way: the taps furthest out count least, so the edge fades into what ShadowEdge's five said
-	//where they agree - equal weights stopped a step short of it, a faint stair where the filter ended and the early answer began.
+	//1-3-3-1 weights, so the outer taps fade into ShadowEdge's early answer; equal weights left a faint stair
 	static const float weights[4] = { 1.0, 3.0, 3.0, 1.0 };
 
 	float apart = soft / 1.5;
@@ -904,8 +950,7 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 #endif
 }
 
-//One tap of the same map, for a point that is not on a surface. A point in the air has no plane for the taps to lie along and nothing to step
-//off - and what a volume asks the map is asked eight times along every ray and weighted into one number. See VolumeFog, the only caller.
+//One tap for a point in the air, with no plane to lie along or step off; only VolumeFog asks
 float ShadowTap( uint map, float3 at, float compare )
 {
 #ifdef PORTABLE
@@ -921,8 +966,8 @@ float ShadowTap( uint map, float3 at, float compare )
 //- see CorePortableSun, which draws it and writes what this reads into the words the pages use.
 [[vk::binding(2,1)]] Sampler2DShadow g_sunShadow;
 
-//How much of the sun reaches a point out of that map - SunShadow's answer in the portable frame, with the same step off the
-//surface and the same one compared tap held off the receiver's plane, over one square instead of levels - see ShadowSharp.
+//The portable frame's SunShadow: the same step off the surface and one tap held off the receiver's plane,
+//over one square instead of levels - see ShadowSharp
 float PortableSunShadow( float3 world, float3 normal, float3 step )
 {
 	float side = g_frame[0].sunPages.x;
@@ -936,7 +981,7 @@ float PortableSunShadow( float3 world, float3 normal, float3 step )
 	float4 at = mul( float4( world + ( step * ( texelWorld * 1.5 ) ), 1.0 ), g_frame[0].sunToPages );
 	float2 uv = ( at.xy * 0.5 ) + 0.5;
 
-	//GL draws its pictures bottom row first, so what it wrote at the top of the light's view is at the bottom of the map - see the GLSL translation.
+	//GL stores pictures bottom row first, so the top of the light's view is the bottom of the map
 #ifdef WEBGL
 	uv.y = 1.0 - uv.y;
 #endif
@@ -944,7 +989,7 @@ float PortableSunShadow( float3 world, float3 normal, float3 step )
 	float edge = 2.0 / texels;
 	if ( any( uv < edge ) || any( uv > 1.0 - edge ) ) return 1.0;
 
-	//The receiver's plane down the light, as the pages have it: the matrix's across and up are two over the side, its along the depth's own scale.
+	//The receiver's plane as the pages have it: across and up span two over the side, along by depth scale
 	float3 facing = mul( float4( normal, 0.0 ), g_frame[0].sunToPages ).xyz;
 	float3 metres = float3( facing.xy * ( side * 0.5 ), facing.z / max( zScale, 1e-8 ) );
 	float2 tilt = metres.xy / max( -metres.z, 0.1 );
@@ -962,8 +1007,7 @@ float PortableSunShadow( float3 world, float3 normal, float3 step )
 }
 #endif
 
-//The sun's angular radius, as its tangent: a quarter of a degree and a little, the sun as it is. An edge spreads each side by this
-//much for every metre the receiver stands behind what shades it - five millimetres. Not a setting: the sun's size is the sun's.
+//The sun's angular radius as a tangent: an edge spreads this much per metre between receiver and caster
 static const float SunSourceTan = 0.004651;
 
 //The sun's edge as wide as the sun makes it: sharp where a receiver stands on its caster, five millimetres wider
@@ -990,7 +1034,7 @@ float SunLevel( uint level, float3 world, float3 step, float2 tilt, bool wide, f
 
 	float3 lifted = mul( float4( world + ( step * ( texelWorld * SunLiftTexels ) ), 1.0 ), g_frame[0].sunToPages ).xyz;
 
-	//The level's span divided out, and nothing else: the sampler repeats, and the level is a torus - a tile lives in its slot modulo the grid.
+	//The level's span divided out; the sampler repeats, as a level is a torus with tiles in slots modulo the grid
 	float2 uv = lifted.xy / ( page * SunPageGrid );
 
 	//A texel of this level, into its depth - the bias and the plane's step both.
@@ -1037,7 +1081,7 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true, boo
 	float2 tilt = facing.xy / max( -facing.z, 0.1 );
 	float vis = 1.0;
 
-	//Not where the still world's shadow is the bake's mask, read beside this by the caller - see BakedShadow. The pages may still be there, for the fog.
+	//Not where the bake's mask holds the static shadow (BakedShadow); the pages may still be there for fog
 	if ( !stillWorld ) level = levels;
 
 	if ( level < levels )
@@ -1094,7 +1138,7 @@ float4 ScreenReflected( float3 world, float3 normal, float3 away )
 	float3 camera = EYE_FRAME( camera ).xyz;
 	float lift = 0.02 + ( 0.002 * length( world - camera ) );
 
-	//The opaque world's depth at its own size where the frame kept it, for the last word on where the ray met something; no normals to hand mid-pass.
+	//The opaque world's depth where kept, for where the ray really hit; no normals mid-pass
 	uint fine = g_frame[0].viewInfo.z > 0.0 ? uint( g_frame[0].viewInfo.z ) : 0u;
 
 	ScreenHit hit = ScreenTrace( chain, fine, 0u, world + ( normal * lift ), away,
@@ -1140,7 +1184,7 @@ float3 SunLevelView( float3 world, float3 normal )
 	float2 grid = at.xy / texelWorld;
 	float2 perPixel = fwidth( grid );
 	float2 stripe = saturate( 1.0 - ( abs( frac( grid + 0.5 ) - 0.5 ) / max( perPixel, 1e-5 ) ) );
-	//Each way on its own: a floor seen low has its texels many pixels across and a fraction of one deep, and the lines across stay worth drawing.
+	//Each axis on its own: a floor seen low has texels wide across and thin deep, and the cross lines still count
 	float2 fade = saturate( 1.0 - ( perPixel * 3.0 ) );
 	float lines = max( stripe.x * fade.x, stripe.y * fade.y );
 
@@ -1154,15 +1198,15 @@ float3 SunLevelView( float3 world, float3 normal )
 static const float LampLayerTexels = 2048.0;
 static const float LampGuardTexels = 4.0;
 
-//How far a lamp's read steps off the surface, and its bias, in texels of a face five hundred and twelve across, whatever size
-//the face is: in metres, not in its own texels. With a texel halved, the floor a lamp grazes shadowed itself in stripes.
+//A lamp read's step and bias in texels of a 512 face whatever its size, so in metres; per-texel halving
+//striped a grazed floor
 static const float LampSteadyTexels = 512.0;
 static const float LampLiftTexels = 1.5;
 static const float LampBiasTexels = 1.0;
 static const float LampNear = 0.05;
 
-//The square a lamp's face looks down `forward` with: across and up. CoreSunPages.LightAxes makes the same two from the same direction - the world's up
-//unless the face runs near it, then the world's forward - and the projection a face was drawn with is built from them, so the two must not disagree.
+//A lamp face's across and up for `forward`, as CoreSunPages.LightAxes builds them: world up, or world forward
+//near it; the face was projected with these, so they must agree
 void LampAxes( float3 forward, out float3 right, out float3 up )
 {
 	float3 along = abs( forward.y ) < 0.9 ? float3( 0.0, 1.0, 0.0 ) : float3( 0.0, 0.0, -1.0 );
@@ -1201,7 +1245,7 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 
 	bool spot = light.colour.w > 1.5;
 
-	//How far across a face is a metre out: one for ninety degrees, the cone's half-angle's tangent for a spot - clamped as CoreLampMaps clamps it.
+	//A face's width a metre out: one for ninety degrees, a spot's half-angle tangent, clamped as CoreLampMaps does
 	float outer = clamp( light.cone.x, 0.17364818, 0.9998 );
 	float halfTan = spot ? sqrt( 1.0 - ( outer * outer ) ) / outer : 1.0;
 	uint sizeClass = uint( light.cone.w );
@@ -1234,15 +1278,15 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 
 	float2 uv = ( float2( dot( d, right ), dot( d, up ) ) * ( fit / ( halfTan * along ) ) * 0.5 ) + 0.5;
 
-	//Where the face is in the map: the lamp's first square and the face's place after it, counted layer by layer, each layer cut into squares of its size.
+	//The face's place in the map: the lamp's first square plus the face, counted layer by layer in squares of its size
 	uint perRow = 1u << sizeClass;
 	uint square = uint( first ) + face;
 	uint within = square % ( perRow * perRow );
 	float2 corner = float2( float( within % perRow ), float( within / perRow ) );
 	float3 at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
 
-	//The depth a face holds: from LampNear to the lamp's reach, as its projection wrote it. And the bias, LampBiasTexels'
-	//worth of metres, through that projection's own derivative - a number of depth is a different distance at every range.
+	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
+	//that projection's derivative, as a depth step differs at every range
 	float far = max( light.position.w, LampNear + 0.01 );
 	float b = LampNear * far / ( far - LampNear );
 	float depth = ( far / ( far - LampNear ) ) - ( b / along );
@@ -1260,7 +1304,7 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 
 	float lit = LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
 
-	//What moves in this face is in the movers' map beside it, where its bit says it was drawn this frame - see CoreLampMaps. Shadowed by either.
+	//This face's movers are in the movers map beside it where its bit says it was drawn - see CoreLampMaps
 	uint moversMap = uint( g_frame[0].sunDepth.z );
 
 	if ( ( uint( light.shape.y ) & ( 1u << face ) ) != 0u && moversMap != 0u && lit > 0.0 )
@@ -1319,15 +1363,14 @@ static const int kLampsOn = 1;
 static const int kSkyTableOn = 1;
 #endif
 
-//Whether the frame has fog in it at all - the same word ApplyFog would have found nought in, see CoreSceneRenderer.SetFog.
+//Whether the frame has fog, as ApplyFog would find - see CoreSceneRenderer.SetFog
 #ifdef SPECIALIZED
 [vk::constant_id( 5 )] const int kFogOn = 1;
 #else
 static const int kFogOn = 1;
 #endif
 
-//And whether it drew an occlusion picture for the world to read - settings.x, which is nought when there is none. Off by default as a
-//project setting, so the branch that reads it is one more piece of the pixel stage that the ordinary frame carries and never enters.
+//Whether an occlusion picture was drawn (settings.x non-zero); a project setting, off by default, so folded out
 #ifdef SPECIALIZED
 [vk::constant_id( 6 )] const int kOcclusionOn = 1;
 #else
@@ -1371,8 +1414,7 @@ static const int kDecalsOn = 0;
 static const int kDecalsOn = 1;
 #endif
 
-//Whether the frame has baked lighting to read - see HasBakedSheet. A scene nobody baked, which is most of them while they are being built,
-//folds the sheet's two reads and the volume's six out of every surface, and with them the registers the branch around them would have held.
+//Whether there is baked lighting (HasBakedSheet); an unbaked scene folds out the sheet and volume reads
 #ifdef SPECIALIZED
 [vk::constant_id( 10 )] const int kBakedOn = 1;
 #else
@@ -1381,14 +1423,21 @@ static const int kBakedOn = 1;
 
 //Sky spec constants: fold out moon/stars (and the sky's own cloud) when unused, to cut registers
 
-//Whether there is any night in this frame - NightFactor above nought. Nought folds the moon and the stars out of the sky's pixel stage.
+//Whether the sky is a panorama (panorama.w); nought folds its table layout, ambient and reflections out
+#ifdef SPECIALIZED
+[vk::constant_id( 18 )] const int kPanoramaOn = 1;
+#else
+static const int kPanoramaOn = 1;
+#endif
+
+//Whether there is any night (NightFactor above nought); nought folds the moon and stars out of the sky
 #ifdef SPECIALIZED
 [vk::constant_id( 11 )] const int kNightOn = 1;
 #else
 static const int kNightOn = 1;
 #endif
 
-//And whether there is any day in it - NightFactor below one. Nought, at night, folds the sun's disc, its limb and its glare out of the same stage.
+//Whether there is any day (NightFactor below one); nought folds the sun's disc and glare out of the sky
 #ifdef SPECIALIZED
 [vk::constant_id( 12 )] const int kSunDiscOn = 1;
 #else
@@ -1431,7 +1480,7 @@ ProbeMix ProbesAt( float3 world )
 		float3 near = min( world - mins, maxs - world );
 		float weight = saturate( min( near.x, min( near.y, near.z ) ) / fade );
 
-		//A probe with no picture yet - not captured, or its capture failed - is no probe: read as a colour it is a room with no light in it.
+		//A probe without a picture (not captured, or failed) is no probe, not a dark room
 		if ( weight <= 0.0 || probe.where.w < 0.5 ) continue;
 
 		if ( mix.first < 0 )
@@ -1534,7 +1583,7 @@ float3 FogLampLight( float3 here, float3 view, float2 screen )
 
 		float3 l = toLight / max( distance, 0.0001 );
 
-		//See the lamp loop in surface_shading.slang, which this repeats: inverse square, windowed to nothing at the range.
+		//As the lamp loop in surface_shading.slang: inverse square, windowed to nothing at the range
 		float reach = distance / max( light.position.w, 0.0001 );
 		float falloff = saturate( 1.0 - reach * reach * reach * reach );
 		float square = max( distance * distance, 0.0001 );
@@ -1574,7 +1623,7 @@ bool FogVolumeSheet( float3 world, float2 screen, out float3 scattered, out floa
 
 	if ( sheet == 0 || slices < 1.0 || Eye() != 0 ) return false;
 
-	//How far down the view the point is - the same number the clip position's w holds, which is what the slices were laid out along.
+	//View depth, the clip position's w, which the slices are laid along
 	float depth = mul( float4( world, 1.0 ), g_frame[0].worldToClip ).w;
 
 	if ( depth <= near )
@@ -1594,8 +1643,8 @@ bool FogVolumeSheet( float3 world, float2 screen, out float3 scattered, out floa
 
 	float2 uv = saturate( screen / float2( max( g_frame[0].settings.y, 1.0 ), max( g_frame[0].settings.z, 1.0 ) ) );
 
-	//Which tile of the sheet a slice is in - the slices are laid across and then down, because a column of them would be a picture taller
-	//than a device will make. See CoreVolumeFog.Columns, which decides this, and the writer, which lays them out the same way round.
+	//The slice's tile: laid across then down, as one column would be taller than a device allows - see
+	//CoreVolumeFog.Columns and the writer, which lay them out the same way
 	float rows = ceil( slices / columns );
 
 	//Inside its own tile, so the filter cannot reach into the slice beside it: a sheet of
@@ -1626,7 +1675,7 @@ float3 VolumeFog( float3 lit, float3 world, float3 eye, float2 screen )
 	int count = (int)g_frame[0].fogVolumeInfo.x;
 	if ( count <= 0 ) return lit;
 
-	//The sheet, where the frame drew one - one read instead of eight steps and eight taps of the sun's map, and the same arithmetic at the end.
+	//The sheet where drawn: one read instead of eight steps and eight sun taps, then the same arithmetic
 	{
 		float3 scattered;
 		float through;
@@ -1687,7 +1736,7 @@ float3 VolumeFog( float3 lit, float3 world, float3 eye, float2 screen )
 			float t = t0 + ( i + 0.5 ) * step;
 			float3 local = origin + direction * t;
 
-			//One at the centre, nought at the faces, raised to the fade: an exponent of nought is a hard-edged box, one a straight fade.
+			//One at the centre, nought at the faces, to the fade's power: nought a hard box, one a straight fade
 			float edge = saturate( 1.0 - max( abs( local.x ), max( abs( local.y ), abs( local.z ) ) ) );
 			float density = strength * kFogVolumeDensity * pow( edge, fade );
 
@@ -1747,7 +1796,7 @@ bool HasBakedVolume()
 #endif
 }
 
-//Whether it has a mask: lights whose shadows of the still world were baked rather than drawn into maps - see Light.Baked.
+//Whether lights' static shadows were baked into a mask rather than maps - see Light.Baked
 bool HasBakedMask()
 {
 #ifdef PORTABLE
@@ -1757,7 +1806,7 @@ bool HasBakedMask()
 #endif
 }
 
-//Which channel of the mask holds the sun's shadow, or -1 - for what lights by the sun without walking the frame's lights, as a leaf's back does.
+//The mask channel with the sun's shadow, or -1, for sun-lit things that skip the light walk (a leaf's back)
 int SunMaskChannel()
 {
 	return HasBakedMask() ? int( g_frame[0].bakedSun.x ) - 1 : -1;
@@ -1780,7 +1829,7 @@ float3 BakedSheet( float2 uv, float3 normal )
 	return light * ( lean / max( way.w, 0.25 ) );
 }
 
-//One layer of the volume's three pictures at a point of the lattice's floor, as the constant and the lean of each colour.
+//One layer of the volume's three pictures at a lattice floor point: each colour's constant and lean
 void BakedLayer( float2 uv, out float4 red, out float4 green, out float4 blue )
 {
 	//Three frame-uniform pictures - see SkyTableAt.
@@ -1825,7 +1874,7 @@ float BakedMask( float3 world, float3 geometric, float2 lightmap, int channel )
 	}
 	else
 	{
-		//A step off the surface, as BakedVolume takes it: a floor reads the air above it, which is what its shadow is the shadow of.
+		//A step off the surface as BakedVolume takes it: a floor reads the air above it
 		through = BakedVolumeMask( world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ) );
 	}
 
@@ -1894,8 +1943,8 @@ float2 OctahedralUv( float3 direction )
 	return ( p * 0.5 ) + 0.5;
 }
 
-//One band of one probe's picture. The bands are stacked down the texture, so a band is a slice of the v coordinate. Kept a
-//half texel off each end of the slice, or the filter reaches into the band above and a rough reflection picks up a sharp one.
+//One band of one probe: bands stack down the texture, kept half a texel in from each end so the filter
+//does not reach a sharper band
 float3 SampleProbeBand( int slot, float2 uv, int band )
 {
 #ifdef PORTABLE
@@ -1909,16 +1958,14 @@ float3 SampleProbeBand( int slot, float2 uv, int band )
 
 	v = clamp( v, ( float( band ) / bands ) + inset, ( float( band + 1 ) / bands ) - inset );
 
-	//The top level and no other: the bands below it are already the blur, and a mip chosen from the neighbours would reach across the band edge
-	//and across the seam the octahedron is folded along - which a full-screen pass does at every pixel, because its neighbours are another surface.
+	//Top level only: lower bands are the blur; neighbour-chosen mips would cross band edges and the seam
 	float4 rgbm = g_textures[NonUniformResourceIndex( uint( slot ) )].SampleLevel( float2( uv.x, v ), 0.0 );
 
 	return DecodeRgbm( rgbm, g_frame[0].probeInfo.w );
 #endif
 }
 
-//What one probe reflects in one direction, at one roughness. Between two bands rather than in one, because five steps of blur across the whole
-//roughness range is a visible staircase on anything that varies - a roughness map, or a curved surface catching the light at a changing angle.
+//One probe's reflection one way at one roughness, between two bands, since five blur steps stair-step visibly
 float3 SampleProbe( int which, float3 direction, float roughness )
 {
 	if ( which < 0 || which >= 4 ) return 0.0.xxx;
@@ -1947,7 +1994,7 @@ float3 SampleProbe( int which, float3 direction, float roughness )
 	return mixed * probe.tint.rgb * probe.tint.a;
 }
 
-//The probes covering a point - <see cref="ProbesAt"/>, and none at all on a pipeline baked without the probe path (kProbesOn).
+//The probes covering a point - see ProbesAt; none on a pipeline baked without kProbesOn
 ProbeMix ProbesHere( float3 world )
 {
 	if ( kProbesOn == 0 )
@@ -1963,8 +2010,8 @@ ProbeMix ProbesHere( float3 world )
 	return ProbesAt( world );
 }
 
-//What the probes over a point say lies one way, laid over `under` - the second over it as far as it reaches, the first over
-//that. `roughness` picks the band; `boxed` reads each probe along its box's projection of `away` rather than along `away` itself.
+//What the probes say lies one way, over `under`: the second where it reaches, the first over that; roughness
+//picks the band, boxed reads along each box's projection of `away`
 float3 ProbesOver( ProbeMix mix, float3 under, float3 world, float3 away, float roughness, bool boxed )
 {
 	float3 seen = under;
@@ -1978,8 +2025,7 @@ float3 ProbesOver( ProbeMix mix, float3 under, float3 world, float3 away, float 
 	return seen;
 }
 
-//Box projection: a picture taken from the middle of a room is only right in the middle of it, and the correction is where the reflected
-//ray actually meets the wall. Without it a reflection slides along a floor as the eye moves, which is the giveaway of an uncorrected probe.
+//Box projection: a probe is right only at its centre, so read where the reflected ray meets its box's wall
 float3 ProbeDirection( int probe, float3 world, float3 away )
 {
 	//Clamped for the same reason as SampleProbe's, and here there is not even a guard above it to hide behind.
@@ -2004,7 +2050,7 @@ float3 EnvironmentAt( ProbeMix probes, float3 world, float3 normal, float3 away,
 	float3 lookAt = normalize( lerp( away, normal, roughness * roughness ) );
 
 	//Reflect the drawn sky, not the flat ambient; flat colour only when there's no sky
-	float3 sky = HasSky() ? SkyDrawn( lookAt ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
+	float3 sky = HasSky() ? SkyReflected( lookAt, roughness ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
 
 	return ProbesOver( probes, sky, world, away, roughness, true );
 }

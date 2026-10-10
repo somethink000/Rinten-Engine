@@ -480,15 +480,22 @@
 						{
 							<div class="state">@Percent( row.Progress )</div>
 						}
+						else if ( row.Local is { Current: true } )
+						{
+							<div class="state">this editor</div>
+						}
 						else if ( row.Installed )
 						{
 							<div class="button plain" tooltip="Start this version's editor" onclick=@( () => OpenVersion( row ) )>
 								<div class="caption">Open</div>
 							</div>
 
-							<div class="button plain" onclick=@( () => Remove( row ) )>
-								<div class="caption">Remove</div>
-							</div>
+							@if ( row.Local.Removable )
+							{
+								<div class="button plain" onclick=@( () => Remove( row ) )>
+									<div class="caption">Remove</div>
+								</div>
+							}
 						}
 						else if ( row.Available )
 						{
@@ -844,6 +851,9 @@
 		Wire();
 
 		if ( !firstTime ) return;
+
+		//So the other engine versions on this machine can open this one
+		EngineVersions.RegisterRunning();
 
 		Reread();
 
@@ -1417,9 +1427,7 @@
 
 	private void OpenVersion( LauncherVersionList.Row row )
 	{
-		var installed = EngineVersions.ListInstalled().FirstOrDefault( x => x.Version == row.Version );
-
-		if ( installed is not null ) LauncherLaunch.StartEditor( installed.Exe );
+		if ( row.Local is { } installed ) LauncherLaunch.StartEditor( installed.Exe );
 	}
 
 	//Opens or closes the engine picker under a card.
@@ -1461,7 +1469,9 @@
 		if ( row.Published != default ) parts.Add( row.Published.LocalDateTime.ToString( "yyyy-MM-dd" ) );
 		if ( !string.IsNullOrWhiteSpace( row.Notes ) ) parts.Add( row.Notes );
 
-		if ( row.Size > 0 ) parts.Add( $"{row.Size / ( 1024.0 * 1024.0 ):0} MB" );
+		//Unpacked by hand: where, since removing it is deleting that folder
+		if ( row.Local is { Removable: false, Current: false } local ) parts.Add( local.Path );
+		else if ( !row.Installed && row.Size > 0 ) parts.Add( $"{row.Size / ( 1024.0 * 1024.0 ):0} MB" );
 
 		return string.Join( " · ", parts );
 	}

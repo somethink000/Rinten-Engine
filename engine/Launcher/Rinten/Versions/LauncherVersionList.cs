@@ -24,7 +24,10 @@ internal sealed class LauncherVersionList
 		//Whether the server has a build of it for this machine.
 		public bool Available { get; init; }
 
-		public bool Installed { get; init; }
+		public bool Installed => Local is not null;
+
+		//Where it is on this machine, or null where it is not
+		public EngineVersions.Installed Local { get; init; }
 
 		//What the installer is handed, or null for a version only on the disk.
 		public EngineReleaseInfo Release { get; init; }
@@ -68,6 +71,7 @@ internal sealed class LauncherVersionList
 		Changed();
 
 		var rows = new List<Row>();
+		var local = EngineVersions.ListInstalled();
 		string status;
 
 		try
@@ -76,9 +80,9 @@ internal sealed class LauncherVersionList
 
 			var releases = await api.GetReleasesAsync();
 
-			foreach ( var release in releases ) rows.Add( FromRelease( release ) );
+			foreach ( var release in releases ) rows.Add( FromRelease( release, local ) );
 
-			AddOrphans( rows );
+			AddOrphans( rows, local );
 
 			status = rows.Count == 0
 				? "Nothing released yet"
@@ -86,8 +90,8 @@ internal sealed class LauncherVersionList
 		}
 		catch ( Exception e )
 		{
-			//An engine unpacked here is one that can be launched, whatever the server says.
-			AddOrphans( rows );
+			//An engine on this machine is one that can be launched, whatever the server says.
+			AddOrphans( rows, local );
 
 			status = $"Couldn't read the releases: {e.Message}";
 		}
@@ -172,7 +176,7 @@ internal sealed class LauncherVersionList
 		if ( (int)( fraction * 100.0f ) != before ) Changed();
 	}
 
-	private static Row FromRelease( EngineReleaseInfo release )
+	private static Row FromRelease( EngineReleaseInfo release, List<EngineVersions.Installed> local )
 	{
 		var artifact = release.Artifacts?.FirstOrDefault( x => x.Platform == ReleaseApi.CurrentPlatform );
 
@@ -183,23 +187,23 @@ internal sealed class LauncherVersionList
 			Published = release.PublishedAt,
 			Size = artifact is { Available: true } ? artifact.SizeBytes : 0,
 			Available = artifact is { Available: true },
-			Installed = EngineVersions.IsInstalled( release.Version ),
+			Local = local.FirstOrDefault( x => x.Version == release.Version ),
 			Release = release,
 		};
 	}
 
 	//The engines on this machine the releases do not mention.
-	private static void AddOrphans( List<Row> rows )
+	private static void AddOrphans( List<Row> rows, List<EngineVersions.Installed> local )
 	{
-		foreach ( var installed in EngineVersions.ListInstalled() )
+		foreach ( var installed in local )
 		{
 			if ( rows.Any( x => x.Version == installed.Version ) ) continue;
 
 			rows.Add( new Row
 			{
 				Version = installed.Version,
-				Notes = "Installed here, not released",
-				Installed = true,
+				Notes = "Not released",
+				Local = installed,
 				Available = false,
 			} );
 		}

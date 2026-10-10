@@ -737,9 +737,45 @@ float2 PanoramaUv( float3 direction, float turn )
 	return float2( ( atan2( -z, -x ) * 0.15915494 ) + 0.5, 0.5 - ( asin( clamp( direction.y, -1.0, 1.0 ) ) * 0.31830989 ) );
 }
 
-//Sky table UV: x sun cosine, y sqrt of height, as sky_surface.slang; a panorama's table is laid out as a panorama
+//PanoramaUv unturned with polynomial atan and asin, ~1e-4 radians off, far under a capture texel's 0.025
+float2 SkyLightUv( float3 direction )
+{
+	float ax = abs( direction.x );
+	float az = abs( direction.z );
+	float t = min( ax, az ) / max( max( ax, az ), 1e-8 );
+	float t2 = t * t;
+	float a = t * ( 0.995354 + ( t2 * ( -0.288679 + ( t2 * 0.079331 ) ) ) );
+
+	//Unfold to atan2( -z, -x ) over the whole turn
+	if ( az > ax ) a = 1.5707963 - a;
+	if ( direction.x > 0.0 ) a = 3.1415927 - a;
+	if ( direction.z > 0.0 ) a = -a;
+
+	//Abramowitz-Stegun 4.4.45: acos of |y|, so asin is a quarter turn less
+	float y = min( abs( direction.y ), 1.0 );
+	float c = sqrt( 1.0 - y ) * ( 1.5707288 + ( y * ( -0.2121144 + ( y * ( 0.0742610 - ( y * 0.0187293 ) ) ) ) ) );
+	float e = ( 1.5707963 - c ) * sign( direction.y );
+
+	return float2( ( a * 0.15915494 ) + 0.5, 0.5 - ( e * 0.31830989 ) );
+}
+
+//The sky capture's size in pixels - see CoreSkyLight; a sky built with SKY_CAPTURE takes its direction from its pixel
+static const float2 SkyCaptureSize = float2( 256.0, 128.0 );
+
+//The direction at a point of a panorama, unturned: PanoramaUv's inverse
+float3 PanoramaDirection( float2 uv )
+{
+	float around = ( uv.x - 0.5 ) * 6.2831853;
+	float up = ( 0.5 - uv.y ) * 3.14159265;
+	float across = cos( up );
+
+	return float3( -cos( around ) * across, sin( up ), -sin( around ) * across );
+}
+
+//Sky table UV: x sun cosine, y sqrt of height, as sky_surface.slang; a portable panorama's is laid out as a panorama
 float2 SkyTableUv( float3 direction )
 {
+#ifdef PORTABLE
 	if ( kPanoramaOn != 0 && g_frame[0].panorama.w > 0.5 )
 	{
 		float2 uv = PanoramaUv( direction, 0.0 );
@@ -747,6 +783,7 @@ float2 SkyTableUv( float3 direction )
 		//Held to the first and last rows' centres: the picture's sampler may wrap, and the zenith is not the ground
 		return float2( uv.x, clamp( uv.y, 0.5 / SkyTableSide, 1.0 - ( 0.5 / SkyTableSide ) ) );
 	}
+#endif
 
 	float up = saturate( direction.y * 0.5 + 0.5 );
 
@@ -783,15 +820,20 @@ bool SkyTableAt( float3 direction, out float3 colour )
 #endif
 }
 
-//A quarter of the procedural sky, whose colours are tuned to be seen; all of a panorama's, already irradiance over pi
+//The ambient factor the frame laid: a quarter of the procedural sky, tuned to be seen, all of a panorama's
 float SkyAmbientScale()
 {
-	return kPanoramaOn != 0 && g_frame[0].panorama.w > 0.5 ? 1.0 : 0.25;
+	return g_frame[0].skyLight.w > 0.0 ? g_frame[0].skyLight.w : 0.25;
 }
 
-//Sky ambient for a normal, read from the sky table so each sky's maths stays in its own shader
+//Sky ambient for a normal: the capture's irradiance where the frame made one (CoreSkyLight), else the sky table
 float3 SkyAmbient( float3 normal )
 {
+#ifndef PORTABLE
+	uint irradiance = uint( g_frame[0].skyLight.z );
+	if ( irradiance != 0u ) return g_textures[irradiance].SampleLevel( SkyLightUv( normal ), 0.0 ).rgb;
+#endif
+
 	float3 held;
 
 	if ( SkyTableAt( normal, held ) ) return held;
@@ -800,9 +842,14 @@ float3 SkyAmbient( float3 normal )
 	return SkyGradientOf( normal.y );
 }
 
-//Sky colour for reflections and distant fog, from the table; no sun disc, moon, stars or clouds
+//Sky colour for distant fog and reflections: the capture's middle level where the frame made one, else the table
 float3 SkyDrawn( float3 direction )
 {
+#ifndef PORTABLE
+	uint levels = uint( g_frame[0].skyLight.x );
+	if ( levels != 0u ) return g_textures[levels].SampleLevel( SkyLightUv( direction ), g_frame[0].skyLight.y * 0.5 ).rgb;
+#endif
+
 	float3 sky;
 
 	if ( SkyTableAt( direction, sky ) ) return sky;
@@ -810,22 +857,16 @@ float3 SkyDrawn( float3 direction )
 	return SkyGradientOf( direction.y );
 }
 
-//A panorama's GGX levels, roughness level / ( levels - 1 ) - see CorePanorama.Prefilter; any other sky's table
+//The sky's GGX reflection levels, roughness level / ( levels - 1 ) - see sky_light.slang; else SkyDrawn
 float3 SkyReflected( float3 direction, float roughness )
 {
 #ifndef PORTABLE
-	uint picture = uint( g_frame[0].panorama.x );
+	uint levels = uint( g_frame[0].skyLight.x );
 
-	if ( kPanoramaOn != 0 && picture != 0 )
+	if ( levels != 0u )
 	{
-		float level = saturate( roughness ) * ( g_frame[0].panorama.z - 1.0 );
-		float2 uv = PanoramaUv( direction, g_frame[0].panorama.y );
-
-		//Held to the first and last rows' centres, as the sampler wraps; the last level is 8x4, each above twice as tall
-		float rows = 4.0 * exp2( g_frame[0].panorama.z - 1.0 - ceil( level ) );
-		uv.y = clamp( uv.y, 0.5 / rows, 1.0 - ( 0.5 / rows ) );
-
-		return g_textures[picture].SampleLevel( uv, level ).rgb * g_frame[0].panoramaLight.rgb;
+		float level = saturate( roughness ) * ( g_frame[0].skyLight.y - 1.0 );
+		return g_textures[levels].SampleLevel( SkyLightUv( direction ), level ).rgb;
 	}
 #endif
 
@@ -1423,7 +1464,7 @@ static const int kBakedOn = 1;
 
 //Sky spec constants: fold out moon/stars (and the sky's own cloud) when unused, to cut registers
 
-//Whether the sky is a panorama (panorama.w); nought folds its table layout, ambient and reflections out
+//Whether the sky is a panorama (panorama.w); nought folds the portable frame's panorama table layout out
 #ifdef SPECIALIZED
 [vk::constant_id( 18 )] const int kPanoramaOn = 1;
 #else

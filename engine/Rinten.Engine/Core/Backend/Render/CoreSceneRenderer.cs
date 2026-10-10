@@ -817,7 +817,10 @@ internal static unsafe class CoreSceneRenderer
 	internal const int PanoramaAt = ScreenTraceAt + 4;
 	internal const int PanoramaLightAt = PanoramaAt + 4;
 
-	internal const int FrameFloats = PanoramaLightAt + 4;
+	//The sky's light from its capture, and the ambient factor - see CoreSkyLight.Lay and LayPanorama.
+	internal const int SkyLightAt = PanoramaLightAt + 4;
+
+	internal const int FrameFloats = SkyLightAt + 4;
 
 	//The exposure a block was written with - see SetFinish
 	internal static float ExposureOf( float[] frame )
@@ -1061,14 +1064,12 @@ internal static unsafe class CoreSceneRenderer
 	//A panorama sky into the block - see frame_data.slang's panorama
 	private static void LayPanorama( float[] frame, CorePanoramaSky.Sky sky )
 	{
-		//The portable frame has no picture table to name them in; its reflections read the sky table
-		var reflections = CoreRenderDevice.PortableFrame || !CoreNative.Available ? 0 : CorePanoramaSky.ReflectionTexture( sky );
-
-		frame[PanoramaAt + 0] = reflections == 0 ? 0.0f : CoreRender.TextureIndex( reflections );
 		frame[PanoramaAt + 1] = sky.Turn;
-		frame[PanoramaAt + 2] = sky.Panorama?.Reflections?.MipCount ?? 1;
 		frame[PanoramaAt + 3] = 1.0f;
 		PanoramaOn = true;
+
+		//A panorama's light is already irradiance over pi, so all of it - see SkyAmbientScale
+		frame[SkyLightAt + 3] = 1.0f;
 
 		frame[PanoramaLightAt + 0] = sky.Light.X;
 		frame[PanoramaLightAt + 1] = sky.Light.Y;

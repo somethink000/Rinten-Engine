@@ -82,7 +82,11 @@ Out MainPs( V2F i )
 
 	if ( !HasSky() ) discard;
 
+#ifdef SKY_CAPTURE
+	float3 direction = PanoramaDirection( i.position.xy / SkyCaptureSize );
+#else
 	float3 direction = normalize( i.direction );
+#endif
 
 	//The scene's SkyBox2D lays its tint in with these; a preview with no scene draws the material's own
 	bool laid = g_frame[0].panorama.w > 0.5;
@@ -103,12 +107,14 @@ Out MainPs( V2F i )
 
 	float3 colour = g_tSkyTexture.SampleGrad( uv, dx * bias, dy * bias ).rgb * light;
 
-	//A fog volume between the eye and the sky fogs the sky too
+	//A fog volume between the eye and the sky fogs the sky too; not in the capture, which has no screen
+#ifndef SKY_CAPTURE
 	if ( kFogOn != 0 )
 	{
 		float3 eye = EYE_FRAME( camera ).xyz;
 		colour = VolumeFog( colour, eye + direction * 4000.0, eye, i.position.xy );
 	}
+#endif
 
 	Out o;
 	o.colour = float4( colour, 1.0 );

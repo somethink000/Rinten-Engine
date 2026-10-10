@@ -1579,6 +1579,9 @@ internal sealed partial class CoreSceneDrawer
 	//This frame's sky where it is a panorama, whose table is made from its picture rather than drawn - see SkyTableSlot
 	private CorePanoramaSky.Sky skyPanorama;
 
+	//The sky's light on the card for this drawing's views - see CoreSkyLight
+	private readonly CoreSkyLight skyLight = new();
+
 	//The sky table's bindless index, one as a flag in the portable frame, nought for none
 	private int SkyTableSlot()
 	{
@@ -2011,6 +2014,7 @@ internal sealed partial class CoreSceneDrawer
 		skyPipelines.Clear();
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
+		CoreSkyLight.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
 		pyramidPipeline = 0;
@@ -2022,6 +2026,7 @@ internal sealed partial class CoreSceneDrawer
 	public void Release()
 	{
 		DropPostInputs();
+		skyLight.Release();
 		upscaler.Release();
 
 		for ( var i = 0; i < 2; i++ )
@@ -2210,6 +2215,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//No occlusion yet (see LayOcclusion)
 		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
+		skyLight.Lay( frame );
 
 		//Upload the point effects the world's shading may carry, whichever way the frame ends up drawn
 		foldKey = FoldChain( camera );
@@ -2435,6 +2441,9 @@ internal sealed partial class CoreSceneDrawer
 
 			skyTableFrame = SharingViews ? EngineLoop.LoopFrames : -1;
 		}
+
+		//And the sky's light, where its sky changed: capture, reflection levels, irradiance
+		skyLight.Draw( frame, skyShader, skyDevice, skyCore );
 
 		//Whether anything reads the world picture; if not, the world is shaded straight onto the window
 		var worldSize = CoreRenderDevice.WorldSize();
@@ -3199,6 +3208,7 @@ internal sealed partial class CoreSceneDrawer
 		skyPipelines.Clear();
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
+		CoreSkyLight.ForgetPipelines();
 	}
 
 	//Only the background pass is made upfront; sky pipelines bake on demand per frame specialization

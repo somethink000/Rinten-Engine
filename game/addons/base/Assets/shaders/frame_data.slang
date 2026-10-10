@@ -110,10 +110,14 @@ struct FrameData
 	//by table index, nought where no reflections were drawn - see ScreenReflected
 	float4 screenTrace;
 
-	//Panorama sky: reflection levels' table index x (nought when portable), turn y radians, level count z, one w if any
-	//w also lays the sky table out by direction; panoramaLight is brightness by tint - see CorePanoramaSky
+	//Panorama sky: turn y radians, one w if any (which lays a portable sky table out by direction); panoramaLight
+	//is brightness by tint - see CorePanoramaSky
 	float4 panorama;
 	float4 panoramaLight;
+
+	//The sky's light from its capture (CoreSkyLight): reflection levels' table index x and their count y, the
+	//irradiance picture's index z, nought where none; the ambient factor w, nought for a quarter
+	float4 skyLight;
 };
 
 #ifdef WEBGL

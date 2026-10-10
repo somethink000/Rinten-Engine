@@ -660,7 +660,7 @@ internal sealed class BakeScene
 
 		var drawn = CoreSceneRenderer.HasPanorama( sky ) ? CorePanoramaSky.Find( CoreSceneRenderer.SkyMaterialOf( scene ) ) : null;
 
-		panorama = drawn?.Panorama;
+		panorama = CorePanoramaSky.PanoramaOf( drawn );
 		panoramaLight = drawn?.Light ?? Vec3.Zero;
 		panoramaTurn = drawn?.Turn ?? 0.0f;
 

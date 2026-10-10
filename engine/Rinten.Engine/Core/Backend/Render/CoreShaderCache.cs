@@ -945,6 +945,7 @@ internal static class EngineShaders
 	internal const string Upscale = "shaders/engine/upscale.slang";
 	internal const string Fsr3 = "shaders/engine/fsr3.slang";
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
+	internal const string SkyLight = "shaders/engine/sky_light.slang";
 
 	//UI shader for world-space panels; reads the frame block so stereo passes get each eye's view
 	internal const string UiWorld = "#define UI_WORLD 1\n";
@@ -1030,6 +1031,15 @@ internal static class EngineShaders
 		.. Fsr3Builds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
+		//The sky light's filters - see CoreSkyLight. Full frame only: they draw into pictures
+		( SkyLight, "", SkyLightDraws, false ),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] SkyLightDraws =
+	[
+		("MainVs", CoreShaderCompiler.Stage.Vertex),
+		("MainPrefilterPs", CoreShaderCompiler.Stage.Pixel),
+		("MainIrradiancePs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] BakeRuns =

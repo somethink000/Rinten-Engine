@@ -3,8 +3,8 @@ using Vec3 = System.Numerics.Vector3;
 
 namespace Rinten;
 
-//A panorama read back from its compiled picture: the bake's sky, the ambient table and the reflection levels.
-//Directions map onto it as PanoramaUv in frame.slang: u round from -X, v down from the zenith
+//A panorama read back from its compiled picture, for what cannot read it on the card: the bake's sky, and the portable
+//frame's table. Directions map onto it as PanoramaUv in frame.slang: u round from -X, v down from the zenith
 internal sealed class CorePanorama
 {
 	//The widest level read back; finer than any bake's sky or reflection resolves
@@ -13,17 +13,11 @@ internal sealed class CorePanorama
 	//The widest level convolved into the table; irradiance holds nothing finer
 	private const int SourceWidth = 64;
 
-	//GGX samples a reflection texel takes; filtered importance sampling keeps so few free of noise
-	private const int ReflectionSamples = 64;
-
 	//The levels read back, widest first, each half the one before
 	private readonly List<(float[] Rgb, int Width, int Height)> chain = new();
 
-	//The table in the panorama's own turn, unscaled: rgb a texel, CoreSkyTable.Side square
-	private readonly float[] table;
-
-	/// <summary>Reflection levels, unscaled and unturned: level i is GGX at roughness i / ( levels - 1 ).</summary>
-	public CoreTextureFile Reflections { get; }
+	//The table in the panorama's own turn, unscaled: rgb a texel, CoreSkyTable.Side square; made on first asking
+	private float[] table;
 
 	private CorePanorama( CoreTextureFile file, int first )
 	{
@@ -35,11 +29,6 @@ internal sealed class CorePanorama
 			var size = file.MipInfo( mip );
 			chain.Add( (light, size.Width, size.Height) );
 		}
-
-		var source = chain.Find( level => level.Width <= SourceWidth );
-		table = Convolve( source.Rgb, source.Width, source.Height );
-
-		Reflections = Prefilter();
 	}
 
 	/// <summary>Reads a compiled HDR picture, or null where it is not one.</summary>
@@ -114,23 +103,16 @@ internal sealed class CorePanorama
 		return Vec3.Lerp( top, bottom, fy );
 	}
 
-	//Trilinear across the levels read
-	private Vec3 Trilinear( float level, Vec3 direction )
-	{
-		var (u, v) = Uv( direction, 0.0f );
-
-		level = Math.Clamp( level, 0.0f, chain.Count - 1 );
-
-		var finer = (int)level;
-		var coarser = Math.Min( finer + 1, chain.Count - 1 );
-
-		return Vec3.Lerp( Bilinear( finer, u, v ), Bilinear( coarser, u, v ), level - finer );
-	}
-
 	/// <summary>The frame's sky table for this panorama, four halves a texel, in the world's turn.</summary>
 	public Half[] Table( Vec3 light, float turn )
 	{
 		const int side = CoreSkyTable.Side;
+
+		if ( table is null )
+		{
+			var source = chain.Find( level => level.Width <= SourceWidth );
+			table = Convolve( source.Rgb, source.Width, source.Height );
+		}
 
 		var texels = new Half[side * side * 4];
 
@@ -220,97 +202,5 @@ internal sealed class CorePanorama
 		} );
 
 		return table;
-	}
-
-	//Karis's split-sum prefilter, view along the normal; samples read the level matching their share of the lobe
-	//(Krivanek's filtered importance sampling). Level 0 is the picture itself
-	private CoreTextureFile Prefilter()
-	{
-		//Down to eight across: a lobe at roughness one is wider than that holds
-		var count = 1;
-		while ( count < chain.Count && chain[0].Width >> count >= 8 ) count++;
-
-		var levels = new (float[] Rgb, int Width, int Height)[count];
-		levels[0] = chain[0];
-
-		//What one texel of the widest level covers, on average over the sphere
-		var texelAngle = 4.0f * MathF.PI / ( chain[0].Width * chain[0].Height );
-
-		for ( var level = 1; level < count; level++ )
-		{
-			var width = Math.Max( 1, chain[0].Width >> level );
-			var height = Math.Max( 1, chain[0].Height >> level );
-			var roughness = level / (float)( count - 1 );
-			var alpha = roughness * roughness;
-			var rgb = new float[width * height * 3];
-
-			Parallel.For( 0, height, y =>
-			{
-				for ( var x = 0; x < width; x++ )
-				{
-					var normal = Direction( ( x + 0.5f ) / width, ( y + 0.5f ) / height );
-					var sum = Filtered( normal, alpha, texelAngle );
-
-					var at = ( ( y * width ) + x ) * 3;
-
-					rgb[at] = sum.X;
-					rgb[at + 1] = sum.Y;
-					rgb[at + 2] = sum.Z;
-				}
-			} );
-
-			levels[level] = (rgb, width, height);
-		}
-
-		return CoreTextureFile.FromLight( levels );
-	}
-
-	//The GGX lobe about one direction, the NdotL-weighted mean of its samples
-	private Vec3 Filtered( Vec3 normal, float alpha, float texelAngle )
-	{
-		var up = MathF.Abs( normal.Y ) < 0.999f ? Vec3.UnitY : Vec3.UnitX;
-		var tangent = Vec3.Normalize( Vec3.Cross( up, normal ) );
-		var bitangent = Vec3.Cross( normal, tangent );
-
-		var alpha2 = alpha * alpha;
-		var sum = Vec3.Zero;
-		var weight = 0.0f;
-
-		for ( uint i = 0; i < ReflectionSamples; i++ )
-		{
-			//Hammersley: an even spread with the radical inverse of the index
-			var e1 = i / (float)ReflectionSamples;
-			var e2 = ReverseBits( i ) * 2.3283064365386963e-10f;
-
-			var cosTheta = MathF.Sqrt( ( 1.0f - e2 ) / ( 1.0f + ( ( alpha2 - 1.0f ) * e2 ) ) );
-			var sinTheta = MathF.Sqrt( 1.0f - ( cosTheta * cosTheta ) );
-			var (sinPhi, cosPhi) = MathF.SinCos( 2.0f * MathF.PI * e1 );
-
-			var half = ( tangent * ( sinTheta * cosPhi ) ) + ( bitangent * ( sinTheta * sinPhi ) ) + ( normal * cosTheta );
-			var toward = ( half * ( 2.0f * Vec3.Dot( normal, half ) ) ) - normal;
-
-			var lit = Vec3.Dot( normal, toward );
-			if ( lit <= 0.0f ) continue;
-
-			//View along the normal makes the pdf D / 4; its solid angle against a texel's picks the level
-			var d = cosTheta * cosTheta * ( alpha2 - 1.0f ) + 1.0f;
-			var pdf = alpha2 / ( MathF.PI * d * d ) * 0.25f;
-			var sampleAngle = 1.0f / ( ReflectionSamples * MathF.Max( pdf, 1e-6f ) );
-			var level = alpha == 0.0f ? 0.0f : MathF.Max( 0.0f, ( 0.5f * MathF.Log2( sampleAngle / texelAngle ) ) + 1.0f );
-
-			sum += Trilinear( level, toward ) * lit;
-			weight += lit;
-		}
-
-		return weight > 0.0f ? sum / weight : Vec3.Zero;
-	}
-
-	private static uint ReverseBits( uint value )
-	{
-		value = ( value << 16 ) | ( value >> 16 );
-		value = ( ( value & 0x00FF00FF ) << 8 ) | ( ( value & 0xFF00FF00 ) >> 8 );
-		value = ( ( value & 0x0F0F0F0F ) << 4 ) | ( ( value & 0xF0F0F0F0 ) >> 4 );
-		value = ( ( value & 0x33333333 ) << 2 ) | ( ( value & 0xCCCCCCCC ) >> 2 );
-		return ( ( value & 0x55555555 ) << 1 ) | ( ( value & 0xAAAAAAAA ) >> 1 );
 	}
 }

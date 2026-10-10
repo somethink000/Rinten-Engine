@@ -227,33 +227,6 @@ internal sealed partial class CoreTextureFile
 		return rgb;
 	}
 
-	/// <summary>An RGB9E5 texture from RGB levels in memory, widest first, each half the one before.</summary>
-	public static CoreTextureFile FromLight( IReadOnlyList<(float[] Rgb, int Width, int Height)> levels )
-	{
-		if ( levels is null || levels.Count == 0 ) return null;
-
-		Span<int> sizes = levels.Count <= 32 ? stackalloc int[levels.Count] : new int[levels.Count];
-		var total = 0;
-
-		for ( var i = 0; i < levels.Count; i++ )
-		{
-			sizes[i] = levels[i].Width * levels[i].Height * 4;
-			total += sizes[i];
-		}
-
-		var pixels = new byte[total];
-		var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>( pixels.AsSpan() );
-		var at = 0;
-
-		foreach ( var (rgb, width, height) in levels )
-		{
-			PackShared( rgb, words.Slice( at, width * height ) );
-			at += width * height;
-		}
-
-		return FromBytes( FileBytes( levels[0].Width, levels[0].Height, TextureFormat.Rgb9e5, srgb: false, sizes, pixels ) );
-	}
-
 	/// <summary>RGB floats as RGB9E5 words, for a device that takes no BC - see BrowserTextures.</summary>
 	public static void PackShared( ReadOnlySpan<float> rgb, Span<uint> into )
 	{

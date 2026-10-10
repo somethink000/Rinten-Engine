@@ -455,7 +455,11 @@ Out MainPs( V2F i )
 	//black. The renderer skips this pass in that case; this is what makes the pass safe to draw anyway.
 	if ( !HasSky() ) discard;
 
+#ifdef SKY_CAPTURE
+	float3 direction = PanoramaDirection( i.position.xy / SkyCaptureSize );
+#else
 	float3 direction = normalize( i.direction );
+#endif
 
 	//Clear sky under per-pixel cloud; kCloudOn folds the cloud path out entirely when there's no cover
 	bool clouded = kCloudOn != 0 && HasSun() && g_flCloudCover > 0.0;
@@ -520,6 +524,7 @@ Out MainPs( V2F i )
 			colour += ( stars + ( moonlight * ( ( disc * 1.5 ) + halo ) * night ) ) * horizon;
 		}
 
+#ifndef SKY_CAPTURE
 		//And the sun, where there is any day in it - kSunDiscOn, the other half of the same answer. Both are one on the frames that are in between.
 		if ( kSunDiscOn != 0 && night < 1.0 )
 		{
@@ -552,6 +557,7 @@ Out MainPs( V2F i )
 				colour += light * ( ( disc * 8.0 ) + glare ) * horizon;
 			}
 		}
+#endif
 
 		if ( clouded )
 			overcast = Clouds( direction, sun, SunLight(), night, cloudAlpha, haze, hazeColour );
@@ -563,11 +569,13 @@ Out MainPs( V2F i )
 
 	//A fog volume standing between the eye and the sky fogs the sky too. The gradient fog does
 	//not - what is far away takes its colour from the sky, and the sky is that colour already.
+#ifndef SKY_CAPTURE
 	if ( kFogOn != 0 )
 	{
 		float3 eye = EYE_FRAME( camera ).xyz;
 		colour = VolumeFog( colour, eye + direction * 4000.0, eye, i.position.xy );
 	}
+#endif
 
 	Out o;
 	o.colour = float4( colour, 1.0 );

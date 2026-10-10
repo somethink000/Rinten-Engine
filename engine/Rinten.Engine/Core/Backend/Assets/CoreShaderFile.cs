@@ -15,7 +15,7 @@ internal static partial class CoreShaderFile
 	public const uint Magic = 0x53535345;
 
 	/// <summary>Blob layout version; older or ambiguous versions are refused and rebuilt</summary>
-	public const uint Version = 20;
+	public const uint Version = 21;
 
 
 	/// <summary>Which stage a blob is.</summary>
@@ -73,9 +73,13 @@ internal static partial class CoreShaderFile
 		/// <summary>The cluster pixel stage with DEPTH_ONLY: MainClusterPs for a depth-only pre-pass.</summary>
 		ClusterDepthPixel = 20,
 
+		//Full frame only: the engine's grid round the sky's own MainPs, built with SKY_CAPTURE - see sky_capture.slang
+		/// <summary>The sky drawn into its equirectangular capture, for the sky light - see CoreSkyLight.</summary>
+		SkyCaptureVertex = 21,
+		SkyCapturePixel = 22,
 	}
 
-	public const int StageCount = 21;
+	public const int StageCount = 23;
 
 	//How many languages a stage is kept in: the full frame's SPIR-V, WGSL, the portable
 	//frame's SPIR-V, GLSL, and the GLSL that draws both of a headset's eyes at once.
@@ -110,6 +114,8 @@ internal static partial class CoreShaderFile
 		var screen = stage is Stage.ClusterScreenPixel or Stage.ScreenPixel or Stage.SkinnedScreenPixel
 			or Stage.InstancedScreenPixel;
 
+		var capture = IsSkyCapture( stage );
+
 		return ( skinned ? "#define SKINNED 1\n" : "" ) +
 			( cluster ? "#define CLUSTER 1\n" : "" ) +
 			( instanced ? "#define INSTANCED 1\n" : "" ) +
@@ -118,7 +124,8 @@ internal static partial class CoreShaderFile
 			( morphed ? "#define MORPHED 1\n" : "" ) +
 			( scene ? "#define TARGET_SCENE 1\n" : "" ) +
 			( compute ? "#define COMPUTE 1\n" : "" ) +
-			( depth ? "#define DEPTH_ONLY 1\n" : "" );
+			( depth ? "#define DEPTH_ONLY 1\n" : "" ) +
+			( capture ? "#define SKY_CAPTURE 1\n" : "" );
 	}
 
 	/// <summary>Whether a stage is a vertex stage.</summary>
@@ -142,6 +149,10 @@ internal static partial class CoreShaderFile
 	public static bool IsSkyTable( Stage stage )
 		=> stage is Stage.SkyTableVertex or Stage.SkyTablePixel;
 
+	/// <summary>Whether a stage is one of the sky capture's - see sky_capture.slang.</summary>
+	public static bool IsSkyCapture( Stage stage )
+		=> stage is Stage.SkyCaptureVertex or Stage.SkyCapturePixel;
+
 	//Appended after the surface text so entries see its declarations and error line numbers still match
 	private const string ClusterSurface = "\n#include \"cluster_surface.slang\"\n";
 
@@ -150,6 +161,9 @@ internal static partial class CoreShaderFile
 
 	//And for the sky's table, round the sky's own SkyLight - see sky_surface.slang.
 	private const string SkySurface = "\n#include \"engine/sky_surface.slang\"\n";
+
+	//And for the sky's capture - see sky_capture.slang.
+	private const string SkyCapture = "\n#include \"engine/sky_capture.slang\"\n";
 
 	//The format a pass's "compact" outputs compile to where not the device's own; the bake compiles both
 	internal static string CompactName { get; set; }
@@ -223,6 +237,9 @@ internal static partial class CoreShaderFile
 		if ( stage is Stage.SkyTableVertex ) return ( "MainSkyTableVs", CoreShaderCompiler.Stage.Vertex );
 		if ( stage is Stage.SkyTablePixel ) return ( "MainSkyTablePs", CoreShaderCompiler.Stage.Pixel );
 
+		if ( stage is Stage.SkyCaptureVertex ) return ( "MainSkyCaptureVs", CoreShaderCompiler.Stage.Vertex );
+		if ( stage is Stage.SkyCapturePixel ) return ( "MainPs", CoreShaderCompiler.Stage.Pixel );
+
 		return IsVertex( stage )
 			? ( "MainVs", CoreShaderCompiler.Stage.Vertex )
 			: ( "MainPs", CoreShaderCompiler.Stage.Pixel );
@@ -285,6 +302,17 @@ internal static partial class CoreShaderFile
 				compiling[i] = CoreResources.IsSky( path ) && !CoreResources.IsPanorama( path )
 					? After( stage is Stage.SkyTableVertex ? null : compiling[(int)Stage.SkyTableVertex],
 						() => Build( path, entry, kind, draws + Defines( stage ), format, SkySurface, instead, build ) )
+					: none;
+
+				continue;
+			}
+
+			//The sky's capture for its light, round its own MainPs; the portable frame cannot draw into pictures
+			if ( IsSkyCapture( stage ) )
+			{
+				compiling[i] = CoreResources.IsSky( path ) && !CoreShaderCompiler.IsPortable( format )
+					? After( stage is Stage.SkyCaptureVertex ? null : compiling[(int)Stage.SkyCaptureVertex],
+						() => Build( path, entry, kind, draws + Defines( stage ), format, SkyCapture, instead, build ) )
 					: none;
 
 				continue;

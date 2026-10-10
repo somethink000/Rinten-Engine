@@ -1,5 +1,8 @@
 //Bloom passes: threshold at full res written at half, mip chain, gather, then additive Apply
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

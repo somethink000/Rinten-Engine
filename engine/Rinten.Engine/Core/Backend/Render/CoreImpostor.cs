@@ -4,7 +4,7 @@ namespace Rinten;
 internal static class CoreImpostor
 {
 	/// <summary>The surface an impostor is drawn with.</summary>
-	public const string Shader = "shaders/impostor.shader";
+	public const string Shader = "shaders/engine/impostor.shader";
 
 	//Texels a side of a page.
 	private const int PageSize = 2048;

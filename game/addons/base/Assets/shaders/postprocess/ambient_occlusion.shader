@@ -1,5 +1,8 @@
 //GTAO from depth: occlusion plus bent normal (MainPs), then a 4x4 blur (SoftenPs)
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

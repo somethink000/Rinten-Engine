@@ -1,6 +1,9 @@
 //Blocks, as a point effect that moves where the frame is read rather than what a pixel becomes - see Pixelate,
 //and Where in CorePointChain. The edge filter is left off a frame with this on: the blocks are the point.
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

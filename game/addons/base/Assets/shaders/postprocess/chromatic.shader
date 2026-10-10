@@ -1,6 +1,9 @@
 //The colours pulled apart towards the corners, the way a cheap lens does it - see ChromaticAberration. A pass
 //of its own over the finished picture: each channel is read somewhere else, which no point effect may do.
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

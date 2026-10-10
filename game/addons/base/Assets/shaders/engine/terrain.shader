@@ -1,5 +1,8 @@
 ﻿//Terrain: a baked mesh painted by 8 per-vertex weights (colour + both UVs), triplanar layers
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

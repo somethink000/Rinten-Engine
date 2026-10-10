@@ -1,5 +1,8 @@
 //Tile map pixel stage: sprite records, animated via BlendSheetUV (X frames, Y fps, Z step)
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 #include "sprite/sprite.slang"
 #include "picture_size.slang"
 

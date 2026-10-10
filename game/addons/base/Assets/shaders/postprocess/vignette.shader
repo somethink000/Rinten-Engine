@@ -1,5 +1,8 @@
 //Darker towards the edges, as a point effect - see Vignette. Laid after the curve, on the picture as the screen will show it.
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

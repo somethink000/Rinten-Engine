@@ -1,5 +1,8 @@
 //Tonemap curve as a point effect; curves live in tonemap.slang, which a project can override
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 STATE
 {
 	//This file's Apply is the frame's curve: what comes before it is light, what comes after it is the picture the screen shows.

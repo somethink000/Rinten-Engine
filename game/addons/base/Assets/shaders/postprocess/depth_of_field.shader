@@ -1,5 +1,8 @@
 //Depth of field: half-res prefilter with CoC in alpha, disc blur, then Apply blends it in
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

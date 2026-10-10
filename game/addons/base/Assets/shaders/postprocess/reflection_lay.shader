@@ -1,5 +1,8 @@
 //Adds SSR into the world picture by blend; upsamples weighting each sample by plane match
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 STATE
 {
 	Blend( Additive );

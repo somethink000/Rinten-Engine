@@ -1,5 +1,8 @@
 //Outline and inner glow from the highlight mask, using a two-radius ring of taps; additive
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 STATE
 {
 	//Added to the frame: an outline is light laid on top of what is there.

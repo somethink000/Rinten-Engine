@@ -1,5 +1,8 @@
 //Model impostor: six quads with pictures of each box side; only the one facing the eye is shown
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 //Not in the depth pre-pass: the pre-pass cuts at a half and puts a corner where the mesh says, and a quad cuts its cover
 //against a pattern and is turned to the eye - the pass that shades it writes its depth, see CoreResources.MovesVertices.
 #define ENGINE_MOVES_VERTICES 1

@@ -1,6 +1,9 @@
 //The detail brought back up, over the finished picture at the window's size - see Sharpen. After
 //an upscale rather than before it: a sharpen that runs first is one the upscaler then softens.
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

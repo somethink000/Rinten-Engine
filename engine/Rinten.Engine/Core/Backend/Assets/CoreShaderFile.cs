@@ -807,9 +807,6 @@ internal static partial class CoreShaderFile
 			["terrain"] = "engine/terrain",
 		};
 
-	//Folder for the engine's own shaders, kept out of the material shader list by location
-	internal const string EngineFolder = "engine";
-
 	//Post-process shader folder name; offered as materials but listed separately at the end
 	internal const string PostFolder = "postprocess";
 
@@ -825,9 +822,6 @@ internal static partial class CoreShaderFile
 
 		return false;
 	}
-
-	//Whether this is one of the engine's own rather than a surface.
-	internal static bool IsEngines( string resourcePath ) => Under( resourcePath, EngineFolder );
 
 	//Whether a material may pick this shader: only under shaders or postprocess, not loose ported files
 	internal static bool IsOffered( string resourcePath )

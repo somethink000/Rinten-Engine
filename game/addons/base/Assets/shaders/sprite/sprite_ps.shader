@@ -1,5 +1,8 @@
 //Engine sprite pixel stage: texture, tint, cut-out, optional lighting and fog
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 #include "sprite/sprite.slang"
 #include "picture_size.slang"
 #include "half.slang"

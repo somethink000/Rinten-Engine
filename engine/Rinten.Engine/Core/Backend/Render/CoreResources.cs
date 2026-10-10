@@ -739,6 +739,16 @@ internal static class CoreResources
 	//What a sky says at the top of itself - see sky.shader.
 	private const string SkyMarker = "#define ENGINE_SKY";
 
+	//Whether only the engine makes materials on this shader (ENGINE_INTERNAL), so the material editor hides it
+	internal static bool IsInternal( string onDisk ) => Mentions( onDisk, 0, InternalMarker );
+
+	private const string InternalMarker = "#define ENGINE_INTERNAL";
+
+	//Whether a shader file is a compute pass, which no material draws with
+	internal static bool IsCompute( string onDisk ) => Mentions( onDisk, 0, ComputeMarker );
+
+	private const string ComputeMarker = "[shader(\"compute\")]";
+
 	//Whether a sky is a panorama, whose table is made from its picture - see CorePanoramaSky
 	internal static bool IsPanorama( string onDisk ) => Mentions( onDisk, 0, PanoramaMarker );
 

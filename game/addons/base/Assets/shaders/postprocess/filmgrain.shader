@@ -1,6 +1,9 @@
 //A film's grain, as a point effect - see FilmGrain. Laid last, over the finished picture, a different
 //pattern every frame - or it is a texture stuck to the screen rather than something happening on it.
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

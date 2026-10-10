@@ -13,7 +13,7 @@ public sealed partial class MaterialDefinition
 	/// <summary>One shader a material may name, as somebody picking it sees it.</summary>
 	public readonly record struct ShaderChoice( string Path, string Title, string Summary, bool Post );
 
-	/// <summary>Shaders a material may use, by folder: under shaders/ or postprocess/, never the engine's own</summary>
+	/// <summary>Shaders a material may use: under shaders/ or postprocess/, bar the engine's internal ones</summary>
 	public static IReadOnlyList<ShaderChoice> Shaders()
 	{
 		var found = new Dictionary<string, ShaderChoice>( StringComparer.OrdinalIgnoreCase );
@@ -41,7 +41,6 @@ public sealed partial class MaterialDefinition
 
 				if ( path.Length == 0 || found.ContainsKey( path ) ) continue;
 				if ( !CoreShaderFile.IsOffered( path ) ) continue;
-				if ( CoreShaderFile.IsEngines( path ) ) continue;
 
 				string full;
 
@@ -53,6 +52,8 @@ public sealed partial class MaterialDefinition
 				{
 					continue;
 				}
+
+				if ( !Wearable( full ) ) continue;
 
 				if ( Choice( path, full ) is { } choice ) found[path] = choice;
 			}
@@ -118,7 +119,7 @@ public sealed partial class MaterialDefinition
 			{
 				var under = Path.GetRelativePath( folder, file ).Replace( '\\', '/' );
 
-				if ( CoreShaderFile.IsEngines( under ) ) continue;
+				if ( !Wearable( file ) ) continue;
 
 				yield return ( "shaders/" + under, file );
 			}
@@ -126,6 +127,10 @@ public sealed partial class MaterialDefinition
 			yield break;
 		}
 	}
+
+	//Not one only the engine makes materials on, nor a compute pass or the legacy format nothing here builds
+	private static bool Wearable( string full )
+		=> !CoreResources.IsInternal( full ) && !CoreResources.IsCompute( full ) && !CoreShaderFile.IsForeign( full );
 
 	//One file, read, and what it should say in the list.
 	private static ShaderChoice? Choice( string path, string full )

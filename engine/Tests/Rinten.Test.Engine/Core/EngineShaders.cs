@@ -16,8 +16,7 @@ public class EngineShadersTest
 		//The surfaces a material may wear, beside each other.
 		"complex.shader", "foliage.shader", "glass.shader", "terrain_layer.shader",
 
-		//And what the engine draws with itself, under its own folder - which is what
-		//keeps them out of the material editor's list. See CoreShaderFile.EngineFolder.
+		//And the engine's own, under its own folder
 		"engine/unlit.shader", "engine/vertex_color.shader",
 		"engine/sky.shader", "engine/terrain.shader",
 

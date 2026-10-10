@@ -1,5 +1,8 @@
 //Colour grading: white balance in scene light, then curves or a LUT on the clamped colour
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

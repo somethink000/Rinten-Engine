@@ -1,5 +1,8 @@
 //Full-frame blur from the frame mip chain with a bicubic read; one pass, four taps
 
+//Only the engine makes materials on this, so the material editor does not offer it
+#define ENGINE_INTERNAL 1
+
 FEATURES
 {
 }

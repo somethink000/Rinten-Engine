@@ -320,7 +320,7 @@ partial class GraphView
 
 		if ( onClose is not null ) menu.AboutToHide += onClose;
 
-		menu.OpenAt( screenPosition, false );
+		menu.OpenAt( screenPosition, this, false );
 	}
 
 	protected virtual void OnOpenContextMenu( Menu menu, Plug targetPlug )

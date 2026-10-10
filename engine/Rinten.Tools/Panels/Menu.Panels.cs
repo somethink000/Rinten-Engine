@@ -307,6 +307,8 @@ public partial class Menu
 
 		//Opened from nothing in particular - a shortcut, a context menu a panel asked for without naming itself.
 		//The pointer says which window that is, and a menu opened at the cursor belongs in the window under it.
+		if ( Window.UnderPointer is { Shell: { } pointed } && EditorOverlay.For( pointed.Root ) is { } top ) return top;
+
 		var at = Application.CursorPosition;
 
 		foreach ( var window in Window.All )

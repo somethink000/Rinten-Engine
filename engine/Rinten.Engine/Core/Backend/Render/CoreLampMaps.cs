@@ -15,9 +15,10 @@ internal sealed class CoreLampMaps : IDisposable
 	//How many sizes a face comes in: Side halved this many times less one.
 	private const int Sizes = 4;
 
-	//How many layers the map has at the most - sixteen megabytes a layer, a hundred and twenty-eight in all, and as much again for the movers' map
-	//beside it: one lamp at the finest and two more beside it, or a room of them at a coarser size - and how many views of faces one frame draws.
+	//16 MB a layer, as much again for the movers' map: one lamp at the finest and two beside it
 	internal const int MostLayers = 8;
+
+	//Face views one frame draws
 	internal const int MostFaces = 14;
 
 	//Where a face's depth starts, in metres from the lamp - LampNear in frame.slang is the same number.
@@ -40,25 +41,27 @@ internal sealed class CoreLampMaps : IDisposable
 	private ulong map;
 	private int layers;
 
-	//What moves in each face, square for square where map has it - see the remarks on the class.
+	//What moves in each face, square for square where map has it
 	private ulong movers;
 
-	//Which size class each layer is cut into, below nought for a layer nobody uses; and which of its squares are taken, a bit each.
+	//Each layer's size class, below nought where unused; and which of its squares are taken, a bit each
 	private readonly int[] layerClass = [-1, -1, -1, -1, -1, -1, -1, -1];
 	private readonly ulong[] layerCells = new ulong[MostLayers];
 
-	//One lamp that casts: its size class and the first of its squares - the squares
-	//of a class counted layer by layer - what it was baked as, and each face's state.
+	//One casting lamp: its size class, first square (counted layer by layer), its baked pose and face states
 	private sealed class Lamp
 	{
 		public Light Light;
 		public int First, Faces, Class;
 		public bool Spot;
 
+		/// <summary>Whether the bake's mask holds its still world's shadow: only movers are drawn.</summary>
+		public bool Masked;
+
 		/// <summary>Texels a face of it is across.</summary>
 		public int Size => SizeOf( Class );
 
-		/// <summary>The squares it had before its size changed, read until the new ones are all baked - below nought where there are none: a lamp baked again at its new size lit without a shadow for the frames that took, a blink.</summary>
+		/// <summary>Squares from before a size change, read until the new ones are baked; below nought for none.</summary>
 		public int OldFirst = -1, OldClass = -1;
 		public Vector3 Position, Forward;
 		public float Range, Outer;
@@ -67,13 +70,13 @@ internal sealed class CoreLampMaps : IDisposable
 		/// <summary>Which faces' still world in the map is as the world stands.</summary>
 		public readonly bool[] Baked = new bool[6];
 
-		/// <summary>Where in each face's square of the movers' map something was last drawn - what the next draw there clears.</summary>
+		/// <summary>Where in each face's movers square something was last drawn - what the next draw clears.</summary>
 		public readonly Area[] Moved = new Area[6];
 
 		/// <summary>Which faces have what moves in them drawn this frame, a bit each - the record's shape.y.</summary>
 		public int Moving;
 
-		/// <summary>Whether it moved this frame: its faces are drawn whole every frame instead of baked - see PlanTravelling.</summary>
+		/// <summary>Whether it moved this frame: its faces are drawn whole each frame instead of baked.</summary>
 		public bool Travelling;
 
 		/// <summary>Faces with a valid picture from the current pose, still read while being rebaked</summary>
@@ -84,7 +87,7 @@ internal sealed class CoreLampMaps : IDisposable
 		public readonly System.Numerics.Matrix4x4[] Clip = new System.Numerics.Matrix4x4[6];
 		public readonly System.Numerics.Vector4[] Planes = new System.Numerics.Vector4[6 * 6];
 
-		/// <summary>The finest triangles of everything still within reach - what a face of it can hold at the most; below nought when it wants counting again.</summary>
+		/// <summary>Finest still triangles in reach, the most a face can hold; below nought to recount.</summary>
 		public long Triangles = -1;
 
 		/// <summary>Whether every face the camera can see into holds a picture - see <see cref="Held"/>.</summary>
@@ -104,7 +107,7 @@ internal sealed class CoreLampMaps : IDisposable
 	private long frameNumber;
 	private bool warnedFull;
 
-	//Whether a lamp found no room for the size it wanted last frame - see the remarks on the class.
+	//Whether a lamp found no room for the size it wanted last frame
 	private bool crowded;
 	private bool crowding;
 
@@ -127,19 +130,19 @@ internal sealed class CoreLampMaps : IDisposable
 		}
 	}
 
-	//What this frame does to one face: bake its still world into the map (a view), and draw what moves in it into the movers' map (a view).
+	//One face this frame: its still world baked into the map, and what moves drawn into the movers' map
 	private readonly struct Face
 	{
 		public readonly Lamp Lamp;
 		public readonly int Index;
 
-		/// <summary>The view its still world is baked from, the one what moves in it is drawn from - below nought for neither.</summary>
+		/// <summary>The views its still world is baked from and its movers drawn from; below nought for none.</summary>
 		public readonly int BakeView, MoverView;
 
 		/// <summary>What of its square in the movers' map is cleared, and where what moves is drawn.</summary>
 		public readonly Area Clear, Movers;
 
-		/// <summary>The face's state before this frame - what it holds again if the bake does not happen.</summary>
+		/// <summary>The face's state going into this frame - what it holds again if the bake does not happen.</summary>
 		public readonly bool WasHeld;
 
 		public Face( Lamp lamp, int index, int bakeView, int moverView, Area clear, Area movers )
@@ -167,8 +170,8 @@ internal sealed class CoreLampMaps : IDisposable
 		this.casters = casters;
 	}
 
-	//Decides this frame's faces and says in each lamp's record which layer its faces start at - nought or more where every face
-	//is baked, below nought where it has none. Before the lights and the frame block go up; the casters are the last frame's.
+	//Plans this frame's faces and writes each record's first layer: nought or more when all are baked, else below
+	//Runs before the lights and frame block go up; the casters are the last frame's
 	internal void Plan( float[] frame, float[] records, IReadOnlyList<Light> lights, int count, bool casts, float lodPixels, int room,
 		Vector3 eye, float pixelsAtAMetre, ReadOnlySpan<System.Numerics.Vector4> seen, in System.Numerics.Matrix4x4 clipToWorld )
 	{
@@ -209,15 +212,23 @@ internal sealed class CoreLampMaps : IDisposable
 
 			if ( kind < 0.5f || light is null || !light.Shadows ) continue;
 
-			//A lamp whose shadow of the still world is in the bake's mask has no still world to draw - see Light.Baked.
-			if ( CoreSceneRenderer.MaskChannelOf( kind ) >= 0 ) continue;
-
 			var lamp = Keep( light, kind > 1.5f, records, at, eye, pixelsAtAMetre );
 			if ( lamp is null ) continue;
 
 			lamp.Seen = frameNumber;
 
-			for ( var f = 0; f < lamp.Faces; f++ ) lamp.Visible[f] = Meets( lamp, f );
+			//The mask has its still world - see Light.Baked
+			var masked = CoreSceneRenderer.MaskChannelOf( kind ) >= 0;
+			if ( masked != lamp.Masked ) Forget( lamp );
+
+			lamp.Masked = masked;
+
+			//A panel or disc lights only forward: a face wholly behind it is read by nothing - see AreaLamp
+			var shape = kind < 1.5f ? records[at + 11] : 0.0f;
+			var front = new Vector3( records[at + 8], records[at + 9], records[at + 10] );
+
+			for ( var f = 0; f < lamp.Faces; f++ )
+				lamp.Visible[f] = Meets( lamp, f ) && !( shape > 0.5f && shape < 2.5f && Behind( lamp, f, front ) );
 		}
 
 		//What left the frame gives its layers back.
@@ -232,6 +243,16 @@ internal sealed class CoreLampMaps : IDisposable
 			lamps.Remove( lamp.Light );
 		}
 
+		//A masked lamp has nothing to bake: every face held. After every Keep, as a bigger map forgets all
+		foreach ( var lamp in lamps.Values )
+		{
+			if ( !lamp.Masked ) continue;
+
+			Array.Fill( lamp.Baked, true );
+			Array.Fill( lamp.Held, true );
+			lamp.Travelling = false;
+		}
+
 		//The faces to draw, nearest lamp first: what this frame cannot do without, then bakes that can wait for room.
 		room = Math.Min( room, MostFaces );
 
@@ -239,8 +260,7 @@ internal sealed class CoreLampMaps : IDisposable
 		{
 			for ( var i = 0; i < count && viewCount < room; i++ )
 			{
-				//A light that is gone leaves its place in the list: asking the lamps for it is asking a dictionary for
-				//a null key, which throws - and in the middle of a frame nobody was catching for, that was the editor.
+				//A light that is gone leaves a null in the list, and a null key throws from the dictionary
 				if ( lights[i] is not { } asking ) continue;
 
 				if ( !lamps.TryGetValue( asking, out var lamp ) || lamp.Seen != frameNumber ) continue;
@@ -250,7 +270,7 @@ internal sealed class CoreLampMaps : IDisposable
 			}
 		}
 
-		//And where each lamp's faces are, where every one is baked: the first of its squares, and their size class - or the old ones, until the new are.
+		//Each lamp's first square and size class once all its faces are baked - or the old ones until then
 		for ( var i = 0; i < count; i++ )
 		{
 			if ( lights[i] is not { } asking ) continue;
@@ -266,10 +286,13 @@ internal sealed class CoreLampMaps : IDisposable
 
 			if ( lamp.Whole() )
 			{
+				//A masked lamp with nothing moving in sight reads no map at all: LampShadow stops at the first test
+				if ( lamp.Masked && lamp.Moving == 0 ) continue;
+
 				records[at + 14] = lamp.First;
 				records[at + 15] = lamp.Class;
 
-				//Which faces read the movers' map as well - only where the squares read are the ones what moves was drawn into.
+				//Which faces read the movers' map too - only where the squares read are the ones movers were drawn into
 				records[at + 17] = lamp.Moving;
 			}
 			else if ( lamp.OldClass >= 0 )
@@ -283,8 +306,8 @@ internal sealed class CoreLampMaps : IDisposable
 			CoreRenderDevice.ShadowMapIndex( movers ), CoreRenderDevice.ShadowMapIndex( movers, depth: true ) );
 	}
 
-	//A lamp that moved this frame: every face it can be seen through drawn whole, what stands still and what moves in one view,
-	//or none - part of them is no shadow anyway. Left unbaked, so the still world is baked once it stops.
+	//A moving lamp: each visible face drawn whole, still and moving in one view, or none at all
+	//Left unbaked, so the still world is baked once it stops
 	private void PlanTravelling( Lamp lamp, int room, float lodPixels )
 	{
 		var wanted = 0;
@@ -335,7 +358,7 @@ internal sealed class CoreLampMaps : IDisposable
 		}
 	}
 
-	//A light's lamp: made where it is new, given its squares at the size it wants and marked to bake where it changed or its size did.
+	//A light's lamp: made if new, given squares at its wanted size, marked to bake where it or its size changed
 	private Lamp Keep( Light light, bool spot, float[] records, int at, Vector3 eye, float pixelsAtAMetre )
 	{
 		var position = new Vector3( records[at + 0], records[at + 1], records[at + 2] );
@@ -374,14 +397,14 @@ internal sealed class CoreLampMaps : IDisposable
 			return lamp;
 		}
 
-		//Finer the moment it should be; coarser only two sizes on - see the remarks on the class. Its old squares
-		//stay its own and are read until the new ones are baked; where there is no room for both, it stays.
+		//Finer at once, coarser only two sizes on; old squares stay its own and are read until the new are baked
+		//Where there is no room for both, it stays
 		if ( lamp.OldClass < 0 && ( sizeClass < lamp.Class || sizeClass >= lamp.Class + ( crowded ? 1 : 2 ) ) )
 		{
 			var was = lamp.Class;
 			var first = lamp.First;
 
-			//Only the size it wants: a lamp that got a coarser one for want of room asked for the finer one again every frame, and was baked every frame.
+			//Only the wanted size: asking again for a finer one each frame would rebake each frame
 			if ( Place( lamp, sizeClass, coarser: sizeClass > was ) )
 			{
 				if ( lamp.Whole() ) { lamp.OldFirst = first; lamp.OldClass = was; }
@@ -571,7 +594,7 @@ internal sealed class CoreLampMaps : IDisposable
 		lamp.Triangles = -1;
 	}
 
-	//A lamp where it now stands: each face's projection and planes again, and every face to bake.
+	//A lamp at its pose: each face's projection and planes again, and every face to bake
 	private void Aim( Lamp lamp, Vector3 position, Vector3 forward, float range, float outer )
 	{
 		lamp.Position = position;
@@ -588,7 +611,7 @@ internal sealed class CoreLampMaps : IDisposable
 		Forget( lamp );
 	}
 
-	//Which way a face looks: down the world's axes for a point light, in the order LampShadow picks them, and down the cone for a spot.
+	//A face's direction: world axes for a point light in LampShadow's order, down the cone for a spot
 	private static Vector3 FaceForward( Lamp lamp, int face ) => lamp.Spot ? lamp.Forward : face switch
 	{
 		0 => new Vector3( 1.0f, 0.0f, 0.0f ),
@@ -609,8 +632,8 @@ internal sealed class CoreLampMaps : IDisposable
 		return MathF.Sqrt( 1.0f - ( outer * outer ) ) / outer;
 	}
 
-	//A face's projection: across and up the face's square over its half-width, less the border, and depth from Near to the lamp's
-	//reach - written out rather than made of a look-at and a perspective so that LampShadow can do the same sums the other way.
+	//A face's projection: across and up over its half-width less the border, depth from Near to its reach
+	//Written out rather than look-at times perspective so LampShadow can invert the same sums
 	private static System.Numerics.Matrix4x4 FaceClip( Lamp lamp, int face )
 	{
 		var ( right, up, forward ) = CoreSunPages.LightAxes( FaceForward( lamp, face ) );
@@ -675,6 +698,20 @@ internal sealed class CoreLampMaps : IDisposable
 		return true;
 	}
 
+	//Whether every direction a face looks down points away from where a one-sided shape lights
+	private static bool Behind( Lamp lamp, int face, Vector3 front )
+	{
+		var ( right, up, forward ) = CoreSunPages.LightAxes( FaceForward( lamp, face ) );
+
+		for ( var c = 0; c < 4; c++ )
+		{
+			var corner = forward + ( ( c & 1 ) != 0 ? right : -right ) + ( ( c & 2 ) != 0 ? up : -up );
+			if ( corner.Dot( front ) > 0.0f ) return false;
+		}
+
+		return true;
+	}
+
 	private static bool Outside( System.Numerics.Vector4 plane, ReadOnlySpan<Vector3> points )
 	{
 		foreach ( var p in points )
@@ -683,7 +720,7 @@ internal sealed class CoreLampMaps : IDisposable
 		return true;
 	}
 
-	//Whether anything that moves stands in a face's frustum now - and it was, for as long as it does.
+	//Whether anything that moves stands in a face's frustum
 	private bool Moving( Lamp lamp, int face )
 	{
 		var planes = lamp.PlanesOf( face );
@@ -787,7 +824,7 @@ internal sealed class CoreLampMaps : IDisposable
 	//A view of one face for this frame's cull: of the still world, to bake, of what moves, for the movers' map, or of both.
 	private int View( Lamp lamp, int face, int casters, float lodPixels )
 	{
-		if ( lamp.Triangles < 0 ) lamp.Triangles = TrianglesNear( lamp );
+		if ( casters != MovingOnly && lamp.Triangles < 0 ) lamp.Triangles = TrianglesNear( lamp );
 
 		Triangles += ( casters == MovingOnly ? 0 : lamp.Triangles ) + ( casters == StillOnly ? 0 : this.casters.MoverTriangles );
 
@@ -828,7 +865,7 @@ internal sealed class CoreLampMaps : IDisposable
 		return sum;
 	}
 
-	//This frame's faces, after the views already in the cull's list; how many there are now.
+	//This frame's faces after the views already in the cull's list; returns the new count
 	internal int AddViews( CoreMeshRender.ViewSetup[] into, int count )
 	{
 		for ( var i = 0; i < viewCount && count < into.Length; i++ )
@@ -874,7 +911,7 @@ internal sealed class CoreLampMaps : IDisposable
 				if ( !baked ) Unbake( face );
 			}
 
-			//What moves into the movers' map: where it was and is cleared, drawn where it is.
+			//Movers into the movers' map: their old and new area cleared, drawn where they are
 			if ( face.MoverView >= 0 )
 			{
 				CoreRenderDevice.ZoneBegin( "lamp movers" );
@@ -911,7 +948,7 @@ internal sealed class CoreLampMaps : IDisposable
 		return true;
 	}
 
-	//A face whose bake did not happen: baked again next frame, and read as it was meanwhile.
+	//A face whose bake did not happen: baked next frame, and its old picture read meanwhile
 	private static void Unbake( in Face face )
 	{
 		face.Lamp.Baked[face.Index] = false;

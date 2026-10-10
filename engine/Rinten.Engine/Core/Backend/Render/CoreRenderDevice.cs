@@ -447,8 +447,8 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	//A second frame block for draws that see the world from somewhere else - a light's view drawing the classic
-	//draws into a shadow map. Where it was put, or nought where it could not be; UseFrame makes the draws read it.
+	//A second frame block for draws seen from elsewhere, like a light's view into a shadow map
+	//Returns where it went, or nought where it could not; UseFrame makes the draws read it
 	internal static ulong PutFrame( ReadOnlySpan<float> frame )
 	{
 		if ( !CoreNative.Available || frame.IsEmpty ) return 0;
@@ -575,7 +575,7 @@ internal static unsafe class CoreRenderDevice
 	public static (int X, int Y, int Wide, int Tall) DepthReadRect( ulong viewport )
 		=> CoreNative.Available ? CoreRender.DepthReadRect( viewport ) : (0, 0, 0, 0);
 
-	//layer is which eye, for a view of both - see CreateEyesView.
+	/// <summary>Reads a view's pixels; layer is the eye for a view of both - see CreateEyesView.</summary>
 	public static bool ReadView( ulong view, Span<byte> pixels, int layer = 0 )
 	{
 		if ( !CoreNative.Available || pixels.IsEmpty ) return false;
@@ -1100,7 +1100,7 @@ internal static unsafe class CoreRenderDevice
 
 	//-- what a project's own buffers are given --------------------------------
 
-	/// <summary>Whether a frame is being recorded right now - a window's, or a view's of its own.</summary>
+	/// <summary>Whether a frame is being recorded - a window's, or a view's of its own.</summary>
 	public static bool Recording => CoreNative.Available && CoreRender.Recording() != 0;
 
 	/// <summary>Fills a buffer run with one word before the next frame; offset and length in whole words.</summary>
@@ -1185,7 +1185,7 @@ internal static unsafe class CoreRenderDevice
 	}
 
 	//Max specialization constants per pipeline; ids below CoreResources.FirstShaderFold are the frame's
-	internal const int SpecializationCount = 19;
+	internal const int SpecializationCount = 20;
 
 	public static ulong CreatePipeline( byte[] vertexSpirv, byte[] pixelSpirv,
 		CoreRender.VertexLayoutKind vertexLayout = CoreRender.VertexLayoutKind.None, bool depthTest = false,

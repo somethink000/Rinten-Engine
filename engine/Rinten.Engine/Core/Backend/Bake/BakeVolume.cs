@@ -16,7 +16,7 @@ internal sealed class BakeVolume
 	/// <summary>A colour channel each: four halves a point - constant, then the lean along x, y, z.</summary>
 	public Half[] Red, Green, Blue;
 
-	/// <summary>Four bytes a point, or null where no light has its shadows baked: how much of each masked light reaches the point through the still world - what a thing that moves takes its shadow of the still world from. Laid out as the colours are.</summary>
+	/// <summary>Four bytes a point, null where nothing is masked: each masked light's share, for movers.</summary>
 	public byte[] Mask;
 
 	//Most points along one side.
@@ -28,7 +28,7 @@ internal sealed class BakeVolume
 	//Most points in all - past this the step grows.
 	private const int MostPoints = 1 << 19;
 
-	/// <summary>Lays the lattice over the still world, a step apart - or further, where the world is too big for that many points.</summary>
+	/// <summary>Lays the lattice over the still world a step apart, or further where that is too many points.</summary>
 	public void Lay( BBox bounds, float step )
 	{
 		step = MathF.Max( step, 0.05f );
@@ -72,6 +72,9 @@ internal sealed class BakeVolume
 
 		progress.Begin( "Tracing the volume", count );
 
+		//The sphere's chance per steradian of a direction, where glows get rays of their own - see Arriving
+		var glowing = scene.Emitters.Length > 0 ? BakeMath.InvPi * 0.25f : 0.0f;
+
 		Parallel.For( 0, count, new ParallelOptions { CancellationToken = cancel }, index =>
 		{
 			var x = index % CountX;
@@ -85,7 +88,7 @@ internal sealed class BakeVolume
 			Vec3 r = Vec3.Zero, g = Vec3.Zero, b = Vec3.Zero;
 			var inside = 0;
 
-			//Every direction once, stratified, so a point with the sky on one side and a wall on the other gets both without luck coming into it.
+			//Every direction once, stratified, so sky on one side and a wall on the other are both seen
 			var across = Math.Max( (int)MathF.Sqrt( samples ), 2 );
 
 			for ( var s = 0; s < across * across; ++s )
@@ -94,9 +97,20 @@ internal sealed class BakeVolume
 				var v = ( ( s / across ) + random.Float() ) / across;
 
 				var direction = BakeMath.AnyDirection( u, v );
-				var arriving = scene.Arriving( at, direction, ref random, out var behind );
+				var arriving = scene.Arriving( at, direction, glowing, ref random, out var behind );
 
 				if ( behind ) inside++;
+
+				//And a glowing triangle straight from the point, as radiance over the sphere's chance of its direction
+				if ( glowing > 0.0f )
+				{
+					var glow = scene.TowardsGlow( at, Vec3.Zero, Vec3.Zero, false, ref random, out var aim ) * glowing;
+
+					sum += glow;
+					r += aim * glow.X;
+					g += aim * glow.Y;
+					b += aim * glow.Z;
+				}
 
 				sum += arriving;
 				r += direction * arriving.X;
@@ -134,7 +148,7 @@ internal sealed class BakeVolume
 			leanG[index] = towardsG;
 			leanB[index] = towardsB;
 
-			//A point that is inside a wall saw the wall's inside, and would make everything near that wall dark. It takes its neighbours' instead.
+			//A point inside a wall saw its inside and would darken everything near it: it takes its neighbours'
 			valid[index] = inside < taken * 0.25f;
 
 			if ( mask is not null ) mask[index] = MaskAt( scene, at, ref random );
@@ -146,7 +160,7 @@ internal sealed class BakeVolume
 		Encode( constant, leanR, leanG, leanB, mask );
 	}
 
-	/// <summary>Traces every point on the GPU (see BakeGpu); false means trace on the CPU. Baked lamps added on CPU</summary>
+	/// <summary>Traces every point on the GPU (BakeGpu); false means the CPU. Baked lamps added on the CPU.</summary>
 	public bool TraceOnCard( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = CountX * CountY * CountZ;
@@ -218,10 +232,10 @@ internal sealed class BakeVolume
 		return true;
 	}
 
-	//One baked lamp's light at a point, as a surface facing it would have it over pi, with its shadow taken from across the lamp's width.
+	//One baked lamp's light at a point over pi, as a surface facing it has it, shadowed across the lamp's width
 	private static Vec3 LampAt( BakeScene scene, BakeLight light, Vec3 at, ref BakeRandom random, out Vec3 towards )
 	{
-		//Asked of the scene with the normal pointed at the lamp, so the answer is its light square on - the same falloff, cone and shadow as a texel.
+		//Asked with the normal at the lamp: its light square on, with a texel's falloff, cone and shadow
 		towards = light.Kind == 0 ? -light.Forward : Vec3.Normalize( light.Position - at );
 
 		var sum = Vec3.Zero;
@@ -291,7 +305,7 @@ internal sealed class BakeVolume
 		}
 	}
 
-	//Into three pictures, one a colour, the layers of the lattice side by side across each - see BakedVolume in frame.slang, which reads them.
+	//Into three pictures, one a colour, the lattice's layers side by side - see BakedVolume in frame.slang
 	private void Encode( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask )
 	{
 		var count = CountX * CountY * CountZ;

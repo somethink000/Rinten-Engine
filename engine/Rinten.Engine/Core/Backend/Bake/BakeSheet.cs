@@ -22,26 +22,26 @@ internal sealed class BakeSheet
 	/// <summary>Four halves a texel: which way the light came from, and how much it leans.</summary>
 	public Half[] Ways;
 
-	/// <summary>Four bytes a texel, or null where no light has its shadows baked: how much of each masked light the still world lets reach the texel, a channel a light - see BakeScene.AssignMasks and MaskAt in frame.slang.</summary>
+	/// <summary>Four bytes a texel, null where nothing is masked: each masked light's share reaching it.</summary>
 	public byte[] Mask;
 
 	//One entry an atlas texel while baking.
 	private Vec3[] position;
 	private Vec3[] normal;
 	private Vec3[] geometric;
-	private float[] owned;        //how far the texel's centre is from the triangle it took, texels; +inf where none
-	private int[] ownerOf;        //which receiver's square it is in, -1 where none
+	private float[] owned;        //Distance from the texel's centre to its triangle, in texels; +inf where none
+	private int[] ownerOf;        //Receiver whose square it is in, -1 where none
 
 	private Vec3[] light;
 	private Vec3[] towards;
 	private float[] variance;
 	private bool[] valid;
 
-	//The mask while baking: each channel's share of the light let through, and how far that can be trusted - null where nothing is masked.
+	//The mask while baking: each channel's share let through and its trust - null where nothing is masked
 	private Vec4[] mask;
 	private float[] maskVariance;
 
-	/// <summary>Gives each receiver a square as big as its surface asks for at the density, the whole atlas no bigger than it needs be and no bigger than <paramref name="most"/>. A scene too big for that at the density asked gets less of it, evenly.</summary>
+	/// <summary>Gives each receiver a square at the density, within <paramref name="most"/>; too big gets less.</summary>
 	public static bool Pack( BakeScene scene, float density, int most, out int side )
 	{
 		side = 0;
@@ -131,7 +131,7 @@ internal sealed class BakeSheet
 		return true;
 	}
 
-	/// <summary>Lays every receiver's triangles over its square and keeps, for each texel, the point of surface under its centre - or, for a texel the surface only grazes, the nearest point of it, so the edges of every island are lit and the filter never reaches a texel nobody baked.</summary>
+	/// <summary>Keeps each texel's surface point under its centre, or the nearest if grazed, so edges are lit.</summary>
 	public void Rasterise( BakeScene scene, int side )
 	{
 		Width = side;
@@ -255,7 +255,7 @@ internal sealed class BakeSheet
 		return p;
 	}
 
-	/// <summary>Traces every texel on the graphics card - see BakeGpu - and leaves what <see cref="Trace"/> would have: the mean, the lean, the noise and whether the texel can be trusted. False where the card could not, and nothing is left; the caller then traces on the processor. The worker's, as Trace is.</summary>
+	/// <summary>Traces every texel on the card (BakeGpu), leaving what Trace would; false where it could not.</summary>
 	public bool TraceOnCard( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = Width * Height;
@@ -313,14 +313,14 @@ internal sealed class BakeSheet
 		var seen = sum / samples;
 		mask[at] = seen;
 
-		//Each channel is the mean of so many coin tosses, which is as noisy as p(1 - p) over their count; the noisiest is what the filter asks after.
+		//Each channel is a mean of coin tosses, noisy as p(1 - p) over their count; the filter asks the noisiest
 		var worst = MathF.Max( MathF.Max( seen.X * ( 1.0f - seen.X ), seen.Y * ( 1.0f - seen.Y ) ),
 			MathF.Max( seen.Z * ( 1.0f - seen.Z ), seen.W * ( 1.0f - seen.W ) ) );
 
 		maskVariance[at] = worst / samples;
 	}
 
-	/// <summary>Traces every texel. Any thread, and all of them; <paramref name="progress"/> counts texels as they finish, for somebody to show.</summary>
+	/// <summary>Traces every texel, on every thread; <paramref name="progress"/> counts texels as they finish.</summary>
 	public void Trace( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = Width * Height;
@@ -368,12 +368,19 @@ internal sealed class BakeSheet
 				}
 
 				var lean = Vec3.Zero;
-				var direct = scene.Direct( p, n, g, ref random, true, ref lean );
+				var direct = scene.Direct( p, n, g, ref random, true, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
 
-				var direction = BakeMath.CosineAround( n, random.Float(), random.Float() );
-				if ( Vec3.Dot( direction, g ) <= 0.0f ) direction = BakeMath.CosineAround( g, random.Float(), random.Float() );
+				var axis = n;
+				var direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
 
-				var arriving = scene.Arriving( BakeScene.Offset( p, g, direction ), direction, ref random, out var behind );
+				if ( Vec3.Dot( direction, g ) <= 0.0f )
+				{
+					axis = g;
+					direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
+				}
+
+				var density = scene.Emitters.Length > 0 ? Vec3.Dot( axis, direction ) * BakeMath.InvPi : 0.0f;
+				var arriving = scene.Arriving( BakeScene.Offset( p, g, direction ), direction, density, ref random, out var behind );
 				if ( behind ) inside++;
 
 				var one = direct + arriving;
@@ -413,7 +420,7 @@ internal sealed class BakeSheet
 		var count = Width * Height;
 		var metres = new float[scene.Receivers.Count];
 
-		//How big a texel of each square is in the world, which is how near a neighbour has to stand to be the same patch of surface.
+		//How big a texel of each square is in the world: how near a neighbour stands to be the same patch
 		for ( var r = 0; r < scene.Receivers.Count; ++r )
 		{
 			var receiver = scene.Receivers[r];
@@ -452,7 +459,7 @@ internal sealed class BakeSheet
 			var toWays = new Vec3[count];
 			var toVariance = new float[count];
 
-			//The mask by the same neighbours - a shadow's edge in it is as much an edge as one in the light - and its own noise for what counts as alike.
+			//The mask by the same neighbours - its shadow edges are edges too - with its own noise for what is alike
 			var toMask = fromMask is null ? null : new Vec4[count];
 			var toMaskVariance = fromMask is null ? null : new float[count];
 
@@ -579,7 +586,7 @@ internal sealed class BakeSheet
 		maskVariance = fromMaskVariance;
 	}
 
-	/// <summary>Fills every texel of a square that has no answer - the gutter, a gap between islands, a texel that was inside something - from the answered texels beside it, a ring at a time, so filtering at any edge reads light that belongs there.</summary>
+	/// <summary>Fills unanswered texels from answered ones beside them, a ring at a time, for clean edges.</summary>
 	public void Dilate()
 	{
 		var count = Width * Height;
@@ -663,7 +670,7 @@ internal sealed class BakeSheet
 			var way = towards[i];
 			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );
 
-			//How much of the light the unbent normal gets by the lean below, which is what an unbent normal is divided back to.
+			//How much light the unbent normal gets by the lean below - what it is divided back to
 			var n = normal[i];
 			var lean = n.LengthSquared() > 0.5f ? ( Vec3.Dot( n, way ) * 0.5f ) + 0.5f : 0.5f + ( way.Length() * 0.5f );
 
@@ -674,7 +681,7 @@ internal sealed class BakeSheet
 
 			if ( Mask is null ) continue;
 
-			//A texel nobody owns lets everything through, so a filter reaching it from an owned edge does not darken that edge.
+			//A texel nobody owns lets everything through, so a filter reaching it does not darken an owned edge
 			var m = ownerOf[i] >= 0 ? Vec4.Clamp( mask[i], Vec4.Zero, Vec4.One ) : Vec4.One;
 
 			Mask[( i * 4 ) + 0] = (byte)MathF.Round( m.X * 255.0f );

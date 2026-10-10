@@ -358,8 +358,8 @@ internal static unsafe class CoreSceneRenderer
 	//Set for the session when some drawn shader turns out to lack a two-view build
 	internal static bool StereoIncomplete { get; private set; }
 
-	//A two-view program that was built and then refused where it runs - the browser would not
-	//link it. Latches StereoIncomplete the same way a missing build does, and says why once.
+	//A two-view program built and then refused where it runs, as when the browser will not link it
+	//Latches StereoIncomplete like a missing build, and says why once
 	internal static void StereoRefused( string why )
 	{
 		if ( StereoIncomplete ) return;
@@ -452,8 +452,7 @@ internal static unsafe class CoreSceneRenderer
 		const int floatsPerLight = CoreLights.LightFloats;
 		const int lightsAt = LightsAt;
 
-		//Scratch, not fresh: a frame's block is read straight into the device and
-		//never kept, and a frame allocating one was a frame the collector had to visit.
+		//Scratch, not fresh: the block goes straight to the device and is never kept, so a frame allocates none
 		var block = sceneScratch;
 		System.Array.Clear( block );
 
@@ -469,6 +468,7 @@ internal static unsafe class CoreSceneRenderer
 			LightsInFrame = 0;
 			block[19] = 0;
 			BakedOn = CoreBakedLighting.Write( block, null );
+			AreaOn = false;
 			return;
 		}
 
@@ -554,6 +554,8 @@ internal static unsafe class CoreSceneRenderer
 		LightsInFrame = lights.Count;
 		block[19] = Math.Min( lights.Count, MaxLights );
 
+		var shaped = false;
+
 		for ( var i = 0; i < lights.Count; i++ )
 		{
 			var at = i * floatsPerLight;
@@ -600,17 +602,34 @@ internal static unsafe class CoreSceneRenderer
 				LightBlock[at + 3] = EffectiveRange( source.Radius, source.Colour, source.Falloff );
 			}
 
+			LightBlock[at + 11] = 0.0f;
+			LightBlock[at + 12] = 0.0f;
+			LightBlock[at + 18] = 0.0f;
+			LightBlock[at + 19] = 0.0f;
+
 			if ( source.Kind == 2 )
 			{
 				//Cones in half-angle degrees; the shader compares cosines, the same test without trigonometry
 				LightBlock[at + 11] = MathF.Cos( source.ConeInner.DegreeToRadian() );
 				LightBlock[at + 12] = MathF.Cos( source.ConeOuter.DegreeToRadian() );
 			}
+			else if ( source.Kind == 1 && source.Shape != 0 )
+			{
+				//Its shape where a spot keeps its cones - see AreaLamp
+				LightBlock[at + 11] = source.Shape;
+				LightBlock[at + 12] = source.HalfWidth;
+				LightBlock[at + 18] = source.HalfHeight;
+				LightBlock[at + 19] = source.Turn;
+				shaped = true;
+			}
 
 			//And into the block where it fits: the browser has no buffer and reads lights from there
 			if ( i < MaxLights )
 				LightBlock.AsSpan( at, floatsPerLight ).CopyTo( block.AsSpan( lightsAt + ( i * floatsPerLight ), floatsPerLight ) );
 		}
+
+		//The tables only where a lamp has a shape: without them it lights as the point it stands on
+		AreaOn = shaped && CoreAreaLights.Write( block );
 
 		CoreRenderDevice.ZoneEnd();
 	}
@@ -820,7 +839,10 @@ internal static unsafe class CoreSceneRenderer
 	//The sky's light from its capture, and the ambient factor - see CoreSkyLight.Lay and LayPanorama.
 	internal const int SkyLightAt = PanoramaLightAt + 4;
 
-	internal const int FrameFloats = SkyLightAt + 4;
+	//The area lamps' LTC tables - see CoreAreaLights.
+	internal const int AreaAt = SkyLightAt + 4;
+
+	internal const int FrameFloats = AreaAt + 4;
 
 	//The exposure a block was written with - see SetFinish
 	internal static float ExposureOf( float[] frame )
@@ -1345,12 +1367,12 @@ internal static unsafe class CoreSceneRenderer
 		var c2 = new System.Numerics.Vector4( vp.M13, vp.M23, vp.M33, vp.M43 );
 		var c3 = new System.Numerics.Vector4( vp.M14, vp.M24, vp.M34, vp.M44 );
 
-		planes[0] = Unit( c3 + c0 ); //left
-		planes[1] = Unit( c3 - c0 ); //right
-		planes[2] = Unit( c3 + c1 ); //bottom
-		planes[3] = Unit( c3 - c1 ); //top
-		planes[4] = Unit( c2 );      //near, with depth in [0..1]
-		planes[5] = Unit( c3 - c2 ); //far
+		planes[0] = Unit( c3 + c0 ); //Left
+		planes[1] = Unit( c3 - c0 ); //Right
+		planes[2] = Unit( c3 + c1 ); //Bottom
+		planes[3] = Unit( c3 - c1 ); //Top
+		planes[4] = Unit( c2 );      //Near, with depth in [0..1]
+		planes[5] = Unit( c3 - c2 ); //Far
 	}
 
 	//Normalises a plane once so sphere tests skip square roots; zero normals are left alone
@@ -1440,7 +1462,8 @@ internal static unsafe class CoreSceneRenderer
 
 	//A light as the frame block holds it, from a Light component or a scene light
 	private readonly record struct LightSource( int Kind, Vector3 Position, Vector3 Forward, Color Colour,
-		float Radius, float Falloff, float SourceRadius, float ConeInner, float ConeOuter, int Withholds = 0 )
+		float Radius, float Falloff, float SourceRadius, float ConeInner, float ConeOuter, int Withholds = 0,
+		int Shape = 0, float HalfWidth = 0.0f, float HalfHeight = 0.0f, float Turn = 0.0f )
 	{
 		//What a light component is kept out of: one for the diffuse, two for the highlight - see Light.Contribution.
 		private static int WithheldBy( Light light )
@@ -1452,11 +1475,35 @@ internal static unsafe class CoreSceneRenderer
 		{
 			SpotLight spot => new( 2, spot.WorldPosition, spot.WorldRotation.Forward.Normal, spot.EmittedColor,
 				spot.Radius, spot.Falloff, MathF.Max( spot.SourceRadius, 0.0f ), spot.ConeInner, spot.ConeOuter, WithheldBy( spot ) ),
+			PointLight { AreaShape: not PointLight.AreaShapes.Point } point => Shaped( point ),
 			PointLight point => new( 1, point.WorldPosition, point.WorldRotation.Forward.Normal, point.EmittedColor,
 				point.Radius, point.Falloff, MathF.Max( point.SourceRadius, 0.0f ), 0, 0, WithheldBy( point ) ),
 			_ => new( 0, light.WorldPosition, light.WorldRotation.Forward.Normal, light.EmittedColor,
 				0, light.Falloff, MathF.Max( light.SourceRadius, 0.0f ), 0, 0, WithheldBy( light ) ),
 		};
+
+		//A point with a shape: its half extents, and its width's turn about forward from LampAxes' right - see AreaLamp
+		private static LightSource Shaped( PointLight point )
+		{
+			var rotation = point.WorldRotation;
+			var forward = rotation.Forward.Normal;
+			var size = point.AreaSize;
+
+			var ( right0, up0, _ ) = CoreSunPages.LightAxes( forward );
+			var right = rotation.Right.Normal;
+			var turn = MathF.Atan2( right.Dot( up0 ), right.Dot( right0 ) );
+
+			var tube = point.AreaShape == PointLight.AreaShapes.Tube;
+			var halfWidth = MathF.Max( size.x * 0.5f, 0.001f );
+			var halfHeight = tube ? MathF.Max( point.SourceRadius, 0.005f )
+				: point.AreaShape == PointLight.AreaShapes.Disc ? halfWidth : MathF.Max( size.y * 0.5f, 0.001f );
+
+			//Its shadow as soft as the shape is wide
+			var width = MathF.Max( point.SourceRadius, tube ? halfHeight : MathF.Max( halfWidth, halfHeight ) );
+
+			return new( 1, point.WorldPosition, forward, point.EmittedColor, point.Radius, point.Falloff, width, 0, 0, WithheldBy( point ),
+				(int)point.AreaShape, halfWidth, halfHeight, turn );
+		}
 
 		/// <summary>A scene light's colour is its brightness; it casts no shadow, so it has no width.</summary>
 		public static LightSource Of( SceneLight light ) => light switch
@@ -1494,6 +1541,11 @@ internal static unsafe class CoreSceneRenderer
 	internal static bool PanoramaOn { get; private set; }
 
 	internal const int PanoramaFold = CoreResources.ShaderFoldsEnd;
+
+	//Whether a lamp in the block has a shape - see kAreaOn, constant 19
+	internal static bool AreaOn { get; private set; }
+
+	internal const int AreaFold = PanoramaFold + 1;
 
 	//Whether the frame drew itself a sky table - see kSkyTableOn.
 	internal static bool SkyTableOn { get; private set; }
@@ -1541,7 +1593,8 @@ internal static unsafe class CoreSceneRenderer
 			| ( CoreLights.Decals > 0 ? 512 : 0 )
 			| ( BakedOn ? 1024 : 0 )
 			| ( FogVolumes && !FogSheetLaid ? 16384 : 0 )
-			| ( PanoramaOn ? 1 << PanoramaFold : 0 );
+			| ( PanoramaOn ? 1 << PanoramaFold : 0 )
+			| ( AreaOn ? 1 << AreaFold : 0 );
 
 	//Sky pass specialization: the world bits, the frame's sky bits, and the sky material's Fold() ids
 	internal static int SkySpecialize( CoreMaterial sky = null )
@@ -1726,7 +1779,7 @@ internal static unsafe class CoreSceneRenderer
 				Log.Warning( $"{kind.Shader} did not load - drawing with {StandardShader} instead: {WhyNot( kind.Shader )}" );
 			stages = CoreResources.Shader( StandardShader );
 
-			//Now drawn by the standard surface, so mark it for the cluster path (CoreResources.StandsIn)
+			//Drawn by the standard surface, so marked for the cluster path (CoreResources.StandsIn)
 			CoreResources.StandsIn( kind.Shader );
 		}
 

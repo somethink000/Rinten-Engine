@@ -43,12 +43,13 @@ internal struct BakeRandom
 internal static class BakeMath
 {
 	public const float Pi = 3.14159265f;
+	public const float InvPi = 1.0f / Pi;
 
 	/// <summary>How bright a colour is to an eye.</summary>
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static float Luma( Vec3 colour ) => ( colour.X * 0.2126f ) + ( colour.Y * 0.7152f ) + ( colour.Z * 0.0722f );
 
-	/// <summary>Two axes square to a direction and to each other - Duff's, which has no square root in it and no direction it fails for.</summary>
+	/// <summary>Two axes square to a direction and each other - Duff's: no square root, never fails.</summary>
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static void Basis( Vec3 normal, out Vec3 right, out Vec3 up )
 	{
@@ -60,7 +61,7 @@ internal static class BakeMath
 		up = new Vec3( b, sign + ( normal.Y * normal.Y * a ), -normal.Y );
 	}
 
-	/// <summary>A direction off a surface, likelier the nearer the normal it is - in proportion to the cosine, which is exactly the weight diffuse light arrives with, so a sample taken this way is worth the light it finds and nothing has to be multiplied in afterwards.</summary>
+	/// <summary>A direction off a surface by the cosine, so a sample is worth the light it finds.</summary>
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static Vec3 CosineAround( Vec3 normal, float u, float v )
 	{
@@ -87,7 +88,7 @@ internal static class BakeMath
 		return new Vec3( radius * MathF.Cos( angle ), z, radius * MathF.Sin( angle ) );
 	}
 
-	/// <summary>A direction inside a cone about an axis, every one as likely as any other - which is where on the sun's disc a ray towards it is aimed.</summary>
+	/// <summary>A direction inside a cone about an axis, all equally likely - where on the sun's disc a ray aims.</summary>
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static Vec3 InCone( Vec3 axis, float cosine, float u, float v )
 	{

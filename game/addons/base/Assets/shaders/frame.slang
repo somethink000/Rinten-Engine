@@ -118,7 +118,7 @@ cbuffer Push
 
 struct MaterialParams
 {
-	float4 surface; //roughness, metalness, emission, alpha cutoff
+	float4 surface; //Roughness, metalness, emission, alpha cutoff
 };
 
 [[vk::binding(4,0)]] ConstantBuffer<MaterialParams> g_material;
@@ -599,8 +599,8 @@ float3 DecalData( float3 decoded, bool encode )
 //A shader's extra texture, read bindlessly by index from the material; index 0 means use Default
 struct EngineTexture
 {
-	float4 where;   //x which picture in the table; nought for none
-	float4 instead; //what to read where there is none
+	float4 where;   //Picture in the table x, nought for none
+	float4 instead; //What to read where there is none
 
 	bool Exists() { return where.x >= 0.5; }
 
@@ -797,8 +797,8 @@ bool SkyTableAt( float3 direction, out float3 colour )
 #else
 	float4 read = g_skyTable.SampleLevel( SkyTableUv( direction ), 0.0 );
 
-	//One in the alpha is a table that was drawn - see sky_surface.slang, which writes it. A device that
-	//has not drawn one reads nought out of a cleared picture, and the caller falls back on the gradient.
+	//Alpha one is a drawn table - see sky_surface.slang; a device that drew none reads nought
+	//from a cleared picture, and the caller falls back on the gradient
 	if ( read.a < 0.5 ) return false;
 
 	colour = read.rgb;
@@ -1330,9 +1330,10 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 	float compare = depth - bias;
 	float texel = 1.0 / LampLayerTexels;
 
-	float lit = LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
+	//A masked lamp's still world is in the bake's mask and its squares of the map are never drawn - see CoreLampMaps
+	float lit = LightMaskChannel( light ) >= 0 ? 1.0 : LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
 
-	//This face's movers are in the movers map beside it where its bit says it was drawn - see CoreLampMaps
+	//This face's movers are in the movers map beside it where its bit is set - see CoreLampMaps
 	uint moversMap = uint( g_frame[0].sunDepth.z );
 
 	if ( ( uint( light.shape.y ) & ( 1u << face ) ) != 0u && moversMap != 0u && lit > 0.0 )
@@ -1456,6 +1457,15 @@ static const int kBakedOn = 1;
 [vk::constant_id( 18 )] const int kPanoramaOn = 1;
 #else
 static const int kPanoramaOn = 1;
+#endif
+
+//Whether a lamp has a shape (AreaShape); nought folds the LTC polygon and its registers out of the light loop
+#ifdef PORTABLE
+static const int kAreaOn = 0;
+#elif defined( SPECIALIZED )
+[vk::constant_id( 19 )] const int kAreaOn = 1;
+#else
+static const int kAreaOn = 1;
 #endif
 
 //Whether there is any night (NightFactor above nought); nought folds the moon and stars out of the sky
@@ -1639,8 +1649,8 @@ bool FogVolumeSheet( float3 world, float2 screen, out float3 scattered, out floa
 	through = 1.0;
 
 #ifdef PORTABLE
-	//The portable frame draws no sheet: CoreVolumeFog is a compute pass on a storage picture, and there is no bindless
-	//table here to read one out of. The caller marches, which is what it did before there was a sheet at all.
+	//The portable frame draws no sheet: CoreVolumeFog is compute on a storage picture, with no bindless table
+	//here to read it; the caller marches instead
 	return false;
 #else
 	uint sheet = uint( g_frame[0].fogVolumeSheet.x );

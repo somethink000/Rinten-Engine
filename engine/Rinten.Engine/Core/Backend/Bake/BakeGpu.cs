@@ -31,7 +31,8 @@ internal static class BakeGpu
 
 	private const int HeaderWords = 32;
 	private const int MaterialWords = 24;
-	private const int LightWords = 20;
+	private const int LightWords = 24;
+	private const int EmitterWords = 12;
 
 	//Floats of sums a texel of the sheet hands back: light and its squares, lean and weight, how many came out
 	//of the back of something, and how much of each masked light got through - see bake_trace.slang's main.
@@ -64,8 +65,8 @@ internal static class BakeGpu
 		return Run( scene, Kernel.Sheet, inputs, texels.Count, samples, 0, "Tracing the surfaces on the card", progress, cancel, out sums );
 	}
 
-	//Traces the volume's points - every direction of across x across strata once - and hands back four float4s of sums each: what arrived,
-	//then its red, green and blue leans, with the count that came out of the back of something in the red's w. See BakeVolume.TraceOnCard.
+	//Traces the volume's points, each direction of across x across strata once: four float4s of sums each,
+	//what arrived, then its red, green and blue leans, insides counted in red's w - see BakeVolume.TraceOnCard
 	internal static bool TraceProbes( BakeScene scene, Vec3[] points, int across, BakeProgress progress,
 		CancellationToken cancel, out float[] sums )
 	{
@@ -131,12 +132,12 @@ internal static class BakeGpu
 
 			//Every lamp is a shadow ray at every bounce, so a world of many has fewer items a dispatch
 			//- no dispatch should come near what a driver waits before it calls the card hung.
-			var atOnce = Math.Clamp( TexelsAtOnce / ( 1 + ( scene.Lights.Count / 4 ) ), 4096, TexelsAtOnce );
+			var atOnce = Math.Clamp( TexelsAtOnce / ( 1 + ( ( scene.Lights.Count + ( scene.Emitters.Length > 0 ? 1 : 0 ) ) / 4 ) ), 4096, TexelsAtOnce );
 			var chunks = ( items + atOnce - 1 ) / atOnce;
 			var passes = ( samples + SamplesAtOnce - 1 ) / SamplesAtOnce;
 			var jobs = new List<(int First, int Count, int Base, int Samples)>( chunks * passes );
 
-			//Every item's first samples before any item's later ones, so a bake stopped half way is evenly half done rather than done in one corner.
+			//Every item's first samples before anyone's later ones: a bake stopped half way is evenly half done
 			for ( var pass = 0; pass < passes; ++pass )
 			{
 				var from = pass * SamplesAtOnce;
@@ -256,7 +257,7 @@ internal static class BakeGpu
 			return;
 		}
 
-		//Not disposed: the main thread sets it whenever it gets there, which may be after a caller that stopped waiting has gone.
+		//Not disposed: the main thread may set it after a caller that stopped waiting has gone
 		var done = new ManualResetEventSlim();
 		Exception failed = null;
 
@@ -344,7 +345,9 @@ internal static class BakeGpu
 		var picturesAt = materialsAt + ( scene.Materials.Count * MaterialWords );
 		var lightsAt = picturesAt + pictureWords;
 		var skyAt = lightsAt + ( scene.Lights.Count * LightWords );
-		var total = skyAt + ( SkySide * SkySide * 3 );
+		var emittersAt = skyAt + ( SkySide * SkySide * 3 );
+		var glowAt = emittersAt + ( scene.Emitters.Length * EmitterWords );
+		var total = glowAt + ( scene.Emitters.Length > 0 ? triangles : 0 );
 
 		var w = new uint[total];
 
@@ -366,6 +369,26 @@ internal static class BakeGpu
 		w[15] = (uint)Math.Max( scene.Bounces, 0 );
 		w[16] = F( scene.AlbedoBoost );
 		w[17] = (uint)bvh.NodeCount;
+		w[18] = (uint)emittersAt;
+		w[19] = (uint)scene.Emitters.Length;
+		w[20] = (uint)glowAt;
+
+		//Glowing triangles: world triangle, power summed so far, a corner and two edges; then GlowDensity per triangle
+		for ( var i = 0; i < scene.Emitters.Length; ++i )
+		{
+			var t = scene.Emitters[i];
+			var at = emittersAt + ( i * EmitterWords );
+			var a = scene.Positions[scene.Corners[t * 3]];
+
+			w[at] = (uint)t;
+			w[at + 1] = F( scene.EmitterSum[i] );
+			Put( w, at + 2, a );
+			Put( w, at + 5, scene.Positions[scene.Corners[( t * 3 ) + 1]] - a );
+			Put( w, at + 8, scene.Positions[scene.Corners[( t * 3 ) + 2]] - a );
+		}
+
+		if ( scene.Emitters.Length > 0 )
+			for ( var t = 0; t < triangles; ++t ) w[glowAt + t] = F( scene.GlowDensity[t] );
 
 		bvh.PackNodes( w.AsSpan( nodesAt, bvh.NodeCount * 8 ) );
 		bvh.PackTriangles( w.AsSpan( treeAt, bvh.TriangleCount * 10 ) );
@@ -455,6 +478,11 @@ internal static class BakeGpu
 
 			//Which channel of the mask its shadow goes into, all ones for none.
 			w[at + 16] = light.Mask >= 0 ? (uint)light.Mask : uint.MaxValue;
+
+			w[at + 17] = (uint)light.Shape;
+			w[at + 18] = F( light.HalfWidth );
+			w[at + 19] = F( light.HalfHeight );
+			Put( w, at + 20, light.Right );
 		}
 
 		//The sky as the rays that miss see it - BakeScene.Environment, which is a function of direction alone, laid

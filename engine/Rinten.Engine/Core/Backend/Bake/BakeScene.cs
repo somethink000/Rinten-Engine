@@ -55,6 +55,20 @@ internal sealed class BakePicture
 		return made;
 	}
 
+	private Vec4? mean;
+
+	/// <summary>Every texel's average, worked out once.</summary>
+	public Vec4 Mean()
+	{
+		if ( mean is { } held ) return held;
+
+		var sum = Vec4.Zero;
+		foreach ( var texel in Texels ) sum += texel;
+
+		mean = Texels.Length > 0 ? sum / Texels.Length : Vec4.One;
+		return mean.Value;
+	}
+
 	/// <summary>Bilinear, repeating - the way the material's own sampler reads it.</summary>
 	public Vec4 Sample( float u, float v )
 	{
@@ -109,6 +123,15 @@ internal sealed class BakeMaterial
 	public bool TwoSided;
 
 	public bool Glows => Emission.X > 0.0f || Emission.Y > 0.0f || Emission.Z > 0.0f;
+
+	/// <summary>What its pictures make of the emission on average - what a glowing triangle is picked by.</summary>
+	public Vec3 MeanGlow()
+	{
+		var map = EmissionMap?.Mean() ?? Vec4.One;
+		var from = EmissionUsesAlbedo ? Colour?.Mean() ?? Vec4.One : Vec4.One;
+
+		return new Vec3( map.X * from.X, map.Y * from.Y, map.Z * from.Z );
+	}
 
 	/// <summary>What the bake needs of a material, read as the surface shader reads it - see complex.shader.</summary>
 	public static BakeMaterial Of( Material material, Dictionary<Texture, BakePicture> pictures )
@@ -180,6 +203,14 @@ internal sealed class BakeLight
 
 	/// <summary>The mask channel its static-world shadow bakes into, or -1 - see BakeScene.AssignMasks.</summary>
 	public int Mask = -1;
+
+	/// <summary>A point light's shape (PointLight.AreaShapes), half extents and width axis - see AreaLamp.</summary>
+	public int Shape;
+	public float HalfWidth, HalfHeight;
+	public Vec3 Right;
+
+	/// <summary>How big the shape is: a tube's as seen side on.</summary>
+	public float Area => Shape == 2 ? BakeMath.Pi * HalfWidth * HalfWidth : 4.0f * HalfWidth * HalfHeight;
 }
 
 //Where a ray landed, as the lighting wants it.
@@ -215,6 +246,13 @@ internal sealed class BakeScene
 
 	public readonly List<BakeMaterial> Materials = new();
 	public readonly List<BakeLight> Lights = new();
+
+	//Glowing triangles a shadow ray is sent to, picked by power - see TowardsGlow; and their power summed so far, each
+	public int[] Emitters = Array.Empty<int>();
+	public float[] EmitterSum = Array.Empty<float>();
+
+	/// <summary>Per world triangle: TowardsGlow's chance per square metre of picking it, nought for never.</summary>
+	public float[] GlowDensity = Array.Empty<float>();
 
 	/// <summary>What stands still and has a sheet of its own to be baked onto.</summary>
 	public readonly List<BakeReceiver> Receivers = new();
@@ -512,6 +550,19 @@ internal sealed class BakeScene
 				case PointLight point:
 					made.Kind = 1;
 					made.Range = CoreSceneRenderer.EffectiveRange( point.Radius, colour, point.Falloff );
+
+					if ( point.AreaShape != PointLight.AreaShapes.Point )
+					{
+						var right = point.WorldRotation.Right.Normal;
+						var size = point.AreaSize;
+
+						made.Shape = (int)point.AreaShape;
+						made.Right = new Vec3( right.x, right.y, right.z );
+						made.HalfWidth = MathF.Max( size.x * 0.5f, 0.001f );
+						made.HalfHeight = made.Shape == 3 ? MathF.Max( point.SourceRadius, 0.005f )
+							: made.Shape == 2 ? made.HalfWidth : MathF.Max( size.y * 0.5f, 0.001f );
+					}
+
 					break;
 
 				case DirectionalLight:
@@ -581,13 +632,66 @@ internal sealed class BakeScene
 		return Vec3.DistanceSquared( a.Position, b.Position ) < reach * reach;
 	}
 
+	/// <summary>A random point on a shaped lamp, and its emitting cosine towards a point - nought from behind.</summary>
+	public static Vec3 PointOn( BakeLight light, Vec3 position, ref BakeRandom random, out float cosine )
+	{
+		var u = random.Float();
+		var v = random.Float();
+		var up = Vec3.Cross( light.Forward, light.Right );
+
+		Vec3 point, facing;
+
+		if ( light.Shape == 3 )
+		{
+			//Side on, as AreaLamp draws it: the panel through the axis facing the point
+			var across = Vec3.Cross( light.Right, position - light.Position );
+			var side = across.Length();
+			across = side > 1e-5f ? across / side : up;
+
+			point = light.Position + ( light.Right * ( light.HalfWidth * ( ( 2.0f * u ) - 1.0f ) ) ) + ( across * ( light.HalfHeight * ( ( 2.0f * v ) - 1.0f ) ) );
+			facing = Vec3.Cross( across, light.Right );
+		}
+		else if ( light.Shape == 2 )
+		{
+			var r = light.HalfWidth * MathF.Sqrt( u );
+			var angle = 2.0f * BakeMath.Pi * v;
+
+			point = light.Position + ( ( ( light.Right * MathF.Cos( angle ) ) + ( up * MathF.Sin( angle ) ) ) * r );
+			facing = light.Forward;
+		}
+		else
+		{
+			point = light.Position + ( light.Right * ( light.HalfWidth * ( ( 2.0f * u ) - 1.0f ) ) ) + ( up * ( light.HalfHeight * ( ( 2.0f * v ) - 1.0f ) ) );
+			facing = light.Forward;
+		}
+
+		var away = position - point;
+		var length = away.Length();
+		cosine = length > 1e-6f ? Vec3.Dot( away / length, facing ) : 0.0f;
+
+		//A tube gives off all round, so whichever side the point is on
+		if ( light.Shape == 3 ) cosine = MathF.Abs( cosine );
+
+		return point;
+	}
+
 	/// <summary>One shadow ray toward a random point on the light: 1 if it gets through.</summary>
 	public float Visible( BakeLight light, Vec3 position, Vec3 geometric, ref BakeRandom random )
 	{
 		Vec3 aim;
 		float distance;
 
-		if ( light.Kind == 0 )
+		if ( light.Kind == 1 && light.Shape != 0 )
+		{
+			var on = PointOn( light, position, ref random, out _ );
+			var toPoint = on - position;
+			distance = toPoint.Length();
+
+			if ( distance < 1e-5f ) return 1.0f;
+
+			aim = toPoint / distance;
+		}
+		else if ( light.Kind == 0 )
 		{
 			aim = BakeMath.InCone( -light.Forward, SunCosine, random.Float(), random.Float() );
 			distance = 1e5f;
@@ -705,6 +809,48 @@ internal sealed class BakeScene
 		}
 
 		Bvh.Build( soup, tested, Through );
+		GatherEmitters();
+	}
+
+	//The triangles that glow and that a ray can find, by area times what they give off on average
+	private void GatherEmitters()
+	{
+		var triangles = Corners.Length / 3;
+		var found = new List<int>();
+		var sums = new List<float>();
+		var total = 0.0f;
+
+		GlowDensity = new float[triangles];
+
+		for ( var t = 0; t < triangles; ++t )
+		{
+			var material = Materials[MaterialOf[t]];
+			if ( !material.Glows || ThroughMode( t ) == 1 ) continue;
+
+			var power = Area( t ) * BakeMath.Luma( material.Emission * material.MeanGlow() );
+			if ( !( power > 0.0f ) ) continue;
+
+			total += power;
+			found.Add( t );
+			sums.Add( total );
+		}
+
+		Emitters = found.ToArray();
+		EmitterSum = sums.ToArray();
+
+		for ( var i = 0; i < Emitters.Length; ++i )
+		{
+			var t = Emitters[i];
+			var power = EmitterSum[i] - ( i > 0 ? EmitterSum[i - 1] : 0.0f );
+
+			GlowDensity[t] = power / total / Area( t );
+		}
+	}
+
+	private float Area( int t )
+	{
+		var a = Positions[Corners[t * 3]];
+		return Vec3.Cross( Positions[Corners[( t * 3 ) + 1]] - a, Positions[Corners[( t * 3 ) + 2]] - a ).Length() * 0.5f;
 	}
 
 	//How a ray meets a triangle of the world, for the card - see BakeGpu: nought it stops, one
@@ -782,17 +928,90 @@ internal sealed class BakeScene
 		//Never quite white: a fully reflective surface makes bounces that never end, and no paint does
 		s.Albedo = Vec3.Min( albedo * material.Diffuse * AlbedoBoost, new Vec3( 0.95f ) );
 
-		s.Emission = Vec3.Zero;
-
-		if ( material.Glows )
-		{
-			var glow = material.EmissionUsesAlbedo ? new Vec3( texel.X, texel.Y, texel.Z ) : Vec3.One;
-			var map = material.EmissionMap?.Sample( uv.X, uv.Y ) ?? Vec4.One;
-
-			s.Emission = new Vec3( map.X, map.Y, map.Z ) * glow * material.Emission;
-		}
+		s.Emission = material.Glows ? GlowOf( material, uv, texel ) : Vec3.Zero;
 
 		return s;
+	}
+
+	private static Vec3 GlowOf( BakeMaterial material, System.Numerics.Vector2 uv, Vec4 texel )
+	{
+		var glow = material.EmissionUsesAlbedo ? new Vec3( texel.X, texel.Y, texel.Z ) : Vec3.One;
+		var map = material.EmissionMap?.Sample( uv.X, uv.Y ) ?? Vec4.One;
+
+		return new Vec3( map.X, map.Y, map.Z ) * glow * material.Emission;
+	}
+
+	//Power heuristic: how much of a sample picked one way counts, against the chance the other way had of it
+	[MethodImpl( MethodImplOptions.AggressiveInlining )]
+	public static float Weight( float picked, float other ) => picked * picked / MathF.Max( ( picked * picked ) + ( other * other ), 1e-30f );
+
+	/// <summary>A shadow ray to a glow picked by power: its light over that direction's chance, MIS-weighted.</summary>
+	//Against a cosine bounce about normal on a surface, or a direction from the whole sphere where onSurface is false
+	public Vec3 TowardsGlow( Vec3 position, Vec3 normal, Vec3 geometric, bool onSurface, ref BakeRandom random, out Vec3 aim )
+	{
+		aim = Vec3.Zero;
+
+		if ( Emitters.Length == 0 ) return Vec3.Zero;
+
+		var picked = EmitterSum[^1] * random.Float();
+		var i = Array.BinarySearch( EmitterSum, picked );
+		i = Math.Min( i < 0 ? ~i : i + 1, Emitters.Length - 1 );
+
+		var t = Emitters[i];
+		var root = MathF.Sqrt( random.Float() );
+		var turn = random.Float();
+		var u = root * ( 1.0f - turn );
+		var v = root * turn;
+
+		var point = Interpolate( Positions, t, u, v );
+		var toPoint = point - position;
+		var distance = toPoint.Length();
+		if ( distance < 1e-5f ) return Vec3.Zero;
+
+		aim = toPoint / distance;
+
+		var material = Materials[MaterialOf[t]];
+		var facing = Vec3.Dot( aim, Facing[t] );
+
+		//Seen from behind it gives nothing - a ray arriving there finds the back of it
+		var cosine = material.TwoSided ? MathF.Abs( facing ) : -facing;
+		if ( cosine <= 1e-6f ) return Vec3.Zero;
+
+		var bounce = BakeMath.InvPi * 0.25f;
+
+		if ( onSurface )
+		{
+			var nDotL = Vec3.Dot( normal, aim );
+			if ( nDotL <= 0.0f || Vec3.Dot( geometric, aim ) <= 0.0f ) return Vec3.Zero;
+
+			bounce = nDotL * BakeMath.InvPi;
+		}
+
+		if ( material.Masked && Through( t, u, v ) ) return Vec3.Zero;
+
+		var from = onSurface ? Offset( position, geometric, aim ) : position;
+		if ( Bvh.Blocked( from, aim, ( distance * 0.999f ) - ( Lift * 2.0f ) ) ) return Vec3.Zero;
+
+		var uv = Interpolate( Uv0, t, u, v );
+		var texel = material.EmissionUsesAlbedo ? material.Colour?.Sample( uv.X, uv.Y ) ?? Vec4.One : Vec4.One;
+
+		var density = GlowDensity[t] * distance * distance / cosine;
+
+		return GlowOf( material, uv, texel ) * ( Weight( density, bounce ) / density );
+	}
+
+	/// <summary>Glowing triangles' direct light over pi on a surface, and its lean; added to Direct for a texel.</summary>
+	public Vec3 GlowDirect( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, ref Vec3 towards )
+	{
+		if ( Emitters.Length == 0 ) return Vec3.Zero;
+
+		var seen = TowardsGlow( position, normal, geometric, true, ref random, out var aim );
+		if ( seen == Vec3.Zero ) return Vec3.Zero;
+
+		var arriving = seen * ( Vec3.Dot( normal, aim ) * BakeMath.InvPi );
+		towards += aim * BakeMath.Luma( arriving );
+
+		return arriving;
 	}
 
 	/// <summary>A point a little off a surface, for a ray to leave from without finding the surface itself.</summary>
@@ -857,6 +1076,30 @@ internal sealed class BakeScene
 				distance = 1e5f;
 				aim = BakeMath.InCone( l, SunCosine, random.Float(), random.Float() );
 			}
+			else if ( light.Kind == 1 && light.Shape != 0 )
+			{
+				var centre = light.Position - position;
+				var reach = centre.Length() / MathF.Max( light.Range, 1e-4f );
+				if ( reach > 1.0f ) return Vec3.Zero;
+
+				var area = light.Area;
+				var on = PointOn( light, position, ref random, out var cosine );
+				if ( cosine <= 0.0f || area <= 1e-8f ) return Vec3.Zero;
+
+				var toPoint = on - position;
+				distance = toPoint.Length();
+				if ( distance < 1e-5f ) return Vec3.Zero;
+
+				aim = toPoint / distance;
+				l = aim;
+
+				//As AreaLamp: radiance colour over area, the lamp's falloff kept as its ratio to the inverse square
+				var window = BakeMath.Saturate( 1.0f - ( reach * reach * reach * reach ) );
+				var square = MathF.Max( centre.LengthSquared(), 0.25f * area );
+				var ratio = window * window * ( light.Falloff == 1.0f ? 1.0f : MathF.Pow( square, 1.0f - light.Falloff ) );
+
+				attenuation = cosine * ratio / MathF.Max( distance * distance, 1e-4f );
+			}
 			else
 			{
 				var toLight = light.Position - position;
@@ -915,8 +1158,9 @@ internal sealed class BakeScene
 		}
 	}
 
-	/// <summary>Path-traced radiance from one direction, lamps sampled, Russian roulette past bounce two.</summary>
-	public Vec3 Arriving( Vec3 origin, Vec3 direction, ref BakeRandom random, out bool inside )
+	/// <summary>Path-traced radiance from one direction; lamps and glows sampled, roulette past bounce two.</summary>
+	//Density: the caller's chance per steradian of this direction when it also sampled a glow, else nought
+	public Vec3 Arriving( Vec3 origin, Vec3 direction, float density, ref BakeRandom random, out bool inside )
 	{
 		inside = false;
 
@@ -938,12 +1182,22 @@ internal sealed class BakeScene
 				return gathered;
 			}
 
-			gathered += carried * s.Emission;
+			if ( s.Emission != Vec3.Zero )
+			{
+				//What TowardsGlow at the last point could have found as well counts only its share
+				var glow = density > 0.0f ? GlowDensity[hit.Triangle] : 0.0f;
+				var cosine = MathF.Abs( Vec3.Dot( direction, s.Geometric ) );
+
+				gathered += carried * s.Emission * ( glow > 0.0f && cosine > 1e-6f
+					? Weight( density, glow * hit.Distance * hit.Distance / cosine )
+					: 1.0f );
+			}
 
 			if ( bounce >= Bounces ) return gathered;
 
 			var ignored = Vec3.Zero;
-			gathered += carried * s.Albedo * Direct( s.Position, s.Normal, s.Geometric, ref random, false, ref ignored );
+			gathered += carried * s.Albedo * ( Direct( s.Position, s.Normal, s.Geometric, ref random, false, ref ignored )
+				+ GlowDirect( s.Position, s.Normal, s.Geometric, ref random, ref ignored ) );
 
 			carried *= s.Albedo;
 
@@ -954,12 +1208,17 @@ internal sealed class BakeScene
 				carried /= keep;
 			}
 
-			direction = BakeMath.CosineAround( s.Normal, random.Float(), random.Float() );
+			var axis = s.Normal;
+			direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
 
 			//A bent normal can point a ray under the plane it stands on.
 			if ( Vec3.Dot( direction, s.Geometric ) <= 0.0f )
-				direction = BakeMath.CosineAround( s.Geometric, random.Float(), random.Float() );
+			{
+				axis = s.Geometric;
+				direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
+			}
 
+			density = Emitters.Length > 0 ? Vec3.Dot( axis, direction ) * BakeMath.InvPi : 0.0f;
 			origin = Offset( s.Position, s.Geometric, direction );
 		}
 	}

@@ -41,6 +41,9 @@
 		<!-- The design tokens every editor sheet is written against, put in
 		     front of each of them as it is parsed (EditorTokens). -->
 		<EmbeddedResource Include="Core/Backend/Ui/_tokens.scss" />
+
+		<!-- The area lights' LTC tables, fitted by engine/Tools/LtcFit (CoreAreaLights). -->
+		<EmbeddedResource Include="Core/Backend/Render/ltc.bin" LogicalName="ltc.bin" />
 	</ItemGroup>
 
 	<ItemGroup>

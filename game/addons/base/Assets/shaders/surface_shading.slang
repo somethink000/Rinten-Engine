@@ -40,8 +40,7 @@ float GeometrySmith( float nDotV, float nDotL, Rough r )
 	return v * l;
 }
 
-//x to the fifth, as four multiplies rather than a log and an exp. This is Schlick's exponent
-//and it is on the per-light path, where a pow is three instructions doing the work of one.
+//Fifth power as four multiplies: Schlick's exponent on the per-light path, where pow costs three instructions
 float Fifth( float x )
 {
 	float square = x * x;
@@ -65,6 +64,185 @@ float3 EnvBrdf( float3 f0, float roughness, float nDotV )
 
 	return ( f0 * ( ( a004 * -1.04 ) + r.z ) ) + ( ( a004 * 1.04 ) + r.w );
 }
+
+#ifndef PORTABLE
+//A lamp's shape, its direction.w - see PointLight.AreaShape
+static const float AreaRectangle = 1.0;
+static const float AreaDisc = 2.0;
+static const float AreaTube = 3.0;
+
+//A disc drawn as the octagon of its area: the corners' radius over the disc's
+static const float AreaOctagon = 1.0539;
+
+//Edge integral of a clamped cosine between unit corners, z of its vector form (Hill and Heitz 2017's fit)
+float AreaEdge( float3 a, float3 b )
+{
+	float x = dot( a, b );
+	float y = abs( x );
+	float p = 0.8543985 + ( ( 0.4965155 + ( 0.0145206 * y ) ) * y );
+	float q = 3.4175940 + ( ( 4.1616724 + y ) * y );
+	float t = p / q;
+	float thetaOverSin = x > 0.0 ? t : ( 0.5 * rsqrt( max( 1.0 - ( x * x ), 1e-7 ) ) ) - t;
+
+	return ( ( a.x * b.y ) - ( a.y * b.x ) ) * thetaOverSin;
+}
+
+//A clamped cosine's share of a polygon's solid angle times two pi, after the 2x2 inverse ( x y ; z w ) over x and z,
+//clipped at the horizon on the way round (Sutherland-Hodgman), either winding
+float AreaPolygon( float3 corners[8], uint count, float4 inverse )
+{
+	float sum = 0.0;
+	float3 first = float3( 0.0, 0.0, 1.0 );
+	float3 last = first;
+	bool any = false;
+
+	float3 from = corners[count - 1u];
+	from = float3( ( inverse.x * from.x ) + ( inverse.y * from.z ), from.y, ( inverse.z * from.x ) + ( inverse.w * from.z ) );
+
+	[unroll]
+	for ( uint i = 0u; i < 8u; ++i )
+	{
+		if ( i >= count ) break;
+
+		float3 to = corners[i];
+		to = float3( ( inverse.x * to.x ) + ( inverse.y * to.z ), to.y, ( inverse.z * to.x ) + ( inverse.w * to.z ) );
+
+		//Where the edge crosses the horizon, then the corner itself if it is above
+		if ( ( from.z >= 0.0 ) != ( to.z >= 0.0 ) )
+		{
+			float3 cut = normalize( from + ( ( to - from ) * ( from.z / ( from.z - to.z ) ) ) );
+
+			if ( any ) sum += AreaEdge( last, cut );
+			else first = cut;
+
+			last = cut;
+			any = true;
+		}
+
+		if ( to.z >= 0.0 )
+		{
+			float3 corner = normalize( to );
+
+			if ( any ) sum += AreaEdge( last, corner );
+			else first = corner;
+
+			last = corner;
+			any = true;
+		}
+
+		from = to;
+	}
+
+	if ( any ) sum += AreaEdge( last, first );
+
+	return abs( sum );
+}
+
+//What an area lamp does to a point: diffuse irradiance over its colour x, and its highlight's radiance over its colour yzw
+//LTC (Heitz et al. 2016) with CoreAreaLights' tables; the lamp's falloff kept as the ratio of its own to the inverse square
+float4 AreaLamp( Light light, float3 world, float3 normal, float3 v, float nDotV, float roughness, float3 f0, float distance )
+{
+	float3 forward = light.direction.xyz;
+	float3 centre = light.position.xyz;
+	float shape = light.direction.w;
+	float halfWidth = light.cone.x;
+	float halfHeight = light.shape.z;
+
+	float3 r0;
+	float3 u0;
+	LampAxes( forward, r0, u0 );
+
+	float turn = light.shape.w;
+	float3 right = ( r0 * cos( turn ) ) + ( u0 * sin( turn ) );
+	float3 up = cross( forward, right );
+
+	float3 corners[8];
+	uint count = 4u;
+	float area;
+
+	if ( shape == AreaTube )
+	{
+		//A cylinder seen side on: the panel through its axis facing the point, as wide as the tube
+		float3 across = cross( right, world - centre );
+		float side = length( across );
+		across = side > 1e-5 ? across / side : up;
+
+		corners[0] = centre - ( right * halfWidth ) - ( across * halfHeight );
+		corners[1] = centre + ( right * halfWidth ) - ( across * halfHeight );
+		corners[2] = centre + ( right * halfWidth ) + ( across * halfHeight );
+		corners[3] = centre - ( right * halfWidth ) + ( across * halfHeight );
+		area = 4.0 * halfWidth * halfHeight;
+	}
+	else
+	{
+		//Rectangles and discs give light only forward
+		if ( dot( world - centre, forward ) <= 0.0 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+		if ( shape == AreaDisc )
+		{
+			float reach = halfWidth * AreaOctagon;
+
+			[unroll]
+			for ( uint k = 0u; k < 8u; ++k )
+			{
+				float angle = float( k ) * 0.78539816;
+				corners[k] = centre + ( ( ( right * cos( angle ) ) + ( up * sin( angle ) ) ) * reach );
+			}
+
+			count = 8u;
+			area = 3.14159265 * halfWidth * halfWidth;
+		}
+		else
+		{
+			corners[0] = centre - ( right * halfWidth ) - ( up * halfHeight );
+			corners[1] = centre + ( right * halfWidth ) - ( up * halfHeight );
+			corners[2] = centre + ( right * halfWidth ) + ( up * halfHeight );
+			corners[3] = centre - ( right * halfWidth ) + ( up * halfHeight );
+			area = 4.0 * halfWidth * halfHeight;
+		}
+	}
+
+	if ( area <= 1e-8 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+	//The surface's frame: along the view across it, then about the normal
+	float3 t1 = v - ( normal * dot( v, normal ) );
+	float t1Length = length( t1 );
+	t1 = t1Length > 1e-4 ? t1 / t1Length : ( abs( normal.y ) < 0.9 ? normalize( cross( float3( 0.0, 1.0, 0.0 ), normal ) ) : float3( 1.0, 0.0, 0.0 ) );
+	float3 t2 = cross( normal, t1 );
+
+	[unroll]
+	for ( uint c = 0u; c < 8u; ++c )
+	{
+		if ( c >= count ) break;
+
+		float3 d = corners[c] - world;
+		corners[c] = float3( dot( d, t1 ), dot( d, t2 ), dot( d, normal ) );
+	}
+
+	float diffuse = AreaPolygon( corners, count, float4( 1.0, 0.0, 0.0, 1.0 ) );
+	if ( diffuse <= 0.0 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+	float2 uv = ( float2( roughness, sqrt( 1.0 - saturate( nDotV ) ) ) * ( 63.0 / 64.0 ) ) + ( 0.5 / 64.0 );
+
+	//Frame-uniform - see SkyTableAt.
+	float4 inverse = g_textures[uint( g_frame[0].area.x )].SampleLevel( uv, 0.0 );
+	float2 scale = g_textures[uint( g_frame[0].area.y )].SampleLevel( uv, 0.0 ).xy;
+
+	float specular = AreaPolygon( corners, count, inverse );
+
+	//The lamp's own falloff over the inverse square, held where the shape is near enough to be seen as a shape
+	float reach = distance / max( light.position.w, 0.0001 );
+	float window = saturate( 1.0 - ( reach * reach * reach * reach ) );
+	float square = max( distance * distance, 0.25 * area );
+	float ratio = window * window * ( light.shape.x == 1.0 ? 1.0 : pow( square, 1.0 - light.shape.x ) );
+
+	//Radiance is colour over area; a polygon's integral over two pi is its share of the clamped cosine
+	float perColour = ratio / area;
+	float3 fresnel = ( f0 * scale.x ) + ( ( 1.0 - f0 ) * scale.y );
+
+	return float4( diffuse * 0.5 * perColour, fresnel * ( specular * 0.15915494 * perColour ) );
+}
+#endif
 
 //Everything the shading needs to know about a pixel, whoever worked it out.
 struct Surface
@@ -166,8 +344,8 @@ void ApplyDecals( inout Surface s )
 			float3 eyeBox = float3( dot( toEye, d.axisX ), -dot( toEye, d.axisY ), dot( toEye, d.axisZ ) );
 			eyeBox *= rsqrt( max( dot( eyeBox, eyeBox ), 1e-8 ) );
 
-			//Half the height either side of the middle, so the picture as a whole stays where it was
-			//put; the floor under the divide stops a grazing angle sending it off across the box.
+			//Half the height either side of the middle, so the picture stays centred; the floor under the divide
+			//stops a grazing angle sending it across the box
 			float2 offset = eyeBox.xy * ( height - 0.5 ) * d.parallax / max( eyeBox.z, 0.35 );
 			uv += offset;
 
@@ -268,6 +446,37 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		//Out here for the shadow too: a lamp map texel's world size depends on the receiver's distance
 		float distance = 0.0;
+
+#ifndef PORTABLE
+		//A point with a shape (AreaLamp): its own diffuse and highlight, the shadow of its centre
+		if ( kAreaOn != 0 && light.colour.w > 0.5 && light.colour.w < 1.5 && light.direction.w > 0.5 )
+		{
+			LightLamp( which, light );
+
+			distance = length( light.position.xyz - s.world );
+			if ( distance > light.position.w ) continue;
+
+			float3 areaF0 = lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness );
+			float4 area = AreaLamp( light, s.world, normal, v, nDotV, roughness, areaF0, distance );
+
+			if ( area.x <= 0.0 ) continue;
+
+			float areaShadow = LampShadow( s.world, geometric, light, distance );
+			areaShadow = BakedShadow( areaShadow, s.world, geometric, s.lightmap, LightMaskChannel( light ) );
+
+			if ( areaShadow <= 0.0 ) continue;
+
+			uint areaWithholds = LightWithholds( light );
+
+			if ( ( areaWithholds & 1u ) == 0u )
+				litDiffuse += albedo * ( 1.0 - metalness ) / 3.14159265 * light.colour.rgb * ( area.x * areaShadow );
+
+			if ( ( areaWithholds & 2u ) == 0u )
+				litSpecular += light.colour.rgb * area.yzw * areaShadow;
+
+			continue;
+		}
+#endif
 
 		if ( light.colour.w < 0.5 )
 		{

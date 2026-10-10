@@ -14,38 +14,38 @@ internal static unsafe partial class VkTextures
 		public ImageView View;
 
 
-		/// <summary>Every texture carries a material set of its own, pointing all four slots at itself with default numbers - so a caller who only has a picture can still draw with it.</summary>
+		/// <summary>Its own material set, all four slots on itself, so a bare picture can be drawn.</summary>
 		public DescriptorSet Set;
 
-		/// <summary>A material's own parameter buffer, when it is a material rather than a plain texture. Plain textures share the device's default.</summary>
+		/// <summary>A material's own parameter buffer; plain textures share the device's default.</summary>
 		public VkBuffer Params;
 		public DeviceMemory ParamsMemory;
 
-		/// <summary>Views and sampler the set was written with, so it can be rewritten when the sampler changes</summary>
+		/// <summary>Views and sampler the set was written with, to rewrite it when the sampler changes.</summary>
 		public readonly ImageView[] SetViews = new ImageView[VkDevice.MaterialTextures];
 		public Sampler SetSampler;
 
 		/// <summary>A material owns no images; it only names other textures' views.</summary>
 		public bool OwnsImage = true;
 
-		/// <summary>A material's: the pictures it was made of, colour, normal, third and emission - see CoreTextureStreaming.</summary>
+		/// <summary>A material's pictures: colour, normal, third, emission - see CoreTextureStreaming.</summary>
 		public ulong[] Parts;
 
-		/// <summary>Where this picture sits in the indexed table, or zero for one that is not in it - a material, an adopted view, or anything at all on a device without the table.</summary>
+		/// <summary>Its slot in the indexed table, or zero if not in it.</summary>
 		public uint Index;
 
-		/// <summary>What its memory cost, for the profiler. Zero for adopted views and materials, whose images are somebody else's.</summary>
+		/// <summary>Its memory cost for the profiler; zero for adopted views and materials.</summary>
 		public ulong Bytes;
 
-		/// <summary>The shape of the picture, for writing new pixels into it in place. Zero for materials and adopted views, which have no picture of their own to write into.</summary>
+		/// <summary>Its size, for writing pixels in place; zero for materials and adopted views.</summary>
 		public uint Width;
 		public uint Height;
 		public uint MipCount = 1;
 
-		/// <summary>What its pixels are, so that a picture kept for reuse is only ever handed to somebody who wanted exactly this.</summary>
+		/// <summary>Its pixel format, so a spare is only reused for exactly this.</summary>
 		public Format Format = Format.Undefined;
 
-		/// <summary>Which slab of memory this picture sits in and where, or -1 for one that owns its allocation outright.</summary>
+		/// <summary>Its memory slab, or -1 where it owns its allocation.</summary>
 		public int Block = -1;
 		public ulong Offset;
 	}
@@ -101,8 +101,7 @@ internal static unsafe partial class VkTextures
 		}
 	}
 
-	//A picture's memory, out of a slab where it will fit. True with the block, its offset and the memory to bind to. A picture too big for a
-	//slab, or one no slab could be had for, comes back with block -1 and an allocation of its own - which is what every picture used to have.
+	//A picture's memory from a slab where it fits; too big or no slab gives block -1 and an allocation of its own
 	private static bool TakeMemory( in MemoryRequirements requirements,
 		out DeviceMemory memory, out int block, out ulong offset )
 	{
@@ -216,8 +215,8 @@ internal static unsafe partial class VkTextures
 
 		slab.Live--;
 
-		//An empty slab is kept where it is the only one of its kind - an interface that has just thrown everything away is usually about to
-		//make it all again - and given back otherwise. The entry itself stays in the list either way: a picture remembers its slab by index.
+		//An empty slab is kept if it is the only one of its kind, since a cleared interface usually rebuilds;
+		//its entry stays either way, as pictures remember slabs by index
 		if ( slab.Live > 0 ) return;
 
 		var another = false;
@@ -240,7 +239,7 @@ internal static unsafe partial class VkTextures
 		slab.Size = 0;
 	}
 
-	//Hands one slice of a texture slab back. Called by the graveyard once the image that had it is provably finished with.
+	//Gives a slab slice back; the graveyard calls it once the image is provably done with
 	internal static void GiveBackTextureSlice( int block, ulong offset, ulong size )
 		=> DropMemory( block, offset, size, default );
 
@@ -290,8 +289,7 @@ internal static unsafe partial class VkTextures
 
 	//-- the indexed table --------------------------------------------------
 
-	//Slots handed out in the indexed table, and the ones handed back. Nought is never handed out: a shader indexing the table with a number nobody
-	//set reads slot zero, and an empty slot zero draws nothing, which is a great deal easier to recognise than whichever picture happened to be first.
+	//Bindless slots; nought is never handed out, so an unset index reads an empty slot zero and draws nothing
 	private static uint nextBindlessSlot = 1;
 
 	//Textures refused a bindless slot; they draw with slot zero, i.e. the wrong picture
@@ -424,7 +422,7 @@ internal static unsafe partial class VkTextures
 		{
 			if ( nextBindlessSlot >= VkDevice.bindlessSlots )
 			{
-				//Said once. Said per refusal, it would be said at the rate textures are made, which is a log nobody can read.
+				//Said once, not per refusal
 				if ( bindlessDropped == 0 )
 				{
 					var text = $"the picture table is full at {VkDevice.bindlessSlots} slots - textures past it draw as another one";
@@ -475,8 +473,8 @@ internal static unsafe partial class VkTextures
 		texture.SetSampler = sampler;
 	}
 
-	//Fills in a material set: four image slots and the numbers. The layout is what the pictures are actually in when the set is read. A
-	//descriptor that names one layout while the image is in another is not a picture the driver has to answer for - it reads as anything at all.
+	//Fills a material set: four images and the numbers, in the layout the images are in when read, since a
+	//mismatched layout reads as anything
 	private static void WriteMaterialSet( DescriptorSet set, ImageView* views, VkBuffer parameters,
 		Sampler sampler = default, ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal )
 	{
@@ -558,8 +556,7 @@ internal static unsafe partial class VkTextures
 		}
 	}
 
-	//The deferred version of DestroyOne: everything goes to the graveyard, because frames in flight - and the frame being recorded right now -
-	//may still be sampling it. This is what the destroy calls use; the immediate one stays for the paths that have already waited the device.
+	//Deferred DestroyOne: frames in flight, and the one recording, may still sample it, so it goes to the graveyard
 	private static void RetireOne( GpuTexture texture )
 	{
 		if ( texture.Index != 0 ) VkDevice.RetireBindless( texture.Index );
@@ -587,6 +584,12 @@ internal static unsafe partial class VkTextures
 	//The stored formats a phone's pictures come in - ASTC 4x4 and ETC2 with alpha, sixteen bytes a block each.
 	internal const int AstcFormat = 7, Etc2Format = 8;
 
+	//An HDR picture's light, four bytes a texel - see CoreTextureFile.TextureFormat.Rgb9e5
+	internal const int SharedExponentFormat = (int)CoreTextureFile.TextureFormat.Rgb9e5;
+
+	//And in BC6H blocks, where the device takes BC
+	internal const int LightBlockFormat = (int)CoreTextureFile.TextureFormat.Bc6h;
+
 	private static Format FormatOf( int stored, bool srgb ) => stored switch
 	{
 		1 => srgb ? Format.BC1RgbaSrgbBlock : Format.BC1RgbaUnormBlock,
@@ -602,6 +605,10 @@ internal static unsafe partial class VkTextures
 		//Light itself rather than a picture of it: four halves a texel, which is what baked lighting is kept
 		//in - see HalfFormat. Every device samples and filters it; it is one of the formats Vulkan requires.
 		HalfFormat => Format.R16G16B16A16Sfloat,
+
+		//Required to sample and filter on every Vulkan device, phones included
+		SharedExponentFormat => Format.E5B9G9R9UfloatPack32,
+		LightBlockFormat => Format.BC6HUfloatBlock,
 		_ => srgb ? Format.R8G8B8A8Srgb : Format.R8G8B8A8Unorm,
 	};
 
@@ -628,7 +635,7 @@ internal static unsafe partial class VkTextures
 
 		if ( slot is null ) return false;
 
-		//Row by row out of the picture the region sits in, so the caller hands over a window onto what it already has rather than packing a copy.
+		//Row by row from the caller's picture, so it passes a window onto what it has rather than a packed copy
 		var destination = slot.StagingMapped + at;
 
 		for ( var row = 0ul; row < rows; ++row )
@@ -708,7 +715,7 @@ internal static unsafe partial class VkTextures
 			return 0;
 		}
 
-		if ( stored is >= 1 and <= 5 && !VkDevice.blockCompression )
+		if ( stored is ( >= 1 and <= 5 ) or LightBlockFormat && !VkDevice.blockCompression )
 		{
 			VkDevice.SetText( "this device does not take compressed textures" );
 			return 0;
@@ -722,8 +729,7 @@ internal static unsafe partial class VkTextures
 		var vk = VkDevice.vk;
 		var device = VkDevice.device;
 
-		//A picture of this shape that somebody has finished with, before asking the device for another one. Only the single-level case: a
-		//mip chain would have to be written all the way down, and the pictures that churn - every widget of an interface - have one level.
+		//Reuse a finished picture of this shape; single level only, as churning interface pictures have one level
 		if ( mipCount == 1 && sparing && stored == 0 )
 		{
 			var spare = TakeSpare( mips[0].Width, mips[0].Height, format );
@@ -757,7 +763,7 @@ internal static unsafe partial class VkTextures
 			ArrayLayers = 1,
 			Samples = SampleCountFlags.Count1Bit,
 			Tiling = ImageTiling.Optimal,
-			//A source of copies as well as a destination: a texture copied into another, or its levels built out of its first - see VkTextures.CopyTexture.
+			//A copy source too: copied into another texture, or its levels built from its first - see CopyTexture
 			Usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit | ImageUsageFlags.SampledBit,
 			InitialLayout = ImageLayout.Undefined,
 		};
@@ -802,12 +808,11 @@ internal static unsafe partial class VkTextures
 		made.Height = mips[0].Height;
 		made.MipCount = (uint)mipCount;
 
-		//By the handle the managed side knows it by, so that a message about an image can be traced back to the asset that made it.
+		//Named by its managed handle, so a validation message traces back to the asset
 		VkDevice.NameHandle( ObjectType.Image, made.Image.Handle, "texture", nextHandle );
 		VkDevice.NameHandle( ObjectType.DeviceMemory, made.Memory.Handle, "texture memory", nextHandle );
 
-		//Transition, copy every mip, transition again - written into the batch of uploads this frame is collecting rather than a
-		//submission of its own. Somebody else's copies are already in there and more will follow; they all go to the card together.
+		//Transition, copy every mip, transition again, into this frame's upload batch rather than its own submit
 		var uploaded = false;
 
 		var slot = ReserveUpload( pixelBytes, out var at );
@@ -882,10 +887,10 @@ internal static unsafe partial class VkTextures
 			uploaded = true;
 		}
 
-		//Nothing to free: the staging buffer is the slot's, and the slot does not hand itself out again until its fence proves this copy finished.
+		//Nothing to free: the staging is the slot's, reused only after its fence
 		if ( !uploaded )
 		{
-			//The batch is still open and still good - what failed was finding room in it, and nothing about this image was written down.
+			//The batch is fine; there was no room in it, and nothing of this image was recorded
 			VkDevice.SetText( "there was no room to copy the texture through" );
 
 			DestroyOne( made );
@@ -918,7 +923,7 @@ internal static unsafe partial class VkTextures
 
 		var viewNs = TimedNs();
 
-		//And into the table every shader can index, so a draw that decides which picture per vertex has a number to decide with.
+		//And into the indexed table, so a draw choosing pictures per vertex has a number to choose with
 		made.Index = TakeBindlessSlot( made.View, default );
 
 		if ( !AllocateTextureSet( out var set ) )
@@ -969,7 +974,7 @@ internal static unsafe partial class VkTextures
 	{
 		if ( textures.TryGetValue( handle, out var found ) ) return found.Set;
 
-		//A pyramid answers here as well, so that a dispatch given one to read binds it by the path every other picture takes.
+		//A pyramid answers here too, so a dispatch binds it as any other picture
 		return pyramids.TryGetValue( handle, out var peak ) ? peak.Set : default;
 	}
 
@@ -978,7 +983,7 @@ internal static unsafe partial class VkTextures
 	internal static uint IndexOf( ulong handle )
 		=> textures.TryGetValue( handle, out var found ) ? found.Index : 0;
 
-	//The picture behind a texture handle, for a pass that fills in a descriptor set of its own rather than binding the one the texture carries.
+	//The view behind a texture handle, for a pass writing its own descriptor set
 	internal static bool ViewOf( ulong handle, out ImageView view )
 	{
 		view = default;
@@ -1038,7 +1043,7 @@ internal static unsafe partial class VkTextures
 	//Destroys every texture. Must run before the descriptor pool goes.
 	internal static void DestroyTextures()
 	{
-		//Nothing put back into the table from here is worth writing: the blank is one of the pictures going, and the table goes with the device.
+		//Nothing returned to the table now is worth writing: the table goes with the device
 		bindlessGoing = true;
 
 		foreach ( var pair in pyramids ) DestroyOne( pair.Value );
@@ -1112,7 +1117,7 @@ internal static unsafe partial class VkTextures
 	}
 
 
-	//Every level of a compiled texture onto the device: three ints a level - width, height, byte count - and the levels back to back.
+	//Every level of a compiled texture: width, height, byte count per level, and the levels back to back
 	internal static ulong CreateMips( int width, int height, int format, int srgb,
 		int mipCount, int* mipInfo, byte* pixelData, int byteCount )
 	{
@@ -1151,7 +1156,7 @@ internal static unsafe partial class VkTextures
 			var mips = stackalloc MipSlice[32];
 			var taken = 0;
 
-			//The levels lie back to back in the order they are listed, so where one starts is the sum of the ones before it.
+			//Levels lie back to back in order, so one starts at the sum of those before it
 			var at = 0ul;
 
 			for ( var mip = 0; mip < first; ++mip ) at += (ulong)mipInfo[( mip * 3 ) + 2];
@@ -1176,7 +1181,7 @@ internal static unsafe partial class VkTextures
 				taken++;
 			}
 
-			//The levels that survived the limit lie back to back from `start`, so they are handed over as one run rather than repacked.
+			//The kept levels lie back to back from `start`, so they go as one run, not repacked
 			return CreateFromPixels( pixelData + start, packed, mips, taken, srgb != 0, format );
 		}
 	}
@@ -1244,7 +1249,7 @@ internal static unsafe partial class VkTextures
 		}
 	}
 
-	//One rectangle of new pixels into a texture that is allowed to take them. The whole-texture call is this with the whole texture as the rectangle.
+	//New pixels into one rectangle of a texture that takes them; the whole texture is the full rectangle
 	internal static int UpdateRgbaRegion( ulong texture, byte* pixels, int stride,
 		int x, int y, int width, int height, bool whole )
 	{
@@ -1256,8 +1261,8 @@ internal static unsafe partial class VkTextures
 
 			if ( !textures.TryGetValue( texture, out var target ) ) return 0;
 
-			//Only a plain picture. A material or an adopted view has no image of its own to write into, and a mip chain would go stale
-			//above the level written - those get a new texture instead, which is what the caller falls back to when this says no.
+			//Plain single-level pictures only: materials and adopted views have no image, a mip chain would go stale,
+			//so the caller makes a new texture instead
 			if ( !target.OwnsImage || target.Image.Handle == 0 ) return 0;
 			if ( target.MipCount != 1 ) return 0;
 
@@ -1321,8 +1326,8 @@ internal static unsafe partial class VkTextures
 		}
 	}
 
-	//A texture of nothing - every level of the chain there, all nought - for whoever fills it in pieces with WriteLevel. All of its levels whatever
-	//the texture quality says: a piece is written by its place in the finest level, and a texture that had lost that level would put it nowhere.
+	//A texture of zeros, every level present whatever the quality setting, for WriteLevel to fill in pieces
+	//by their place in the finest level
 	internal static ulong CreateBlank( int width, int height, int stored, int srgb, int mipCount )
 	{
 		lock ( VkDevice.renderLock )
@@ -1356,7 +1361,7 @@ internal static unsafe partial class VkTextures
 		}
 	}
 
-	//The buffer of numbers a material was made with, nought for one using the device's shared defaults. The caller holds the render lock.
+	//A material's own numbers buffer, nought where it uses the shared defaults; caller holds the render lock
 	internal static VkBuffer MaterialParams( ulong material )
 		=> textures.TryGetValue( material, out var found ) && found.Parts is not null ? found.Params : default;
 
@@ -1436,10 +1441,13 @@ internal static unsafe partial class VkTextures
 
 	//-- the portable frame's sky table --------------------------------------------
 
+	//A table made on the CPU to bind in place of the drawn one, nought for the drawn one - see CorePanoramaSky
+	internal static ulong portableSkyTable;
+
 	//Sky table view for the portable frame, which binds it since it has no bindless table
 	internal static bool PortableSkyTableView( out ImageView view )
 	{
-		view = VkDevice.skyTableView;
+		view = portableSkyTable != 0 && textures.TryGetValue( portableSkyTable, out var made ) ? made.View : VkDevice.skyTableView;
 
 		return view.Handle != 0;
 	}
@@ -1527,7 +1535,7 @@ internal static unsafe partial class VkTextures
 
 				textures.Remove( source );
 
-				//A picture moved twice in one batch: whatever was moved onto the view that has just gone is moved on again, so no set is left naming it.
+				//A picture moved twice in a batch: anything moved onto the view just gone moves on again
 				foreach ( var key in new List<ulong>( moved.Keys ) )
 					if ( moved[key].Handle == old.Handle ) moved[key] = into.View;
 
@@ -1537,7 +1545,7 @@ internal static unsafe partial class VkTextures
 
 			if ( moved.Count == 0 ) return 0;
 
-			//Every material made of an old view gets a new set naming the new one; the old set goes when the frames that bound it are done.
+			//Materials made of an old view get a set naming the new one; the old set goes when its frames finish
 			var views = stackalloc ImageView[(int)VkDevice.MaterialTextures];
 
 			foreach ( var pair in textures )
@@ -1587,8 +1595,8 @@ internal static unsafe partial class VkTextures
 			//Flush pending uploads first, since the graveyard can't see copies in an unsent command buffer
 			SubmitBatch();
 
-			//A plain picture is kept rather than freed: the next texture of this shape takes it as it is. Nothing about it changes here, so a frame
-			//still in flight goes on sampling exactly what it was sampling - and whoever takes it writes through a barrier that waits for that sampling.
+			//A plain picture is kept for the next texture of its shape, unchanged, so frames in flight still sample it;
+			//its next writer waits on that sampling through a barrier
 			if ( sparing && Plain( found ) &&
 				spareCount < SpareCeiling &&
 				spareBytes + (long)found.Bytes <= SpareBytesCeiling )
@@ -1610,8 +1618,7 @@ internal static unsafe partial class VkTextures
 				return;
 			}
 
-			//Frames in flight may still be sampling it - and so may the frame being recorded right now, which a device-wide wait would
-			//not even cover. The graveyard holds it until a fence proves everything that could name it has finished; nobody stalls.
+			//Frames in flight, and the one recording, may still sample it; the graveyard holds it until a fence clears
 			if ( found.OwnsImage )
 			{
 				VkDevice.trackedTextureBytes -= (long)found.Bytes;

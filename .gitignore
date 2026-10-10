@@ -92,6 +92,7 @@
 !/game/addons/base/Assets/materials/dev/grid.png
 !/game/addons/base/Assets/materials/dev/metal.png
 !/game/addons/base/Assets/materials/error.png
+!/game/addons/base/Assets/materials/skybox/suburban_soccer_park_1k.exr
 
 # VR controller models (XrControllerModels); compiled forms are local
 !/game/addons/base/Assets/models/vr/controllers/**
@@ -223,3 +224,7 @@ game/config/input/common.json
 /game/tools
 /game/aftermath_dumps
 /game/gamecache
+
+# Agent instructions kept beside the checkout, not in the repository
+/AGENTS.md
+/CLAUDE.md

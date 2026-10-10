@@ -26,5 +26,7 @@ engine/Core/extern/** linguist-vendored
 # Icons and images are binary, said out loud. "* text=auto" above is a guess, and it has been wrong: brand/rotor-512.png went into the repository
 # with the CR taken out of its PNG signature and has been an unreadable file ever since. A mangled binary is not something a diff shows you.
 *.png binary
+*.exr binary
+*.hdr binary
 *.ico binary
 *.icns binary

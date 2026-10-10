@@ -12,7 +12,7 @@ namespace Editor.TreeBrowser;
 //Batch moves/copies assets, avoids clobbering, and repoints references in one project pass
 internal static class AssetMover
 {
-    //What a batch ended up doing. Worth logging - a move that silently renamed six files because of collisions is something the user wants to know about.
+    //What a batch did, worth logging: a move that renamed six files on collision is news to the user
     internal sealed class Result
     {
         public int Moved;
@@ -21,13 +21,13 @@ internal static class AssetMover
         public int Renamed;
         public List<string> Errors = new();
 
-        /// <summary>Old path to new path for everything that moved, waiting to be rewritten across the project. Null when there's nothing to repoint - a copy, or nothing under Assets.</summary>
+        /// <summary>Old to new path of everything moved, to repoint; null if nothing to repoint.</summary>
         public Dictionary<string, string> PendingReferences;
 
         public bool DidAnything => Moved > 0 || Copied > 0;
     }
 
-    /// <summary>Move or copy everything in <paramref name="sources"/> into <paramref name="targetFolder"/>, then repoint anything that referenced the old locations.</summary>
+    /// <summary>Moves or copies sources into targetFolder, then repoints references to the old locations.</summary>
     public static Result Run( IEnumerable<string> sources, string targetFolder, bool copy )
     {
         var result = new Result();
@@ -42,7 +42,7 @@ internal static class AssetMover
         if ( items.Count == 0 )
             return result;
 
-        //Work out what references need repointing before anything moves - once a folder has been renamed we can't enumerate what used to be inside it.
+        //Map references before anything moves: a renamed folder's old contents cannot be enumerated
         var references = copy ? null : BuildReferenceMap( items );
 
         foreach ( var item in items )
@@ -83,7 +83,7 @@ internal static class AssetMover
         RepointInBackground( result.PendingReferences );
     }
 
-    //Only one reference pass at a time - two overlapping passes would each be working from a stale view of the project and could undo each other.
+    //One reference pass at a time; overlapping passes work from stale views and can undo each other
     private static readonly object RepointLock = new();
 
     private static void RepointInBackground( Dictionary<string, string> references )
@@ -117,7 +117,7 @@ internal static class AssetMover
         } );
     }
 
-    /// <summary>Rename a file or folder in place, repointing everything that referenced the old name. A rename is a move that doesn't change folder, so it has exactly the same reference problem - doing it with a bare File.Move is what leaves scenes pointing at assets that no longer exist.</summary>
+    /// <summary>Renames in place and repoints references; a rename is a move with the same reference problem.</summary>
     public static Result Rename( string path, string newName )
     {
         var result = new Result();
@@ -188,7 +188,7 @@ internal static class AssetMover
         Report( Rename( path, newName ), onComplete );
     }
 
-    /// <summary>Start a drag carrying every path given, so dragging one row out of a multi-selection takes the whole selection with it. Drag data holds one "file:///" line per path - that's the shape the drop side parses out of Data.Files, and what Explorer sends us.</summary>
+    /// <summary>Starts a drag of every path, one "file:///" line each, as Explorer sends them.</summary>
     public static bool StartDrag( Widget source, IEnumerable<string> paths, object payload = null )
         => StartDragCore( source, paths, payload );
 
@@ -235,8 +235,8 @@ internal static class AssetMover
         return data;
     }
 
-    //A path as a file URI: three slashes and the path, with its own leading slash counted among them. "file:///" + path was
-    //right for C:/ and one slash too many on Linux, where file:////home/x is a network share - see DragData.LocalPathOf.
+    //A path as a file URI: three slashes counting the path's own; "file:///" + path is one too many on
+    //Linux, where file:////home/x is a network share - see DragData.LocalPathOf
     internal static string FileUri( string path )
     {
         var forward = path.Replace( '\\', '/' );
@@ -244,7 +244,7 @@ internal static class AssetMover
         return "file://" + ( forward.StartsWith( '/' ) ? forward : "/" + forward );
     }
 
-    /// <summary>The paths the user means to drag: the whole selection if the grabbed row is part of it, otherwise just that row. Matches how file managers behave.</summary>
+    /// <summary>The paths to drag: the whole selection if the grabbed row is in it, else that row.</summary>
     public static List<string> GetDragPaths( IEnumerable<string> selectedPaths, string grabbedPath )
     {
         var selected = (selectedPaths ?? Enumerable.Empty<string>())
@@ -374,8 +374,7 @@ internal static class AssetMover
                 return;
             }
 
-            //Done as files rather than through the asset system: to this core the source and the compiled file are the same file, so asking it to
-            //move an asset leaves a "_c" from the old pipeline behind - and the browser hides those, so nobody can move it themselves afterwards.
+            //Done on files rather than through the asset system, which would leave a hidden "_c" behind at the old path
             if ( item.Copy )
             {
                 CopyFileWithCompiled( item.Source, item.Destination );
@@ -396,7 +395,7 @@ internal static class AssetMover
         }
     }
 
-    //File.Move, taking the compiled "_c" sibling along. Leaving it behind orphans a stale compiled asset at the old path.
+    //File.Move, taking the compiled "_c" sibling along so no stale asset is orphaned at the old path
     private static void MoveFileWithCompiled( string source, string destination )
     {
         File.Move( source, destination );
@@ -423,7 +422,7 @@ internal static class AssetMover
             File.Copy( compiled, destination + "_c", true );
     }
 
-    //Directory.Move can't cross volumes, which is easy to hit with a project on another drive. Fall back to copying and deleting.
+    //Directory.Move cannot cross volumes, so fall back to copy and delete
     private static void MoveDirectory( string source, string destination )
     {
         try
@@ -454,8 +453,7 @@ internal static class AssetMover
 
     //References
 
-    //Old asset-relative path to new one, for everything this batch is about to move. Folders map as a path prefix, so one
-    //entry covers everything inside them however deep - no need to walk the folder or hold thousands of per-file entries.
+    //Old to new asset-relative path for this batch; folders map as a prefix, so one entry covers their contents
     private static Dictionary<string, string> BuildReferenceMap( List<PlannedItem> items )
     {
         var map = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
@@ -546,8 +544,8 @@ internal static class AssetMover
         return changed.ToList();
     }
 
-    //One regex matching any of the old paths. Longest first, so a nested folder wins over its parent and we don't rewrite half a path. The lookbehind
-    //keeps "models/foo.mdl" from matching inside "othermodels/foo.mdl"; a trailing "_c" still matches, since it just follows the part we replace.
+    //One regex over all old paths, longest first so a nested folder beats its parent; the lookbehind keeps
+    //"models/foo.mdl" out of "othermodels/foo.mdl", and a trailing "_c" still matches
     private static Regex BuildCombinedRegex( IEnumerable<string> references )
     {
         var alternatives = references
@@ -564,7 +562,7 @@ internal static class AssetMover
 
     private static readonly HashSet<string> NonTextExtensions = new( StringComparer.OrdinalIgnoreCase )
     {
-        ".png", ".jpg", ".jpeg", ".tga", ".psd", ".bmp", ".gif", ".dds", ".hdr",
+        ".png", ".jpg", ".jpeg", ".tga", ".psd", ".bmp", ".gif", ".dds", ".hdr", ".exr",
         ".fbx", ".obj", ".gltf", ".glb", ".dmx", ".blend",
         ".wav", ".mp3", ".ogg", ".flac",
         ".tex", ".vtex", ".vsnd", ".dll", ".pdb", ".exe", ".zip", ".bin"
@@ -584,7 +582,7 @@ internal static class AssetMover
 
     //Paths
 
-    //Path as the asset system refers to it - relative to Assets, forward slashes. Null if it isn't under the assets mount at all.
+    //The path relative to Assets with forward slashes, or null if it is not under the assets mount
     private static string ToAssetRelative( string assetsRoot, string fullPath )
     {
         try

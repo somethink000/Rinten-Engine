@@ -37,6 +37,7 @@ public static partial class AssetSystem
 	{
 		//Before anything is drawn: a picture compiled without it loses its settings until they next change.
 		PictureBake.Install();
+		HdrPictures.Install();
 
 		string path = System.IO.Path.Combine( project.GetRootPath(), Project.CacheFolder, "cloud.db" );
 		CloudDirectory = new CloudAssetDirectory( path );
@@ -53,7 +54,7 @@ public static partial class AssetSystem
 	}
 
 
-	//An asset that was found by us rather than handed over by their asset system - which, without their asset system, is all of them.
+	//An asset this side found itself, which without a native asset system is every asset
 	internal static void AddManaged( Asset asset )
 	{
 		allAssets[asset.AssetId] = asset;
@@ -193,8 +194,7 @@ public static partial class AssetSystem
 		asset.Compile( false );
 	}
 
-	//An asset was built again: whoever shows it is told, and a preview already made from what it was before is made again. Not through
-	//ChangedManaged: that would look at whether it is stale, and a build that failed is still stale - it would be queued again every frame.
+	//Tells viewers of a rebuild and remakes the preview; not via ChangedManaged, which requeues failed builds
 	internal static void Rebuilt( Asset asset )
 	{
 		ThreadSafe.AssertIsMainThread();
@@ -220,7 +220,7 @@ public static partial class AssetSystem
 		return null;
 	}
 
-	//Keys a path is known under. A leading slash is a Unix disk path here and a content path there, so both spellings have to be tried.
+	//Keys a path is known under; a leading slash is a disk path on Unix and a content path elsewhere, so try both
 	internal static string[] LookupKeys( string path )
 	{
 		path = path.Replace( '\\', '/' );
@@ -262,7 +262,7 @@ public static partial class AssetSystem
 	{
 		ThreadSafe.AssertIsMainThread();
 
-		//Ours is a file, and the asset system is the list of them. Registering one is telling that list about a file it has not walked past yet.
+		//Registering an asset tells the scan about a file it has not walked past yet
 		var relative = Editor.FileSystem.Content?.GetRelativePath( absoluteFilePath ) ?? System.IO.Path.GetFileName( absoluteFilePath );
 
 		CoreAssetScan.RegisterFile( absoluteFilePath, relative );
@@ -271,8 +271,7 @@ public static partial class AssetSystem
 
 		var ret = CoreAssetScan.Find( absoluteFilePath );
 
-		//Not every file handed here becomes an asset of its own. A compiled file with its source beside it is deliberately not one - see
-		//CoreAssetScan.RegisterFile - so the caller is told there is nothing, rather than the whole project failing to open on the first such file.
+		//A compiled file beside its source is not an asset of its own (see CoreAssetScan.RegisterFile)
 		if ( ret is null ) return null;
 
 		//Make sure the ResoureLibrary has proper loaded version, so that properties that target GameResources
@@ -282,7 +281,7 @@ public static partial class AssetSystem
 		return ret;
 	}
 
-	/// <summary>Delete orphaned trivial children. These are things that are generated for usage by an asset, but aren't referenced by anything, so are useless.</summary>
+	/// <summary>Deletes generated children nothing references.</summary>
 	public static void DeleteOrphans()
 	{
 		//Only delete orphans from the current project's transient folder. Engine-shipped transients
@@ -292,7 +291,7 @@ public static partial class AssetSystem
 		var orphans = All
 						.Where( x => x.IsTrivialChild )
 						.Where( x => !x.IsDeleted )
-						.Where( x => x.AssetType == AssetType.Texture ) //Note - gib models can be trivial children too, but I don't want to push my luck
+						.Where( x => x.AssetType == AssetType.Texture ) //Gib models can be trivial too; left out
 						.Where( x => transientRoot is not null && x.AbsolutePath.StartsWith( transientRoot, StringComparison.OrdinalIgnoreCase ) )
 						.ToArray();
 
@@ -365,8 +364,7 @@ public static partial class AssetSystem
 	}
 
 
-	//Their asset picker asked us to open ours, through interop, and took the answer back as native
-	//asset handles. Nothing native asks any more: the editor opens its own picker directly.
+	//The editor opens its own asset picker; these handles stay for the API's shape
 
 	static ulong _freeIndex = uint.MaxValue;
 
@@ -403,14 +401,14 @@ public static partial class AssetSystem
 		/// <summary>The thumbnail for an asset has been updated</summary>
 		void OnAssetThumbGenerated( Asset asset ) { }
 
-		/// <summary>Changes have been detected in the asset system. We won't tell you what, but you probably need to update the asset list or something.</summary>
+		/// <summary>Called when the asset system changed; refresh what lists assets.</summary>
 		void OnAssetSystemChanges() { }
 
 		/// <summary>Called when a new tag has been added to the asset system.</summary>
 		void OnAssetTagsChanged() { }
 	}
 
-	/// <summary>Create an Asset from a serialized property. This is expected to be an embedded asset property.</summary>
+	/// <summary>Creates an Asset from a serialized property, expected to be an embedded asset property.</summary>
 	public static Asset CreateEmbeddedAsset( SerializedProperty target )
 	{
 		return new EmbeddedAsset( target );

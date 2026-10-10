@@ -12,7 +12,11 @@ partial class StandaloneExporter
 	//A picture the build carries compiled, by its path on disk, and the blocks that stand in for it.
 	private readonly Dictionary<string, List<string>> compiledPictures = new( StringComparer.Ordinal );
 
-	//Compiles the pictures the build's materials read into the blocks they are read as, and puts those in the manifest in place of the picture.
+	//What a material may name as a picture: what the image loader reads, and the HDR files only the compiler does
+	private static bool IsPicture( string file )
+		=> Rinten.TextureLoader.Image.IsAppropriate( file ) || CoreTextureFile.IsHdr( file );
+
+	//Compiles the pictures the build's materials read and puts the blocks in the manifest in their place
 	private async Task CompilePictures()
 	{
 		compiledPictures.Clear();
@@ -59,12 +63,12 @@ partial class StandaloneExporter
 			}
 		} );
 
-		//The pictures the build carries that a material reads: the project's, by the name the manifest gives them, and the base addon's.
+		//Pictures a material reads: the project's, by manifest name, and the base addon's
 		var pictures = PackageManifest.Assets
-			.Where( file => file.AbsolutePath is not null && Rinten.TextureLoader.Image.IsAppropriate( file.Name ) )
+			.Where( file => file.AbsolutePath is not null && IsPicture( file.Name ) )
 			.Select( file => (Name: file.Name, Absolute: file.AbsolutePath) )
 			.Concat( BaseContent( engineDir )
-				.Where( file => Rinten.TextureLoader.Image.IsAppropriate( file ) )
+				.Where( IsPicture )
 				.Select( file => (Name: BaseName( file ), Absolute: file) ) )
 			.Where( picture => readings.ContainsKey( picture.Name ) )
 			.ToList();
@@ -81,15 +85,29 @@ partial class StandaloneExporter
 				foreach ( var (srgb, cut) in readings[name] )
 				{
 					var blocksPath = CompiledPaths.TextureBlocks( absolute, srgb, cut );
+
+					//HDR: BC6H for desktop builds, RGB9E5 under the plain name elsewhere; this Basis holds no HDR
+					if ( CoreTextureFile.IsHdr( absolute ) )
+					{
+						var light = universal ? blocksPath : CompiledPaths.Compressed( blocksPath );
+						var current = !CorePictures.IsStale( absolute, light ) && CoreTextureFile.Load( light ) is not null;
+
+						if ( !current && !CoreTextureFile.Compile( absolute, light, srgb, generateMips: true, compress: !universal ) )
+							break;
+
+						blocks.Add( light );
+						continue;
+					}
+
 					var compiled = universal ? CompiledPaths.Universal( blocksPath ) : CompiledPaths.Compressed( blocksPath );
 
-					//The mask a colour is cut by, where the material names one - folded in as it is compiled, the way the renderer does.
+					//The mask a material cuts the colour by, folded in at compile as the renderer does
 					var cutFull = cut is null ? null : CoreModel.ResolveOnDisk( cut.Replace( '\\', '/' ) );
 					if ( cut is not null && cutFull is null ) break;
 
 					if ( universal )
 					{
-						//The levels as the engine makes them - cut, brightened, halved with a cut's coverage kept - packed by Basis instead of into BC.
+						//The engine's levels (cut, brightened, coverage kept), packed by Basis, not BC
 						if ( CorePictures.IsStale( absolute, compiled, cutFull ) || CoreUniversalTexture.Load( compiled ) is null )
 						{
 							var levels = CoreTextureFile.CompileLevels( absolute, cutFull );
@@ -112,7 +130,7 @@ partial class StandaloneExporter
 						continue;
 					}
 
-					//Compiled again where it is older than the picture or its mask, or in a format this engine no longer reads - which its age does not show.
+					//Recompiled when older than the picture or mask, or in a format this engine cannot read
 					var fresh = !CorePictures.IsStale( absolute, compiled, cutFull ) && CoreTextureFile.Load( compiled ) is not null;
 
 					if ( !fresh && !CoreTextureFile.Compile( absolute, compiled, srgb, generateMips: true, compress: true, cutFull ) )
@@ -128,11 +146,11 @@ partial class StandaloneExporter
 			}
 		} );
 
-		//Said, and the picture kept: a build that compiles it where it is drawn is better than one that cannot draw it at all.
+		//The picture ships as is, to be compiled where it is drawn
 		foreach ( var name in failed )
 			Logger.Warning( $"{name} would not compile - the build carries the picture, and compiles it where it is drawn" );
 
-		//The project's pictures: their blocks in the manifest in place of them, named from the picture's own name, the way the engine looks for them.
+		//Project pictures: their blocks replace them in the manifest, named as the engine looks them up
 		foreach ( var file in PackageManifest.Assets.ToList() )
 		{
 			if ( file.AbsolutePath is null || !compiledPictures.TryGetValue( file.AbsolutePath, out var blocks ) ) continue;

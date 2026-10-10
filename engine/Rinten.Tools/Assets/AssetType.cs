@@ -96,8 +96,7 @@ public class AssetType
 
 	private void GenerateGlyphs( AssetTypeAttribute gr )
 	{
-		//A resource draws its own icon, and to be asked it has to be made - but a resource that is only ever loaded, never built empty, is entitled to
-		//have no way of making one. That is not worth failing a project's load over: it gets the same icon as anything else that could not be asked.
+		//A resource that can only be loaded, not built empty, cannot draw its icon; it gets the default instead
 		try
 		{
 			if ( Activator.CreateInstance( gr.TargetType ) is Resource temp )
@@ -144,7 +143,7 @@ public class AssetType
 		DrawGlyphs( "description", "#8a8f98" );
 	}
 
-	/// <summary>Another kind of resource this asset can be loaded as, if it says it can. Null for everything that does not, which is everything but our own formats.</summary>
+	/// <summary>Another resource type this asset can load as, or null - only our own formats have one.</summary>
 	public System.Type ProvidedResourceType { get; private set; }
 
 	private void Init( TypeDescription type, AssetTypeAttribute attribute )
@@ -227,7 +226,7 @@ public class AssetType
 	//Called to insert the asset types for types defined in Engine/Game
 	internal static bool UpdateCustomTypes()
 	{
-		//Before anything walks the project: the walk asks whether a file has a type, and a picture has none until this has run.
+		//Before the project walk, which asks whether a file has a type; pictures have none until this runs
 		AddNativeTypes();
 
 		bool bChanged = false;
@@ -285,7 +284,7 @@ public class AssetType
 	}
 
 	//The pictures a project keeps beside its materials.
-	private static readonly string[] ImageExtensions = { "png", "jpg", "jpeg", "tga", "bmp", "gif", "webp" };
+	private static readonly string[] ImageExtensions = { "png", "jpg", "jpeg", "tga", "bmp", "gif", "webp", "exr", "hdr" };
 
 	//The audio a sound is played from.
 	private static readonly string[] AudioExtensions = { "wav", "mp3", "ogg", "flac" };
@@ -373,7 +372,7 @@ public class AssetType
 		}
 	}
 
-	/// <summary>For a type (ie Texture, Material, Surface) return the appropriate AssetType. Returns null if can't resolve.</summary>
+	/// <summary>The AssetType for a resource type (Texture, Material, ...), or null.</summary>
 	public static AssetType FromType( System.Type t )
 	{
 		//A picture, not the definition beside it: that is what Asset.LoadResource reads for a Texture.
@@ -381,7 +380,7 @@ public class AssetType
 		if ( t == typeof( Material ) ) return AssetType.Material;
 		if ( t == typeof( Model ) ) return AssetType.Model;
 		if ( t == typeof( SoundFile ) ) return AssetType.SoundFile;
-		//A graph is the model's, so a graph is picked by picking the model - see AnimGraph.Load, which takes a model's path for its graph.
+		//A graph lives in its model, so picking a graph picks the model - see AnimGraph.Load
 		if ( t == typeof( AnimGraph ) ) return AssetType.Model;
 
 		foreach ( var a in t.GetCustomAttributes<AssetTypeAttribute>() )
@@ -393,7 +392,7 @@ public class AssetType
 		return null;
 	}
 
-	//Asked from whatever thread is scanning content, so it has to be one that can be written to from more than one at a time.
+	//Written by whatever threads scan content
 	static System.Collections.Concurrent.ConcurrentDictionary<string, AssetType> _extensionCache = new();
 
 	public static AssetType FromExtension( string extension )

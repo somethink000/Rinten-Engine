@@ -5,7 +5,7 @@ using Rinten.Native;
 namespace Rinten;
 
 //Compiled texture file: compile from images, write from blocks, read back; flat offset-based layout
-internal sealed class CoreTextureFile
+internal sealed partial class CoreTextureFile
 {
 	/// <summary>"ESST", little-endian.</summary>
 	public const uint Magic = 0x54535345;
@@ -16,7 +16,7 @@ internal sealed class CoreTextureFile
 	/// <summary>How the pixels are stored.</summary>
 	public enum TextureFormat
 	{
-		/// <summary>Eight bits a channel, four channels. What an image file decodes to, and what every GPU can take.</summary>
+		/// <summary>Eight bits a channel, four channels: what images decode to and every GPU takes.</summary>
 		Rgba8 = 0,
 
 		/// <summary>Colour, one bit of alpha if any. Eight bytes a block.</summary>
@@ -28,11 +28,18 @@ internal sealed class CoreTextureFile
 		/// <summary>One channel. Eight bytes a block.</summary>
 		Bc4 = 3,
 
-		/// <summary>Two channels - what a normal map is stored as, the third rebuilt in the shader. Sixteen bytes a block.</summary>
+		/// <summary>Two channels, a normal map's; the third is rebuilt in the shader. Sixteen bytes a block.</summary>
 		Bc5 = 4,
 
 		/// <summary>Colour and alpha at the highest quality of the family. Sixteen bytes a block.</summary>
 		Bc7 = 5,
+
+		//6 to 8 are the device's own stored formats
+		/// <summary>HDR light as RGB9E5, four bytes a texel, no alpha.</summary>
+		Rgb9e5 = 9,
+
+		/// <summary>HDR light as unsigned BC6H blocks, for a device that takes BC.</summary>
+		Bc6h = 10,
 	}
 
 	/// <summary>One level of the mip chain: its size, and how many bytes it takes.</summary>
@@ -46,7 +53,7 @@ internal sealed class CoreTextureFile
 	private const int HeaderMagic = 0;
 	private const int HeaderVersion = 4;
 
-	//Checked against what was read. A truncated file otherwise loads as a valid one whose last mip is whatever followed it on disk.
+	//Checked against what was read, so a truncated file does not load with garbage for its last mip
 	private const int HeaderByteCount = 8;
 	private const int HeaderWidth = 16;
 	private const int HeaderHeight = 20;
@@ -105,7 +112,7 @@ internal sealed class CoreTextureFile
 		return new ReadOnlySpan<byte>( bytes, pixelOffset + offset, byteCount );
 	}
 
-	/// <summary>Every level's size, three ints each - width, height, byte count - and every level's bytes back to back, largest first. What the device upload takes.</summary>
+	/// <summary>Each level's width, height and byte count, and all levels' bytes, largest first.</summary>
 	public void Levels( Span<int> info, out ReadOnlySpan<byte> pixels )
 	{
 		for ( var mip = 0; mip < MipCount; ++mip )
@@ -120,7 +127,7 @@ internal sealed class CoreTextureFile
 		pixels = new ReadOnlySpan<byte>( bytes, pixelOffset, (int)ReadU32( bytes, HeaderPixelByteCount ) );
 	}
 
-	/// <summary>Reads a compiled texture, or null where the file is not one: missing, the wrong magic or version, or with a piece that lies outside it.</summary>
+	/// <summary>Reads a compiled texture; null if missing, of another version, or truncated.</summary>
 	public static CoreTextureFile Load( string path )
 	{
 		if ( string.IsNullOrEmpty( path ) ) return null;
@@ -145,7 +152,7 @@ internal sealed class CoreTextureFile
 		return FromBytes( bytes );
 	}
 
-	/// <summary>A compiled texture from bytes in memory - one carried inside another file, a model's impostor - or null where they are not one.</summary>
+	/// <summary>A compiled texture from bytes in memory, e.g. a model's impostor; null if not one.</summary>
 	public static CoreTextureFile FromBytes( byte[] bytes )
 	{
 		if ( bytes is null || bytes.Length < HeaderSize ) return null;
@@ -203,7 +210,7 @@ internal sealed class CoreTextureFile
 
 		for ( var y = 0; y < to.Height; ++y )
 		{
-			//An odd-sized level has a row or column with no partner; sampling the same one twice is better than reading past the edge.
+			//An odd edge has no partner row or column; sample the last one twice rather than read past it
 			var y0 = y * 2;
 			var y1 = ( y0 + 1 < from.Height ) ? y0 + 1 : y0;
 
@@ -238,7 +245,7 @@ internal sealed class CoreTextureFile
 
 		fixed ( byte* bytes = encoded )
 		{
-			//Always four channels out, whatever went in: a GPU wants a predictable stride far more than it wants the three bytes saved.
+			//Always four channels: a predictable stride is worth more to the GPU than the bytes saved
 			var decoded = StbImage.stbi_load_from_memory( bytes, encoded.Length, &w, &h, &channels, 4 );
 
 			if ( decoded == null ) return null;
@@ -370,6 +377,8 @@ internal sealed class CoreTextureFile
 	{
 		if ( string.IsNullOrEmpty( output ) ) return false;
 
+		if ( IsHdr( source ) ) return CompileHdr( source, output, generateMips, compress );
+
 		var rgba = Prepared( source, cutBy, ref generateMips, ref compress, out var width, out var height );
 		if ( rgba is null ) return false;
 
@@ -392,8 +401,8 @@ internal sealed class CoreTextureFile
 		return true;
 	}
 
-	//A picture's top level as everything made from it starts: decoded, cut by its mask, and brightened as its settings say
-	//- and what its settings say of mips and blocks folded into the two asked for. Null where the picture could not be read.
+	//A picture's top level as decoded, cut by its mask and brightened per its settings, which also fold into the
+	//mips and blocks asked for. Null where the picture could not be read
 	private static byte[] Prepared( string source, string cutBy, ref bool generateMips, ref bool compress, out int width, out int height )
 	{
 		width = 0;
@@ -438,10 +447,10 @@ internal sealed class CoreTextureFile
 		var rgba = Decode( encoded, out width, out height );
 		if ( rgba is null ) return null;
 
-		//The cut, before anything else is made from the alpha: the mips below keep what it covers the same as they would a picture's own.
+		//Cut before anything is made from the alpha, so the mips keep its coverage as a picture's own
 		if ( !string.IsNullOrEmpty( cutBy ) && !CutBy( rgba, width, height, cutBy ) ) return null;
 
-		//Brightness scales the colour and leaves the alpha alone, before the mips are made from it so every level agrees.
+		//Brightness scales colour, not alpha, before the mips so every level agrees
 		if ( settings is { } bright && MathF.Abs( bright.Brightness - 1.0f ) > 0.001f )
 		{
 			var scale = MathF.Max( bright.Brightness, 0.0f );
@@ -457,7 +466,7 @@ internal sealed class CoreTextureFile
 		return rgba;
 	}
 
-	/// <summary>Mip chain as Compile builds it, for other block formats (web KTX2); empty if kept uncompressed</summary>
+	/// <summary>The mip chain Compile builds, for other block formats (web KTX2); empty if kept uncompressed.</summary>
 	public static IReadOnlyList<(byte[] Pixels, int Width, int Height)> CompileLevels( string source, string cutBy = null )
 	{
 		var generateMips = true;
@@ -470,8 +479,7 @@ internal sealed class CoreTextureFile
 		return Chain( rgba, width, height, generateMips, alphaIsCut: true ).ConvertAll( level => (level.Pixels, level.Width, level.Height) );
 	}
 
-	//For what is drawn at compile time rather than read from a file: a model's impostor.
-	/// <summary>A texture file's bytes from pixels in memory: four bytes a pixel, rows from the top - the mip chain, a mask's kept coverage and the blocks, the same as <see cref="Compile"/> makes of a picture. Null where nothing could be made.</summary>
+	/// <summary>Texture file bytes from RGBA8 pixels, built as Compile builds a picture; null on failure.</summary>
 	public static byte[] Build( byte[] rgba, int width, int height, bool srgb, bool generateMips, bool compress, bool alphaIsCut = true )
 	{
 		if ( rgba is null || width <= 0 || height <= 0 || rgba.Length < width * height * 4 ) return null;
@@ -486,7 +494,7 @@ internal sealed class CoreTextureFile
 
 		if ( generateMips )
 		{
-			//Down to one pixel. The last few levels cost almost nothing and leaving them out is what makes a distant surface flicker.
+			//Down to one pixel: dropping the last levels makes distant surfaces flicker
 			while ( levels[^1].Width > 1 || levels[^1].Height > 1 )
 				levels.Add( Halve( levels[^1] ) );
 
@@ -498,7 +506,7 @@ internal sealed class CoreTextureFile
 		return levels;
 	}
 
-	/// <summary>Texture bytes from a caller-built mip chain (e.g. impostors); keepAlpha forces an alpha format</summary>
+	/// <summary>Texture bytes from a caller-built mip chain (impostors); keepAlpha forces an alpha format.</summary>
 	public static byte[] BuildLevels( IReadOnlyList<(byte[] Pixels, int Width, int Height)> chain, bool srgb, bool compress, bool keepAlpha = false )
 	{
 		if ( chain is null || chain.Count == 0 ) return null;
@@ -567,8 +575,8 @@ internal sealed class CoreTextureFile
 		return FileBytes( width, height, format, srgb, sizes, pixels );
 	}
 
-	//The other door into the same file format as Compile, for content that arrives compressed: the blocks are written through unchanged rather than unpacked, drawn into a PNG and packed again.
-	/// <summary>Writes a compiled texture from bytes that are already in their final form.</summary>
+	//For content that arrives compressed: its blocks are written through unchanged
+	/// <summary>Writes a compiled texture from bytes already in their final form.</summary>
 	public static bool Write( string output, int width, int height, TextureFormat format, bool srgb,
 		ReadOnlySpan<int> mipSizes, ReadOnlySpan<byte> data )
 	{
@@ -618,7 +626,7 @@ internal sealed class CoreTextureFile
 		{
 			if ( mipSizes[level] <= 0 ) return null;
 
-			//The sizes are the caller's, and a caller who got them wrong would otherwise write a file whose last mip runs off the end of the bytes.
+			//The caller's sizes, checked so a wrong one cannot run the last mip off the end of the bytes
 			if ( offset + (uint)mipSizes[level] > (uint)data.Length ) return null;
 
 			var at = mipAt + ( level * MipSize );

@@ -281,9 +281,9 @@ if(NOT EMSCRIPTEN AND NOT ANDROID)
 	endif()
 
 	target_sources(rintencore PRIVATE extern/basisu/encoder/basisu_wasm_api.cpp
-		extern/basisu/encoder/basisu_wasm_transcoder_api.cpp)
+		extern/basisu/encoder/basisu_wasm_transcoder_api.cpp src/hdr_shim.cpp)
 	set_source_files_properties(extern/basisu/encoder/basisu_wasm_api.cpp
-		extern/basisu/encoder/basisu_wasm_transcoder_api.cpp PROPERTIES
+		extern/basisu/encoder/basisu_wasm_transcoder_api.cpp src/hdr_shim.cpp PROPERTIES
 		COMPILE_DEFINITIONS "${BASISU_DEFINES}"
 		COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w;-fvisibility=default>"
 		CXX_STANDARD 17)

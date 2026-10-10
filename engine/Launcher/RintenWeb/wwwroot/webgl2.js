@@ -76,7 +76,7 @@
 			infoText = "WebGL2: the context was lost";
 		});
 
-		//The world's own picture is half floats. Where they cannot be drawn into, eight bits a channel stands in - see createTexture.
+		//The world's picture is half floats; where those cannot be drawn into, 8-bit stands in - see createTexture
 		halfFloatTargets = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
 		uniformAlign = gl.getParameter(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT);
 
@@ -96,7 +96,8 @@
 				"bc4-r-unorm": rgtc.COMPRESSED_RED_RGTC1_EXT,
 				"bc5-rg-unorm": rgtc.COMPRESSED_RED_GREEN_RGTC2_EXT,
 				"bc7-rgba-unorm": bptc.COMPRESSED_RGBA_BPTC_UNORM_EXT,
-				"bc7-rgba-unorm-srgb": bptc.COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT
+				"bc7-rgba-unorm-srgb": bptc.COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT,
+				"bc6h-rgb-ufloat": bptc.COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT
 			};
 		}
 
@@ -141,7 +142,7 @@
 		}
 	}
 
-	//Of WebGPU's optional features, the one the backend asks about: the block formats. No depth-stencil combination is ever asked for.
+	//The one optional WebGPU feature the backend asks about: block formats
 	function hasFeature(name) {
 		switch (name) {
 			case "texture-compression-bc": return bcBlocks ? 1 : 0;
@@ -250,7 +251,7 @@
 		this.early = null;
 	};
 
-	//One buffer into another. A buffer still holding its bytes here - not yet drawn with - is read or written here too, whichever end it is.
+	//One buffer into another; a buffer still holding its bytes here is read or written here too
 	function copyBuffer(from, fromOffset, into, intoOffset, size) {
 		var a = get(from), b = get(into);
 		if (!a || !b) return;
@@ -294,10 +295,12 @@
 			case "rgba8unorm-srgb":
 				return { internal: gl.SRGB8_ALPHA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE, depth: false, texel: 4 };
 			case "rgba16float":
-				//Half floats are an ES 3.0 texture whatever the device says; the extension is about drawing into one. So a picture that is
-				//only ever sampled - the sky's table - keeps its halves on a device that cannot render to them, and one drawn into falls back.
+				//Half floats are always sampleable in ES 3.0; the extension is for drawing into them, so a sampled-only
+				//picture (the sky table) keeps halves and a drawn one falls back
 				if (halfFloatTargets || !renderable) return { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, depth: false, texel: 8 };
 				return { internal: gl.RGBA8, format: gl.RGBA, type: gl.UNSIGNED_BYTE, depth: false, texel: 4 };
+			case "rgb9e5ufloat":
+				return { internal: gl.RGB9_E5, format: gl.RGB, type: gl.UNSIGNED_INT_5_9_9_9_REV, depth: false, texel: 4 };
 			case "depth32float":
 				return { internal: gl.DEPTH_COMPONENT32F, format: gl.DEPTH_COMPONENT, type: gl.FLOAT, depth: true };
 			case "depth24plus":
@@ -335,15 +338,15 @@
 		else
 			gl.texStorage2D(this.target, Math.max(1, mips), this.format.internal, width, height);
 
-		//A depth picture is not filtered in WebGL, and a sampler that asks it to be leaves it unreadable; these are what it has with no sampler.
+		//WebGL cannot filter depth, and a filtering sampler makes it unreadable; these are its unsampled settings
 		gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, this.format.depth ? gl.NEAREST : gl.LINEAR);
 		gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, this.format.depth ? gl.NEAREST : gl.LINEAR);
 		units.touched(this.gl);
 	}
 
 	Texture.prototype.destroy = function () {
-		//A picture drawing straight into a headset's layer holds the browser's texture, not its own - see xrAlias. Given back first, so what
-		//is deleted is ours: deleting the layer's took an image out of the headset's swapchain, and that eye froze on whatever was last in it.
+		//A picture drawing into a headset layer holds the browser's texture (xrAlias); give it back first, or
+		//deleting it takes an image from the headset's swapchain and that eye freezes
 		if (xrOwn && xrOwn.picture === this) xrUnalias();
 
 		for (var i = 0; i < this.framebuffers.length; i++) forgetFramebuffer(this.framebuffers[i]);
@@ -363,7 +366,7 @@
 		return alloc(new Texture(width, height, mips, format, usage, layers, samples));
 	}
 
-	//A view is the texture and the level it starts at; WebGL binds textures, not views, and nothing here views a part of one any other way.
+	//A view is the texture and its first level; WebGL binds textures, and nothing views part of one otherwise
 	function createView(texture, format, aspect, baseMip, mipCount) {
 		var t = get(texture);
 		if (!t) return 0;
@@ -388,6 +391,10 @@
 
 		//Half floats are read as sixteen bit words, and GL takes them only so.
 		if (f.type === gl.HALF_FLOAT) data = new Uint16Array(data.buffer, data.byteOffset, data.byteLength >> 1);
+
+		//Shared-exponent light uploads as 32-bit words; a view needs four-byte alignment, a copy does not
+		if (f.type === gl.UNSIGNED_INT_5_9_9_9_REV)
+			data = data.byteOffset % 4 === 0 ? new Uint32Array(data.buffer, data.byteOffset, data.byteLength >> 2) : new Uint32Array(data.slice().buffer);
 
 		gl.pixelStorei(gl.UNPACK_ROW_LENGTH, bytesPerRow / f.texel);
 		gl.texSubImage2D(gl.TEXTURE_2D, mip, x, y, width, height, f.format, f.type, data);
@@ -429,8 +436,8 @@
 		return alloc({ gl: s, compares: !!desc.compare, destroy: function () { gl.deleteSampler(s); } });
 	}
 
-	//--- layouts and groups ------------------------------------------------------- A layout is only asked which of its buffers take a draw's offset. A
-	//group is what it names, by binding, resolved now - and the sampler its pictures are read with, which in every group the backend makes is the one it has.
+	//--- layouts and groups --- A layout says which buffers take a draw's offset; a group resolves what it
+	//names by binding now, plus the one sampler every group here uses
 
 	function createBindGroupLayout(json) {
 		var desc = JSON.parse(json);
@@ -562,7 +569,7 @@
 		}
 	}
 
-	//The program, what it reads and where from, and the fixed state around it. Linked at once: WebGPU's promise resolves on the next turn either way.
+	//The program, its inputs and the fixed state round it, linked at once: WebGPU's promise resolves next turn anyway
 	async function createRenderPipeline(json) {
 		var desc = JSON.parse(json);
 		var vertexModule = get(desc.vertexModule);
@@ -605,8 +612,8 @@
 		//The blocks, each at a binding point of its own: group times eight plus binding, which no two of them share.
 		var blockCount = gl.getProgramParameter(program, gl.ACTIVE_UNIFORM_BLOCKS);
 
-		//Which points the ordinary blocks will take, gathered before any are handed out: an array's second element needs one nothing else wants, and picking
-		//it blind - "one above the highest the scheme can reach" - can run past MAX_UNIFORM_BUFFER_BINDINGS, which ES 3.0 only promises to be twenty-four.
+		//Gather the points ordinary blocks take first: an array's second element needs one nothing else wants, and
+		//picking it blind can pass MAX_UNIFORM_BUFFER_BINDINGS, which ES 3.0 only promises to be 24
 		var taken = {};
 
 		for (var b = 0; b < blockCount; b++) {
@@ -865,7 +872,7 @@
 		return fb;
 	}
 
-	//OVR_multiview2, asked for once. Null where the browser has not got it, and then nothing here ever makes a layered picture - see multiview().
+	//OVR_multiview2, asked once; null without it, and then no layered picture is made - see multiview()
 	var multiviewExt;
 
 	function multiview() {
@@ -892,7 +899,7 @@
 		return [Math.max(1, t.width >> view.mip), Math.max(1, t.height >> view.mip)];
 	}
 
-	//The pass being recorded: where it draws, how tall that is - for turning a rectangle over - and what the draws in it have said so far.
+	//The pass being recorded: its target, its height for flipping rectangles, and its draws' state so far
 	var pass = null;
 
 	//Pass descriptions by token, so JSON is parsed once instead of every pass open
@@ -907,7 +914,7 @@
 		passDescs = [];
 	}
 
-	//The framebuffer the last pass drew into, where it had a depth - what a headset's eye says it is finished with; see xrEyeCopy.
+	//The framebuffer the last pass drew into with depth, which a headset eye says it is done with - see xrEyeCopy
 	var lastDepthFramebuffer = null;
 
 	function beginRenderPass(encoder, token) {
@@ -929,7 +936,7 @@
 		var size;
 
 		if (canvasPass) {
-			//The canvas is the default framebuffer, which has no depth to give - the backend draws into a picture of its own and copies that here.
+			//The canvas has no depth; the backend draws into its own picture and copies that here
 			if (depthView) fail("the canvas cannot be drawn into beside a depth picture");
 			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 			size = [canvas.width, canvas.height];
@@ -955,7 +962,7 @@
 			resolves: null
 		};
 
-		//A multisampled colour names the picture it ends up in; the samples are averaged into it when the pass closes - see endPass.
+		//A multisampled colour names its resolve picture; samples average into it when the pass closes - see endPass
 		for (var r = 0; r < desc.colors.length; r++) {
 			var rc = desc.colors[r];
 			if (!rc || !rc.resolve || !colours[r]) continue;
@@ -967,7 +974,7 @@
 		gl.depthRange(0, 1);
 		gl.scissor(0, 0, size[0], size[1]);
 
-		//A clear writes through the masks the last pipeline left, so they are opened for it and put back by the next pipeline.
+		//A clear writes through the last pipeline's masks, so they are opened for it; the next pipeline resets them
 		if (clears.some(function (x) { return x; }) || (d && d.depthLoad === "clear")) {
 			gl.colorMask(true, true, true, true);
 			current.mask = 15;
@@ -1103,8 +1110,8 @@
 		return shift < 0 ? 0 : shift;
 	}
 
-	//Where each attribute reads from: the draw's buffers, at the first vertex it draws - which is how a base vertex is said in WebGL. With
-	//fromStart the buffers' own offsets are left out, because the caller is putting them in the draw's first vertex instead - see sharedVertexShift.
+	//Each attribute reads the draw's buffers from its first vertex, WebGL's base vertex; fromStart leaves the
+	//buffers' own offsets out, as the caller folds them in - see sharedVertexShift
 	function bindVertices(p, firstVertex, fromStart) {
 		var used = [];
 
@@ -1182,7 +1189,7 @@
 		release(passHandle);
 	}
 
-	//The frame's commands in one call, the same words webgpu.js plays - see BrowserNative's stream - each handed to this file's own function for it.
+	//The frame's commands in one call, the words webgpu.js plays (see BrowserNative's stream), each to its function
 	function runPass(passHandle, bytes, count, end) {
 		if (count > 0) {
 			var v = bytesOf(bytes);
@@ -1211,8 +1218,7 @@
 		if (end) endPass(passHandle);
 	}
 
-	//The samples of a multisampled pass averaged into the pictures it named, as WebGPU's resolveTarget does at the end of its pass. A blit between two
-	//pictures of the same format is exactly that in GL. The scissor is let go of first - a blit is clipped by it, and the last draw's is still set.
+	//Multisample resolve as WebGPU's resolveTarget, by a same-format blit; the scissor goes first, as it clips blits
 	function resolvePass(p) {
 		gl.disable(gl.SCISSOR_TEST);
 
@@ -1286,8 +1292,7 @@
 		gl.disable(gl.BLEND);
 		gl.colorMask(true, true, true, true);
 
-		//The depth test is on for the whole run - see defaultState - and the canvas has no depth buffer, so this never mattered there. A headset's
-		//framebuffer has one, and nobody clears it: without this the triangle is at the mercy of whatever the last pipeline left in depthFunc.
+		//Depth test is on throughout (defaultState) and a headset framebuffer's depth is never cleared, so set it here
 		gl.depthFunc(gl.ALWAYS);
 		gl.depthMask(false);
 
@@ -1321,7 +1326,7 @@
 		current.depthWrite = false;
 	}
 
-	//A copy between two pictures is a blit, from the top of one to the top of the other - in GL's rows, from the bottom, that is the last rows of each.
+	//A picture-to-picture copy is a blit, top to top: in GL's bottom-up rows, the last rows of each
 	function copyTextureToTexture(encoder, source, sourceMip, destination, destinationMip, width, height) {
 		var from = get(source);
 		var to = get(destination);
@@ -1358,7 +1363,7 @@
 		return alloc({ encoder: true });
 	}
 
-	//Everything already ran. With validation on, what GL said about it is asked once a frame - asking after every call would be the frame.
+	//With validation on, GL's errors are asked once a frame; after every call would cost the frame
 	function finishAndSubmit(encoder) {
 		gpuEnd();
 		release(encoder);
@@ -1405,7 +1410,7 @@
 		gpuOpen = null;
 	}
 
-	//The GPU milliseconds finished since the last ask - about a frame's - or -1 where there is no timer. want says whether to go on timing.
+	//GPU milliseconds finished since the last ask, about a frame's, or -1 without a timer; want keeps timing on
 	function gpuTake(want) {
 		gpuWanted = !!want;
 		if (!timer()) return -1;
@@ -1451,13 +1456,13 @@
 	var xrProjection = null;
 	var xrSubs = [null, null];
 
-	//The engine's own picture for the eyes, once the first copy has named it, and what it was before it was pointed at the layer's texture - see xrAlias.
+	//The engine's eye picture once the first copy names it, and what it was before pointing at the layer - see xrAlias
 	var xrSource = 0;
 	var xrOwn = null;
 	var xrGeneration = 0;
 
-	//How big an eye is drawn, and how much of its edge is shaded coarsely. Nought is "whatever the browser thinks", which is a headset's own
-	//idea of one-to-one; the engine sets both through xrTune, and ?xrscale / ?xrfoveation on the address override for a look without a rebuild.
+	//Eye resolution and how much edge is shaded coarsely; nought is the headset's own one-to-one. Set by xrTune,
+	//overridden by ?xrscale and ?xrfoveation on the address for a look without a rebuild
 	var xrScale = 0;
 	var xrFoveation = 1;
 
@@ -1472,7 +1477,7 @@
 		if (globalThis.console) console.warn("WebXR: " + text);
 	}
 
-	//The address wins over whatever the engine asks for, so a build can be looked at at half the pixels without rebuilding it. Below nought is "not said".
+	//The address overrides the engine, so a build can be viewed at half the pixels; below nought is unset
 	var xrForced = null;
 
 	function forced(name) {
@@ -1502,8 +1507,8 @@
 
 	function xrCan() { return gl ? 1 : 0; }
 
-	//Whether to ask the session for "layers" - which has to be decided before it opens, because a session that has them refuses
-	//a baseLayer. Only where the layer can be drawn into the way the engine draws: a texture array, through OVR_multiview2.
+	//Whether to ask for "layers", decided before the session opens (it then refuses a baseLayer); only where
+	//the layer takes the engine's drawing: a texture array through OVR_multiview2
 	function xrLayersWanted() {
 		return gl && typeof XRWebGLBinding === "function" && multiview() && forced("xrnolayers") < 0 ? 1 : 0;
 	}
@@ -1513,7 +1518,7 @@
 
 	function xrNative() { return xrNativeScale; }
 
-	//Asked for before a session opens, because the size is fixed when the layer is made. Foveation is not, and takes hold the moment it is set.
+	//Before a session opens, as the layer's size is fixed when made; foveation takes hold whenever set
 	function xrTune(scale, foveation) {
 		xrScale = scale > 0 ? scale : 0;
 		xrFoveation = Math.max(0, Math.min(1, foveation));
@@ -1525,12 +1530,12 @@
 		var layer = xrProjection || xrLayer;
 		if (!layer) return;
 
-		//A headset without fixed foveation refuses the write, and that is all it does - there is nothing to fall back to and nothing to say.
+		//A headset without fixed foveation refuses the write; nothing to fall back to
 		try { layer.fixedFoveation = wantedFoveation(); } catch (e) {}
 	}
 
-	//The projection layer, or nothing. sRGB colour, because that is what the engine's own picture is: the passes write linear light and the device
-	//encodes it, so the bytes that reach the eye are the ones the copy made. No depth: the engine tests against a depth of its own, the same size.
+	//The projection layer or nothing: sRGB, as the engine's picture is, so the bytes reaching the eye are the
+	//copy's; no depth, as the engine tests against its own
 	function projectionLayer(session) {
 		if (!session.enabledFeatures || session.enabledFeatures.indexOf("layers") < 0) return false;
 
@@ -1660,7 +1665,7 @@
 		if (!xrOwn) {
 			xrOwn = { picture: picture, gl: picture.gl, id: idOf(picture) };
 
-			//Built on the picture's own texture, and knowing nothing of the layer: once, so the next pass builds them again, marked to follow it.
+			//Built on the picture's own texture: dropped once so the next pass rebuilds them, marked to follow it
 			for (var i = 0; i < picture.framebuffers.length; i++) forgetFramebuffer(picture.framebuffers[i]);
 			picture.framebuffers.length = 0;
 		}
@@ -1716,20 +1721,19 @@
 		return which === 0 ? vp.width : vp.height;
 	}
 
-	//Nought is "no eye this frame"; anything else names one, and comes back here through BrowserSwapchain.ViewCopyTo as the thing to copy into.
+	//Nought is no eye this frame; otherwise it names one, back through BrowserSwapchain.ViewCopyTo
 	function xrTarget(eye) {
 		return xrViewports[eye] ? eye + 1 : 0;
 	}
 
-	//A finished eye into its part of the headset's framebuffer. The same encode the canvas gets: a compositor reads those bytes the
-	//way a canvas does. The layer given, where the picture holds both eyes at once - see multiview - and the whole of it otherwise.
+	//A finished eye into its part of the headset framebuffer, encoded as for the canvas; the given layer where
+	//the picture holds both eyes (see multiview), else all of it
 	function xrEyeCopy(source, eye, layer) {
 		var vp = xrViewports[eye];
 		var from = get(source);
 		if (!vp || !from || !from.gl) return 0;
 
-		//The eye's depth is not wanted again - the next frame clears it - and on a tiled GPU a depth that is not said to be finished with is written out
-		//to memory at the end of every pass: both eyes' worth, every frame, for nothing. Said to the framebuffer the last pass drew into, still bound.
+		//The next frame clears the eye's depth, so invalidate it: a tiled GPU otherwise writes it out every pass
 		if (eye === 0 && lastDepthFramebuffer) {
 			gl.bindFramebuffer(gl.FRAMEBUFFER, lastDepthFramebuffer);
 			gl.invalidateFramebuffer(gl.FRAMEBUFFER, [gl.DEPTH_ATTACHMENT]);
@@ -1745,8 +1749,8 @@
 			//Drawn into the layer's own texture already - see xrAlias.
 			if (from.gl === sub.colorTexture) return 1;
 
-			//An eye that arrives as a picture of its own means the frame went back to an eye at a time (CoreSceneRenderer.StereoIncomplete):
-			//the two-eye picture no longer reaches the headset, so it is not to go on holding the layer's texture either.
+			//An eye arriving as its own picture means the frame went back to one eye at a time
+			//(CoreSceneRenderer.StereoIncomplete), so it stops holding the layer's texture
 			if (xrOwn && xrOwn.picture !== from) xrUnalias();
 
 			//Fallback copy into the eye layer by blit, reading one layer of the array or the whole picture

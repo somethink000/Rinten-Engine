@@ -22,13 +22,13 @@ internal static unsafe class BrowserTextures
 		public int MipCount;
 		public long Bytes;
 
-		/// <summary>Bytes a four-by-four block where the device holds it in blocks, nought where it holds pixels.</summary>
+		/// <summary>Bytes per 4x4 block where held in blocks; nought where held as pixels.</summary>
 		public int BlockBytes;
 
-		/// <summary>The block format a picture held as pixels came in, for what is written into it later - see WriteLevel.</summary>
+		/// <summary>The block format a picture held as pixels came in, for later writes - see WriteLevel.</summary>
 		public CoreBlockCompression.Kind? Unpacked;
 
-		/// <summary>A material's: the pictures it was made of - colour, normal, third, emission - and the views its group names, so a picture given new levels can be named again. See Swap and CoreTextureStreaming.</summary>
+		/// <summary>A material's four pictures, so a re-levelled one can be rebound.</summary>
 		public ulong[] Parts;
 		public int[] SetViews;
 	}
@@ -235,7 +235,7 @@ internal static unsafe class BrowserTextures
 			return 0;
 		}
 
-		//The blocks to the page, which copies them before this returns and writes every level into the texture once its worker has turned them.
+		//The page copies the blocks before this returns and writes each level once its worker transcodes them
 		BrowserNative.TranscodeInto( image, picture.Bytes, target, blockBytes );
 
 		BrowserDevice.trackedTextureBytes += made.Bytes;
@@ -271,7 +271,7 @@ internal static unsafe class BrowserTextures
 	//There is no bindless path on this backend, so every texture is slot nought.
 	internal static uint IndexGet( ulong handle ) => 0;
 
-	//Takes a view the renderer already owns - a render target's - and gives it a handle, so that a later pass can name it as a texture.
+	//Gives a view the renderer owns (a render target's) a handle, so a later pass can name it as a texture
 	internal static ulong Adopt( int view, bool depth = false )
 	{
 		if ( view == 0 || !EnsureWhite() ) return 0;
@@ -319,7 +319,7 @@ internal static unsafe class BrowserTextures
 		plain = 0;
 	}
 
-	//Prebuilt mip chain upload; block formats unpacked to RGBA8 if unsupported, Light format refused
+	//Prebuilt mip chain upload; block formats unpacked to RGBA8 if unsupported, HDR light as it is
 	internal static ulong CreateMips( int width, int height, int format, int srgb,
 		int mipCount, int* mipInfo, byte* pixelData, int byteCount )
 	{
@@ -371,6 +371,17 @@ internal static unsafe class BrowserTextures
 		if ( stored == CoreTextureFile.TextureFormat.Rgba8 )
 			return CreateFromPixels( pixelData, mips, at, rgba );
 
+		if ( stored == CoreTextureFile.TextureFormat.Rgb9e5 )
+			return CreateFromPixels( pixelData, mips, at, BrowserDevice.FormatRgb9e5 );
+
+		if ( stored == CoreTextureFile.TextureFormat.Bc6h )
+		{
+			if ( BrowserDevice.BlockCompression && width % 4 == 0 && height % 4 == 0 )
+				return CreateFromPixels( pixelData, mips, at, "bc6h-rgb-ufloat", CoreBc6h.BlockBytes );
+
+			return CreateLightUnpacked( pixelData, mips );
+		}
+
 		var kind = stored switch
 		{
 			CoreTextureFile.TextureFormat.Bc1 => CoreBlockCompression.Kind.Bc1,
@@ -380,7 +391,7 @@ internal static unsafe class BrowserTextures
 			_ => CoreBlockCompression.Kind.Bc7,
 		};
 
-		//WebGPU makes a block picture only in whole blocks, so a picture whose edge is not one is unpacked like on a device without blocks at all.
+		//WebGPU makes block pictures only in whole blocks; other sizes are unpacked as on a device without blocks
 		if ( BrowserDevice.BlockCompression && width % 4 == 0 && height % 4 == 0 )
 		{
 			var suffix = srgb != 0 ? "-srgb" : "";
@@ -405,6 +416,34 @@ internal static unsafe class BrowserTextures
 		}
 
 		return unpacked;
+	}
+
+	//BC6H levels on a device without BC: decoded and packed again as RGB9E5, which every one samples
+	private static ulong CreateLightUnpacked( byte* pixelData, ReadOnlySpan<MipSlice> mips )
+	{
+		var levels = new MipSlice[mips.Length];
+		var total = 0;
+
+		for ( var i = 0; i < mips.Length; i++ )
+		{
+			levels[i] = mips[i];
+			levels[i].Offset = total;
+			levels[i].ByteCount = mips[i].Width * mips[i].Height * 4;
+			total += levels[i].ByteCount;
+		}
+
+		var words = new uint[total / 4];
+
+		for ( var i = 0; i < mips.Length; i++ )
+		{
+			var light = CoreTextureFile.LightBlocks( new ReadOnlySpan<byte>( pixelData + mips[i].Offset, mips[i].ByteCount ), mips[i].Width, mips[i].Height );
+			if ( light is null ) return 0;
+
+			CoreTextureFile.PackShared( light, words.AsSpan( levels[i].Offset / 4, mips[i].Width * mips[i].Height ) );
+		}
+
+		fixed ( uint* unpacked = words )
+			return CreateFromPixels( (byte*)unpacked, levels, total, BrowserDevice.FormatRgb9e5 );
 	}
 
 	//A texture of nothing, every level there - for filling in pieces with WriteLevel. See VkTextures.CreateBlank.
@@ -442,8 +481,8 @@ internal static unsafe class BrowserTextures
 			return CreateMips( width, height, format, srgb, mipCount, mipInfo, pixels, total );
 	}
 
-	//A rectangle of one level of a texture this backend made, in the format the texture was made from - see
-	//VkTextures.WriteLevel. Blocks into a picture the device holds as pixels are unpacked on the way, as its levels were.
+	//A rectangle of one level, in the texture's source format - see VkTextures.WriteLevel
+	//Blocks into a picture held as pixels are unpacked on the way
 	internal static int WriteLevel( ulong texture, int level, int x, int y, int width, int height, byte* data, int stride )
 	{
 		if ( !BrowserDevice.Ready || data is null || width <= 0 || height <= 0 || x < 0 || y < 0 || level < 0 ) return 0;
@@ -690,7 +729,7 @@ internal static unsafe class BrowserTextures
 		}
 	}
 
-	//A material: four pictures and a handful of numbers, as one bind group. Anything it does not name falls back to the colour map, and that to white.
+	//Four pictures and the numbers as one bind group; a missing picture falls back to the colour map, then white
 	internal static ulong MaterialCreate( ulong colour, ulong normal,
 		ulong third, ulong emission, float* parameters )
 	{

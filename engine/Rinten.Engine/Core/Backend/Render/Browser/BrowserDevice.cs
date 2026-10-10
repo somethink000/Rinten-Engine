@@ -8,8 +8,7 @@ namespace Rinten;
 //Browser graphics setup over WebGPU or WebGL2 (see BrowserNative), shaped like the Vulkan side
 internal static class BrowserDevice
 {
-	//-- what the WebGPU flags are, as numbers ----------------------------------- GPUBufferUsage, GPUTextureUsage and GPUShaderStage are bit
-	//fields in the browser and plain numbers over the seam. Written down here rather than in each caller so a wrong bit is wrong in one place.
+	//-- WebGPU flags as numbers: GPUBufferUsage, GPUTextureUsage and GPUShaderStage bits, kept in one place --
 
 	internal static class BufferUse
 	{
@@ -41,6 +40,9 @@ internal static class BrowserDevice
 	internal const string FormatRgba8 = "rgba8unorm";
 	internal const string FormatRgba8Srgb = "rgba8unorm-srgb";
 	internal const string FormatRgba16Float = "rgba16float";
+
+	//An HDR picture's light; core WebGPU, filterable - see CoreTextureFile.TextureFormat.Rgb9e5
+	internal const string FormatRgb9e5 = "rgb9e5ufloat";
 	internal const string FormatDepth32 = "depth32float";
 
 	internal const string AspectAll = "all";
@@ -72,7 +74,7 @@ internal static class BrowserDevice
 
 	//Binding of the plain filtering sampler in the frame group; see OneSamplerAGroup
 	internal const int FilterSamplerBinding = 4;
-	//A material's numbers: every slot a shader's PARAMETERS block can ask for - see CoreRenderDevice.MaterialParamSlots.
+	//A material's numbers: every slot a PARAMETERS block can ask for - see CoreRenderDevice.MaterialParamSlots
 	internal const int MaterialParamSize = CoreRenderDevice.MaterialParamFloats * sizeof( float );
 	internal const int FramesInFlight = 2;
 	internal const int DynamicScratch = 4 * 1024 * 1024;
@@ -116,17 +118,15 @@ internal static class BrowserDevice
 	internal static int defaultBones;
 	internal static int defaultObject;
 
-	//What the two default groups name. Kept for as long as the groups are: a released buffer is a destroyed one in WebGPU, and a
-	//group naming one fails every submit it is bound in - which was every frame, since every draw binds the default object group.
+	//Kept as long as the default groups: WebGPU destroys a released buffer, failing every submit bound to it
 	private static int defaultBonesBuffer;
 	private static int defaultFrameBuffer;
 	private static int defaultObjectBuffer;
 
-	//What the world is finished into: eight bits a channel with the curve, as a desktop's window is - the device encodes the light the shaders write,
-	//which is what every screen stage is written for. It went into the canvas's own format before, which has no curve, and the whole picture was dark.
+	//The world finishes into sRGB eight-bit, like a desktop window, since screen stages write linear light
 	internal const string ScreenFormat = FormatRgba8Srgb;
 
-	//The canvas's format: the same bytes without the curve, which WebGPU copies the finished picture into as they are. Every browser offers it.
+	//The canvas's format: the same bytes without the curve, copied in as they are; every browser offers it
 	internal const string CanvasFormat = FormatRgba8;
 
 	//The language this device's shaders are in: WGSL on WebGPU, GLSL where the page had only WebGL2 - see webgl2.js.
@@ -138,8 +138,8 @@ internal static class BrowserDevice
 	//browser does; a phone's does not, and gets them unpacked - see BrowserTextures.CreateMips.
 	internal static bool BlockCompression;
 
-	//Whether the device reads ASTC's four-by-four blocks - a headset's or a phone's - and ETC2's, which every WebGL2 browser
-	//on a phone has. What a web build's pictures are turned into where there is no BC: see BrowserTextures.CreateUniversal.
+	//Whether the device reads ASTC 4x4 (headsets, phones) and ETC2 (every phone WebGL2), what a web build's
+	//pictures become without BC - see BrowserTextures.CreateUniversal
 	internal static bool AstcCompression;
 	internal static bool Etc2Compression;
 
@@ -156,8 +156,7 @@ internal static class BrowserDevice
 
 	private static bool ready;
 
-	//Whether the browser has told the page its device is gone. Asked of the page once a frame and read as a field after that. Every draw looks at
-	//this, and a call into JavaScript per draw to learn something that can only change between frames would be the most expensive thing on the path.
+	//Whether the browser said the device is gone; asked once a frame, so a draw reads a field, not JavaScript
 	internal static bool Lost => lost;
 
 	private static bool lost;
@@ -170,8 +169,8 @@ internal static class BrowserDevice
 
 	//-- making things ------------------------------------------------------------
 
-	//A buffer with bytes already in it, or an empty one where the span is empty. The size is rounded up to four, because WebGPU maps only whole words
-	//at creation; the tail of a mapped range is fresh and therefore zero, which is what the C the browser renderer used to be wrote there by hand.
+	//A buffer with bytes in it, or empty for an empty span; sized up to whole words, as WebGPU maps only those,
+	//the tail of a mapped range being zero
 	internal static int MakeBuffer( Span<byte> data, int usage )
 	{
 		if ( data.Length == 0 ) return 0;
@@ -292,8 +291,8 @@ internal static class BrowserDevice
 		]}
 		""";
 
-	//Group 1: the bones - or a run of sprites, read by the pixel too - the frame block, the sun's map and the sampler it is compared
-	//through, a filtering sampler, and the sky's table. The push ring is group 0 because it is the one thing bound again between draws.
+	//Group 1: bones or a sprite run, the frame block, the sun map and its compare sampler, a filtering sampler,
+	//the sky table. Group 0 is the push ring, the one thing rebound between draws
 	private static readonly string BoneSetJson = $$$"""
 		{"entries":[
 		{"binding":0,"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage","minBindingSize":{{{BoneBlockSize}}},"hasDynamicOffset":true}},
@@ -306,7 +305,7 @@ internal static class BrowserDevice
 		]}
 		""";
 
-	//Group 2: an object's own two buffers, whatever they hold. No minimum size: a chunk of a world and a palette of instances are the same binding here.
+	//Group 2: an object's two buffers, with no minimum size, so world chunks and instance palettes share it
 	private static readonly string ObjectSetJson = $$$"""
 		{"entries":[
 		{"binding":0,"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage"}},
@@ -331,7 +330,7 @@ internal static class BrowserDevice
 		//layout's slot and is never drawn into; it was once four thousand texels a side, 128 MB nothing read.
 		shadowImage = MakeTexture( 1, 1, FormatDepth32, usage );
 
-		//The sky's table, cleared - its alpha is nought until CoreSkyTable sends one, which is what says the frame has none. See SkyTableAt in frame.slang.
+		//Cleared: alpha stays nought, meaning no table, until CoreSkyTable sends one - see SkyTableAt in frame.slang
 		skyTableImage = MakeTexture( SkyTableSide, SkyTableSide, FormatRgba16Float,
 			TextureUse.TextureBinding | TextureUse.CopyDst );
 
@@ -417,7 +416,7 @@ internal static class BrowserDevice
 		ReleaseTexture( ref shadowImage, ref shadowView );
 		ReleaseTexture( ref skyTableImage, ref skyTableView );
 
-		//The sky's table was in that picture - see CoreSkyTable, which sends it again rather than leaving the next device with a cleared one.
+		//CoreSkyTable sends the table again rather than leave the next device a cleared one
 		CoreSkyTable.Forget();
 
 		if ( textureSetLayout != 0 ) BrowserNative.Release( textureSetLayout );

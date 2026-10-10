@@ -18,6 +18,8 @@ static class AssetFileIcons
 		{ ".tga", "image" },
 		{ ".tex", "image" },
 		{ ".psd", "image" },
+		{ ".exr", "image" },
+		{ ".hdr", "image" },
 		{ ".wav", "audiotrack" },
 		{ ".mp3", "audiotrack" },
 		{ ".ogg", "audiotrack" },

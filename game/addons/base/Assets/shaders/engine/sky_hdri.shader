@@ -82,11 +82,7 @@ Out MainPs( V2F i )
 
 	if ( !HasSky() ) discard;
 
-#ifdef SKY_CAPTURE
-	float3 direction = PanoramaDirection( i.position.xy / SkyCaptureSize );
-#else
 	float3 direction = normalize( i.direction );
-#endif
 
 	//The scene's SkyBox2D lays its tint in with these; a preview with no scene draws the material's own
 	bool laid = g_frame[0].panorama.w > 0.5;
@@ -103,7 +99,12 @@ Out MainPs( V2F i )
 	dx.x -= round( dx.x );
 	dy.x -= round( dy.x );
 
+	//The capture has no upscaler to sharpen for
+#ifdef SKY_CAPTURE
+	float bias = 1.0;
+#else
 	float bias = exp2( MipBias() );
+#endif
 
 	float3 colour = g_tSkyTexture.SampleGrad( uv, dx * bias, dy * bias ).rgb * light;
 

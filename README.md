@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">Rinten</h1>
+<h1 align="center">Rinten
 
 <p align="center">A C# multiplatform game engine</p>
 

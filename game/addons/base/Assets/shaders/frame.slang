@@ -737,39 +737,26 @@ float2 PanoramaUv( float3 direction, float turn )
 	return float2( ( atan2( -z, -x ) * 0.15915494 ) + 0.5, 0.5 - ( asin( clamp( direction.y, -1.0, 1.0 ) ) * 0.31830989 ) );
 }
 
-//PanoramaUv unturned with polynomial atan and asin, ~1e-4 radians off, far under a capture texel's 0.025
-float2 SkyLightUv( float3 direction )
+//The sky light's octahedral layout (CoreSkyLight): the upper half in the middle diamond, the lower folded into the
+//corners, so the only seams lie below the horizon. Unnormalised: linear across each of the eight faces
+float3 SkyLightRay( float2 uv )
 {
-	float ax = abs( direction.x );
-	float az = abs( direction.z );
-	float t = min( ax, az ) / max( max( ax, az ), 1e-8 );
-	float t2 = t * t;
-	float a = t * ( 0.995354 + ( t2 * ( -0.288679 + ( t2 * 0.079331 ) ) ) );
+	float2 p = ( uv * 2.0 ) - 1.0;
+	float y = 1.0 - abs( p.x ) - abs( p.y );
 
-	//Unfold to atan2( -z, -x ) over the whole turn
-	if ( az > ax ) a = 1.5707963 - a;
-	if ( direction.x > 0.0 ) a = 3.1415927 - a;
-	if ( direction.z > 0.0 ) a = -a;
+	if ( y < 0.0 ) p = ( 1.0 - abs( p.yx ) ) * float2( p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0 );
 
-	//Abramowitz-Stegun 4.4.45: acos of |y|, so asin is a quarter turn less
-	float y = min( abs( direction.y ), 1.0 );
-	float c = sqrt( 1.0 - y ) * ( 1.5707288 + ( y * ( -0.2121144 + ( y * ( 0.0742610 - ( y * 0.0187293 ) ) ) ) ) );
-	float e = ( 1.5707963 - c ) * sign( direction.y );
-
-	return float2( ( a * 0.15915494 ) + 0.5, 0.5 - ( e * 0.31830989 ) );
+	return float3( p.x, y, p.y );
 }
 
-//The sky capture's size in pixels - see CoreSkyLight; a sky built with SKY_CAPTURE takes its direction from its pixel
-static const float2 SkyCaptureSize = float2( 256.0, 128.0 );
-
-//The direction at a point of a panorama, unturned: PanoramaUv's inverse
-float3 PanoramaDirection( float2 uv )
+//Where a direction lands in the sky light's pictures: SkyLightRay's inverse
+float2 SkyLightUv( float3 direction )
 {
-	float around = ( uv.x - 0.5 ) * 6.2831853;
-	float up = ( 0.5 - uv.y ) * 3.14159265;
-	float across = cos( up );
+	float2 p = direction.xz / ( abs( direction.x ) + abs( direction.y ) + abs( direction.z ) );
 
-	return float3( -cos( around ) * across, sin( up ), -sin( around ) * across );
+	if ( direction.y < 0.0 ) p = ( 1.0 - abs( p.yx ) ) * float2( p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0 );
+
+	return ( p * 0.5 ) + 0.5;
 }
 
 //Sky table UV: x sun cosine, y sqrt of height, as sky_surface.slang; a portable panorama's is laid out as a panorama

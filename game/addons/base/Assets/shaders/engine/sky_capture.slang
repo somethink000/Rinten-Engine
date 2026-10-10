@@ -1,12 +1,8 @@
-//The sky drawn into an equirectangular picture by its own MainPs, built with SKY_CAPTURE, for the sky light - see
-//CoreSkyLight. The engine's skies take the exact direction from the pixel (SkyCaptureSize); for any other, a grid of
-//cells, each corner its world direction, interpolates close to it
+//The sky drawn into the sky light's octahedral capture by its own MainPs, built with SKY_CAPTURE - see CoreSkyLight.
+//One triangle a face of the octahedron: SkyLightRay is linear across each, so the direction comes through exact
 
-//Cells across and down; CoreSkyLight.CaptureVertices is six a cell
-static const uint SkyCaptureColumns = 64u;
-static const uint SkyCaptureRows = 32u;
-
-static const float2 SkyCaptureCorners[6] =
+//A quadrant's inner face (upper half) and outer face (lower half), as corners of the quadrant's own square
+static const float2 SkyCaptureFaces[6] =
 {
 	float2( 0.0, 0.0 ), float2( 1.0, 0.0 ), float2( 0.0, 1.0 ),
 	float2( 1.0, 0.0 ), float2( 1.0, 1.0 ), float2( 0.0, 1.0 ),
@@ -15,15 +11,22 @@ static const float2 SkyCaptureCorners[6] =
 [shader("vertex")]
 V2F MainSkyCaptureVs( uint id : SV_VertexID )
 {
-	uint cell = id / 6u;
-	float2 at = ( float2( cell % SkyCaptureColumns, cell / SkyCaptureColumns ) + SkyCaptureCorners[id % 6u] )
-		/ float2( SkyCaptureColumns, SkyCaptureRows );
+	//Four quadrants of six corners; CoreSkyLight.CaptureVertices
+	uint quadrant = id / 6u;
+	uint corner = id % 6u;
+
+	float2 side = float2( ( quadrant & 1u ) != 0u ? -1.0 : 1.0, ( quadrant & 2u ) != 0u ? -1.0 : 1.0 );
+
+	//A mirrored quadrant turns its triangles over; swapping two corners keeps every one facing the same way
+	if ( side.x * side.y < 0.0 && ( corner % 3u ) != 0u ) corner = ( corner % 3u ) == 1u ? corner + 1u : corner - 1u;
+
+	float2 p = SkyCaptureFaces[corner] * side;
 
 	V2F o;
 
 	//Vulkan's clip y runs down, as the picture's v does
-	o.position = float4( ( at * 2.0 ) - 1.0, 0.0, 1.0 );
-	o.direction = PanoramaDirection( at );
+	o.position = float4( p, 0.0, 1.0 );
+	o.direction = SkyLightRay( ( p * 0.5 ) + 0.5 );
 
 	return o;
 }

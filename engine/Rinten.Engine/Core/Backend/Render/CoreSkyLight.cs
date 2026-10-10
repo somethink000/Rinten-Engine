@@ -1,27 +1,27 @@
 namespace Rinten;
 
-//The sky's light on the card, for the full frame: the sky draws itself into an equirectangular capture (its shader's
+//The sky's light on the card, for the full frame: the sky draws itself into an octahedral capture (its shader's
 //SkyCapture stages), which is filtered into GGX reflection levels and an irradiance picture - see sky_light.slang.
-//Redrawn only when what the sky is made of changed, or now and then for a sky that moves on its own
+//Redrawn when the sky changed, at most every RedrawEvery, a stage a frame
 internal sealed class CoreSkyLight
 {
-	//The capture's size; frame.slang's SkyCaptureSize must agree
-	internal const int CaptureWide = 256, CaptureTall = 128;
+	//The capture's side: about a degree and a half a texel, as fine at the zenith as at the horizon
+	private const int CaptureSide = 128;
 
-	//The grid sky_capture.slang draws: 64 by 32 cells, two triangles each
-	private const int CaptureVertices = 64 * 32 * 6;
+	//sky_capture.slang's triangles, one a face of the octahedron
+	private const int CaptureVertices = 8 * 3;
 
-	//Reflection levels: the capture's width down to sixteen across, roughness level / ( count - 1 )
-	private const int ReflectionLevels = 5;
+	//Reflection levels: the capture's side down to sixteen, roughness level / ( count - 1 ); eight shows its texels
+	private const int ReflectionLevels = 4;
 
-	//The irradiance picture, by direction like the capture; irradiance holds nothing finer
-	private const int IrradianceWide = 32, IrradianceTall = 16;
+	//The irradiance picture; irradiance holds nothing finer
+	private const int IrradianceSide = 16;
 
-	//The capture level the irradiance sums: sixteen by eight texels
-	private const int IrradianceSource = 4;
+	//The capture level the irradiance sums, sixteen a side; sky_light.slang's IrradianceTexels must agree
+	private const int IrradianceSource = 3;
 
-	//How often a sky that moves by itself (clouds, stars) is redrawn, in seconds of the frame's clock
-	private const float MovingSkyEvery = 0.25f;
+	//Seconds of real time between redraws of a sky that keeps changing: a turning sun, drifting cloud
+	private const float RedrawEvery = 0.25f;
 
 	private ulong capture, reflections, irradiance;
 	private int captureIndex, reflectionsIndex, irradianceIndex;
@@ -36,6 +36,7 @@ internal sealed class CoreSkyLight
 	private readonly float[] drawnFrom = new float[Watched.Length * 4];
 	private CoreMaterial drawnCore;
 	private int drawnRevision = -1, drawnValues = -1;
+	private float drawnClock = float.NaN;
 	private float drawnAt = float.NegativeInfinity;
 
 	//The frame block's sky lanes a redraw follows: zenith, horizon, ground, sun, its light, the panorama
@@ -148,7 +149,7 @@ internal sealed class CoreSkyLight
 
 		for ( var level = 0; level < ReflectionLevels; level++ )
 		{
-			Push( level / (float)( ReflectionLevels - 1 ), Math.Max( 1, CaptureWide >> level ), Math.Max( 1, CaptureTall >> level ), 0 );
+			Push( level / (float)( ReflectionLevels - 1 ), CaptureSide >> level, 0 );
 
 			if ( !CoreRenderDevice.BeginPicture( reflections, level ) ) continue;
 
@@ -162,7 +163,7 @@ internal sealed class CoreSkyLight
 	private void DrawIrradiance( ulong pipeline )
 	{
 		CoreRenderDevice.ZoneBegin( "sky irradiance" );
-		Push( 0.0f, IrradianceWide, IrradianceTall, IrradianceSource );
+		Push( 0.0f, IrradianceSide, IrradianceSource );
 
 		if ( CoreRenderDevice.BeginPicture( irradiance, 0 ) )
 		{
@@ -181,10 +182,15 @@ internal sealed class CoreSkyLight
 		lock ( said ) if ( said.Add( why ) ) Log.Warning( why );
 	}
 
-	//Whether the pictures no longer show the sky the frame describes
+	//Whether the pictures no longer show the sky the frame describes: another sky at once, any other change
+	//no sooner than RedrawEvery after the last, so a sky that changes every frame costs as one that changes at that rate
 	private bool Stale( float[] frame, string skyShader, CoreMaterial skyCore )
 	{
 		if ( !ready || !ReferenceEquals( skyCore, drawnCore ) ) return true;
+
+		var now = frame[CoreSceneRenderer.TimeAt + 0];
+		if ( now >= drawnAt && now - drawnAt < RedrawEvery ) return false;
+
 		if ( skyCore is not null && ( skyCore.Revision != drawnRevision || skyCore.ValuesRevision != drawnValues ) ) return true;
 
 		for ( var i = 0; i < Watched.Length; i++ )
@@ -195,11 +201,18 @@ internal sealed class CoreSkyLight
 			}
 		}
 
-		//A procedural sky moves by itself; a panorama does not
-		if ( CoreResources.IsPanoramaShader( skyShader ) ) return false;
+		return frame[CoreSceneRenderer.TimeAt + 2] != drawnClock && Drifts( skyShader, skyCore );
+	}
 
-		var now = frame[CoreSceneRenderer.TimeAt + 2];
-		return now < drawnAt || now - drawnAt >= MovingSkyEvery;
+	//Whether the sky changes with the scene's clock alone: the engine's sky only under cloud with a wind, which is
+	//all of it that moves in the capture; a panorama never; any other sky, not known, is taken to
+	private static bool Drifts( string skyShader, CoreMaterial skyCore )
+	{
+		if ( CoreResources.IsPanoramaShader( skyShader ) ) return false;
+		if ( !string.Equals( skyShader, CoreSceneRenderer.SkyShader, StringComparison.OrdinalIgnoreCase ) ) return true;
+
+		var wind = CoreResources.Vector( skyCore, "g_vCloudWind", default );
+		return CoreResources.Number( skyCore, "g_flCloudCover", 0.0f ) > 0.0f && ( wind.x != 0.0f || wind.y != 0.0f );
 	}
 
 	private void Remember( float[] frame, CoreMaterial skyCore )
@@ -212,22 +225,21 @@ internal sealed class CoreSkyLight
 		drawnCore = skyCore;
 		drawnRevision = skyCore?.Revision ?? -1;
 		drawnValues = skyCore?.ValuesRevision ?? -1;
-		drawnAt = frame[CoreSceneRenderer.TimeAt + 2];
+		drawnClock = frame[CoreSceneRenderer.TimeAt + 2];
+		drawnAt = frame[CoreSceneRenderer.TimeAt + 0];
 	}
 
-	//The prefilter and gather numbers: the capture's index and size, the roughness, the target's size and source level
-	private void Push( float roughness, int wide, int tall, int sourceLevel )
+	//The prefilter and gather numbers: the capture's index and side, the roughness, the target's side and source level
+	private void Push( float roughness, int side, int sourceLevel )
 	{
 		System.Array.Clear( push );
 
 		var numbers = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( push.AsSpan() );
 
 		numbers[0] = captureIndex;
-		numbers[1] = CaptureWide;
-		numbers[2] = CaptureTall;
+		numbers[1] = CaptureSide;
 		numbers[3] = roughness;
-		numbers[4] = wide;
-		numbers[5] = tall;
+		numbers[4] = side;
 		numbers[6] = sourceLevel;
 	}
 
@@ -246,10 +258,10 @@ internal sealed class CoreSkyLight
 
 		Release();
 
-		capture = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.Hdr, CaptureWide, CaptureTall, levels: 32 );
+		capture = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.Hdr, CaptureSide, CaptureSide, levels: 32 );
 		//What every surface reads, so in half the bytes; the capture they are filtered from keeps half floats
-		reflections = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.HdrCompact, CaptureWide, CaptureTall, levels: ReflectionLevels );
-		irradiance = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.HdrCompact, IrradianceWide, IrradianceTall );
+		reflections = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.HdrCompact, CaptureSide, CaptureSide, levels: ReflectionLevels );
+		irradiance = CoreRenderDevice.AcquirePicture( CoreRender.PictureKind.HdrCompact, IrradianceSide, IrradianceSide );
 
 		if ( capture == 0 || reflections == 0 || irradiance == 0 )
 		{

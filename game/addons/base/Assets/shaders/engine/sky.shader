@@ -455,11 +455,7 @@ Out MainPs( V2F i )
 	//black. The renderer skips this pass in that case; this is what makes the pass safe to draw anyway.
 	if ( !HasSky() ) discard;
 
-#ifdef SKY_CAPTURE
-	float3 direction = PanoramaDirection( i.position.xy / SkyCaptureSize );
-#else
 	float3 direction = normalize( i.direction );
-#endif
 
 	//Clear sky under per-pixel cloud; kCloudOn folds the cloud path out entirely when there's no cover
 	bool clouded = kCloudOn != 0 && HasSun() && g_flCloudCover > 0.0;
@@ -519,7 +515,12 @@ Out MainPs( V2F i )
 
 			//The stars, with the moon standing in front of whichever of them it covers. The disc and not
 			//the halo: the halo is air, and air does not hide a star, it only makes it harder to pick out.
+#ifdef SKY_CAPTURE
+			//Points far under a capture texel, which would only flicker in it - and twinkle it into redrawing
+			float3 stars = float3( 0.0, 0.0, 0.0 );
+#else
 			float3 stars = Stars( direction, night, g_frame[0].time.x ) * ( 1.0 - edge );
+#endif
 
 			colour += ( stars + ( moonlight * ( ( disc * 1.5 ) + halo ) * night ) ) * horizon;
 		}

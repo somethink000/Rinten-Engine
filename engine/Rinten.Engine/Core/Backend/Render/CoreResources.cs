@@ -646,14 +646,18 @@ internal static class CoreResources
 
 	//A material number as the shader sees it: the material's value, else the shader-declared default
 	internal static float Number( CoreMaterial core, string name, float fallback )
+		=> Vector( core, name, new Vector4( fallback, 0.0f, 0.0f, 0.0f ) ).x;
+
+	//The same for a vector the shader declares
+	internal static Vector4 Vector( CoreMaterial core, string name, Vector4 fallback )
 	{
 		if ( core is null ) return fallback;
 
-		if ( core.Values.TryGetValue( name, out var value ) ) return value.x;
+		if ( core.Values.TryGetValue( name, out var value ) ) return value;
 
 		foreach ( var one in Declared( core.Shader ) )
 		{
-			if ( one.Name == name ) return one.Default.x;
+			if ( one.Name == name ) return one.Default;
 		}
 
 		return fallback;

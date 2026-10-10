@@ -73,8 +73,8 @@ internal static partial class CoreShaderFile
 		/// <summary>The cluster pixel stage with DEPTH_ONLY: MainClusterPs for a depth-only pre-pass.</summary>
 		ClusterDepthPixel = 20,
 
-		//Full frame only: the engine's grid round the sky's own MainPs, built with SKY_CAPTURE - see sky_capture.slang
-		/// <summary>The sky drawn into its equirectangular capture, for the sky light - see CoreSkyLight.</summary>
+		//Full frame only: the octahedron's faces round the sky's own MainPs, built with SKY_CAPTURE - see sky_capture.slang
+		/// <summary>The sky drawn into its octahedral capture, for the sky light - see CoreSkyLight.</summary>
 		SkyCaptureVertex = 21,
 		SkyCapturePixel = 22,
 	}

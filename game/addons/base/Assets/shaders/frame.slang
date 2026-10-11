@@ -829,6 +829,12 @@ float3 SkyAmbient( float3 normal )
 	return SkyGradientOf( normal.y );
 }
 
+//Sky and flat ambient as a surface facing way gets them now - what a baked point's sky visibility scales
+float3 SkyLit( float3 way )
+{
+	return SceneAmbient( HasSky() ? SkyAmbient( way ) * SkyAmbientScale() : float3( 0.0, 0.0, 0.0 ) );
+}
+
 //Sky colour for distant fog and reflections: the capture's middle level where the frame made one, else the table
 float3 SkyDrawn( float3 direction )
 {
@@ -1876,13 +1882,75 @@ void BakedLayer( float2 uv, out float4 red, out float4 green, out float4 blue )
 	blue = g_textures[uint( g_frame[0].bakedVolume.z )].SampleLevel( uv, 0.0 );
 }
 
-//Baked light-volume mask at a point, clamped half a texel inside each layer to avoid bleeding
-float4 BakedVolumeMask( float3 world )
+//Four corners' weights at one x end of a cell: trilinear, times how far past their walls the point is not, times
+//how far in front of the surface they stand as DDGI weighs probes; d is the point's distance from each per axis
+float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float4 reachX, float4 reachY, float4 reachZ, float3 normal )
+{
+	float4 sy = float4( -1.0, 1.0, -1.0, 1.0 );
+	float4 sz = float4( -1.0, -1.0, 1.0, 1.0 );
+
+	float4 trilinear = ( 1.0 - dx ) * ( 1.0 - dy ) * ( 1.0 - dz );
+
+	//An eighth of a cell of give past a wall, more than a nibble's rounding
+	float4 seen = saturate( ( ( reachX - dx ) * 8.0 ) + 1.0 ) * saturate( ( ( reachY - dy ) * 8.0 ) + 1.0 ) * saturate( ( ( reachZ - dz ) * 8.0 ) + 1.0 );
+
+	float4 along = ( sx * dx * normal.x ) + ( sy * dy * normal.y ) + ( sz * dz * normal.z );
+	float4 apart = sqrt( ( dx * dx ) + ( dy * dy ) + ( dz * dz ) );
+	float4 facing = saturate( ( along / max( apart, 1e-4 ) * 0.5 ) + 0.5 );
+
+	return trilinear * seen * ( ( facing * facing ) + 0.2 );
+}
+
+//Where in the lattice a point reads: moved within its cell towards the corners it sees and that face it (BakeVolume.Walls),
+//so one filtered read takes their light and not the other side of a wall's - as Unity's probe volumes warp theirs
+float3 BakedVolumeSpot( float3 world, float3 normal )
 {
 	float3 count = g_frame[0].volumeCount.xyz;
 
 	float3 at = ( world - g_frame[0].volumeOrigin.xyz ) * g_frame[0].volumeOrigin.w;
 	at = clamp( at, float3( 0.0, 0.0, 0.0 ), count - 1.0 );
+
+	//Frame-uniform - see SkyTableAt.
+	uint walls = uint( g_frame[0].bakedSun.y );
+	if ( walls == 0u ) return at;
+
+	float3 cell = min( floor( at ), count - 2.0 );
+	float3 f = at - cell;
+
+	//A row of cells an axis; each texel that axis's reach of the cell's eight corners, a nibble each
+	float u = ( ( cell.y * count.x ) + cell.x + 0.5 ) / ( count.x * count.y );
+	float rows = count.z * 3.0;
+
+	float4 x = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
+	float4 y = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + count.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
+	float4 z = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + ( count.z * 2.0 ) + 0.5 ) / rows ), 0.0 ) * 255.0 );
+
+	//High nibbles are the far x corners, low the near; the channels go along y, then z
+	float4 xFar = floor( x / 16.0 );
+	float4 yFar = floor( y / 16.0 );
+	float4 zFar = floor( z / 16.0 );
+
+	float4 dy = lerp( f.yyyy, 1.0 - f.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
+	float4 dz = lerp( f.zzzz, 1.0 - f.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
+
+	float4 nearSide = BakedCorners( f.x, -1.0, dy, dz, ( x - ( xFar * 16.0 ) ) / 15.0, ( y - ( yFar * 16.0 ) ) / 15.0, ( z - ( zFar * 16.0 ) ) / 15.0, normal );
+	float4 farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0, normal );
+
+	float4 both = nearSide + farSide;
+	float total = dot( both, float4( 1.0, 1.0, 1.0, 1.0 ) );
+
+	//No corner sees it: inside a wall, where the plain read is as good as any
+	if ( total < 1e-5 ) return at;
+
+	float3 moved = float3( dot( farSide, float4( 1.0, 1.0, 1.0, 1.0 ) ), both.y + both.w, both.z + both.w ) / total;
+
+	return cell + moved;
+}
+
+//One of the volume's per-point pictures at a spot (BakedVolumeSpot), its layers lerped, half a texel inside each
+float4 BakedVolumeAt( uint picture, float3 at )
+{
+	float3 count = g_frame[0].volumeCount.xyz;
 
 	float below = floor( at.y );
 	float above = min( below + 1.0, count.y - 1.0 );
@@ -1891,13 +1959,54 @@ float4 BakedVolumeMask( float3 world )
 	float across = count.x * count.y;
 	float v = ( at.z + 0.5 ) / count.z;
 
-	//Frame-uniform - see SkyTableAt.
-	uint mask = uint( g_frame[0].bakedMask.y );
-
-	float4 low = g_textures[mask].SampleLevel( float2( ( ( below * count.x ) + at.x + 0.5 ) / across, v ), 0.0 );
-	float4 high = g_textures[mask].SampleLevel( float2( ( ( above * count.x ) + at.x + 0.5 ) / across, v ), 0.0 );
+	float4 low = g_textures[picture].SampleLevel( float2( ( ( below * count.x ) + at.x + 0.5 ) / across, v ), 0.0 );
+	float4 high = g_textures[picture].SampleLevel( float2( ( ( above * count.x ) + at.x + 0.5 ) / across, v ), 0.0 );
 
 	return lerp( low, high, between );
+}
+
+//Baked light-volume mask at a spot; the picture is frame-uniform - see SkyTableAt
+float4 BakedVolumeMask( float3 at )
+{
+	return BakedVolumeAt( uint( g_frame[0].bakedMask.y ), at );
+}
+
+//Whether the bake keeps the sky as visibility for the frame to light (SkyLit) - a bake before that has it in its light
+bool HasBakedSky()
+{
+	return g_frame[0].volumeCount.w > 0.5;
+}
+
+//A sheet texel's sky: which way it is open xyz, how much of it is seen w - see BakeSheet.Sky
+float4 BakedSkySheet( float2 uv )
+{
+	//Frame-uniform - see SkyTableAt.
+	return g_textures[uint( g_frame[0].bakedMaps.z )].SampleLevel( uv, 0.0 );
+}
+
+//How much sky a surface facing normal sees at a point of the volume: its visibility's two bands - see BakeVolume.Sky
+float BakedSkyVolume( float3 at, float3 normal )
+{
+	return saturate( dot( BakedVolumeAt( uint( g_frame[0].volumeCount.w ), at ), float4( 1.0, normal ) ) );
+}
+
+//The glow layers' light times their groups' brightness now: from the sheet where uv is on it, else the volume's spot
+float3 BakedGlows( float2 uv, bool sheet, float3 at )
+{
+	float3 sum = float3( 0.0, 0.0, 0.0 );
+
+	[unroll]
+	for ( uint i = 0u; i < 4u; ++i )
+	{
+		//Frame-uniform - see SkyTableAt.
+		float4 glow = g_frame[0].bakedGlow[i];
+		if ( glow.z <= 0.0 ) continue;
+
+		if ( sheet && glow.x > 0.5 ) sum += g_textures[uint( glow.x )].SampleLevel( uv, 0.0 ).rgb * glow.z;
+		else if ( !sheet && glow.y > 0.5 ) sum += BakedVolumeAt( uint( glow.y ), at ).rgb * glow.z;
+	}
+
+	return sum;
 }
 
 //Baked still-world shadow for a masked light, from the lightmap mask or else the volume mask
@@ -1913,18 +2022,32 @@ float BakedMask( float3 world, float3 geometric, float2 lightmap, int channel )
 	else
 	{
 		//A step off the surface as BakedVolume takes it: a floor reads the air above it
-		through = BakedVolumeMask( world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ) );
+		through = BakedVolumeMask( BakedVolumeSpot( world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric ) );
 	}
 
 	return through[clamp( channel, 0, 3 )];
 }
 
-float3 BakedVolume( float3 world, float3 normal )
+//Whether the frame relights the sun's and sky's bounce (CoreLiveBounce) - the bake left it out
+bool HasBakedBounce()
+{
+	return g_frame[0].bakedSun.z > 0.5;
+}
+
+//That bounce at a spot on a surface facing normal: its colour, times one plus its lean onto the normal
+float3 BakedBounce( float3 at, float3 normal )
+{
+	//Both frame-uniform - see SkyTableAt.
+	float3 light = BakedVolumeAt( uint( g_frame[0].bakedSun.z ), at ).rgb;
+	float3 lean = BakedVolumeAt( uint( g_frame[0].bakedSun.w ), at ).xyz;
+
+	return light * max( 1.0 + dot( lean, normal ), 0.0 );
+}
+
+//The volume's light at a spot (BakedVolumeSpot) on a surface facing normal
+float3 BakedVolume( float3 at, float3 normal )
 {
 	float3 count = g_frame[0].volumeCount.xyz;
-
-	float3 at = ( world - g_frame[0].volumeOrigin.xyz ) * g_frame[0].volumeOrigin.w;
-	at = clamp( at, float3( 0.0, 0.0, 0.0 ), count - 1.0 );
 
 	float below = floor( at.y );
 	float above = min( below + 1.0, count.y - 1.0 );

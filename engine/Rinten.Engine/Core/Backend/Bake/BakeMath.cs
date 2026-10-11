@@ -101,6 +101,32 @@ internal static class BakeMath
 		return Vec3.Normalize( ( right * ( radius * MathF.Cos( angle ) ) ) + ( up * ( radius * MathF.Sin( angle ) ) ) + ( axis * z ) );
 	}
 
+	/// <summary>A direction on the unfolded octahedron, minus one to one, y the axis - as BakeGpu's sky.</summary>
+	public static (float X, float Y) Octahedron( Vec3 direction )
+	{
+		var n = direction / MathF.Max( MathF.Abs( direction.X ) + MathF.Abs( direction.Y ) + MathF.Abs( direction.Z ), 1e-8f );
+
+		if ( n.Y >= 0.0f ) return (n.X, n.Z);
+
+		return (( 1.0f - MathF.Abs( n.Z ) ) * ( n.X >= 0.0f ? 1.0f : -1.0f ), ( 1.0f - MathF.Abs( n.X ) ) * ( n.Z >= 0.0f ? 1.0f : -1.0f ));
+	}
+
+	/// <summary>The direction at a point of the unfolded octahedron, Octahedron's inverse.</summary>
+	public static Vec3 FromOctahedron( float x, float y )
+	{
+		var up = 1.0f - MathF.Abs( x ) - MathF.Abs( y );
+
+		if ( up < 0.0f )
+		{
+			var fx = ( 1.0f - MathF.Abs( y ) ) * ( x >= 0.0f ? 1.0f : -1.0f );
+			var fy = ( 1.0f - MathF.Abs( x ) ) * ( y >= 0.0f ? 1.0f : -1.0f );
+			x = fx;
+			y = fy;
+		}
+
+		return Vec3.Normalize( new Vec3( x, up, y ) );
+	}
+
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static float Saturate( float x ) => x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x;
 

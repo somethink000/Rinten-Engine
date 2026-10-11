@@ -53,13 +53,13 @@ struct FrameData
 	float4 fogShape;  //Distance exponent, height exponent, enabled, colour from the sky
 
 	//Baked lighting: lightmap sheet for static surfaces, probe volume for moving ones; zero = no bake
-	float4 bakedMaps;    //Sheet's table index x, its directions' y, spare z, one where there is a sheet w
+	float4 bakedMaps;    //Sheet's table index x, its directions' y, its sky's z, one where there is a sheet w
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
-	float4 volumeCount;  //Points along x, y and z, spare w
+	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
 	float4 bakedMask;    //Sheet mask's index x, volume's y, one if the sheet has one z, one if any mask w
-	float4 bakedSun;     //Mask channel of the sun's shadow plus one x (nought for none), spare yzw
-	float4 bakedSpare[4];
+	float4 bakedSun;     //Sun's mask channel plus one x (nought none), walls' picture y, bounce's colour z and lean w
+	float4 bakedGlow[4]; //Glow layers: sheet's index x, volume's y, group brightness z (BakedGlow); nought for none
 
 	//How many of the four probes are filled is x; nothing after it matters when zero
 	float4 probeInfo; //Count, one picture's width, bands, RGBM range

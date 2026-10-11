@@ -661,23 +661,47 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//With a bake, its answer replaces the sky and AO guess rather than adding to it
 	float3 ambientSky = sky;
 
-	//Sky visibility from the bake ratio, so indoor floors don't mirror the full sky
+	//How much of the sky the reflection sees, so indoor floors don't mirror the full sky
 	float skyReach = 1.0;
 
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
 	{
-		ambientSky = BakedSheet( s.lightmap, normal );
+		ambientSky = BakedSheet( s.lightmap, normal ) + BakedGlows( s.lightmap, true, s.world );
 		visible = 1.0;
 
-		skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+		//The sun's and sky's bounce as they are now, from the volume a step off the surface as below
+		if ( HasBakedBounce() )
+			ambientSky += BakedBounce( BakedVolumeSpot( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric ), normal );
+
+		if ( HasBakedSky() && g_frame[0].bakedMaps.z > 0.5 )
+		{
+			//The sky now, from where the texel sees it, as much as it sees - right at any hour without a new bake
+			float4 open = BakedSkySheet( s.lightmap );
+			float3 way = dot( open.xyz, open.xyz ) > 1e-4 ? normalize( open.xyz ) : normal;
+
+			ambientSky += SkyLit( way ) * open.w;
+			skyReach = saturate( open.w );
+		}
+		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 	else if ( HasBakedVolume() )
 	{
 		//A step off the surface, so a floor reads the room above it rather than the lattice's layer below.
-		ambientSky = BakedVolume( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), normal );
+		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
+		float3 spot = BakedVolumeSpot( lifted, geometric );
 
-		skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+		ambientSky = BakedVolume( spot, normal ) + BakedGlows( float2( 0.0, 0.0 ), false, spot );
+		if ( HasBakedBounce() ) ambientSky += BakedBounce( spot, normal );
+
+		if ( HasBakedSky() )
+		{
+			float seen = BakedSkyVolume( spot, normal );
+
+			ambientSky += SkyLit( normal ) * seen;
+			skyReach = seen;
+		}
+		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 #endif
 

@@ -34,9 +34,12 @@ internal static class BakeGpu
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
-	//Floats of sums a texel of the sheet hands back: light and its squares, lean and weight, how many came out
-	//of the back of something, and how much of each masked light got through - see bake_trace.slang's main.
-	internal const int SheetFloats = 16;
+	//Floats of sums a texel of the sheet hands back: light and squares, lean and weight, insides, each masked light's
+	//share, and the sky's escaping directions and count - see bake_trace.slang's main
+	internal const int SheetFloats = 20;
+
+	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
+	internal const int ProbeFloats = 20;
 
 	private static readonly ulong[] pipelines = new ulong[2];
 	private static readonly int[] pipelineBuilt = { -1, -1 };
@@ -65,8 +68,8 @@ internal static class BakeGpu
 		return Run( scene, Kernel.Sheet, inputs, texels.Count, samples, 0, "Tracing the surfaces on the card", progress, cancel, out sums );
 	}
 
-	//Traces the volume's points, each direction of across x across strata once: four float4s of sums each,
-	//what arrived, then its red, green and blue leans, insides counted in red's w - see BakeVolume.TraceOnCard
+	//Traces the volume's points, each direction of across x across strata once: five float4s of sums each - what
+	//arrived, its red, green and blue leans (insides in red's w), the sky's escapes - see BakeVolume.TraceOnCard
 	internal static bool TraceProbes( BakeScene scene, Vec3[] points, int across, BakeProgress progress,
 		CancellationToken cancel, out float[] sums )
 	{
@@ -85,7 +88,7 @@ internal static class BakeGpu
 	private enum Kernel { Sheet, Probes }
 
 	//The kernel's entry, and how many floats of sums an item has.
-	private static (string Entry, int Floats) Of( Kernel kernel ) => kernel == Kernel.Sheet ? ("main", SheetFloats) : ("ProbeCs", 16);
+	private static (string Entry, int Floats) Of( Kernel kernel ) => kernel == Kernel.Sheet ? ("main", SheetFloats) : ("ProbeCs", ProbeFloats);
 
 	private static bool Run( BakeScene scene, Kernel kernel, float[] inputs, int items, int samples, int across, string stage,
 		BakeProgress progress, CancellationToken cancel, out float[] sums )
@@ -294,15 +297,17 @@ internal static class BakeGpu
 
 	//-- the world, in words - see bake_trace.slang's header ----------------------
 
-	//The last world packed, for the volume after the sheet: the same scene is the same words.
-	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BakeScene, uint[]> packed = new();
+	//The last world packed, for the volume after the sheet: the same scene in the same pass is the same words
+	private sealed record PackedWorld( int Pass, uint[] Words );
+
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BakeScene, PackedWorld> packed = new();
 
 	private static uint[] Packed( BakeScene scene )
 	{
-		if ( packed.TryGetValue( scene, out var words ) ) return words;
+		if ( packed.TryGetValue( scene, out var held ) && held.Pass == scene.Pass ) return held.Words;
 
-		words = Pack( scene );
-		packed.AddOrUpdate( scene, words );
+		var words = Pack( scene );
+		packed.AddOrUpdate( scene, new PackedWorld( scene.Pass, words ) );
 
 		return words;
 	}
@@ -344,10 +349,15 @@ internal static class BakeGpu
 		var materialsAt = coloursAt + ( vertices * 3 );
 		var picturesAt = materialsAt + ( scene.Materials.Count * MaterialWords );
 		var lightsAt = picturesAt + pictureWords;
-		var skyAt = lightsAt + ( scene.Lights.Count * LightWords );
+		//A glow group's pass has no lamps; its sky is black - see BakeScene.UsePass
+		var lights = scene.Pass == 0 ? scene.Lights.Count : 0;
+		var grouped = Array.Exists( scene.GroupOf, g => g != 0 );
+
+		var skyAt = lightsAt + ( lights * LightWords );
 		var emittersAt = skyAt + ( SkySide * SkySide * 3 );
 		var glowAt = emittersAt + ( scene.Emitters.Length * EmitterWords );
-		var total = glowAt + ( scene.Emitters.Length > 0 ? triangles : 0 );
+		var groupsAt = glowAt + ( scene.Emitters.Length > 0 ? triangles : 0 );
+		var total = groupsAt + ( grouped ? triangles : 0 );
 
 		var w = new uint[total];
 
@@ -362,7 +372,7 @@ internal static class BakeGpu
 		w[8] = (uint)materialsAt;
 		w[9] = (uint)picturesAt;
 		w[10] = (uint)lightsAt;
-		w[11] = (uint)scene.Lights.Count;
+		w[11] = (uint)lights;
 		w[12] = (uint)skyAt;
 		w[13] = SkySide;
 		w[14] = F( scene.SunCosine );
@@ -372,6 +382,11 @@ internal static class BakeGpu
 		w[18] = (uint)emittersAt;
 		w[19] = (uint)scene.Emitters.Length;
 		w[20] = (uint)glowAt;
+		w[21] = (uint)scene.Pass;
+		w[22] = grouped ? (uint)groupsAt : 0u;
+
+		if ( grouped )
+			for ( var t = 0; t < triangles; ++t ) w[groupsAt + t] = (uint)scene.GroupOf[t];
 
 		//Glowing triangles: world triangle, power summed so far, a corner and two edges; then GlowDensity per triangle
 		for ( var i = 0; i < scene.Emitters.Length; ++i )
@@ -460,7 +475,7 @@ internal static class BakeGpu
 				Put( w, at + ( i * 4 ), texels[i] );
 		}
 
-		for ( var i = 0; i < scene.Lights.Count; ++i )
+		for ( var i = 0; i < lights; ++i )
 		{
 			var light = scene.Lights[i];
 			var at = lightsAt + ( i * LightWords );
@@ -468,7 +483,8 @@ internal static class BakeGpu
 			w[at] = (uint)light.Kind;
 			Put( w, at + 1, light.Position );
 			w[at + 4] = F( light.Range );
-			Put( w, at + 5, light.Colour );
+			//A sun whose bounce the frame relights gives the bake none - see BakeScene.LiveBounce
+			Put( w, at + 5, scene.LiveBounce && light.Live ? Vec3.Zero : light.Colour );
 			Put( w, at + 8, light.Forward );
 			w[at + 11] = F( light.CosInner );
 			w[at + 12] = F( light.CosOuter );

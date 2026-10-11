@@ -201,6 +201,9 @@ internal sealed class BakeLight
 	/// <summary>The whole of it is in the bake, and none of it in the frame - see Light.BakedWhole.</summary>
 	public bool Whole;
 
+	/// <summary>A sun the frame relights the bounce of (CoreLiveBounce): the bake leaves its bounce out.</summary>
+	public bool Live;
+
 	/// <summary>The mask channel its static-world shadow bakes into, or -1 - see BakeScene.AssignMasks.</summary>
 	public int Mask = -1;
 
@@ -254,24 +257,22 @@ internal sealed class BakeScene
 	/// <summary>Per world triangle: TowardsGlow's chance per square metre of picking it, nought for never.</summary>
 	public float[] GlowDensity = Array.Empty<float>();
 
+	/// <summary>Per world triangle: its BakedGlow group, one to four, or nought for the main bake.</summary>
+	public int[] GroupOf = Array.Empty<int>();
+
+	/// <summary>What is being baked: nought the main bake, else one glow group's light alone - see UsePass.</summary>
+	public int Pass { get; private set; }
+
 	/// <summary>What stands still and has a sheet of its own to be baked onto.</summary>
 	public readonly List<BakeReceiver> Receivers = new();
 
 	public BBox Bounds;
 
-	//The sky, out of the same block the frame is written into.
-	private readonly float[] sky = new float[CoreSceneRenderer.FrameFloats];
-	private bool hasSky;
-	private bool hasSun;
-	private Vec3 zenith, horizon, ground, sunDirection, sunLight;
-	private float night;
+	/// <summary>The sky as it was when gathered.</summary>
+	public readonly BakeSky Sky = new();
 
-	//A panorama sky's picture, light and turn, where the sky is one - see CorePanoramaSky
-	private CorePanorama panorama;
-	private Vec3 panoramaLight;
-	private float panoramaTurn;
-
-	private Vec4 ambient;
+	/// <summary>Whether the frame relights sun and sky bounces (CoreLiveBounce): the bake leaves them out.</summary>
+	public bool LiveBounce;
 
 	public float SkyStrength = 1.0f;
 	public float AlbedoBoost = 1.0f;
@@ -292,6 +293,7 @@ internal sealed class BakeScene
 	private readonly List<int> corners = new();
 	private readonly List<int> materialOf = new();
 	private readonly List<Vec3> tintOf = new();
+	private readonly List<int> groupOf = new();
 	private readonly Dictionary<Material, int> materialIndex = new();
 	private readonly Dictionary<Texture, BakePicture> pictures = new();
 
@@ -321,6 +323,9 @@ internal sealed class BakeScene
 			var count = ( corners.Count / 3 ) - first;
 
 			if ( count == 0 ) continue;
+
+			var glow = renderer.GetComponent<BakedGlow>();
+			Group( glow is { Enabled: true } ? glow.Layer + 1 : 0 );
 
 			Grow( first, count, ref any );
 
@@ -357,6 +362,9 @@ internal sealed class BakeScene
 		MaterialOf = materialOf.ToArray();
 		TintOf = tintOf.ToArray();
 
+		Group( 0 );
+		GroupOf = groupOf.ToArray();
+
 		GatherLights( scene );
 		AssignMasks();
 		GatherSky( scene );
@@ -368,6 +376,31 @@ internal sealed class BakeScene
 	private void Transparent( int first, int count )
 	{
 		for ( var t = first; t < first + count; ++t ) clear.Add( t );
+	}
+
+	//The triangles added since the last call, into a glow group
+	private void Group( int group )
+	{
+		while ( groupOf.Count < corners.Count / 3 ) groupOf.Add( group );
+	}
+
+	/// <summary>The glow groups with something glowing in them, in order.</summary>
+	public List<int> GlowGroups()
+	{
+		var found = new List<int>();
+
+		for ( var t = 0; t < GroupOf.Length; ++t )
+			if ( GroupOf[t] > 0 && !found.Contains( GroupOf[t] ) && Materials[MaterialOf[t]].Glows ) found.Add( GroupOf[t] );
+
+		found.Sort();
+		return found;
+	}
+
+	/// <summary>Bakes nought, the main bake, or one glow group's light alone: no lamps, no sky, only its glow.</summary>
+	public void UsePass( int pass )
+	{
+		Pass = pass;
+		GatherEmitters();
 	}
 
 	private void Grow( int first, int count, ref bool any )
@@ -536,6 +569,7 @@ internal sealed class BakeScene
 				//A shadowless baked light bakes only its bounces and stays in the frame as it is
 				Whole = light.BakedWhole,
 				Mask = !light.BakedWhole && light.Shadows ? 0 : -1,
+				Live = light is DirectionalLight && !light.BakedWhole,
 			};
 
 			switch ( light )
@@ -741,38 +775,15 @@ internal sealed class BakeScene
 	/// <summary>Whether any light has a channel of the mask - a bake with none writes no mask.</summary>
 	public bool AnyMasked()
 	{
+		if ( Pass != 0 ) return false;
+
 		foreach ( var light in Lights )
 			if ( light.Mask >= 0 ) return true;
 
 		return false;
 	}
 
-	private void GatherSky( Scene scene )
-	{
-		CoreSceneRenderer.SetSky( sky, scene );
-		CoreSceneRenderer.SetAmbient( sky, scene );
-
-		hasSky = sky[CoreSceneRenderer.SkyAt + 3] > 0.5f;
-		hasSun = sky[CoreSceneRenderer.SunAt + 3] > 0.0f;
-
-		zenith = Read3( CoreSceneRenderer.SkyAt + 0 );
-		horizon = Read3( CoreSceneRenderer.SkyAt + 4 );
-		ground = Read3( CoreSceneRenderer.SkyAt + 8 );
-		sunDirection = Read3( CoreSceneRenderer.SunAt );
-		sunLight = Read3( CoreSceneRenderer.SunLightAt );
-		night = sky[CoreSceneRenderer.SunLightAt + 3];
-
-		var drawn = CoreSceneRenderer.HasPanorama( sky ) ? CorePanoramaSky.Find( CoreSceneRenderer.SkyMaterialOf( scene ) ) : null;
-
-		panorama = CorePanoramaSky.PanoramaOf( drawn );
-		panoramaLight = drawn?.Light ?? Vec3.Zero;
-		panoramaTurn = drawn?.Turn ?? 0.0f;
-
-		var at = CoreSceneRenderer.AmbientAt;
-		ambient = new Vec4( sky[at], sky[at + 1], sky[at + 2], sky[at + 3] );
-	}
-
-	private Vec3 Read3( int at ) => new( sky[at], sky[at + 1], sky[at + 2] );
+	private void GatherSky( Scene scene ) => Sky.Gather( scene );
 
 	/// <summary>Builds the tree over what was gathered. Any thread - and it uses all of them.</summary>
 	public void Build()
@@ -825,7 +836,7 @@ internal sealed class BakeScene
 		for ( var t = 0; t < triangles; ++t )
 		{
 			var material = Materials[MaterialOf[t]];
-			if ( !material.Glows || ThroughMode( t ) == 1 ) continue;
+			if ( !material.Glows || GroupOf[t] != Pass || ThroughMode( t ) == 1 ) continue;
 
 			var power = Area( t ) * BakeMath.Luma( material.Emission * material.MeanGlow() );
 			if ( !( power > 0.0f ) ) continue;
@@ -847,7 +858,7 @@ internal sealed class BakeScene
 		}
 	}
 
-	private float Area( int t )
+	internal float Area( int t )
 	{
 		var a = Positions[Corners[t * 3]];
 		return Vec3.Cross( Positions[Corners[( t * 3 ) + 1]] - a, Positions[Corners[( t * 3 ) + 2]] - a ).Length() * 0.5f;
@@ -928,7 +939,7 @@ internal sealed class BakeScene
 		//Never quite white: a fully reflective surface makes bounces that never end, and no paint does
 		s.Albedo = Vec3.Min( albedo * material.Diffuse * AlbedoBoost, new Vec3( 0.95f ) );
 
-		s.Emission = material.Glows ? GlowOf( material, uv, texel ) : Vec3.Zero;
+		s.Emission = material.Glows && GroupOf[t] == Pass ? GlowOf( material, uv, texel ) : Vec3.Zero;
 
 		return s;
 	}
@@ -1024,32 +1035,19 @@ internal sealed class BakeScene
 		return position + ( geometric * ( side * ( Lift + ( scale * 2e-6f ) ) ) );
 	}
 
-	/// <summary>Sky plus flat ambient from one direction, scaled as SkyAmbientScale in frame.slang scales it.</summary>
+	/// <summary>The sky from one direction as a bounced ray sees it: none in a glow pass or where relit live.</summary>
 	public Vec3 Environment( Vec3 direction )
-	{
-		var around = !hasSky ? Vec3.Zero
-			: panorama is not null ? panorama.Radiance( direction, panoramaTurn ) * panoramaLight
-			: SkyColourOf( direction.Y, BakeMath.Saturate( Vec3.Dot( direction, sunDirection ) ) ) * 0.25f;
-
-		around = BakeMath.Lerp( around, new Vec3( ambient.X, ambient.Y, ambient.Z ), ambient.W );
-
-		return around * SkyStrength;
-	}
-
-	//The engine's built-in sky colour; custom sky shaders cannot run on the CPU bake. See CoreSkyTable
-	private Vec3 SkyColourOf( float height, float mu )
-		=> CoreSkyTable.ColourOf(
-			new CoreSkyTable.Air( zenith, horizon, ground, sunDirection, sunLight, night, hasSun ),
-			height, mu );
+		=> Pass != 0 || LiveBounce ? Vec3.Zero : Sky.Radiance( direction ) * SkyStrength;
 
 	/// <summary>Direct lamp light over pi at a point, and its dominant direction; as surface_shading.slang.</summary>
 	public Vec3 Direct( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, bool bakedOnly, ref Vec3 towards )
 	{
 		var sum = Vec3.Zero;
+		if ( Pass != 0 ) return sum;
 
 		foreach ( var light in Lights )
 		{
-			if ( bakedOnly && !light.Whole ) continue;
+			if ( ( bakedOnly && !light.Whole ) || ( LiveBounce && light.Live ) ) continue;
 
 			var arriving = DirectOne( light, position, normal, geometric, ref random, out var l );
 
@@ -1160,9 +1158,11 @@ internal sealed class BakeScene
 
 	/// <summary>Path-traced radiance from one direction; lamps and glows sampled, roulette past bounce two.</summary>
 	//Density: the caller's chance per steradian of this direction when it also sampled a glow, else nought
-	public Vec3 Arriving( Vec3 origin, Vec3 direction, float density, ref BakeRandom random, out bool inside )
+	//Escaped: the ray left straight to the sky, which the frame lights by the visibility kept instead - see SkyLit
+	public Vec3 Arriving( Vec3 origin, Vec3 direction, float density, ref BakeRandom random, out bool inside, out bool escaped )
 	{
 		inside = false;
+		escaped = false;
 
 		var carried = Vec3.One;
 		var gathered = Vec3.Zero;
@@ -1171,7 +1171,8 @@ internal sealed class BakeScene
 		{
 			if ( !Bvh.Nearest( origin, direction, 1e6f, out var hit ) )
 			{
-				return gathered + ( carried * Environment( direction ) );
+				escaped = bounce == 0;
+				return escaped ? gathered : gathered + ( carried * Environment( direction ) );
 			}
 
 			var s = Surface( hit, origin, direction );

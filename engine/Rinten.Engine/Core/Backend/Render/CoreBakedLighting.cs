@@ -12,20 +12,40 @@ internal static class CoreBakedLighting
 	private sealed class Held
 	{
 		public int Revision = -1;
-		public ulong Sheet, Ways, Red, Green, Blue, SheetMask, VolumeMask;
+		public ulong Sheet, Ways, Red, Green, Blue, SheetMask, VolumeMask, SheetSky, VolumeSky, Walls;
 
 		/// <summary>Each light the bake took something of: its mask channel, or -1 where it took the whole of it.</summary>
 		public readonly Dictionary<Guid, int> Lights = new();
 
-		/// <summary>A bake from before the masks, which took every Baked light whole - see BakedLightingData.IsOld.</summary>
+		/// <summary>A bake from before the masks, naming no lights - see BakedLightingData.IsOld.</summary>
 		public bool Old;
+
+		/// <summary>Each glow layer's sheet and volume, and its group - see BakedGlow.</summary>
+		public readonly ulong[] GlowSheet = new ulong[BakedGlow.Groups], GlowVolume = new ulong[BakedGlow.Groups];
+		public readonly int[] GlowGroup = new int[BakedGlow.Groups];
+
+		/// <summary>The sun's and sky's bounce, relit as they change; null for a bake without surfels.</summary>
+		public CoreLiveBounce Bounce;
 
 		public void Release()
 		{
-			foreach ( var texture in new[] { Sheet, Ways, Red, Green, Blue, SheetMask, VolumeMask } )
+			foreach ( var texture in new[] { Sheet, Ways, Red, Green, Blue, SheetMask, VolumeMask, SheetSky, VolumeSky, Walls } )
 				if ( texture != 0 ) CoreRenderDevice.DestroyTexture( texture );
 
-			Sheet = Ways = Red = Green = Blue = SheetMask = VolumeMask = 0;
+			for ( var i = 0; i < BakedGlow.Groups; ++i )
+			{
+				if ( GlowSheet[i] != 0 ) CoreRenderDevice.DestroyTexture( GlowSheet[i] );
+				if ( GlowVolume[i] != 0 ) CoreRenderDevice.DestroyTexture( GlowVolume[i] );
+			}
+
+			Bounce?.Release();
+			Bounce = null;
+
+			Array.Clear( GlowSheet );
+			Array.Clear( GlowVolume );
+			Array.Clear( GlowGroup );
+
+			Sheet = Ways = Red = Green = Blue = SheetMask = VolumeMask = SheetSky = VolumeSky = Walls = 0;
 			Lights.Clear();
 			Old = false;
 			Revision = -1;
@@ -97,12 +117,11 @@ internal static class CoreBakedLighting
 		if ( frame is null || frame.Length < CoreSceneRenderer.FrameFloats ) return false;
 
 		var at = CoreSceneRenderer.BakedAt;
-		//The sheet, the volume, the masks and the sun's channel - see frame_data.slang.
-		Array.Clear( frame, at, 24 );
+		//The sheet, the volume, the masks, the sun's channel and the glow layers - see frame_data.slang
+		Array.Clear( frame, at, 40 );
 		writing = null;
 
-		//The portable frame reads neither the sheet nor the volume - see HasBakedSheet and HasBakedVolume in frame.slang, both of which answer
-		//false there - so the block is left at nought and, more to the point, the atlas and the volume are not uploaded to the card at all.
+		//The portable frame reads neither sheet nor volume (HasBakedSheet, HasBakedVolume): nothing is uploaded
 		if ( CoreRenderDevice.PortableFrame ) return false;
 
 		var bake = Of( scene );
@@ -123,6 +142,7 @@ internal static class CoreBakedLighting
 		{
 			frame[at + 0] = CoreRender.TextureIndex( on.Sheet );
 			frame[at + 1] = CoreRender.TextureIndex( on.Ways );
+			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
 			any = true;
 		}
@@ -142,11 +162,24 @@ internal static class CoreBakedLighting
 			frame[at + 12] = data.VolumeX;
 			frame[at + 13] = data.VolumeY;
 			frame[at + 14] = data.VolumeZ;
+			frame[at + 15] = on.VolumeSky != 0 ? CoreRender.TextureIndex( on.VolumeSky ) : 0.0f;
+			frame[at + 21] = on.Walls != 0 ? CoreRender.TextureIndex( on.Walls ) : 0.0f;
 			any = true;
+
+			if ( on.Bounce is not null )
+			{
+				on.Bounce.Tick( scene );
+
+				if ( on.Bounce.Light != 0 && on.Bounce.Lean != 0 )
+				{
+					frame[at + 22] = CoreRender.TextureIndex( on.Bounce.Light );
+					frame[at + 23] = CoreRender.TextureIndex( on.Bounce.Lean );
+				}
+			}
 		}
 
-		//The masks, where any light's shadows are baked - see bakedMask in frame_data.slang. A surface with a place on the sheet reads the sheet's, everything
-		//else the volume's - so the volume's is what says there is a mask at all, and a bake of a scene nothing of which was unwrapped has that one alone.
+		//The masks where shadows are baked: surfaces on the sheet read its mask, the rest the volume's,
+		//so the volume's mask is what says there is one
 		if ( on.VolumeMask != 0 && frame[at + 7] > 0.5f )
 		{
 			frame[at + 17] = CoreRender.TextureIndex( on.VolumeMask );
@@ -158,6 +191,8 @@ internal static class CoreBakedLighting
 				frame[at + 18] = 1.0f;
 			}
 		}
+
+		WriteGlows( frame, at + 24, on, scene );
 
 		return any;
 	}
@@ -181,7 +216,7 @@ internal static class CoreBakedLighting
 
 		if ( !writing.Lights.TryGetValue( light.Id, out var channel ) ) return NotBaked;
 
-		//A mask is no use without a picture to read it from, and its light is not in the bake: drawn as any other light, shadow maps and all.
+		//A mask with no picture to read leaves its light out of the bake: drawn as any other, shadow maps and all
 		if ( channel >= 0 && writing.VolumeMask == 0 ) return NotBaked;
 
 		return channel;
@@ -217,7 +252,77 @@ internal static class CoreBakedLighting
 			on.Red = CoreRenderDevice.CreateTextureHalf( data.VolumeRed, across, data.VolumeZ );
 			on.Green = CoreRenderDevice.CreateTextureHalf( data.VolumeGreen, across, data.VolumeZ );
 			on.Blue = CoreRenderDevice.CreateTextureHalf( data.VolumeBlue, across, data.VolumeZ );
+
+			//Bytes of nibbles, read whole: linear, and only ever at a texel's middle
+			if ( data.HasWalls )
+				on.Walls = CoreRenderDevice.CreateTextureRgba( data.VolumeWalls, across, data.VolumeZ * 3, false );
+
+			if ( data.HasBounce ) on.Bounce = new CoreLiveBounce( data );
+
+			if ( data.HasSky )
+			{
+				on.VolumeSky = CoreRenderDevice.CreateTextureHalf( data.VolumeSky, across, data.VolumeZ );
+
+				if ( data.HasSheet && data.SheetSky.Length == data.Sheet.Length )
+					on.SheetSky = CoreRenderDevice.CreateTextureHalf( data.SheetSky, data.SheetWidth, data.SheetHeight );
+			}
 		}
+
+		for ( var i = 0; i < Math.Min( data.Glows.Count, BakedGlow.Groups ); ++i )
+		{
+			var glow = data.Glows[i];
+			on.GlowGroup[i] = Math.Clamp( glow.Group, 1, BakedGlow.Groups );
+
+			if ( data.HasSheet && glow.Sheet?.Length == data.Sheet.Length )
+				on.GlowSheet[i] = CoreRenderDevice.CreateTextureHalf( glow.Sheet, data.SheetWidth, data.SheetHeight );
+
+			if ( data.HasVolume && glow.Volume?.Length == data.VolumeRed.Length )
+				on.GlowVolume[i] = CoreRenderDevice.CreateTextureHalf( glow.Volume, data.VolumeX * data.VolumeY, data.VolumeZ );
+		}
+	}
+
+	//Each glow layer's pictures and its group's brightness now - see bakedGlow in frame_data.slang
+	private static void WriteGlows( float[] frame, int at, Held on, Scene scene )
+	{
+		Span<float> brightness = stackalloc float[BakedGlow.Groups];
+		var any = false;
+
+		for ( var i = 0; i < BakedGlow.Groups; ++i ) any |= on.GlowGroup[i] != 0;
+		if ( !any ) return;
+
+		//The brightest switched-on glow of a group decides it; a group with none on is dark
+		foreach ( var glow in scene.GetAllComponents<BakedGlow>() )
+		{
+			if ( !glow.IsValid() || !glow.Active ) continue;
+			brightness[glow.Layer] = MathF.Max( brightness[glow.Layer], MathF.Max( glow.Brightness, 0.0f ) );
+		}
+
+		for ( var i = 0; i < BakedGlow.Groups; ++i )
+		{
+			if ( on.GlowGroup[i] == 0 ) continue;
+
+			var slot = at + ( i * 4 );
+			frame[slot + 0] = on.GlowSheet[i] != 0 && frame[CoreSceneRenderer.BakedAt + 3] > 0.5f ? CoreRender.TextureIndex( on.GlowSheet[i] ) : 0.0f;
+			frame[slot + 1] = on.GlowVolume[i] != 0 && frame[CoreSceneRenderer.BakedAt + 7] > 0.5f ? CoreRender.TextureIndex( on.GlowVolume[i] ) : 0.0f;
+			frame[slot + 2] = brightness[on.GlowGroup[i] - 1];
+		}
+	}
+
+	//A volume's colour constants, one point a texel - what a glow layer keeps of it, its lean left out
+	private static Half[] Constants( BakeVolume volume )
+	{
+		var points = volume.CountX * volume.CountY * volume.CountZ;
+		var made = new Half[points * 4];
+
+		for ( var i = 0; i < points; ++i )
+		{
+			made[( i * 4 ) + 0] = volume.Red[i * 4];
+			made[( i * 4 ) + 1] = volume.Green[i * 4];
+			made[( i * 4 ) + 2] = volume.Blue[i * 4];
+			made[( i * 4 ) + 3] = (Half)1.0f;
+		}
+
+		return made;
 	}
 
 	//Everything off the card, on device teardown.
@@ -227,8 +332,8 @@ internal static class CoreBakedLighting
 		held.Clear();
 	}
 
-	//Runs a bake of the component's scene with its settings. The scene is read on the main thread; everything after is
-	//traced on every other core, and what it made comes back here. Null where it was cancelled or there was nothing to bake.
+	//Bakes the component's scene with its settings: read on the main thread, traced on every other core
+	//Null where it was cancelled or there was nothing to bake
 	internal static async Task<BakedLightingData> Bake( BakedLighting bake, CancellationToken cancel )
 	{
 		ThreadSafe.AssertIsMainThread();
@@ -245,6 +350,19 @@ internal static class CoreBakedLighting
 		};
 
 		world.Gather( scene );
+
+		//The sun and sky light the bake's surfels in the frame, so their bounces are left out of it - see CoreLiveBounce
+		world.LiveBounce = true;
+		var liveSun = Guid.Empty;
+
+		foreach ( var light in scene.GetAllComponents<DirectionalLight>() )
+		{
+			if ( !light.IsValid() || !light.Enabled || !light.Active || light.BakedWhole ) continue;
+			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
+
+			liveSun = light.Id;
+			break;
+		}
 
 		if ( world.Corners.Length == 0 )
 		{
@@ -282,6 +400,14 @@ internal static class CoreBakedLighting
 
 		BakeSheet sheet = null;
 		var volume = new BakeVolume();
+		var surfels = new BakeSurfels();
+
+		//The main bake's results, kept as the glow groups' passes reuse the same sheet and lattice
+		Half[] sheetLight = null, sheetWays = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
+		byte[] sheetMask = null, volumeMask = null, volumeWalls = null;
+
+		var groups = world.GlowGroups();
+		var glows = new List<BakedLightingData.Glow>();
 
 		var work = Task.Run( () =>
 		{
@@ -301,12 +427,52 @@ internal static class CoreBakedLighting
 				sheet.Denoise( world, denoise );
 				sheet.Dilate();
 				sheet.Encode();
+
+				( sheetLight, sheetWays, sheetMask, sheetSky ) = ( sheet.Light, sheet.Ways, sheet.Mask, sheet.Sky );
 			}
 
 			volume.Lay( world.Bounds, spacing );
 
 			if ( !volume.TraceOnCard( world, volumeSamples, progress, stop ) )
 				volume.Trace( world, volumeSamples, progress, stop );
+
+			( volumeRed, volumeGreen, volumeBlue, volumeMask, volumeSky ) = ( volume.Red, volume.Green, volume.Blue, volume.Mask, volume.Sky );
+
+			//The still world alone decides these, so once for all the passes
+			volume.FindWalls( world, progress, stop );
+			volumeWalls = volume.Walls;
+
+			//About two surfels a volume step, which is as fine as the bounce they carry is read
+			surfels.Scatter( world, Math.Clamp( volume.Step * 0.5f, 0.5f, 2.0f ) );
+			surfels.Trace( world, progress, stop );
+			surfels.Probes( world, volume, progress, stop );
+
+			//Each glow group's light alone, on the same sheet and lattice - see BakedGlow
+			foreach ( var group in groups )
+			{
+				world.UsePass( group );
+
+				Half[] glowSheet = null;
+
+				if ( sheet is not null )
+				{
+					if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
+						sheet.Trace( world, samples, progress, stop );
+
+					progress.Begin( "Filtering", 1 );
+					sheet.Denoise( world, denoise );
+					sheet.Dilate();
+					sheet.Encode();
+					glowSheet = sheet.Light;
+				}
+
+				if ( !volume.TraceOnCard( world, volumeSamples, progress, stop ) )
+					volume.Trace( world, volumeSamples, progress, stop );
+
+				glows.Add( new BakedLightingData.Glow { Group = group, Sheet = glowSheet ?? [], Volume = Constants( volume ) } );
+			}
+
+			world.UsePass( 0 );
 		}, stop );
 
 		while ( !work.IsCompleted )
@@ -345,14 +511,27 @@ internal static class CoreBakedLighting
 			VolumeZ = volume.CountZ,
 			VolumeOrigin = new Vector3( volume.Origin.X, volume.Origin.Y, volume.Origin.Z ),
 			VolumeStep = volume.Step,
-			VolumeRed = volume.Red,
-			VolumeGreen = volume.Green,
-			VolumeBlue = volume.Blue,
-			VolumeMask = volume.Mask ?? [],
+			VolumeRed = volumeRed,
+			VolumeGreen = volumeGreen,
+			VolumeBlue = volumeBlue,
+			VolumeMask = volumeMask ?? [],
+			VolumeSky = volumeSky ?? [],
+			VolumeWalls = volumeWalls ?? [],
+			LiveSun = liveSun,
+			Surfels = surfels.Data,
+			SurfelSun = surfels.Sun,
+			SurfelDepth = surfels.Depth,
+			SurfelLinks = surfels.Link,
+			SurfelWeights = surfels.Weight,
+			ProbeLinks = surfels.ProbeLink,
+			ProbeWeights = surfels.ProbeWeight,
+			Glows = glows,
 		};
 
 		foreach ( var light in world.Lights )
 		{
+			if ( !light.Live ) data.Bounced.Add( light.Id );
+
 			if ( light.Whole || light.Mask >= 0 )
 				data.Lights.Add( new BakedLightingData.BakedLight { Light = light.Id, Channel = light.Whole ? -1 : light.Mask } );
 		}
@@ -361,9 +540,10 @@ internal static class CoreBakedLighting
 		{
 			data.SheetWidth = sheet.Width;
 			data.SheetHeight = sheet.Height;
-			data.Sheet = sheet.Light;
-			data.Ways = sheet.Ways;
-			data.SheetMask = sheet.Mask ?? [];
+			data.Sheet = sheetLight;
+			data.Ways = sheetWays;
+			data.SheetMask = sheetMask ?? [];
+			data.SheetSky = sheetSky ?? [];
 
 			foreach ( var receiver in world.Receivers )
 			{
@@ -381,7 +561,7 @@ internal static class CoreBakedLighting
 		data.Touched();
 
 		Log.Info( $"baked lighting: {world.Corners.Length / 3} triangles, {world.Receivers.Count} surfaces on a {sheetSide}² atlas, " +
-			$"{volume.CountX}x{volume.CountY}x{volume.CountZ} volume points {volume.Step:0.##} m apart, " +
+			$"{volume.CountX}x{volume.CountY}x{volume.CountZ} volume points {volume.Step:0.##} m apart, {surfels.Count} surfels, {glows.Count} glow layers, " +
 			$"{( DateTime.UtcNow - started ).TotalSeconds:0.0} s" );
 
 		return data;

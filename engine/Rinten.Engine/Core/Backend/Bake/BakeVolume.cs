@@ -19,6 +19,12 @@ internal sealed class BakeVolume
 	/// <summary>Four bytes a point, null where nothing is masked: each masked light's share, for movers.</summary>
 	public byte[] Mask;
 
+	/// <summary>Four halves a point: how much sky is seen, then its lean along x, y, z - see SkyLit.</summary>
+	public Half[] Sky;
+
+	/// <summary>Each cell's corners' clear reach into it, a nibble an axis and corner - see BakedVolumeSpot.</summary>
+	public byte[] Walls;
+
 	//Most points along one side.
 	private const int MostAlong = 128;
 
@@ -69,6 +75,7 @@ internal sealed class BakeVolume
 		var leanB = new Vec3[count];
 		var valid = new bool[count];
 		var mask = scene.AnyMasked() ? new Vec4[count] : null;
+		var sky = new Vec4[count];
 
 		progress.Begin( "Tracing the volume", count );
 
@@ -87,6 +94,7 @@ internal sealed class BakeVolume
 			var sum = Vec3.Zero;
 			Vec3 r = Vec3.Zero, g = Vec3.Zero, b = Vec3.Zero;
 			var inside = 0;
+			var open = Vec4.Zero;
 
 			//Every direction once, stratified, so sky on one side and a wall on the other are both seen
 			var across = Math.Max( (int)MathF.Sqrt( samples ), 2 );
@@ -97,9 +105,10 @@ internal sealed class BakeVolume
 				var v = ( ( s / across ) + random.Float() ) / across;
 
 				var direction = BakeMath.AnyDirection( u, v );
-				var arriving = scene.Arriving( at, direction, glowing, ref random, out var behind );
+				var arriving = scene.Arriving( at, direction, glowing, ref random, out var behind, out var escaped );
 
 				if ( behind ) inside++;
+				if ( escaped ) open += new Vec4( direction, 1.0f );
 
 				//And a glowing triangle straight from the point, as radiance over the sphere's chance of its direction
 				if ( glowing > 0.0f )
@@ -131,7 +140,7 @@ internal sealed class BakeVolume
 			//and projects onto the bands as a quarter of its light in the constant and half of it in the lean.
 			foreach ( var light in scene.Lights )
 			{
-				if ( !light.Whole ) continue;
+				if ( !light.Whole || scene.Pass != 0 ) continue;
 
 				var direct = LampAt( scene, light, at, ref random, out var towards );
 
@@ -153,12 +162,18 @@ internal sealed class BakeVolume
 
 			if ( mask is not null ) mask[index] = MaskAt( scene, at, ref random );
 
+			sky[index] = SkyOf( open, taken, scene.SkyStrength );
+
 			progress.Step();
 		} );
 
-		Fill( constant, leanR, leanG, leanB, mask, valid );
-		Encode( constant, leanR, leanG, leanB, mask );
+		Fill( constant, leanR, leanG, leanB, mask, sky, valid );
+		Encode( constant, leanR, leanG, leanB, mask, sky );
 	}
+
+	//Escaping rays' direction sum and count into the sky's visibility as its first two bands, as the light's are
+	private static Vec4 SkyOf( Vec4 open, int taken, float strength )
+		=> new Vec4( open.X, open.Y, open.Z, 0.0f ) * ( 2.0f / taken * strength ) + new Vec4( 0.0f, 0.0f, 0.0f, open.W / taken * strength );
 
 	/// <summary>Traces every point on the GPU (BakeGpu); false means the CPU. Baked lamps added on the CPU.</summary>
 	public bool TraceOnCard( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
@@ -185,6 +200,7 @@ internal sealed class BakeVolume
 		var leanB = new Vec3[count];
 		var valid = new bool[count];
 		var mask = scene.AnyMasked() ? new Vec4[count] : null;
+		var sky = new Vec4[count];
 
 		var taken = across * across;
 
@@ -192,7 +208,7 @@ internal sealed class BakeVolume
 
 		Parallel.For( 0, count, new ParallelOptions { CancellationToken = cancel }, index =>
 		{
-			var o = index * 16;
+			var o = index * BakeGpu.ProbeFloats;
 			var random = new BakeRandom( ( (ulong)index * 0xD1B54A32D192ED03ul ) + 17, (ulong)index + 1 );
 
 			var mean = new Vec3( sums[o], sums[o + 1], sums[o + 2] ) / taken;
@@ -201,9 +217,11 @@ internal sealed class BakeVolume
 			var towardsB = new Vec3( sums[o + 12], sums[o + 13], sums[o + 14] ) * ( 2.0f / taken );
 			var inside = sums[o + 7];
 
+			sky[index] = SkyOf( new Vec4( sums[o + 16], sums[o + 17], sums[o + 18], sums[o + 19] ), taken, scene.SkyStrength );
+
 			foreach ( var light in scene.Lights )
 			{
-				if ( !light.Whole ) continue;
+				if ( !light.Whole || scene.Pass != 0 ) continue;
 
 				var direct = LampAt( scene, light, points[index], ref random, out var towards );
 
@@ -226,10 +244,114 @@ internal sealed class BakeVolume
 			progress.Step();
 		} );
 
-		Fill( constant, leanR, leanG, leanB, mask, valid );
-		Encode( constant, leanR, leanG, leanB, mask );
+		Fill( constant, leanR, leanG, leanB, mask, sky, valid );
+		Encode( constant, leanR, leanG, leanB, mask, sky );
 
 		return true;
+	}
+
+	/// <summary>Finds how far each point sees into the cells it is a corner of. Any thread.</summary>
+	public void FindWalls( BakeScene scene, BakeProgress progress, CancellationToken cancel )
+	{
+		var count = CountX * CountY * CountZ;
+
+		//Per point, octant and axis: how far its box reaches before a wall, in fifteenths of a step
+		var reach = new byte[count * 24];
+
+		progress.Begin( "Finding the volume's walls", count );
+
+		Parallel.For( 0, count, new ParallelOptions { CancellationToken = cancel }, index =>
+		{
+			var x = index % CountX;
+			var y = ( index / CountX ) % CountY;
+			var z = index / ( CountX * CountY );
+
+			var at = Origin + ( new Vec3( x, y, z ) * Step );
+			var random = new BakeRandom( ( (ulong)index * 0x9E3779B97F4A7C15ul ) + 3, (ulong)index + 7 );
+
+			for ( var octant = 0; octant < 8; ++octant )
+			{
+				var signs = new Vec3( ( octant & 1 ) != 0 ? -1.0f : 1.0f, ( octant & 2 ) != 0 ? -1.0f : 1.0f, ( octant & 4 ) != 0 ? -1.0f : 1.0f );
+				var box = Box( scene, at, signs, ref random );
+
+				reach[( index * 24 ) + ( octant * 3 ) + 0] = Nibble( box.X );
+				reach[( index * 24 ) + ( octant * 3 ) + 1] = Nibble( box.Y );
+				reach[( index * 24 ) + ( octant * 3 ) + 2] = Nibble( box.Z );
+			}
+
+			progress.Step();
+		} );
+
+		PackWalls( reach );
+	}
+
+	//The box from a point into one octant, in steps, that no wall crosses: a wall hit within a step
+	//stops the box along its own normal's axis, so a floor bounds its height and a wall its depth
+	private Vec3 Box( BakeScene scene, Vec3 at, Vec3 signs, ref BakeRandom random )
+	{
+		const int Across = 4;
+		var box = Vec3.One;
+
+		//A step's cube corner to corner, the furthest a point of the cell lies
+		var furthest = Step * 1.7321f;
+
+		for ( var s = 0; s < Across * Across; ++s )
+		{
+			//Even over the octant: height uniform, angle uniform around
+			var up = ( ( s % Across ) + random.Float() ) / Across;
+			var turn = ( ( s / Across ) + random.Float() ) * ( BakeMath.Pi * 0.5f / Across );
+			var flat = MathF.Sqrt( MathF.Max( 1.0f - ( up * up ), 0.0f ) );
+			var direction = new Vec3( flat * MathF.Cos( turn ), flat * MathF.Sin( turn ), up ) * signs;
+
+			if ( !scene.Bvh.Nearest( at, direction, furthest, out var hit ) ) continue;
+
+			var r = Vec3.Abs( direction ) * ( hit.Distance / Step );
+			if ( r.X > 1.0f || r.Y > 1.0f || r.Z > 1.0f ) continue;
+
+			var face = Vec3.Abs( scene.Facing[hit.Triangle] );
+
+			if ( face.X >= face.Y && face.X >= face.Z ) box.X = MathF.Min( box.X, r.X );
+			else if ( face.Y >= face.Z ) box.Y = MathF.Min( box.Y, r.Y );
+			else box.Z = MathF.Min( box.Z, r.Z );
+		}
+
+		return box;
+	}
+
+	private static byte Nibble( float reach ) => (byte)Math.Clamp( (int)MathF.Round( reach * 15.0f ), 0, 15 );
+
+	//Into one picture as wide as the volume's, three times as tall: a row of cells an axis, each texel that
+	//axis's reach of all eight corners - its channels along y then z, the near x corner low, the far one high
+	private void PackWalls( byte[] reach )
+	{
+		var across = CountX * CountY;
+		Walls = new byte[across * CountZ * 3 * 4];
+
+		for ( var z = 0; z < CountZ - 1; ++z )
+		for ( var y = 0; y < CountY - 1; ++y )
+		for ( var x = 0; x < CountX - 1; ++x )
+		{
+			for ( var corner = 0; corner < 8; ++corner )
+			{
+				var cx = corner & 1;
+				var cy = ( corner >> 1 ) & 1;
+				var cz = ( corner >> 2 ) & 1;
+
+				var point = x + cx + ( CountX * ( y + cy + ( CountY * ( z + cz ) ) ) );
+
+				//The octant from that corner into the cell: away from its own side
+				var octant = cx | ( cy << 1 ) | ( cz << 2 );
+				var channel = cy | ( cz << 1 );
+
+				for ( var axis = 0; axis < 3; ++axis )
+				{
+					var value = reach[( point * 24 ) + ( octant * 3 ) + axis];
+					var texel = ( ( ( ( axis * CountZ ) + z ) * across ) + ( y * CountX ) + x ) * 4;
+
+					Walls[texel + channel] |= (byte)( cx == 0 ? value : value << 4 );
+				}
+			}
+		}
 	}
 
 	//One baked lamp's light at a point over pi, as a surface facing it has it, shadowed across the lamp's width
@@ -248,7 +370,7 @@ internal sealed class BakeVolume
 	}
 
 	//Points that were inside something take the mean of their answered neighbours, a ring at a time.
-	private void Fill( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask, bool[] valid )
+	private void Fill( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask, Vec4[] sky, bool[] valid )
 	{
 		for ( var ring = 0; ring < 8; ++ring )
 		{
@@ -265,6 +387,7 @@ internal sealed class BakeVolume
 				var c = Vec3.Zero;
 				Vec3 r = Vec3.Zero, g = Vec3.Zero, b = Vec3.Zero;
 				var m = Vec4.Zero;
+				var open = Vec4.Zero;
 				var n = 0;
 
 				for ( var dz = -1; dz <= 1; ++dz )
@@ -285,6 +408,7 @@ internal sealed class BakeVolume
 					g += leanG[near];
 					b += leanB[near];
 					if ( mask is not null ) m += mask[near];
+					open += sky[near];
 					n++;
 				}
 
@@ -295,6 +419,7 @@ internal sealed class BakeVolume
 				leanG[index] = g / n;
 				leanB[index] = b / n;
 				if ( mask is not null ) mask[index] = m / n;
+				sky[index] = open / n;
 
 				grown[index] = true;
 				any = true;
@@ -306,7 +431,7 @@ internal sealed class BakeVolume
 	}
 
 	//Into three pictures, one a colour, the lattice's layers side by side - see BakedVolume in frame.slang
-	private void Encode( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask )
+	private void Encode( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask, Vec4[] sky )
 	{
 		var count = CountX * CountY * CountZ;
 
@@ -314,6 +439,7 @@ internal sealed class BakeVolume
 		Green = new Half[count * 4];
 		Blue = new Half[count * 4];
 		Mask = mask is null ? null : new byte[count * 4];
+		Sky = new Half[count * 4];
 
 		for ( var z = 0; z < CountZ; ++z )
 		for ( var y = 0; y < CountY; ++y )
@@ -327,6 +453,7 @@ internal sealed class BakeVolume
 			Put( Red, texel, constant[index].X, leanR[index] );
 			Put( Green, texel, constant[index].Y, leanG[index] );
 			Put( Blue, texel, constant[index].Z, leanB[index] );
+			Put( Sky, texel, sky[index].W, new Vec3( sky[index].X, sky[index].Y, sky[index].Z ) );
 
 			if ( Mask is null ) continue;
 

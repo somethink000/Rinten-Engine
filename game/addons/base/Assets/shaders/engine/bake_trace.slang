@@ -51,6 +51,11 @@ uint NodeCount() { return Word( 17 ); }
 uint EmittersAt() { return Word( 18 ); }   //Per glow: world triangle, power so far, corner, two edges
 uint EmitterCount() { return Word( 19 ); }
 uint GlowAt() { return Word( 20 ); }       //Per world triangle: TowardsGlow's chance per square metre
+uint Pass() { return Word( 21 ); }         //Nought the main bake, else the glow group baked alone
+uint GroupsAt() { return Word( 22 ); }     //Per world triangle: its glow group; no table where none has one
+
+//Whether a triangle's glow is in this pass - BakeScene.Surface
+bool GlowsNow( uint t ) { return ( GroupsAt() == 0u ? 0u : Word( GroupsAt() + t ) ) == Pass(); }
 
 static const uint MaterialWords = 24;
 static const uint LightWords = 24;
@@ -462,7 +467,7 @@ Surface SurfaceOf( Hit hit, float3 origin, float3 direction )
 	float3 albedo = texel.xyz * Float3( at ) * tint * vertex;
 	s.albedo = min( albedo * Float( at + 4 ) * AlbedoBoost(), float3( 0.95, 0.95, 0.95 ) );
 
-	s.emission = GlowOf( at, flags, uv, texel );
+	s.emission = GlowsNow( t ) ? GlowOf( at, flags, uv, texel ) : float3( 0.0, 0.0, 0.0 );
 
 	return s;
 }
@@ -847,9 +852,11 @@ float3 GlowDirect( float3 position, float3 normal, float3 geometric, inout Rando
 }
 
 //Density: the caller's chance per steradian of this direction when it also sampled a glow, else nought
-float3 Arriving( float3 origin, float3 direction, float density, inout Random random, out bool inside )
+//Escaped: the ray left straight to the sky, which the frame lights by the kept visibility - BakeScene.Arriving
+float3 Arriving( float3 origin, float3 direction, float density, inout Random random, out bool inside, out bool escaped )
 {
 	inside = false;
+	escaped = false;
 
 	float3 carried = float3( 1.0, 1.0, 1.0 );
 	float3 gathered = float3( 0.0, 0.0, 0.0 );
@@ -861,7 +868,10 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 		Hit hit;
 
 		if ( !Nearest( origin, direction, 1e6, hit ) )
-			return gathered + ( carried * Environment( direction ) );
+		{
+			escaped = bounce == 0u;
+			return escaped ? gathered : gathered + ( carried * Environment( direction ) );
+		}
 
 		Surface s = SurfaceOf( hit, origin, direction );
 
@@ -931,10 +941,11 @@ void main( uint3 id : SV_DispatchThreadID )
 	float3 n = g_texels[( texel * 3 ) + 1].xyz;
 	float3 g = g_texels[( texel * 3 ) + 2].xyz;
 
-	float4 sumSquares = g_sums[( texel * 4 ) + 0];
-	float4 wayWeight = g_sums[( texel * 4 ) + 1];
-	float4 insideSpare = g_sums[( texel * 4 ) + 2];
-	float4 through = g_sums[( texel * 4 ) + 3];
+	float4 sumSquares = g_sums[( texel * 5 ) + 0];
+	float4 wayWeight = g_sums[( texel * 5 ) + 1];
+	float4 insideSpare = g_sums[( texel * 5 ) + 2];
+	float4 through = g_sums[( texel * 5 ) + 3];
+	float4 open = g_sums[( texel * 5 ) + 4];
 
 	//Which light each channel of the mask is here.
 	uint masked[4];
@@ -968,7 +979,10 @@ void main( uint3 id : SV_DispatchThreadID )
 		float density = EmitterCount() > 0u ? dot( axis, direction ) * InvPi : 0.0;
 
 		bool behind;
-		float3 arriving = Arriving( Offset( p, g, direction ), direction, density, random, behind );
+		bool escaped;
+		float3 arriving = Arriving( Offset( p, g, direction ), direction, density, random, behind, escaped );
+
+		if ( escaped ) open += float4( direction, 1.0 );
 
 		float3 one = direct + arriving;
 		float luma = Luma( one );
@@ -978,10 +992,11 @@ void main( uint3 id : SV_DispatchThreadID )
 		insideSpare.x += behind ? 1.0 : 0.0;
 	}
 
-	g_sums[( texel * 4 ) + 0] = sumSquares;
-	g_sums[( texel * 4 ) + 1] = wayWeight;
-	g_sums[( texel * 4 ) + 2] = insideSpare;
-	g_sums[( texel * 4 ) + 3] = through;
+	g_sums[( texel * 5 ) + 0] = sumSquares;
+	g_sums[( texel * 5 ) + 1] = wayWeight;
+	g_sums[( texel * 5 ) + 2] = insideSpare;
+	g_sums[( texel * 5 ) + 3] = through;
+	g_sums[( texel * 5 ) + 4] = open;
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------
@@ -996,10 +1011,11 @@ void ProbeCs( uint3 id : SV_DispatchThreadID )
 	uint point = g_first + id.x;
 	float3 at = g_texels[point].xyz;
 
-	float4 sum = g_sums[( point * 4 ) + 0];
-	float4 red = g_sums[( point * 4 ) + 1];
-	float4 green = g_sums[( point * 4 ) + 2];
-	float4 blue = g_sums[( point * 4 ) + 3];
+	float4 sum = g_sums[( point * 5 ) + 0];
+	float4 red = g_sums[( point * 5 ) + 1];
+	float4 green = g_sums[( point * 5 ) + 2];
+	float4 blue = g_sums[( point * 5 ) + 3];
+	float4 open = g_sums[( point * 5 ) + 4];
 
 	uint across = max( g_across, 2u );
 
@@ -1019,7 +1035,10 @@ void ProbeCs( uint3 id : SV_DispatchThreadID )
 		float3 direction = AnyDirection( u, v );
 
 		bool behind;
-		float3 arriving = Arriving( at, direction, glowing, random, behind );
+		bool escaped;
+		float3 arriving = Arriving( at, direction, glowing, random, behind, escaped );
+
+		if ( escaped ) open += float4( direction, 1.0 );
 
 		sum.xyz += arriving;
 		red.xyz += direction * arriving.x;
@@ -1040,8 +1059,9 @@ void ProbeCs( uint3 id : SV_DispatchThreadID )
 		}
 	}
 
-	g_sums[( point * 4 ) + 0] = sum;
-	g_sums[( point * 4 ) + 1] = red;
-	g_sums[( point * 4 ) + 2] = green;
-	g_sums[( point * 4 ) + 3] = blue;
+	g_sums[( point * 5 ) + 0] = sum;
+	g_sums[( point * 5 ) + 1] = red;
+	g_sums[( point * 5 ) + 2] = green;
+	g_sums[( point * 5 ) + 3] = blue;
+	g_sums[( point * 5 ) + 4] = open;
 }

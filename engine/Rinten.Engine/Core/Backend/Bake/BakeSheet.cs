@@ -25,14 +25,39 @@ internal sealed class BakeSheet
 	/// <summary>Four halves a texel: which way the sky is open xyz, how much is seen w - see SkyLit.</summary>
 	public Half[] Sky;
 
+	/// <summary>The light's first band over the light, half size, four bytes a texel in runs of red, green, blue.</summary>
+	public byte[] Band;
+
 	//One entry an atlas texel while baking.
 	private Vec3[] position;
 	private Vec3[] normal;
 	private Vec3[] geometric;
+
+	//How far the surface moves across one texel and down one, in the world: what each sample spreads over, so a
+	//texel is the mean over its area rather than its centre and a shadow's edge falls across it, not between texels
+	private Vec3[] across;
+	private Vec3[] down;
+
+	//How far each way from its centre a texel's spread may go and stay on its own face: least and most across x y,
+	//down z w, in texels - a sample past a box's edge is in the air beside it, and lights the edge as if it saw round
+	private System.Numerics.Vector4[] reach;
 	private float[] owned;        //Distance from the texel's centre to its triangle, in texels; +inf where none
 	private int[] ownerOf;        //Receiver whose square it is in, -1 where none
 
+	//What each texel's surface reflects, for the denoiser to tell one material from another - see BakeDenoise
+	private Vec3[] albedo;
+
+	//Texels whose centre was moved out of something (Unocclude): the denoiser takes nothing from them
+	private bool[] pushed;
+
+	//The light that bounced, which the filter smooths, and what came straight from the lights, which it leaves
 	private Vec3[] light;
+	private Vec3[] direct;
+
+	//Their first bands, three a texel - red, green, blue - each the way the light came, by how much: the irradiance at a
+	//normal n is the light plus the band's dot with n less the face's (L1 lightmaps)
+	private Vec3[] bounceBand;
+	private Vec3[] straightBand;
 	private Vec3[] towards;
 	private float[] variance;
 	private bool[] valid;
@@ -57,6 +82,10 @@ internal sealed class BakeSheet
 			var world = 0.0f;
 			var sheet = 0.0f;
 
+			//Metres a unit of the unwrap spans in its longer direction, weighed by area: a box stretched to a pillar
+			//keeps its square unwrap, and the square must be big enough for the long way, not the mean
+			var stretched = 0.0f;
+
 			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
 			{
 				var a = scene.Corners[t * 3];
@@ -69,11 +98,28 @@ internal sealed class BakeSheet
 				var ub = scene.Uv1[b];
 				var uc = scene.Uv1[c];
 
-				sheet += MathF.Abs( ( ( ub.X - ua.X ) * ( uc.Y - ua.Y ) ) - ( ( uc.X - ua.X ) * ( ub.Y - ua.Y ) ) ) * 0.5f;
+				var e1 = scene.Positions[b] - scene.Positions[a];
+				var e2 = scene.Positions[c] - scene.Positions[a];
+				var d1 = ub - ua;
+				var d2 = uc - ua;
+				var turn = ( d1.X * d2.Y ) - ( d2.X * d1.Y );
+				var area = Vec3.Cross( e1, e2 ).Length() * 0.5f;
+
+				sheet += MathF.Abs( turn ) * 0.5f;
+
+				if ( MathF.Abs( turn ) > 1e-10f )
+				{
+					var alongU = ( ( e1 * d2.Y ) - ( e2 * d1.Y ) ) / turn;
+					var alongV = ( ( e2 * d1.X ) - ( e1 * d2.X ) ) / turn;
+					stretched += MathF.Max( alongU.Length(), alongV.Length() ) * area;
+				}
 			}
 
-			//The unwrap fills some part of its square; the square is as big as makes that part carry the density.
-			wanted[r] = sheet > 1e-6f ? MathF.Sqrt( world / sheet ) : MathF.Sqrt( world );
+			//The unwrap fills some part of its square; the square is as big as makes that part carry the density,
+			//and its long way too - within four times what the area alone asks
+			var even = sheet > 1e-6f ? MathF.Sqrt( world / sheet ) : MathF.Sqrt( world );
+			var longest = world > 1e-8f ? stretched / world : even;
+			wanted[r] = Math.Clamp( longest, even, even * 4.0f );
 		}
 
 		for ( var attempt = 0; attempt < 48; ++attempt )
@@ -141,6 +187,10 @@ internal sealed class BakeSheet
 		position = new Vec3[count];
 		normal = new Vec3[count];
 		geometric = new Vec3[count];
+		across = new Vec3[count];
+		down = new Vec3[count];
+		reach = new System.Numerics.Vector4[count];
+		albedo = new Vec3[count];
 		owned = new float[count];
 		ownerOf = new int[count];
 
@@ -157,7 +207,109 @@ internal sealed class BakeSheet
 
 			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
 				Triangle( scene, receiver, t, side );
+
+			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
+				Covers( scene, receiver, t, side );
 		}
+
+		Unocclude( scene );
+	}
+
+	//Unocclude: four rays along a texel's face, and where one finds the back of something - a wall standing on the
+	//floor, the inside of a pillar - within the texel, its centre goes out past it, so it measures the open side
+	private void Unocclude( BakeScene scene )
+	{
+		var count = Width * Height;
+		pushed = new bool[count];
+
+		//How far the rays look for the mark, in texels
+		const float Look = 4.0f;
+
+		Parallel.For( 0, count, at =>
+		{
+			if ( float.IsPositiveInfinity( owned[at] ) ) return;
+
+			var face = geometric[at];
+			if ( face == Vec3.Zero ) return;
+
+			var size = MathF.Max( across[at].Length(), down[at].Length() );
+			if ( size <= 1e-6f ) return;
+
+			var from = position[at] + ( face * BakeScene.Lift );
+			var u = Vec3.Normalize( across[at].LengthSquared() > 1e-12f ? across[at] : Vec3.Cross( face, Vec3.UnitY ) );
+			var v = Vec3.Normalize( Vec3.Cross( face, u ) );
+
+			Span<Vec3> ways = [u, v, -u, -v];
+			var nearest = float.MaxValue;
+			var moved = position[at];
+
+			foreach ( var way in ways )
+			{
+				if ( !scene.Bvh.Nearest( from, way, size * Look, out var hit ) ) continue;
+
+				var facing = scene.Facing[hit.Triangle];
+				if ( Vec3.Dot( way, facing ) <= 0.0f ) continue;
+
+				pushed[at] = true;
+
+				if ( hit.Distance <= size && hit.Distance < nearest )
+				{
+					nearest = hit.Distance;
+					moved = from + ( way * hit.Distance ) + ( facing * BakeScene.Lift * 10.0f );
+				}
+			}
+
+			position[at] = moved;
+		} );
+	}
+
+	//Widens the reach of the texels of a triangle's face to where this triangle covers them
+	private void Covers( BakeScene scene, BakeReceiver receiver, int t, int side )
+	{
+		var scale = receiver.Side;
+		var origin = new Vec2( receiver.X, receiver.Y );
+
+		var a = ( Vec2.Clamp( scene.Uv1[scene.Corners[t * 3]], Vec2.Zero, Vec2.One ) * scale ) + origin;
+		var b = ( Vec2.Clamp( scene.Uv1[scene.Corners[( t * 3 ) + 1]], Vec2.Zero, Vec2.One ) * scale ) + origin;
+		var c = ( Vec2.Clamp( scene.Uv1[scene.Corners[( t * 3 ) + 2]], Vec2.Zero, Vec2.One ) * scale ) + origin;
+
+		var x0 = Math.Max( (int)MathF.Floor( MathF.Min( a.X, MathF.Min( b.X, c.X ) ) ) - 1, 0 );
+		var y0 = Math.Max( (int)MathF.Floor( MathF.Min( a.Y, MathF.Min( b.Y, c.Y ) ) ) - 1, 0 );
+		var x1 = Math.Min( (int)MathF.Ceiling( MathF.Max( a.X, MathF.Max( b.X, c.X ) ) ) + 1, side - 1 );
+		var y1 = Math.Min( (int)MathF.Ceiling( MathF.Max( a.Y, MathF.Max( b.Y, c.Y ) ) ) + 1, side - 1 );
+
+		Span<float> steps = [-0.5f, -0.25f, 0.25f, 0.5f];
+
+		for ( var y = y0; y <= y1; ++y )
+		{
+			for ( var x = x0; x <= x1; ++x )
+			{
+				var at = ( y * side ) + x;
+				if ( float.IsPositiveInfinity( owned[at] ) || Vec3.Dot( geometric[at], scene.Facing[t] ) < 0.99f ) continue;
+
+				var centre = new Vec2( x + 0.5f, y + 0.5f );
+				var r = reach[at];
+
+				foreach ( var s in steps )
+				{
+					if ( Inside( centre + new Vec2( s, 0.0f ), a, b, c ) ) { r.X = MathF.Min( r.X, s ); r.Y = MathF.Max( r.Y, s ); }
+					if ( Inside( centre + new Vec2( 0.0f, s ), a, b, c ) ) { r.Z = MathF.Min( r.Z, s ); r.W = MathF.Max( r.W, s ); }
+				}
+
+				reach[at] = r;
+			}
+		}
+	}
+
+	//Whether a point is on a triangle, all in texels, with a hair's slack so a shared edge counts for both
+	private static bool Inside( Vec2 p, Vec2 a, Vec2 b, Vec2 c )
+	{
+		var d1 = ( ( b.X - a.X ) * ( p.Y - a.Y ) ) - ( ( b.Y - a.Y ) * ( p.X - a.X ) );
+		var d2 = ( ( c.X - b.X ) * ( p.Y - b.Y ) ) - ( ( c.Y - b.Y ) * ( p.X - b.X ) );
+		var d3 = ( ( a.X - c.X ) * ( p.Y - c.Y ) ) - ( ( a.Y - c.Y ) * ( p.X - c.X ) );
+		const float Slack = 1e-3f;
+
+		return ( d1 >= -Slack && d2 >= -Slack && d3 >= -Slack ) || ( d1 <= Slack && d2 <= Slack && d3 <= Slack );
 	}
 
 	private void Triangle( BakeScene scene, BakeReceiver receiver, int t, int side )
@@ -189,6 +341,13 @@ internal sealed class BakeSheet
 		var area = ( ( b.X - a.X ) * ( c.Y - a.Y ) ) - ( ( c.X - a.X ) * ( b.Y - a.Y ) );
 		if ( MathF.Abs( area ) < 1e-12f ) return;
 
+		//The world's change a texel across and down the square, out of the triangle's corners
+		var pa = scene.Interpolate( scene.Positions, t, 0.0f, 0.0f );
+		var ab = scene.Interpolate( scene.Positions, t, 1.0f, 0.0f ) - pa;
+		var ac = scene.Interpolate( scene.Positions, t, 0.0f, 1.0f ) - pa;
+		var perX = Short( ( ( ab * ( c.Y - a.Y ) ) - ( ac * ( b.Y - a.Y ) ) ) / area );
+		var perY = Short( ( ( ac * ( b.X - a.X ) ) - ( ab * ( c.X - a.X ) ) ) / area );
+
 		for ( var y = y0; y <= y1; ++y )
 		{
 			for ( var x = x0; x <= x1; ++x )
@@ -214,8 +373,89 @@ internal sealed class BakeSheet
 				var length = n.Length();
 				normal[at] = length > 1e-8f ? n / length : scene.Facing[t];
 				geometric[at] = scene.Facing[t];
+				albedo[at] = scene.AlbedoAt( t, wb, wc );
+				across[at] = perX;
+				down[at] = perY;
 			}
 		}
+	}
+
+	//Which way a texel's face looks, as one of 64 bins over the octahedron, over 64 - what the frame's filter keeps its
+	//taps to, so it does not reach into the face beside it where an unwrap packs faces edge to edge (SheetFaces)
+	private static float FaceOf( Vec3 facing )
+	{
+		var sum = MathF.Abs( facing.X ) + MathF.Abs( facing.Y ) + MathF.Abs( facing.Z );
+		if ( sum < 1e-6f ) return 1.0f / 64.0f;
+
+		var x = facing.X / sum;
+		var y = facing.Y / sum;
+
+		if ( facing.Z < 0.0f )
+		{
+			var fx = ( 1.0f - MathF.Abs( y ) ) * ( x >= 0.0f ? 1.0f : -1.0f );
+			var fy = ( 1.0f - MathF.Abs( x ) ) * ( y >= 0.0f ? 1.0f : -1.0f );
+			x = fx;
+			y = fy;
+		}
+
+		var bx = Math.Clamp( (int)( ( ( x * 0.5f ) + 0.5f ) * 8.0f ), 0, 7 );
+		var by = Math.Clamp( (int)( ( ( y * 0.5f ) + 0.5f ) * 8.0f ), 0, 7 );
+
+		return ( ( by * 8 ) + bx + 1 ) / 64.0f;
+	}
+
+	//The band at half the sheet's size, each colour over that colour's light, as L1 is packed - the way the light
+	//leans is broad, and a byte of it is plenty: a quarter of the memory of a full one in halves, twice over
+	private void EncodeBand()
+	{
+		var half = Math.Max( Width / 2, 1 );
+		var rows = Math.Max( Height / 2, 1 );
+		Band = new byte[half * rows * 12];
+
+		Span<Vec3> bands = stackalloc Vec3[3];
+
+		for ( var y = 0; y < rows; ++y )
+		{
+			for ( var x = 0; x < half; ++x )
+			{
+				bands.Clear();
+				var lit = Vec3.Zero;
+
+				for ( var k = 0; k < 4; ++k )
+				{
+					var xx = Math.Min( ( x * 2 ) + ( k & 1 ), Width - 1 );
+					var yy = Math.Min( ( y * 2 ) + ( k >> 1 ), Height - 1 );
+					var at = ( yy * Width ) + xx;
+					if ( ownerOf[at] < 0 ) continue;
+
+					lit += Vec3.Max( light[at] + direct[at], Vec3.Zero );
+					for ( var c = 0; c < 3; ++c ) bands[c] += bounceBand[( at * 3 ) + c] + straightBand[( at * 3 ) + c];
+				}
+
+				ReadOnlySpan<float> each = [lit.X, lit.Y, lit.Z];
+
+				for ( var c = 0; c < 3; ++c )
+				{
+					var over = bands[c] / MathF.Max( each[c], 1e-4f );
+					var to = ( ( y * half * 3 ) + ( c * half ) + x ) * 4;
+
+					Band[to] = Byte( over.X );
+					Band[to + 1] = Byte( over.Y );
+					Band[to + 2] = Byte( over.Z );
+					Band[to + 3] = 128;
+				}
+			}
+		}
+	}
+
+	//Minus two to two as a byte, nought at its middle - BakedSheet reads it back the same way
+	private static byte Byte( float value ) => (byte)Math.Clamp( MathF.Round( ( ( value * 0.25f ) + 0.5f ) * 255.0f ), 0.0f, 255.0f );
+
+	//A texel's step held to half a metre, so a sliver of a triangle stretched over its square does not spread far
+	private static Vec3 Short( Vec3 step )
+	{
+		var length = step.Length();
+		return length > 0.5f ? step * ( 0.5f / length ) : step;
 	}
 
 	//The point of a triangle nearest a point, all in texels.
@@ -262,14 +502,19 @@ internal sealed class BakeSheet
 		var texels = new List<int>();
 		for ( var i = 0; i < count; ++i ) if ( !float.IsPositiveInfinity( owned[i] ) ) texels.Add( i );
 
-		if ( !BakeGpu.Trace( scene, position, normal, geometric, texels, samples, progress, cancel, out var sums ) )
+		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, progress, cancel, out var sums ) )
 			return false;
 
 		light = new Vec3[count];
+		direct = new Vec3[count];
+		bounceBand = new Vec3[count * 3];
+		straightBand = new Vec3[count * 3];
 		towards = new Vec3[count];
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
+
+		Span<Vec3> bands = stackalloc Vec3[6];
 
 		for ( var i = 0; i < texels.Count; ++i )
 		{
@@ -280,17 +525,13 @@ internal sealed class BakeSheet
 			var squares = sums[o + 3];
 			var way = new Vec3( sums[o + 4], sums[o + 5], sums[o + 6] );
 			var weight = sums[o + 7];
-			var inside = sums[o + 8];
+			var inside = (int)sums[o + 8];
+			var straight = new Vec3( sums[o + 9], sums[o + 10], sums[o + 11] );
 
-			var mean = sum / samples;
-			var meanLuma = BakeMath.Luma( mean );
+			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 16 + ( k * 4 )], sums[o + 17 + ( k * 4 )], sums[o + 18 + ( k * 4 )] );
 
-			light[at] = mean;
-			towards[at] = weight > 1e-8f ? way / weight : Vec3.Zero;
-			variance[at] = MathF.Max( ( squares / samples ) - ( meanLuma * meanLuma ), 0.0f ) / samples;
-			valid[at] = inside < samples * 0.35f;
-
-			sky[at] = SkyOf( new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), samples, scene.SkyStrength );
+			End( at, sum, straight, squares, way, weight, inside, samples, bands );
+			sky[at] = SkyOf( new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), Math.Max( samples - inside, 1 ), scene.SkyStrength );
 		}
 
 		return true;
@@ -302,6 +543,9 @@ internal sealed class BakeSheet
 		var count = Width * Height;
 
 		light = new Vec3[count];
+		direct = new Vec3[count];
+		bounceBand = new Vec3[count * 3];
+		straightBand = new Vec3[count * 3];
 		towards = new Vec3[count];
 		variance = new float[count];
 		valid = new bool[count];
@@ -317,21 +561,23 @@ internal sealed class BakeSheet
 			var at = texels[i];
 			var random = new BakeRandom( (ulong)at * 0x9E3779B97F4A7C15ul, (ulong)at );
 
-			var p = position[at];
 			var n = normal[at];
 			var g = geometric[at];
 
 			var sum = Vec3.Zero;
+			var straight = Vec3.Zero;
 			var way = Vec3.Zero;
 			var weight = 0.0f;
 			var squares = 0.0f;
 			var inside = 0;
 			var open = Vec4.Zero;
+			Span<Vec3> bands = stackalloc Vec3[6];
 
 			for ( var s = 0; s < samples; ++s )
 			{
-				var lean = Vec3.Zero;
-				var direct = scene.Direct( p, n, g, ref random, true, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
+				//Somewhere in the texel's area that is on its face
+				var r = reach[at];
+				var p = position[at] + ( across[at] * float.Lerp( r.X, r.Y, random.Float() ) ) + ( down[at] * float.Lerp( r.Z, r.W, random.Float() ) );
 
 				var axis = n;
 				var direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
@@ -344,36 +590,73 @@ internal sealed class BakeSheet
 
 				var density = scene.Emitters.Length > 0 ? Vec3.Dot( axis, direction ) * BakeMath.InvPi : 0.0f;
 				var arriving = scene.Arriving( BakeScene.Offset( p, g, direction ), direction, density, ref random, out var behind, out var escaped );
-				if ( behind ) inside++;
+
+				//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows
+				if ( behind )
+				{
+					inside++;
+					continue;
+				}
+
 				if ( escaped ) open += new Vec4( direction, 1.0f );
 
-				var one = direct + arriving;
-				var luma = BakeMath.Luma( one );
+				var lean = Vec3.Zero;
+				var lit = scene.Direct( p, n, g, ref random, true, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
+				var luma = BakeMath.Luma( arriving );
 
-				sum += one;
+				sum += lit + arriving;
+				straight += lit;
 				squares += luma * luma;
 
-				way += lean + ( direction * BakeMath.Luma( arriving ) );
-				weight += BakeMath.Luma( direct ) + BakeMath.Luma( arriving );
+				way += lean + ( direction * luma );
+				weight += BakeMath.Luma( lit ) + luma;
+
+				bands[0] += direction * arriving.X;
+				bands[1] += direction * arriving.Y;
+				bands[2] += direction * arriving.Z;
+
+				//The lights' way, and their light as it would fall square on - see bake_trace.slang's main
+				var leaning = lean.Length();
+
+				if ( leaning > 1e-8f )
+				{
+					var l = lean / leaning;
+					var square = lit / MathF.Max( Vec3.Dot( n, l ), 0.1f );
+
+					bands[3] += l * square.X;
+					bands[4] += l * square.Y;
+					bands[5] += l * square.Z;
+				}
 			}
 
-			var mean = sum / samples;
-			var meanLuma = BakeMath.Luma( mean );
-
-			light[at] = mean;
-			towards[at] = weight > 1e-8f ? way / weight : Vec3.Zero;
-
-			//How far this texel's mean can be trusted - what the filter below is allowed to smooth over.
-			variance[at] = MathF.Max( ( squares / samples ) - ( meanLuma * meanLuma ), 0.0f ) / samples;
-
-			//A texel whose rays mostly came out of the back of something is under a wall or inside a pillar,
-			//and what it measured is the dark inside of that. It is filled from its neighbours instead.
-			valid[at] = inside < samples * 0.35f;
-
-			sky[at] = SkyOf( open, samples, scene.SkyStrength );
+			End( at, sum, straight, squares, way, weight, inside, samples, bands );
+			sky[at] = SkyOf( open, Math.Max( samples - inside, 1 ), scene.SkyStrength );
 
 			progress.Step();
 		} );
+	}
+
+	//A texel out of what its samples summed: the bounce apart from the straight light, how far the bounce's mean can be
+	//trusted (what the filter may smooth over), and whether enough of the texel was outside things to keep
+	private void End( int at, Vec3 sum, Vec3 straight, float squares, Vec3 way, float weight, int inside, int samples, ReadOnlySpan<Vec3> bands )
+	{
+		var kept = Math.Max( samples - inside, 1 );
+
+		for ( var c = 0; c < 3; ++c )
+		{
+			bounceBand[( at * 3 ) + c] = bands[c] / kept;
+			straightBand[( at * 3 ) + c] = bands[3 + c] / kept;
+		}
+
+		direct[at] = straight / kept;
+		light[at] = ( sum - straight ) / kept;
+		towards[at] = weight > 1e-8f ? way / weight : Vec3.Zero;
+
+		var meanLuma = BakeMath.Luma( light[at] );
+		variance[at] = MathF.Max( ( squares / kept ) - ( meanLuma * meanLuma ), 0.0f ) / kept;
+
+		//Mostly under a wall or inside a pillar: filled from its neighbours instead
+		valid[at] = inside < samples * 0.75f;
 	}
 
 	//Escaping rays' direction sum and count into the way the sky is open and how much of it, at the bake's sky strength
@@ -389,6 +672,9 @@ internal sealed class BakeSheet
 	public void Denoise( BakeScene scene, float strength )
 	{
 		if ( strength <= 0.0f ) return;
+
+		//Joint non-local means on the card, a square at a time; the filter below where it cannot
+		if ( DenoiseOnCard( scene ) ) return;
 
 		var count = Width * Height;
 		var metres = new float[scene.Receivers.Count];
@@ -517,13 +803,62 @@ internal sealed class BakeSheet
 		variance = fromVariance;
 	}
 
-	/// <summary>Fills unanswered texels from answered ones beside them, a ring at a time, for clean edges.</summary>
+	//Each receiver's square with its gutter through BakeDenoise; false where the card would not take one
+	private bool DenoiseOnCard( BakeScene scene )
+	{
+		foreach ( var receiver in scene.Receivers )
+		{
+			var x0 = Math.Max( receiver.X - Gutter, 0 );
+			var y0 = Math.Max( receiver.Y - Gutter, 0 );
+			var w = Math.Min( receiver.X + receiver.Side + Gutter, Width ) - x0;
+			var h = Math.Min( receiver.Y + receiver.Side + Gutter, Height ) - y0;
+
+			var part = new Vec3[w * h];
+			var partBands = new Vec3[w * h * 3];
+			var guide = new System.Numerics.Vector4[w * h];
+			var facing = new Vec3[w * h];
+
+			for ( var y = 0; y < h; ++y )
+				for ( var x = 0; x < w; ++x )
+				{
+					var at = ( ( y0 + y ) * Width ) + x0 + x;
+					var i = ( y * w ) + x;
+					var mine = !float.IsPositiveInfinity( owned[at] ) && ownerOf[at] == scene.Receivers.IndexOf( receiver );
+
+					part[i] = light[at];
+					for ( var c = 0; c < 3; ++c ) partBands[( i * 3 ) + c] = bounceBand[( at * 3 ) + c];
+					guide[i] = new System.Numerics.Vector4( albedo[at], valid[at] && !pushed[at] ? 0.0f : 1.0f );
+					facing[i] = mine ? normal[at] : Vec3.Zero;
+				}
+
+			if ( !BakeDenoise.Run( part, partBands, guide, facing, w, h, CancellationToken.None ) ) return false;
+
+			for ( var y = 0; y < h; ++y )
+			{
+				for ( var x = 0; x < w; ++x )
+				{
+					var i = ( y * w ) + x;
+					if ( facing[i] == Vec3.Zero ) continue;
+
+					var at = ( ( y0 + y ) * Width ) + x0 + x;
+					light[at] = part[i];
+					for ( var c = 0; c < 3; ++c ) bounceBand[( at * 3 ) + c] = partBands[( i * 3 ) + c];
+				}
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>Fills unanswered texels from answered ones of the same face beside them, a ring at a time.</summary>
 	public void Dilate()
 	{
 		var count = Width * Height;
 		var known = new bool[count];
 
 		for ( var i = 0; i < count; ++i ) known[i] = valid[i] && !float.IsPositiveInfinity( owned[i] );
+
+		Span<Vec3> bands = stackalloc Vec3[6];
 
 		for ( var ring = 0; ring < Gutter + 6; ++ring )
 		{
@@ -538,9 +873,28 @@ internal sealed class BakeSheet
 					if ( known[at] || ownerOf[at] < 0 ) continue;
 
 					var sum = Vec3.Zero;
+					var straight = Vec3.Zero;
 					var ways = Vec3.Zero;
 					var skies = Vec4.Zero;
+					bands.Clear();
 					var n = 0;
+
+					//Only from the face it carries on: a box's faces sit side by side in its square, and a lit face's
+					//light filled into a dark one's border is a bright line down the edge once the frame filters it
+					var face = geometric[at];
+
+					if ( face == Vec3.Zero )
+					{
+						for ( var i = 0; i < 9 && face == Vec3.Zero; ++i )
+						{
+							var xx = x + ( i % 3 ) - 1;
+							var yy = y + ( i / 3 ) - 1;
+							if ( xx < 0 || yy < 0 || xx >= Width || yy >= Height ) continue;
+
+							var near = ( yy * Width ) + xx;
+							if ( known[near] && ownerOf[near] == ownerOf[at] ) face = geometric[near];
+						}
+					}
 
 					for ( var dy = -1; dy <= 1; ++dy )
 					{
@@ -553,8 +907,16 @@ internal sealed class BakeSheet
 
 							var near = ( yy * Width ) + xx;
 							if ( !known[near] || ownerOf[near] != ownerOf[at] ) continue;
+							if ( face != Vec3.Zero && Vec3.Dot( geometric[near], face ) < 0.9f ) continue;
 
 							sum += light[near];
+							straight += direct[near];
+
+							for ( var c = 0; c < 3; ++c )
+							{
+								bands[c] += bounceBand[( near * 3 ) + c];
+								bands[3 + c] += straightBand[( near * 3 ) + c];
+							}
 							ways += towards[near];
 							skies += sky[near];
 							n++;
@@ -564,11 +926,19 @@ internal sealed class BakeSheet
 					if ( n == 0 ) continue;
 
 					light[at] = sum / n;
+					direct[at] = straight / n;
+
+					for ( var c = 0; c < 3; ++c )
+					{
+						bounceBand[( at * 3 ) + c] = bands[c] / n;
+						straightBand[( at * 3 ) + c] = bands[3 + c] / n;
+					}
 					towards[at] = ways / n;
 					sky[at] = skies / n;
 
-					//Its normal from the same neighbours, for the directions below.
+					//Its normal from the same neighbours, for the directions below; its face for the next ring
 					if ( float.IsPositiveInfinity( owned[at] ) ) normal[at] = Vec3.Zero;
+					geometric[at] = face;
 
 					grown[at] = true;
 					any = true;
@@ -588,15 +958,16 @@ internal sealed class BakeSheet
 		Light = new Half[count * 4];
 		Ways = new Half[count * 4];
 		Sky = new Half[count * 4];
+		EncodeBand();
 
 		for ( var i = 0; i < count; ++i )
 		{
-			var l = Vec3.Max( light[i], Vec3.Zero );
+			var l = Vec3.Max( light[i] + direct[i], Vec3.Zero );
 
 			Light[( i * 4 ) + 0] = (Half)Math.Min( l.X, 60000.0f );
 			Light[( i * 4 ) + 1] = (Half)Math.Min( l.Y, 60000.0f );
 			Light[( i * 4 ) + 2] = (Half)Math.Min( l.Z, 60000.0f );
-			Light[( i * 4 ) + 3] = (Half)( ownerOf[i] >= 0 ? 1.0f : 0.0f );
+			Light[( i * 4 ) + 3] = (Half)( ownerOf[i] >= 0 ? FaceOf( geometric[i] ) : 0.0f );
 
 			var way = towards[i];
 			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );

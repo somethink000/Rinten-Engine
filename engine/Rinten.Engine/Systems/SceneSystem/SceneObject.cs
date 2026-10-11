@@ -46,7 +46,7 @@ public partial class SceneObject : IHandle
 	//The attributes if any were ever asked for, without asking - for the renderer, which only reads.
 	internal RenderAttributes AttributesIfAny => _attributes;
 
-	//Whether this object carries attributes - the renderer's cache keeps only what has none, since attributes have no version to compare.
+	//Whether this object carries attributes - the renderer's cache keeps only what has none, as they have no version
 	internal bool HasAttributes => _attributes is { } held && ( held.Count > 0 || held.Combos.Count > 0 );
 
 	//Bumped on any change to how it is drawn, so the renderer table can skip unchanged ones
@@ -82,7 +82,7 @@ public partial class SceneObject : IHandle
 	private ulong _meshGroupMask = ulong.MaxValue;
 	private int _meshIndex = -1;
 
-	/// <summary>Draw only this one mesh of the model, by index, whatever the body groups say. Minus one is all of them. What a particle standing for one piece of a broken model uses - see ParticleModelRenderer.</summary>
+	/// <summary>Draws only this mesh of the model, whatever the body groups say; minus one is all.</summary>
 	public int MeshIndex
 	{
 		get => _meshIndex;
@@ -195,10 +195,10 @@ public partial class SceneObject : IHandle
 	//not a rotation, and an object that was never placed would be drawn collapsed into the origin.
 	Transform _transform = Transform.Zero;
 
-	//Incremented whenever Transform actually changes. Cheap way for consumers (e.g. the shadow cache) to detect movement without storing a transform.
+	//Incremented whenever Transform changes: consumers (the shadow cache) detect movement without keeping a transform
 	internal int TransformVersion = 1;
 
-	/// <summary>Transform of this scene object, relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> if parent is not set.</summary>
+	/// <summary>Transform relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> without one.</summary>
 	public Transform Transform
 	{
 		get => _transform;
@@ -212,7 +212,7 @@ public partial class SceneObject : IHandle
 		}
 	}
 
-	/// <summary>Rotation of this scene object, relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> if parent is not set.</summary>
+	/// <summary>Rotation relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> without one.</summary>
 	public Rotation Rotation
 	{
 		get => Transform.Rotation;
@@ -226,7 +226,7 @@ public partial class SceneObject : IHandle
 		}
 	}
 
-	/// <summary>Position of this scene object, relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> if parent is not set.</summary>
+	/// <summary>Position relative to its <see cref="Parent"/>, or <see cref="SceneWorld"/> without one.</summary>
 	[Property( "origin" )]
 	public Vector3 Position
 	{
@@ -331,7 +331,7 @@ public partial class SceneObject : IHandle
 			return;
 	}
 
-	/// <summary>Unlink given scene object as a child from this one. The child scene object will have its parent set to null. It will not be deleted.</summary>
+	/// <summary>Unlinks a child scene object: its parent becomes null, and it is not deleted.</summary>
 	public void RemoveChild( SceneObject child )
 	{
 		if ( !child.IsValid() )
@@ -348,7 +348,7 @@ public partial class SceneObject : IHandle
 			if ( _model == value ) return;
 			Touched();
 
-			//And the membership, because whether an object is walked at all turns on whether it has a model - see SceneWorld.Membership.
+			//And the membership: whether an object is walked at all turns on its having a model - see SceneWorld.Membership
 			World?.TouchMembership();
 
 			_model = value;
@@ -376,6 +376,19 @@ public partial class SceneObject : IHandle
 
 	Material _materialOverride;
 
+	//Its place in the baked atlas (xy scale, zw offset) where no ModelRenderer holds one - see MeshComponent.LightmapRect
+	internal System.Numerics.Vector4 LightmapRect
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Touched();
+		}
+	}
+
 	/// <summary>Override all materials on this object's <see cref="Model"/>.</summary>
 	public void SetMaterialOverride( Material material )
 	{
@@ -398,13 +411,13 @@ public partial class SceneObject : IHandle
 		//No-op: nothing to do here
 	}
 
-	/// <summary>Replaces all materials of the model that have the given <b>User Material Attribute</b> set to <b>"1"</b>, with given material. The system checks both the models' default material group materials and the materials of the active material group.</summary>
+	/// <summary>Replaces the model's materials whose user attribute is set to "1", in either material group.</summary>
 	public void SetMaterialOverride( Material material, string attributeName, int attributeValue = 1 )
 	{
 		//No-op: nothing to do here
 	}
 
-	/// <summary>Set material group to replace materials of the model as set up in ModelDoc. Which of the model's material groups is on it.</summary>
+	/// <summary>Which of the model's material groups (as set up in ModelDoc) is on it.</summary>
 	public string MaterialGroup { get; private set; }
 
 	public void SetMaterialGroup( string name )
@@ -418,7 +431,7 @@ public partial class SceneObject : IHandle
 
 	}
 
-	/// <summary>Whether this object may be batched with compatible objects. Different render attribute values automatically split batches; objects with equal attributes can still batch together.</summary>
+	/// <summary>Whether this may be batched with compatible objects; differing attribute values split batches.</summary>
 	public bool Batchable
 	{
 		get => _batchable;
@@ -493,7 +506,7 @@ public partial class SceneObject : IHandle
 			set => SetFlag( Rendering.SceneObjectFlags.CastShadows, value );
 		}
 
-		/// <summary>Whether this is here for a moment rather than part of the world - see <see cref="Rendering.SceneObjectFlags.NeverStill"/>.</summary>
+		/// <summary>Whether this is here for a moment - see <see cref="Rendering.SceneObjectFlags.NeverStill"/>.</summary>
 		public bool NeverStill
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.NeverStill );
@@ -532,7 +545,7 @@ public partial class SceneObject : IHandle
 			set => SetFlag( Rendering.SceneObjectFlags.GameOverlayLayer, value );
 		}
 
-		/// <summary>Don't render in the opaque/translucent game passes. This is useful when you want to only render in the Bloom layer, rather than additionally to it.</summary>
+		/// <summary>Not drawn in the opaque and translucent passes - for drawing only in the bloom layer.</summary>
 		public bool ExcludeGameLayer
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.ExcludeGameLayer );
@@ -564,7 +577,7 @@ public partial class SceneObject : IHandle
 			set => SetFlag( Rendering.SceneObjectFlags.EnvironmentMapped, value );
 		}
 
-		/// <summary>Automatically sets the "FrameBufferCopyTexture" attribute within the material. This does the same thing as Render.CopyFrameBuffer(); except automatically if the pass allows for it.</summary>
+		/// <summary>Sets the material's "FrameBufferCopyTexture" itself, as Render.CopyFrameBuffer() does.</summary>
 		public bool WantsFrameBufferCopy
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.WantsFrameBufferCopyTexture );
@@ -596,7 +609,7 @@ public partial class SceneObject : IHandle
 			set => SetFlag( Rendering.SceneObjectFlags.NoZPrepass, !value );
 		}
 
-		/// <summary>Whether this object is a static, permanent part of the world that never moves. Static objects can use cheaper rendering paths (e.g. we dont render them on dynamic shadowmaps ).</summary>
+		/// <summary>Whether this is a permanent part of the world that never moves, which cheaper paths rely on.</summary>
 		public bool IsStatic
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.StaticObject );

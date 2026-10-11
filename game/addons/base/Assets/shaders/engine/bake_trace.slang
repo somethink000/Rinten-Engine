@@ -508,6 +508,17 @@ float3 Environment( float3 d )
 static const uint LightShadows = 1u;
 static const uint LightBaked = 2u;
 
+//A lamp's light at a squared distance: its falloff to its radius, then the inverse square on - BakeScene.Spread
+float Spread( uint at, float square )
+{
+	float edge = max( Float( at + 4 ) * Float( at + 4 ), 1e-4 );
+	float near = min( square, edge );
+	float falloff = Float( at + 13 );
+	float own = 1.0 / ( falloff == 1.0 ? near : pow( near, falloff ) );
+
+	return square > edge ? own * edge / square : own;
+}
+
 //A random point on a shaped lamp and the cosine it gives off at towards a point - BakeScene.PointOn
 float3 PointOn( uint at, float3 position, inout Random random, out float cosine )
 {
@@ -580,8 +591,6 @@ float3 DirectOne( uint index, float3 position, float3 normal, float3 geometric, 
 	{
 		//BakeScene.DirectOne's shaped lamp: radiance colour over area, its falloff as the ratio to the inverse square
 		float3 centre = Float3( at + 1 ) - position;
-		float reach = length( centre ) / max( Float( at + 4 ), 1e-4 );
-		if ( reach > 1.0 ) return float3( 0.0, 0.0, 0.0 );
 
 		uint shape = Word( at + 17 );
 		float halfWidth = Float( at + 18 );
@@ -598,32 +607,21 @@ float3 DirectOne( uint index, float3 position, float3 normal, float3 geometric, 
 		aim = toPoint / distance;
 		l = aim;
 
-		float window = saturate( 1.0 - ( reach * reach * reach * reach ) );
 		float square = max( dot( centre, centre ), 0.25 * area );
-		float falloff = Float( at + 13 );
 
-		attenuation = cosine * window * window * ( falloff == 1.0 ? 1.0 : pow( square, 1.0 - falloff ) ) / max( distance * distance, 1e-4 );
+		attenuation = cosine * square * Spread( at, square ) / max( distance * distance, 1e-4 );
 	}
 	else
 	{
 		float3 lamp = Float3( at + 1 );
-		float range = Float( at + 4 );
 
 		float3 toLight = lamp - position;
 		distance = length( toLight );
 
-		if ( distance > range || distance < 1e-5 ) return float3( 0.0, 0.0, 0.0 );
+		if ( distance < 1e-5 ) return float3( 0.0, 0.0, 0.0 );
 
 		l = toLight / distance;
-
-		float reach = distance / max( range, 1e-4 );
-		float window = saturate( 1.0 - ( reach * reach * reach * reach ) );
-
-		float square = max( distance * distance, 1e-4 );
-		float falloff = Float( at + 13 );
-		float spread = falloff == 1.0 ? square : pow( square, falloff );
-
-		attenuation = window * window / max( spread, 1e-4 );
+		attenuation = Spread( at, max( distance * distance, 1e-4 ) );
 
 		if ( kind == 2u )
 		{
@@ -857,26 +855,34 @@ void main( uint3 id : SV_DispatchThreadID )
 
 	uint texel = g_first + id.x;
 
-	float3 p = g_texels[( texel * 3 ) + 0].xyz;
-	float3 n = g_texels[( texel * 3 ) + 1].xyz;
-	float3 g = g_texels[( texel * 3 ) + 2].xyz;
+	float4 centre = g_texels[( texel * 5 ) + 0];
+	float4 n = g_texels[( texel * 5 ) + 1];
+	float3 g = g_texels[( texel * 5 ) + 2].xyz;
+	float4 across = g_texels[( texel * 5 ) + 3];
+	float4 down = g_texels[( texel * 5 ) + 4];
 
-	float4 sumSquares = g_sums[( texel * 4 ) + 0];
-	float4 wayWeight = g_sums[( texel * 4 ) + 1];
-	float4 insideSpare = g_sums[( texel * 4 ) + 2];
-	float4 open = g_sums[( texel * 4 ) + 3];
+	uint at = texel * 10u;
+
+	float4 sumSquares = g_sums[at + 0u];
+	float4 wayWeight = g_sums[at + 1u];
+	float4 insideSpare = g_sums[at + 2u];
+	float4 open = g_sums[at + 3u];
+
+	//The light's first band a colour, bounced then straight - see BakeSheet.Encode
+	float3 bouncedR = g_sums[at + 4u].xyz, bouncedG = g_sums[at + 5u].xyz, bouncedB = g_sums[at + 6u].xyz;
+	float3 straightR = g_sums[at + 7u].xyz, straightG = g_sums[at + 8u].xyz, straightB = g_sums[at + 9u].xyz;
 
 	for ( uint s = 0; s < g_samples; ++s )
 	{
 		Random random;
 		random.state = Hash( texel ^ Hash( g_sampleBase + s + g_seed ) );
 
-		float3 lean = float3( 0.0, 0.0, 0.0 );
-		float3 direct = Direct( p, n, g, random, true, lean ) + GlowDirect( p, n, g, random, lean );
+		//Somewhere in the texel's area on its own face - see BakeSheet.reach, the four w's
+		float3 p = centre.xyz + ( across.xyz * lerp( centre.w, n.w, random.Next() ) ) + ( down.xyz * lerp( across.w, down.w, random.Next() ) );
 
 		float u = random.Next();
 		float v = random.Next();
-		float3 axis = n;
+		float3 axis = n.xyz;
 		float3 direction = CosineAround( axis, u, v );
 
 		if ( dot( direction, g ) <= 0.0 )
@@ -893,20 +899,51 @@ void main( uint3 id : SV_DispatchThreadID )
 		bool escaped;
 		float3 arriving = Arriving( Offset( p, g, direction ), direction, density, random, behind, escaped );
 
+		//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows
+		if ( behind )
+		{
+			insideSpare.x += 1.0;
+			continue;
+		}
+
 		if ( escaped ) open += float4( direction, 1.0 );
 
-		float3 one = direct + arriving;
-		float luma = Luma( one );
+		float3 lean = float3( 0.0, 0.0, 0.0 );
+		float3 direct = Direct( p, n.xyz, g, random, true, lean ) + GlowDirect( p, n.xyz, g, random, lean );
+		float luma = Luma( arriving );
 
-		sumSquares += float4( one, luma * luma );
-		wayWeight += float4( lean + ( direction * Luma( arriving ) ), Luma( direct ) + Luma( arriving ) );
-		insideSpare.x += behind ? 1.0 : 0.0;
+		sumSquares += float4( direct + arriving, luma * luma );
+		wayWeight += float4( lean + ( direction * luma ), Luma( direct ) + luma );
+		insideSpare.yzw += direct;
+
+		bouncedR += direction * arriving.r;
+		bouncedG += direction * arriving.g;
+		bouncedB += direction * arriving.b;
+
+		//The lights' way, and their light as it would fall square on, so a normal facing them takes all of it
+		float leaning = length( lean );
+
+		if ( leaning > 1e-8 )
+		{
+			float3 l = lean / leaning;
+			float3 square = direct / max( dot( n.xyz, l ), 0.1 );
+
+			straightR += l * square.r;
+			straightG += l * square.g;
+			straightB += l * square.b;
+		}
 	}
 
-	g_sums[( texel * 4 ) + 0] = sumSquares;
-	g_sums[( texel * 4 ) + 1] = wayWeight;
-	g_sums[( texel * 4 ) + 2] = insideSpare;
-	g_sums[( texel * 4 ) + 3] = open;
+	g_sums[at + 0u] = sumSquares;
+	g_sums[at + 1u] = wayWeight;
+	g_sums[at + 2u] = insideSpare;
+	g_sums[at + 3u] = open;
+	g_sums[at + 4u] = float4( bouncedR, 0.0 );
+	g_sums[at + 5u] = float4( bouncedG, 0.0 );
+	g_sums[at + 6u] = float4( bouncedB, 0.0 );
+	g_sums[at + 7u] = float4( straightR, 0.0 );
+	g_sums[at + 8u] = float4( straightG, 0.0 );
+	g_sums[at + 9u] = float4( straightB, 0.0 );
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

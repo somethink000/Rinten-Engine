@@ -35,8 +35,8 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 	[Property, Group( "Volume" ), Range( 64, 4096 )]
 	public int VolumeSamples { get; set; } = 1024;
 
-	/// <summary>How often light may bounce; past the second, a path goes on as often as it carries light.</summary>
-	[Property, Group( "Light" ), Range( 1, 16 )]
+	/// <summary>How often light may bounce, nought for direct only; past two, a path goes on as it carries light.</summary>
+	[Property, Group( "Light" ), Range( 0, 16 )]
 	public int Bounces { get; set; } = 6;
 
 	/// <summary>The sky's light against the frame's on an open surface; at one, an open field bakes as drawn.</summary>

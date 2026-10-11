@@ -24,19 +24,24 @@ internal sealed class BakePicture
 		while ( mip < texture.Mips - 1 && Math.Max( texture.Width >> mip, texture.Height >> mip ) > Largest ) mip++;
 
 		Color32[] pixels;
+		var width = Math.Max( texture.Width >> mip, 1 );
+		var height = Math.Max( texture.Height >> mip, 1 );
 
 		try
 		{
 			pixels = texture.GetPixels( mip );
 		}
-		catch ( Exception e )
+		catch ( Exception )
 		{
-			Log.Warning( $"the bake could not read {texture.ResourcePath}: {e.Message}" );
-			return null;
-		}
+			//A streamed, compressed map has nothing to read back: the picture it was made from, off the disk
+			pixels = FromSource( texture.core?.Name, out width, out height );
 
-		var width = Math.Max( texture.Width >> mip, 1 );
-		var height = Math.Max( texture.Height >> mip, 1 );
+			if ( pixels is null )
+			{
+				Log.Warning( $"the bake could not read {texture.core?.Name ?? texture.ResourcePath} - it takes it as white" );
+				return null;
+			}
+		}
 
 		if ( pixels is null || pixels.Length < width * height ) return null;
 
@@ -53,6 +58,64 @@ internal sealed class BakePicture
 		}
 
 		return made;
+	}
+
+	//A picture file decoded on the processor, averaged in linear light to no wider than Largest; null if unreadable
+	private static Color32[] FromSource( string path, out int width, out int height )
+	{
+		width = height = 0;
+		if ( string.IsNullOrWhiteSpace( path ) ) return null;
+
+		try
+		{
+			using var bitmap = CoreImportedTexture.IsTheirs( path )
+				? CoreImportedTexture.Load( path )
+				: FileSystem.Mounted.FileExists( path ) ? Bitmap.CreateFromBytes( FileSystem.Mounted.ReadAllBytes( path ).ToArray() ) : null;
+
+			if ( bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ) return null;
+
+			var all = bitmap.GetPixels32();
+			var step = 1;
+			while ( Math.Max( bitmap.Width / step, bitmap.Height / step ) > Largest ) step *= 2;
+
+			width = Math.Max( bitmap.Width / step, 1 );
+			height = Math.Max( bitmap.Height / step, 1 );
+
+			var kept = new Color32[width * height];
+			var linear = BakeMath.Linear;
+
+			for ( var y = 0; y < height; ++y )
+			{
+				for ( var x = 0; x < width; ++x )
+				{
+					var sum = Vec4.Zero;
+
+					for ( var dy = 0; dy < step; ++dy )
+						for ( var dx = 0; dx < step; ++dx )
+						{
+							var p = all[( Math.Min( ( y * step ) + dy, bitmap.Height - 1 ) * bitmap.Width ) + Math.Min( ( x * step ) + dx, bitmap.Width - 1 )];
+							sum += new Vec4( linear[p.r], linear[p.g], linear[p.b], p.a / 255.0f );
+						}
+
+					sum /= step * step;
+					kept[( y * width ) + x] = new Color32( Encode( sum.X ), Encode( sum.Y ), Encode( sum.Z ), (byte)MathF.Round( sum.W * 255.0f ) );
+				}
+			}
+
+			return kept;
+		}
+		catch ( Exception )
+		{
+			return null;
+		}
+	}
+
+	//Linear light back to an sRGB byte, for an average taken in linear
+	private static byte Encode( float linear )
+	{
+		var c = Math.Clamp( linear, 0.0f, 1.0f );
+		var s = c <= 0.0031308f ? c * 12.92f : ( 1.055f * MathF.Pow( c, 1.0f / 2.4f ) ) - 0.055f;
+		return (byte)MathF.Round( s * 255.0f );
 	}
 
 	private Vec4? mean;
@@ -331,6 +394,29 @@ internal sealed class BakeScene
 			if ( seen && hasSheet ) Receivers.Add( new BakeReceiver( renderer, model, first, count ) );
 		}
 
+		//The level's own meshes, built in the editor: each face an island of their sheet - see PolygonMesh.LayLightmap
+		foreach ( var built in scene.GetAllComponents<MeshComponent>() )
+		{
+			if ( !built.IsValid() || !built.Enabled || !built.Active || !built.GameObject.IsStatic ) continue;
+			if ( built.Model is not { } model || !model.IsValid() ) continue;
+
+			var first = corners.Count / 3;
+			var hasSheet = AddModel( model, built.WorldTransform, Color.White, ulong.MaxValue, null, null );
+			var count = ( corners.Count / 3 ) - first;
+
+			if ( count == 0 ) continue;
+
+			var glow = built.GetComponent<BakedGlow>();
+			Group( glow is { Enabled: true } ? glow.Layer + 1 : 0 );
+
+			Grow( first, count, ref any );
+
+			if ( built.RenderType == ModelRenderer.ShadowRenderType.Off ) Transparent( first, count );
+
+			if ( built.RenderType != ModelRenderer.ShadowRenderType.ShadowsOnly && hasSheet )
+				Receivers.Add( new BakeReceiver( built, model, first, count ) );
+		}
+
 		//The ground: the terrain's chunks are models of their own with no sheet among their coordinates - the second
 		//set carries paint - so they stop light and throw it back, and read the volume like anything without one.
 		foreach ( var terrain in scene.GetAllComponents<Terrain>() )
@@ -458,10 +544,10 @@ internal sealed class BakeScene
 
 			//The mesh's vertices once each, however many triangles share them.
 			var local = new Dictionary<int, int>();
+			Span<int> at = stackalloc int[3];
 
 			for ( var i = 0; i + 2 < indexCount; i += 3 )
 			{
-				Span<int> at = stackalloc int[3];
 				var good = true;
 
 				for ( var k = 0; k < 3; ++k )
@@ -723,6 +809,16 @@ internal sealed class BakeScene
 		}
 	}
 
+	/// <summary>What a triangle reflects at a point, as Surface reads it - the denoiser's guide.</summary>
+	internal Vec3 AlbedoAt( int t, float u, float v )
+	{
+		var material = Materials[MaterialOf[t]];
+		var uv = Interpolate( Uv0, t, u, v );
+		var texel = material.Colour?.Sample( uv.X, uv.Y ) ?? Vec4.One;
+
+		return new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t] * Interpolate( Colours, t, u, v ) * material.Diffuse;
+	}
+
 	internal float Area( int t )
 	{
 		var a = Positions[Corners[t * 3]];
@@ -923,6 +1019,17 @@ internal sealed class BakeScene
 		return sum;
 	}
 
+	/// <summary>A baked lamp's light at a squared distance: its falloff to its radius, then the inverse square.</summary>
+	public static float Spread( BakeLight light, float square )
+	{
+		//No edge where the frame's lamp ends, as VRAD's lights have none: past it the light goes on as light does
+		var edge = MathF.Max( light.Range * light.Range, 1e-4f );
+		var near = MathF.Min( square, edge );
+		var own = 1.0f / ( light.Falloff == 1.0f ? near : MathF.Pow( near, light.Falloff ) );
+
+		return square > edge ? own * edge / square : own;
+	}
+
 	/// <summary>One light's share of <see cref="Direct"/>, and which way it arrives from.</summary>
 	public Vec3 DirectOne( BakeLight light, Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, out Vec3 l )
 	{
@@ -942,9 +1049,6 @@ internal sealed class BakeScene
 			else if ( light.Kind == 1 && light.Shape != 0 )
 			{
 				var centre = light.Position - position;
-				var reach = centre.Length() / MathF.Max( light.Range, 1e-4f );
-				if ( reach > 1.0f ) return Vec3.Zero;
-
 				var area = light.Area;
 				var on = PointOn( light, position, ref random, out var cosine );
 				if ( cosine <= 0.0f || area <= 1e-8f ) return Vec3.Zero;
@@ -957,9 +1061,8 @@ internal sealed class BakeScene
 				l = aim;
 
 				//As AreaLamp: radiance colour over area, the lamp's falloff kept as its ratio to the inverse square
-				var window = BakeMath.Saturate( 1.0f - ( reach * reach * reach * reach ) );
 				var square = MathF.Max( centre.LengthSquared(), 0.25f * area );
-				var ratio = window * window * ( light.Falloff == 1.0f ? 1.0f : MathF.Pow( square, 1.0f - light.Falloff ) );
+				var ratio = square * Spread( light, square );
 
 				attenuation = cosine * ratio / MathF.Max( distance * distance, 1e-4f );
 			}
@@ -968,17 +1071,10 @@ internal sealed class BakeScene
 				var toLight = light.Position - position;
 				distance = toLight.Length();
 
-				if ( distance > light.Range || distance < 1e-5f ) return Vec3.Zero;
+				if ( distance < 1e-5f ) return Vec3.Zero;
 
 				l = toLight / distance;
-
-				var reach = distance / MathF.Max( light.Range, 1e-4f );
-				var window = BakeMath.Saturate( 1.0f - ( reach * reach * reach * reach ) );
-
-				var square = MathF.Max( distance * distance, 1e-4f );
-				var spread = light.Falloff == 1.0f ? square : MathF.Pow( square, light.Falloff );
-
-				attenuation = window * window / MathF.Max( spread, 1e-4f );
+				attenuation = Spread( light, MathF.Max( distance * distance, 1e-4f ) );
 
 				if ( light.Kind == 2 )
 				{
@@ -1093,7 +1189,8 @@ internal sealed class BakeScene
 //A static renderer with its own lightmap sheet: its triangles in the world and where its sheet lands in the atlas
 internal sealed class BakeReceiver
 {
-	public readonly ModelRenderer Renderer;
+	/// <summary>What is baked onto: a ModelRenderer, or a MeshComponent with its own sheet.</summary>
+	public readonly Component Renderer;
 	public readonly Model Model;
 	public readonly int FirstTriangle;
 	public readonly int TriangleCount;
@@ -1101,7 +1198,7 @@ internal sealed class BakeReceiver
 	/// <summary>Where it was packed, in texels, with its side.</summary>
 	public int X, Y, Side;
 
-	public BakeReceiver( ModelRenderer renderer, Model model, int first, int count )
+	public BakeReceiver( Component renderer, Model model, int first, int count )
 	{
 		Renderer = renderer;
 		Model = model;

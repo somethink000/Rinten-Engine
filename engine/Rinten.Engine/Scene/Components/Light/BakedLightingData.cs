@@ -8,7 +8,7 @@ namespace Rinten;
 /// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 5;
+	public override int Version => 7;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -21,6 +21,9 @@ public sealed class BakedLightingData : BlobData
 
 		/// <summary>Scale in xy, offset in zw - see ModelRenderer.LightmapRect.</summary>
 		public Vector4 Rect;
+
+		/// <summary>Its model's vertices: a MeshComponent edited since has another sheet, and reads the volume.</summary>
+		public int Vertices;
 	}
 
 	public int SheetWidth { get; set; }
@@ -66,6 +69,12 @@ public sealed class BakedLightingData : BlobData
 
 	/// <summary>Four halves a texel: which way the sky is open and how much is seen; the frame lights it.</summary>
 	public Half[] SheetSky { get; set; } = [];
+
+	/// <summary>The sheet's first band over its light, half size - see BakeSheet.Band; empty before version 6.</summary>
+	public byte[] SheetBand { get; set; } = [];
+
+	/// <summary>Whether the sheet's first band is kept, for the light to lean into a normal map by colour.</summary>
+	public bool HasBand => HasSheet && SheetBand.Length == Math.Max( SheetWidth / 2, 1 ) * Math.Max( SheetHeight / 2, 1 ) * 12;
 
 	/// <summary>Four halves a point: how much sky is seen, then its lean along x, y, z.</summary>
 	public Half[] VolumeSky { get; set; } = [];
@@ -191,6 +200,12 @@ public sealed class BakedLightingData : BlobData
 		PackedBytes( ref s, SurfelDepth );
 		Packed( ref s, SurfelClusters );
 
+		//Version 6: the sheet's first band.
+		PackedBytes( ref s, SheetBand );
+
+		//Version 7: each place's vertices.
+		foreach ( var place in Places ) s.Write( place.Vertices );
+
 		writer.Stream = s;
 	}
 
@@ -202,6 +217,13 @@ public sealed class BakedLightingData : BlobData
 		if ( fromVersion == 1 ) IsOld = true;
 		if ( fromVersion >= 2 ) ReadMasks( ref reader );
 		if ( fromVersion >= 3 ) ReadThird( ref reader );
+		if ( fromVersion >= 5 )
+		{
+			ReadFifth( ref reader );
+			if ( fromVersion >= 6 ) ReadBand( ref reader );
+			return;
+		}
+
 		if ( fromVersion >= 4 ) ReadFourth( ref reader, true );
 
 		Touched();
@@ -211,6 +233,32 @@ public sealed class BakedLightingData : BlobData
 	internal bool IsOld { get; private set; }
 
 	public override void Deserialize( ref Reader reader )
+	{
+		ReadFifth( ref reader );
+		ReadBand( ref reader );
+
+		var s = reader.Stream;
+
+		for ( var i = 0; i < Places.Count; ++i )
+		{
+			var place = Places[i];
+			place.Vertices = s.Read<int>();
+			Places[i] = place;
+		}
+
+		reader.Stream = s;
+	}
+
+	//What version 6 added: the sheet's first band
+	private void ReadBand( ref Reader reader )
+	{
+		var s = reader.Stream;
+		SheetBand = UnpackedBytes( ref s );
+		reader.Stream = s;
+	}
+
+	//What version 5 held: the first, the lights in the bake, the third and the fourth
+	private void ReadFifth( ref Reader reader )
 	{
 		ReadFirst( ref reader );
 

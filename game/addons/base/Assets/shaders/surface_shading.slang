@@ -402,6 +402,35 @@ void ApplyDecals( inout Surface s )
 }
 
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
+#ifndef PORTABLE
+//The baked light's highlight from the sheet's dominant way, as directional lightmaps give one: the share that came
+//one way, as a lamp from there, its lobe the wider the less the light agreed
+float3 BakedHighlight( float2 lightmap, float3 normal, float3 v, float nDotV, float roughness, float3 f0 )
+{
+	//Both frame-uniform - see SkyTableAt.
+	float4 way = g_textures[uint( g_frame[0].bakedMaps.y )].SampleLevel( lightmap, 0.0 );
+	float strength = length( way.xyz );
+	if ( strength < 0.05 ) return float3( 0.0, 0.0, 0.0 );
+
+	float3 l = way.xyz / strength;
+	float nDotL = saturate( dot( normal, l ) );
+	if ( nDotL <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
+
+	float3 light = g_textures[uint( g_frame[0].bakedMaps.x )].SampleLevel( lightmap, 0.0 ).rgb;
+
+	float3 h = normalize( l + v );
+	Rough rough = RoughFor( lerp( 1.0, roughness, saturate( strength ) ) );
+
+	float3 specular = DistributionGGX( saturate( dot( normal, h ) ), rough )
+		* GeometrySmith( nDotV, nDotL, rough )
+		* FresnelSchlick( saturate( dot( v, h ) ), f0 )
+		/ max( 4.0 * nDotV * nDotL, 0.0001 );
+
+	//The sheet holds irradiance over pi; what came the one way is its strength's share, arriving at nDotL
+	return specular * light * ( 3.14159265 * saturate( strength ) );
+}
+#endif
+
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
 	//The decals first, where the frame has any: what they paint is what the lights see - see ApplyDecals.
@@ -683,7 +712,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
 	{
-		ambientSky = BakedSheet( s.lightmap, normal ) + BakedGlows( s.lightmap, true, s.world );
+		ambientSky = BakedSheet( s.lightmap, normal, geometric ) + BakedGlows( s.lightmap, true, s.world );
+		lit += BakedHighlight( s.lightmap, normal, v, nDotV, roughness, lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness ) );
 		visible = 1.0;
 
 		//The bounce of the lights left out of the bake, as they are now, from the volume a step off the surface

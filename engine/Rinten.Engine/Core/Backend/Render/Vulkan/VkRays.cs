@@ -35,6 +35,39 @@ internal static unsafe class VkRays
 	/// <summary>Whether the device asks for buffer device addresses for the rays - see VkModern.ChainFeatures.</summary>
 	internal static bool WantsAddresses => offered;
 
+	[DllImport( "libc", EntryPoint = "getenv" )]
+	private static extern nint GetEnv( string name );
+
+	[DllImport( "libc", EntryPoint = "setenv" )]
+	private static extern int SetEnv( string name, string value, int overwrite );
+
+	/// <summary>Asks RADV to trace in shaders on a card without ray hardware; true where it must be asked anew.</summary>
+	internal static bool AskEmulation( PhysicalDevice physical )
+	{
+		if ( !OperatingSystem.IsLinux() || VkDevice.HasDeviceExtension( physical, "VK_KHR_ray_query" ) ) return false;
+
+		PhysicalDeviceProperties properties;
+		VkDevice.vk.GetPhysicalDeviceProperties( physical, &properties );
+
+		//RADV names itself in the device name; a card with the hardware would be slowed by it, so only these
+		var name = Marshal.PtrToStringUTF8( (nint)properties.DeviceName ) ?? "";
+		if ( properties.VendorID != 0x1002 || !name.Contains( "RADV" ) ) return false;
+
+		try
+		{
+			var said = Marshal.PtrToStringUTF8( GetEnv( "RADV_PERFTEST" ) ) ?? "";
+			if ( said.Contains( "emulate_rt" ) ) return false;
+
+			SetEnv( "RADV_PERFTEST", said.Length == 0 ? "emulate_rt" : $"{said},emulate_rt", 1 );
+			Log.Info( $"hardware rays: {name} has none - RADV traces them in shaders (emulate_rt)" );
+			return true;
+		}
+		catch ( Exception e ) when ( e is DllNotFoundException or EntryPointNotFoundException )
+		{
+			return false;
+		}
+	}
+
 	/// <summary>Asks the card, before its device opens; the full frame on 1.3 only.</summary>
 	internal static void Choose( PhysicalDevice physical, bool modern, bool full )
 	{

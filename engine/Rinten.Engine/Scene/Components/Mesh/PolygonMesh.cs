@@ -28,7 +28,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 	private int _materialId = 0;
 	private float _smoothingThreshold;
 
-	//Editor only face visibility, not serialized. Hidden faces are skipped when rebuilding the model so they don't render, trace or collide.
+	//Editor-only face visibility, not saved: hidden faces are left out of the model - not drawn, traced or hit
 	private readonly HashSet<int> _hiddenFaces = new();
 
 	private static readonly float CollinearTolerance = MathF.Cos( 1f.DegreeToRadian() );
@@ -123,7 +123,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			TextureScale[pair.Value] = sourceMesh.TextureScale[pair.Key];
 			TextureOffset[pair.Value] = sourceMesh.TextureOffset[pair.Key];
 
-			//By name, not by material: a source face wearing something that did not load still has a name, and merging is not the place to lose it.
+			//By name, not material: a face wearing something that did not load still has a name, and merging must keep it
 			SetFaceMaterialSlot( pair.Value, AddMaterial(
 				sourceMesh.GetFaceMaterialName( pair.Key ),
 				sourceMesh.GetFaceMaterial( pair.Key ) ) );
@@ -258,7 +258,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		Topology.OnClearFaceVertexData = ( hEdge ) =>
 		{
-			//White rather than default, for the reason above: cleared means untinted, and untinted has to be the colour that changes nothing.
+			//White rather than default: cleared means untinted, and untinted is the colour that changes nothing
 			Colors[hEdge] = Color32.White;
 			Blends[hEdge] = default;
 			TextureCoord[hEdge] = default;
@@ -277,8 +277,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 			if ( id >= 0 ) usedIds.Add( id );
 		}
 
-		//A face can name a slot the table has never heard of: data written before a failed load kept its slot, or a file edited by
-		//hand. Those are dropped to -1 rather than remapped, which is what every reader here already treats as "no material of its own".
+		//A face can name a slot the table never heard of - a failed load kept it, or a hand-edited file. Dropped to -1,
+		//which every reader here treats as "no material of its own".
 		var known = usedIds.Where( _materialNamesById.ContainsKey ).ToHashSet();
 
 		if ( known.Count == usedIds.Count && known.Count == _materialNamesById.Count )
@@ -454,7 +454,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 	/// <summary>Is this face hidden?</summary>
 	public bool IsFaceHidden( FaceHandle hFace ) => _hiddenFaces.Contains( hFace.Index );
 
-	/// <summary>Hide or show a face. Hidden faces are editor only and not saved, they are excluded from the rebuilt model so they don't render or trace.</summary>
+	/// <summary>Hides or shows a face; hidden faces are editor-only, unsaved, and left out of the rebuilt model.</summary>
 	public void SetFaceHidden( FaceHandle hFace, bool hidden )
 	{
 		if ( hidden ? _hiddenFaces.Add( hFace.Index ) : _hiddenFaces.Remove( hFace.Index ) )
@@ -903,7 +903,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 	public void DissolveEdges( IReadOnlyList<HalfEdgeHandle> edges, bool bFaceMustBePlanar, DissolveRemoveVertexCondition removeCondition )
 	{
-		const float flColinearTolerance = 5.0f; //Edges may be at an angle of up to this many degrees and still be considered co-linear
+		const float flColinearTolerance = 5.0f; //Degrees between edges that still count as co-linear
 		const float flPlanarTolerance = 0.01f;
 
 		var nNumEdges = edges.Count;
@@ -949,7 +949,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			combinedFaces.Add( hFace );
 		}
 
-		//Now that all of the edges have been dissolved remove all of the vertices that were determined should be removed while dissolving the edges.
+		//With every edge dissolved, remove the vertices dissolving marked for removal
 		int nNumVerticesToRemove = verticesToRemove.Count;
 		for ( int iVertex = 0; iVertex < nNumVerticesToRemove; ++iVertex )
 		{
@@ -1441,7 +1441,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 			if ( bUseDistance )
 			{
-				//Build an array of the positions specifically for the vertices to merge instead of all the positions in the mesh
+				//The positions of just the vertices to merge, not every position in the mesh
 				var vertexPositions = new List<Vector3>( nNumVerticesToMerge );
 				for ( var iVertex = 0; iVertex < nNumVerticesToMerge; ++iVertex )
 				{
@@ -1515,9 +1515,9 @@ public sealed partial class PolygonMesh : IJsonConvert
 				groupOffsets[0] = 0;
 			}
 
-			var groupsMergedVertexCount = new int[nNumGroups]; //Number of vertices in each group that were successfully merged
-			var groupsSumPosition = new Vector3[nNumGroups]; //Average position of the vertices in the group that were merged
-			var groupsTargetVertex = new VertexHandle[nNumGroups]; //Target vertex with which other vertices in the group should be merged.
+			var groupsMergedVertexCount = new int[nNumGroups]; //Vertices merged in each group
+			var groupsSumPosition = new Vector3[nNumGroups]; //Summed positions of each group's merged vertices
+			var groupsTargetVertex = new VertexHandle[nNumGroups]; //The vertex each group's others merge into
 
 			for ( var iGroup = 0; iGroup < nNumGroups; ++iGroup )
 			{
@@ -1559,7 +1559,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 						//Get the position of the vertex to be merged before merging it, which will delete the vertex.
 						var vMergeVertexPosition = GetVertexPosition( hMergeVertex );
 
-						//If bPreConnect is specified connect vertices that share a face allowing them to be merged even if they did not originally have a common edge.
+						//With bPreConnect, connect vertices sharing a face so they merge even without a common edge
 						if ( bPreConnect )
 						{
 							var hSharedFace = Topology.FindFaceSharedByVertices( hTargetVertex, hMergeVertex );
@@ -1569,7 +1569,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 							}
 						}
 
-						//If averaging positions, set the merge interpolation parameter to 0.5f, otherwise set it to 1.0 so that the data of the merge vertex is preserved.
+						//Averaging puts the merge at 0.5; otherwise 1.0 keeps the merge vertex's data
 						var flParam = bAveragePositions ? 0.5f : 1.0f;
 
 						if ( MergeVertices( hTargetVertex, hMergeVertex, flParam, out var hNewVertex ) )
@@ -1585,7 +1585,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 							//don't update the target, then there is no way to merge the remaining vertices in this pass.
 							hTargetVertex = hNewVertex;
 
-							//Set the original vertex in the group to invalid so we don't try to merge it again in subsequent passes.
+							//The group's original vertex is marked invalid, so later passes do not merge it again
 							verticesSortedByGroup[nGroupVertexOffset + iVertex] = VertexHandle.Invalid;
 
 							++nNumMerged;
@@ -1597,7 +1597,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 						}
 					}
 
-					//If all of the vertices in the group were merged mark the group as not having any vertices so that it is not touched in any future iterations.
+					//A group whose every vertex merged is marked empty, so no later pass touches it
 					if ( nNumUnmergedInGroup == 0 )
 					{
 						groupVertexCounts[iGroup] = -1;
@@ -1714,13 +1714,13 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return Topology.IsFullEdgeOpen( hEdge );
 	}
 
-	/// <summary>Find all of the edges in the ring with the specified edge. An edge ring is the set of edges that are connected by a loop of faces.</summary>
+	/// <summary>The edges in the ring of an edge: those connected by a loop of faces.</summary>
 	public void FindEdgeRing( HalfEdgeHandle hEdge, out List<HalfEdgeHandle> outEdgeList )
 	{
 		Topology.FindEdgeRing( hEdge, out outEdgeList );
 	}
 
-	/// <summary>Bridge two edges (create a face connecting them). The edges must both be open and belong to different faces.</summary>
+	/// <summary>Bridges two open edges of different faces with a new face.</summary>
 	public bool BridgeEdges( HalfEdgeHandle hEdgeA, HalfEdgeHandle hEdgeB, out FaceHandle hOutNewFace )
 	{
 		hOutNewFace = FaceHandle.Invalid;
@@ -1859,7 +1859,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return true;
 	}
 
-	//What a bridge's new faces are painted with, taken from the face each span grew out of: the material and the tint both - see CopyFaceColor.
+	//A bridge's new faces take the material and tint of the face each span grew out of - see CopyFaceColor
 	void AssignBridgeSurface( List<BridgeEdgeSet> edgeSets )
 	{
 		var faces = new List<FaceHandle>( 128 );
@@ -2525,7 +2525,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return true;
 	}
 
-	/// <summary>Connect the specified edges by adding a vertex to their mid point of each edge and then connecting the vertices.</summary>
+	/// <summary>Connects edges by a vertex at each edge's middle, joined up.</summary>
 	public bool ConnectEdges( IReadOnlyList<HalfEdgeHandle> edges, out List<HalfEdgeHandle> newEdges )
 	{
 		newEdges = null;
@@ -2589,7 +2589,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		//Interpolate the values of the vertices to compute the value of the new vertex
 		InterpolateVertexData( hNewVertex, hVertexA, hVertexB, flParam );
 
-		//Interpolate the value of the face vertices connected to each face to compute the value of the new face vertex on each side of the edge.
+		//The face vertices' values interpolated, for the new face vertex on each side of the edge
 		var hEdgeAToNew = Topology.FindHalfEdgeConnectingVertices( hVertexA, hNewVertex );
 		var hEdgeNewToB = Topology.FindHalfEdgeConnectingVertices( hNewVertex, hVertexB );
 		InterpolateFaceVertexData( hEdgeAToNew, hPrevEdge, hEdgeNewToB, flParam );
@@ -2981,7 +2981,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			hExternalVertex = hVertexA;
 		}
 
-		//If there is a position stream use the direction of the edge to disambiguate which of the incoming half edge to internal vertex is the best one to use.
+		//With positions, the edge's direction picks which incoming half edge to the internal vertex to use
 		if ( hInternalVertex.IsValid && hExternalVertex.IsValid )
 		{
 			//Compute the direction of the new edge to be added, going from the internal vertex to the external
@@ -2992,8 +2992,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 			//Compute the normal of the face
 			ComputeFaceNormal( hFace, out var vFaceNormal );
 
-			//Determine which of the edges terminating at the internal edge should be used by finding the direction perpendicular to
-			//each edge that points into the face and comparing the direction of the new edge to the vector pointing into the face.
+			//Which edge ending at the internal edge to use: each edge's perpendicular into the face, compared with the
+			//new edge's direction
 			float flBestDot = float.MinValue;
 			var hBestInternalFaceVertex = HalfEdgeHandle.Invalid;
 
@@ -3015,7 +3015,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 					//Compute the direction pointing into the face
 					var vInteriorDir = vFaceNormal.Cross( vInternalEdgeDir );
 
-					//Is the new edge direction closer to the interior direction of this edge than any of the previous edges?
+					//Whether the new edge leans nearer this edge's inward direction than any before
 					float flDot = vInteriorDir.Dot( vNewEdgeDir );
 					if ( flDot > flBestDot )
 					{
@@ -3559,7 +3559,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		SetFaceColor( hDstFace, colour.Value );
 	}
 
-	//Null rather than the first corner's, so that whatever is showing this can say "several" instead of picking one of them and looking like the answer. A face painted per corner by the vertex paint tool is exactly that case.
+	//Null rather than the first corner's, so a display can say "several" - a face painted per corner is that case
 	/// <summary>A face's tint, or null where its corners do not agree on one.</summary>
 	public Color32? GetFaceColor( FaceHandle hFace )
 	{
@@ -4022,7 +4022,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		IsDirty = true;
 	}
 
-	/// <summary>Continue the texture mapping of an adjacent source face onto a destination face across their shared edge, keeping the texture continuous over the edge. Returns false if the faces don't share an edge or the source parameters are unusable.</summary>
+	/// <summary>Carries a neighbour's texture mapping over their shared edge; false if none is usable.</summary>
 	public bool TextureWrapFromFace( FaceHandle hSourceFace, FaceHandle hDestFace )
 	{
 		if ( !hSourceFace.IsValid || !hDestFace.IsValid || hSourceFace == hDestFace )
@@ -4085,7 +4085,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return true;
 	}
 
-	/// <summary>Wrap the texture of a face from the first adjacent face that isn't excluded. Returns false if no suitable neighbour was found.</summary>
+	/// <summary>Wraps a face's texture from its first neighbour not excluded; false where none suits.</summary>
 	public bool TextureWrapFromNeighbour( FaceHandle hFace, IReadOnlySet<FaceHandle> excludeFaces = null )
 	{
 		GetEdgesConnectedToFace( hFace, out var edges );
@@ -4410,6 +4410,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		var halfEdgeCount = Topology.HalfEdgeCount;
 
 		_triangleFaces.Clear();
+		_lightmapFaces.Clear();
 		_badFaces.Clear();
 		_meshIndices.Clear();
 		_meshVertices.Clear();
@@ -4465,6 +4466,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		_submeshes.Clear();
 		_submeshes.AddRange( submeshes.Values );
+
+		LayLightmap();
 
 		if ( _meshVertices.Count >= 3 && _meshIndices.Count >= 3 )
 		{
@@ -4815,7 +4818,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			GetVerticesConnectedToFace( hFace, out var vertices );
 			if ( vertices.Length != 4 )
 			{
-				//If the face isn't actually a quad, see if there are 4 distinct corner vertices that can be identified based on the shape.
+				//A face that is not a quad: four distinct corners found by its shape, if it has them
 				FindCornerVerticesForFace( hFace, minCornerAngleDegrees, out var cornerVertices );
 
 				vertices = cornerVertices.ToArray();
@@ -4828,7 +4831,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			QuadSliceFace( hFace, vertices, cutsX, cutsY, newFaces );
 		}
 
-		//Mark the new faces as having their uv texture coordinates explicitly set so that the texture parameters will be recomputed from the uvs.
+		//The new faces' uvs are marked explicit, so their texture parameters are worked out from them
 		ComputeFaceTextureCoordinatesFromParameters( newFaces );
 
 		if ( outNewFaceList is not null )
@@ -4885,7 +4888,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		Assert.True( edgeSpansX.Count == (2 + numCutsX) );
 		Assert.True( edgeSpansY.Count == (2 + numCutsY) );
 
-		//Since the operation only adds new edges to faces, which creates one new face each time, the original face is still in use.
+		//Adding edges only splits off a new face each time, so the original face is still in use
 		outNewFaces?.Add( hFace );
 
 		if ( outEdgeSpansX is not null )
@@ -4900,7 +4903,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 			outEdgeSpansY.AddRange( edgeSpansX );
 		}
 
-		//If requested, get all of the vertices from the spans and optionally compute their [ 0, 1 ] coordinates within the quad.
+		//Where asked, the spans' vertices, and optionally their [0, 1] place within the quad
 		if ( outVertices is not null || outVertexParameters is not null )
 		{
 			var nNumTotalVertices = (2 + numCutsX) * (2 + numCutsY);
@@ -4983,7 +4986,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		}
 	}
 
-	/// <summary>Remove all invalid geometry from the mesh: degenerate faces, edges not attached to any face and vertices not attached to any edge.</summary>
+	/// <summary>Removes degenerate faces, edges with no face and vertices with no edge.</summary>
 	public void RemoveBadGeometry()
 	{
 		RemoveBadFaces();
@@ -5162,8 +5165,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 			var uvCenterEdge1 = (uvA1 + uvB1) * 0.5f;
 			var uvCenterEdge2 = (uvA2 + uvB2) * 0.5f;
 
-			//Compute the integer offset that will place center of edge2 nearest the center of edge1 and then apply that offset to all of the uvs in
-			//face2. Since the offset is an integer value and we apply the offset to all uvs of the face, this won't visually change the texturing.
+			//An integer offset placing edge2's centre nearest edge1's, applied to all of face2's uvs - an integer shift
+			//changes nothing visible
 			var delta = uvCenterEdge1 - uvCenterEdge2;
 			var deltaX = (int)(delta.x + (delta.x < 0 ? -0.5f : 0.5f));
 			var deltaY = (int)(delta.y + (delta.y < 0 ? -0.5f : 0.5f));
@@ -5197,8 +5200,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		foreach ( var hVertex in vertices )
 		{
-			//Get all of the faces connected to the vertex. We get the faces and then the face vertices from the faces because there may
-			//be face vertices with no corresponding face for open edges and we only want the face vertices connected to valid faces.
+			//The faces at the vertex, then their face vertices: open edges have face vertices without a face, and only
+			//those of real faces are wanted
 			GetFacesConnectedToVertex( hVertex, out var connectedFaces );
 			var numFaces = connectedFaces.Count;
 			if ( numFaces <= 0 )
@@ -5942,6 +5945,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 		int startVertex = vertices.Count;
 		int startCollisionVertex = _meshVertices.Count;
 
+		_lightmapFaces.Add( (submesh, startVertex, hFace) );
+
 		GetFaceVerticesConnectedToFace( hFace, out var faceEdges );
 
 		for ( var i = 0; i < faceEdges.Length; ++i )
@@ -6533,6 +6538,10 @@ public sealed partial class PolygonMesh : IJsonConvert
 		[VertexLayout.Normal] public Vector3 Normal = normal;
 		[VertexLayout.Tangent] public Vector4 Tangent = tangent;
 		[VertexLayout.TexCoord] public Vector2 Texcoord = texcoord;
+
+		//Where the face lies on the mesh's lightmap sheet - see LayLightmap
+		[VertexLayout.TexCoord( 1 )] public Vector2 Lightmap;
+
 		[VertexLayout.TexCoord( 4 )] public Color32 Blend = blend;
 
 		//Tint goes in Vertex.Color; a TexCoord(5) slot was dropped when repacking to the engine vertex

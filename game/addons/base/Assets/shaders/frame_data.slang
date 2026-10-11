@@ -57,7 +57,7 @@ struct FrameData
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
 	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
-	float4 bakedMore;    //Walls' picture x, the live bounce's colour y and lean z (nought for none)
+	float4 bakedMore;    //Walls' picture x, the live bounce's colour y and lean z, the sheet's first band w (nought for none)
 	float4 bakedGlow[4]; //Glow layers: sheet's index x, volume's y, group brightness z (BakedGlow); nought for none
 
 	//How many of the four probes are filled is x; nothing after it matters when zero

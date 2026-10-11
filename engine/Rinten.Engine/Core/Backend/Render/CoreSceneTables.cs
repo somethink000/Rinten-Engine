@@ -1334,9 +1334,9 @@ internal sealed class CoreSceneTables
 		if ( entry.NeverStill || ( Movable && entry.Renderer is { } baked && baked.GameObject is { IsStatic: false } ) )
 			flags |= CoreMeshShaders.InstanceNeverStill;
 
-		//Its place in the baked atlas, read as g_object (ModelRenderer.LightmapRect); only a renderer has one,
-		//as the bake finds what it lights by component; an object's own numbers go in the said ones below
-		var numbers = entry.Renderer is { } lit ? lit.LightmapRect : default;
+		//Its place in the baked atlas, read as g_object: a renderer's (ModelRenderer.LightmapRect), else its object's
+		//(a MeshComponent's and its cells'); an object's own numbers go in the said ones below
+		var numbers = entry.Renderer is { } lit ? lit.LightmapRect : entry.Object?.LightmapRect ?? default;
 
 		Span<float> said = stackalloc float[CoreShaderParams.DrawSlots * 4];
 		said.Clear();

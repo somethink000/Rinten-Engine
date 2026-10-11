@@ -34,9 +34,9 @@ internal static class BakeGpu
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
-	//Floats of sums a texel of the sheet hands back: light and squares, lean and weight, insides, and the sky's
-	//escaping directions and count - see bake_trace.slang's main
-	internal const int SheetFloats = 16;
+	//Floats of sums a sheet texel hands back: light, lean, insides and straight light, the sky's escapes, and the bounced
+	//and the straight light's first band a colour, four each - see bake_trace.slang's main
+	internal const int SheetFloats = 40;
 
 	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
 	internal const int ProbeFloats = 20;
@@ -45,24 +45,32 @@ internal static class BakeGpu
 	private static readonly int[] pipelineBuilt = { -1, -1 };
 
 	//Traces texels on the GPU into four float4 sums each; false means fall back to CPU. Blocks per step
-	internal static bool Trace( BakeScene scene, Vec3[] position, Vec3[] normal, Vec3[] geometric, List<int> texels,
-		int samples, BakeProgress progress, CancellationToken cancel, out float[] sums )
+	internal static bool Trace( BakeScene scene, Vec3[] position, Vec3[] normal, Vec3[] geometric, Vec3[] across, Vec3[] down,
+		System.Numerics.Vector4[] reach, List<int> texels, int samples, BakeProgress progress, CancellationToken cancel, out float[] sums )
 	{
 		sums = null;
 
 		if ( !Available || texels.Count == 0 ) return false;
 
-		//The texels, three float4s each: where, which way the surface's shading faces, and which way its face does.
-		var inputs = new float[texels.Count * 12];
+		//The texels, five float4s each: where, which way the shading and the face look, and its step across and down -
+		//with how far each way it may spread in the four w's (BakeSheet.reach)
+		var inputs = new float[texels.Count * 20];
 
 		for ( var i = 0; i < texels.Count; ++i )
 		{
 			var at = texels[i];
-			var o = i * 12;
+			var o = i * 20;
 
 			Put( inputs, o, position[at] );
 			Put( inputs, o + 4, normal[at] );
 			Put( inputs, o + 8, geometric[at] );
+			Put( inputs, o + 12, across[at] );
+			Put( inputs, o + 16, down[at] );
+
+			inputs[o + 3] = reach[at].X;
+			inputs[o + 7] = reach[at].Y;
+			inputs[o + 15] = reach[at].Z;
+			inputs[o + 19] = reach[at].W;
 		}
 
 		return Run( scene, Kernel.Sheet, inputs, texels.Count, samples, 0, "Tracing the surfaces on the card", progress, cancel, out sums );
@@ -252,7 +260,7 @@ internal static class BakeGpu
 
 	//Runs on the main thread and waits for it - the card is only reached from there.
 	//Not waited for where wait is false: letting go of the buffers need hold nobody up.
-	private static void OnMain( Action action, CancellationToken cancel, bool wait = true )
+	internal static void OnMain( Action action, CancellationToken cancel, bool wait = true )
 	{
 		if ( ThreadSafe.IsMainThread )
 		{

@@ -945,6 +945,7 @@ internal static class EngineShaders
 	internal const string Upscale = "shaders/engine/upscale.slang";
 	internal const string Fsr3 = "shaders/engine/fsr3.slang";
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
+	internal const string BakeDenoise = "shaders/engine/bake_denoise.slang";
 	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
 	internal const string SkyLight = "shaders/engine/sky_light.slang";
 
@@ -1032,6 +1033,7 @@ internal static class EngineShaders
 		.. Fsr3Builds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
+		( BakeDenoise, "", Runs, false ),
 		//The probes' bounce through hardware rays - see CoreLiveBounce. Built everywhere, run where the card has rays.
 		( RayBounce, "", Runs, false ),
 		//The sky light's filters - see CoreSkyLight. Full frame only: they draw into pictures

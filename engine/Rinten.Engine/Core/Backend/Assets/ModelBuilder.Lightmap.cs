@@ -63,6 +63,9 @@ internal sealed unsafe partial class ModelBuilder
 		}
 	}
 
+	//Triangles past which an import keeps no sheet of its own - see GenerateLightmapUv
+	private const int MostLightmapTriangles = 65536;
+
 	//Normal dot threshold for joining triangles into one island (about 48 degrees)
 	private const float SameWay = 0.66f;
 
@@ -122,8 +125,8 @@ internal sealed unsafe partial class ModelBuilder
 		up = Normalised( CrossOf( normal, right ) );
 	}
 
-	//Shelf packing, tallest first, into a square of the given side. The same shape as the atlas packer one level up - see
-	//CoreLightmap.Pack - and for the same reason: it is the packing that can be written down in twenty lines and read in five.
+	//Shelf packing, tallest first, into a square of the given side - the same shape as CoreLightmap.Pack one level up,
+	//as it is the packing that can be written in twenty lines and read in five
 	private static bool Fits( List<Island> islands, List<uint> order, float side, float padding )
 	{
 		var x = 0.0f;
@@ -175,7 +178,7 @@ internal sealed unsafe partial class ModelBuilder
 		var count = vertices.Count;
 		if ( count == 0 ) return false;
 
-		//Hashes rather than the keys themselves: this is a ratio against a factor of two, and a collision here or there cannot move it.
+		//Hashes rather than the keys: this is a ratio against a factor of two, and a collision cannot move it
 		var whole = new HashSet<int>( count );
 		var without = new HashSet<int>( count );
 
@@ -196,6 +199,9 @@ internal sealed unsafe partial class ModelBuilder
 	public int GenerateLightmapUv( int overwrite )
 	{
 		if ( vertices.Count == 0 || indices.Count == 0 ) return 0;
+
+		//A dense mesh - foliage, terrain - is lit from the volume, as UE advises: its split corners would cost every frame
+		if ( overwrite == 0 && indices.Count / 3 > MostLightmapTriangles ) return 0;
 
 		//Skip skinned or morphed models: they are not lightmapped and morphs index vertices by number
 		if ( bones.Count > 0 || morphs.Count > 0 ) return 0;
@@ -226,8 +232,8 @@ internal sealed unsafe partial class ModelBuilder
 
 		var flatIndices = CollectionsMarshal.AsSpan( indices );
 
-		//One sheet for the whole model, not one a mesh. An instance has one place in the atlas - see BakedLighting - so two meshes of a model that
-		//each filled a square of their own would be baked over each other. The islands of every mesh are found first and packed together after.
+		//One sheet for the whole model: an instance has one place in the atlas (BakedLighting), so meshes that each filled
+		//a square of their own would be baked over each other. Every mesh's islands are found first, then packed together.
 		var facesOf = new List<Face>[meshes.Count];
 		var islands = new List<Island>();
 
@@ -245,8 +251,8 @@ internal sealed unsafe partial class ModelBuilder
 			if ( firstIndex + mesh.IndexCount > indices.Count ) continue;
 			if ( firstVertex + mesh.VertexCount > vertices.Count ) continue;
 
-			//------------------------------------------------ the triangles One entry a triangle of the mesh, in the mesh's order, so that a face's place in
-			//the list is its place in the index buffer. A triangle that cannot be unwrapped stays in the list with no island and keeps the indices it had.
+			//The triangles, one entry each in the mesh's order, so a face's place in the list is its place in the indices;
+			//one that cannot be unwrapped stays with no island and keeps its indices
 			var faces = new List<Face>( (int)( mesh.IndexCount / 3 ) );
 			facesOf[m] = faces;
 
@@ -417,8 +423,10 @@ internal sealed unsafe partial class ModelBuilder
 			widest = MathF.Max( widest, MathF.Max( island.SizeX, island.SizeY ) );
 		}
 
-		//Padding between islands scaled to island size, not sheet size, so packing can still succeed
-		var padding = MathF.Sqrt( area / islands.Count ) * 0.02f;
+		//Padding scaled to island size, so packing succeeds - and a 48th of the side where islands are few, so a square
+		//the bake gives 96 texels has two between them for its filters; less as they multiply
+		var least = MathF.Sqrt( area / islands.Count ) * 0.02f;
+		var padding = least;
 
 		var padded = 0.0f;
 
@@ -427,12 +435,13 @@ internal sealed unsafe partial class ModelBuilder
 
 		var side = MathF.Max( MathF.Sqrt( padded ) * 1.3f, ( widest + ( padding * 2.0f ) ) * 1.05f );
 
-		//Grown until they fit rather than solved for: the shelf packer wastes an amount nobody can predict, and ten tries of a cheap
-		//function beat one try of an expensive one. With the gap fixed the area to fit is fixed too, so growing the side gets there.
+		//Grown until they fit rather than solved for: the shelf packer wastes an unpredictable amount, and ten cheap tries
+		//beat one expensive one. With the gap fixed the area to fit is too, so growing the side gets there.
 		var packed = false;
 
 		for ( var attempt = 0; attempt < 16 && !packed; ++attempt )
 		{
+			padding = MathF.Max( least, side / MathF.Max( 48.0f, 6.0f * MathF.Sqrt( islands.Count ) ) );
 			packed = Fits( islands, order, side, padding );
 
 			if ( !packed ) side *= 1.25f;
@@ -493,10 +502,10 @@ internal sealed unsafe partial class ModelBuilder
 				{
 					var local = corners[corner];
 
-					//A triangle that named a vertex the mesh has not got keeps the first one, as nothing can be read for it either way.
+					//A triangle naming a vertex the mesh lacks keeps the first one: nothing can be read for it either way
 					if ( local >= mesh.VertexCount ) local = 0;
 
-					//A triangle with no island shares the vertices nobody moved: the island half of the key is one no island has.
+					//A triangle with no island shares the unmoved vertices: its island half of the key is one no island has
 					var key = ( (ulong)(uint)face.Island << 32 ) | local;
 
 					if ( !made.TryGetValue( key, out var found ) )

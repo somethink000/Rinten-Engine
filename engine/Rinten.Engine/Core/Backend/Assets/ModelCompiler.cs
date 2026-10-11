@@ -37,8 +37,8 @@ internal static class ModelCompiler
 			builder.SetName( definition.ResourcePath ?? "" );
 			builder.SetLodGroup( definition.LodGroup );
 
-			//The bits this model's body groups compile to, worked out before anything is imported so each mesh can be given its own as it
-			//arrives. See ModelDefinition.BodyGroupLayout: the numbering is the file's own order, and everything downstream is that numbering.
+			//This model's body group bits, worked out before import so each mesh gets its own as it arrives -
+			//see ModelDefinition.BodyGroupLayout: the numbering is the file's own order
 			var layout = definition.BodyGroupBits();
 
 			var meshes = 0;
@@ -81,9 +81,12 @@ internal static class ModelCompiler
 
 			ModelCollision.Write( builder, definition, sourceDirectory );
 
-			//The whole-model TRS, applied once here after the mesh, skeleton and hulls are all in the builder - the same ModelTransformOp call every other compile
-			//path makes, so mesh, skeleton and every bone-relative hull move together in one pass instead of each caller composing it into its own placement.
+			//The whole-model TRS, once, after mesh, skeleton and hulls are in - the ModelTransformOp every compile
+			//path calls, so mesh, skeleton and every bone-relative hull move together
 			ModelTransformOp.Apply( builder, definition );
+
+			//A lightmap sheet with its islands apart, as engines make one on import; an artist's own is kept
+			builder.GenerateLightmapUv( 0 );
 
 			Directory.CreateDirectory( Path.GetDirectoryName( outputPath ) );
 
@@ -117,8 +120,8 @@ internal static class ModelCompiler
 				wanted.Add( i );
 		}
 
-		//A filter that matches nothing keeps everything: their filter names a node in the export, and a format with no nodes to name - an smd,
-		//which is triangles by material - comes back with names their document never mentions. Dropping on that is a model that draws as nothing.
+		//A filter matching nothing keeps everything: it names a node in the export, and a format with none (an smd) comes
+		//back with names their document never mentions - dropping on that draws nothing
 		if ( wanted.Count == 0 ) return count - first;
 
 		//Backwards: dropping one moves everything after it down.

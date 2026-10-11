@@ -95,7 +95,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	//How far off the middle an origin may be before it is moved, in metres.
 	const float OriginTolerance = 0.0001f;
 
-	/// <summary>Moves the origin to the mesh's local bounds centre, keeping mesh and children in place in the world</summary>
+	/// <summary>Moves the origin to the mesh's bounds centre, keeping mesh and children where they are.</summary>
 	public bool CenterOrigin()
 	{
 		if ( Mesh is null ) return false;
@@ -143,8 +143,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 	SceneObject _sceneObject;
 
-	//What is drawn of a mesh wider than a cell of the world's grid: a model a cell, each taking the level of detail its own distance
-	//gives - see PolygonMesh.RenderCells. The whole mesh's object stays, undrawn, for what asks about the mesh as one thing.
+	//A mesh wider than a world grid cell is drawn as a model a cell, each at its own distance's detail - see
+	//PolygonMesh.RenderCells; the whole mesh's object stays, undrawn, for what asks about it as one thing
 	List<SceneObject> _cellObjects;
 
 	public void SetMaterial( Material material, int triangle )
@@ -416,12 +416,26 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		foreach ( var cell in _cellObjects ?? [] ) if ( cell.IsValid() ) Describe( cell );
 	}
 
+	//Lightmap rect (xy scale, zw offset) for the mesh and its cells, which share its sheet; set by the bake, not saved
+	internal System.Numerics.Vector4 LightmapRect
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			UpdateSceneObject();
+		}
+	}
+
 	void Describe( SceneObject one )
 	{
 		one.Component = this;
+		one.LightmapRect = LightmapRect;
 
-		//Says what it is, which is the one thing the frame cannot work out for itself: by the time a mesh reaches the renderer it is triangles
-		//with a material on them, the same as a prop standing on it. What reads it is the editor's grid - see CoreSceneDrawer.DrawSurfaceGrid.
+		//Says what it is, which the frame cannot work out: to the renderer a mesh is triangles with a material,
+		//like a prop standing on it. The editor's grid reads it - see CoreSceneDrawer.DrawSurfaceGrid.
 		one.Flags.IsEditableMesh = true;
 
 		one.Tags.SetFrom( GameObject.Tags );

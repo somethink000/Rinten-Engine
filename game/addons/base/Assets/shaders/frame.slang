@@ -1846,12 +1846,12 @@ bool HasBakedVolume()
 
 #ifndef PORTABLE
 
-//A sheet picture read cubic, B-spline in four filtered taps (Sigg and Hadwiger), so its texels do not show as
-//squares; it reaches two texels, which the sheet's gutters hold
-float4 SheetCubic( uint picture, float2 uv )
+//A sheet picture read cubic, B-spline over its sixteen nearest texels, each kept only where it lies on the same face as
+//the pixel's own texel by the light sheet's alpha (BakeSheet.FaceOf) - smooth within a face, nothing from the one beside
+float4 SheetFaces( uint picture, uint faces, float2 uv )
 {
 	float2 size;
-	g_textures[picture].GetDimensions( size.x, size.y );
+	g_textures[faces].GetDimensions( size.x, size.y );
 
 	float2 at = ( uv * size ) - 0.5;
 	float2 cell = floor( at );
@@ -1859,30 +1859,56 @@ float4 SheetCubic( uint picture, float2 uv )
 
 	float2 f2 = f * f;
 	float2 f3 = f2 * f;
-	float2 w0 = ( ( -f3 + ( 3.0 * f2 ) ) - ( 3.0 * f ) + 1.0 ) / 6.0;
-	float2 w1 = ( ( 3.0 * f3 ) - ( 6.0 * f2 ) + 4.0 ) / 6.0;
-	float2 w2 = ( ( -3.0 * f3 ) + ( 3.0 * f2 ) + ( 3.0 * f ) + 1.0 ) / 6.0;
-	float2 w3 = f3 / 6.0;
+	float2 w[4] = { ( -f3 + ( 3.0 * f2 ) - ( 3.0 * f ) + 1.0 ) / 6.0, ( ( 3.0 * f3 ) - ( 6.0 * f2 ) + 4.0 ) / 6.0,
+		( ( -3.0 * f3 ) + ( 3.0 * f2 ) + ( 3.0 * f ) + 1.0 ) / 6.0, f3 / 6.0 };
 
-	float2 g0 = w0 + w1;
-	float2 g1 = w2 + w3;
-	float2 near = ( cell - 0.5 + ( w1 / g0 ) ) / size;
-	float2 far = ( cell + 1.5 + ( w3 / g1 ) ) / size;
+	float own = g_textures[faces].SampleLevel( ( floor( uv * size ) + 0.5 ) / size, 0.0 ).a;
 
-	return ( g0.y * ( ( g0.x * g_textures[picture].SampleLevel( near, 0.0 ) ) + ( g1.x * g_textures[picture].SampleLevel( float2( far.x, near.y ), 0.0 ) ) ) ) +
-		( g1.y * ( ( g0.x * g_textures[picture].SampleLevel( float2( near.x, far.y ), 0.0 ) ) + ( g1.x * g_textures[picture].SampleLevel( far, 0.0 ) ) ) );
+	float4 sum = 0.0;
+	float total = 0.0;
+
+	[unroll]
+	for ( int j = 0; j < 4; ++j )
+	{
+		[unroll]
+		for ( int i = 0; i < 4; ++i )
+		{
+			float2 texel = ( cell + float2( i - 1, j - 1 ) + 0.5 ) / size;
+			float same = abs( g_textures[faces].SampleLevel( texel, 0.0 ).a - own ) < ( 0.5 / 64.0 ) ? 1.0 : 0.0;
+			float weight = w[i].x * w[j].y * same;
+
+			sum += ( picture == faces ? g_textures[faces].SampleLevel( texel, 0.0 ) : g_textures[picture].SampleLevel( texel, 0.0 ) ) * weight;
+			total += weight;
+		}
+	}
+
+	return total > 1e-5 ? sum / total : g_textures[picture].SampleLevel( uv, 0.0 );
 }
 
-//Baked lightmap diffuse with a dominant direction; only redistributes light for bent normals
-float3 BakedSheet( float2 uv, float3 normal )
+//Baked lightmap diffuse at a normal: the light as the face took it, and - where the bake kept its first band - leaning
+//by colour into where the normal turns from the face (L1 lightmaps), else by the one dominant way
+float3 BakedSheet( float2 uv, float3 normal, float3 face )
 {
 	uint sheet = uint( g_frame[0].bakedMaps.x );
 	uint ways = uint( g_frame[0].bakedMaps.y );
 
-	//Both frame-uniform - see SkyTableAt.
-	float3 light = SheetCubic( sheet, uv ).rgb;
-	float4 way = g_textures[ways].SampleLevel( uv, 0.0 );
+	//Frame-uniform - see SkyTableAt.
+	float3 light = SheetFaces( sheet, sheet, uv ).rgb;
 
+	uint band = uint( g_frame[0].bakedMore.w );
+
+	if ( band != 0u )
+	{
+		//Three runs, red, green, blue, each the band over its colour's light as a byte - see BakeSheet.EncodeBand
+		float3 red = ( g_textures[band].SampleLevel( float2( uv.x / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+		float3 green = ( g_textures[band].SampleLevel( float2( ( uv.x + 1.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+		float3 blue = ( g_textures[band].SampleLevel( float2( ( uv.x + 2.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+
+		float3 turned = normal - face;
+		return max( light * ( 1.0 + float3( dot( red, turned ), dot( green, turned ), dot( blue, turned ) ) ), 0.0 );
+	}
+
+	float4 way = g_textures[ways].SampleLevel( uv, 0.0 );
 	float lean = dot( normal, way.xyz ) * 0.5 + 0.5;
 
 	return light * ( lean / max( way.w, 0.25 ) );
@@ -1990,7 +2016,7 @@ bool HasBakedSky()
 float4 BakedSkySheet( float2 uv )
 {
 	//Frame-uniform - see SkyTableAt.
-	return SheetCubic( uint( g_frame[0].bakedMaps.z ), uv );
+	return SheetFaces( uint( g_frame[0].bakedMaps.z ), uint( g_frame[0].bakedMaps.x ), uv );
 }
 
 //How much sky a surface facing normal sees at a point of the volume: its visibility's two bands - see BakeVolume.Sky
@@ -2011,7 +2037,7 @@ float3 BakedGlows( float2 uv, bool sheet, float3 at )
 		float4 glow = g_frame[0].bakedGlow[i];
 		if ( glow.z <= 0.0 ) continue;
 
-		if ( sheet && glow.x > 0.5 ) sum += SheetCubic( uint( glow.x ), uv ).rgb * glow.z;
+		if ( sheet && glow.x > 0.5 ) sum += SheetFaces( uint( glow.x ), uint( g_frame[0].bakedMaps.x ), uv ).rgb * glow.z;
 		else if ( !sheet && glow.y > 0.5 ) sum += BakedVolumeAt( uint( glow.y ), at ).rgb * glow.z;
 	}
 

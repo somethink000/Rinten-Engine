@@ -12,7 +12,7 @@ internal static partial class CoreBakedLighting
 	private sealed class Held
 	{
 		public int Revision = -1;
-		public ulong Sheet, Ways, Red, Green, Blue, SheetSky, VolumeSky, Walls;
+		public ulong Sheet, Ways, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls;
 
 		/// <summary>The lights all in the bake, which the frame does not draw.</summary>
 		public readonly HashSet<Guid> Baked = new();
@@ -32,7 +32,7 @@ internal static partial class CoreBakedLighting
 
 		public void Release()
 		{
-			foreach ( var texture in new[] { Sheet, Ways, Red, Green, Blue, SheetSky, VolumeSky, Walls } )
+			foreach ( var texture in new[] { Sheet, Ways, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls } )
 				if ( texture != 0 ) CoreRenderDevice.DestroyTexture( texture );
 
 			for ( var i = 0; i < BakedGlow.Groups; ++i )
@@ -51,7 +51,7 @@ internal static partial class CoreBakedLighting
 			Array.Clear( GlowVolume );
 			Array.Clear( GlowGroup );
 
-			Sheet = Ways = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
+			Sheet = Ways = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
 			Baked.Clear();
 			Old = false;
 			Revision = -1;
@@ -85,10 +85,20 @@ internal static partial class CoreBakedLighting
 
 		foreach ( var place in data.Places )
 		{
-			if ( bake.Scene.Directory.FindComponentByGuid( place.Renderer ) is not ModelRenderer renderer ) continue;
-			if ( !Fits( renderer, place ) ) continue;
+			var rect = new System.Numerics.Vector4( place.Rect.x, place.Rect.y, place.Rect.z, place.Rect.w );
 
-			renderer.LightmapRect = new System.Numerics.Vector4( place.Rect.x, place.Rect.y, place.Rect.z, place.Rect.w );
+			switch ( bake.Scene.Directory.FindComponentByGuid( place.Renderer ) )
+			{
+				case ModelRenderer renderer when Fits( renderer, place ):
+					renderer.LightmapRect = rect;
+					break;
+
+				//A mesh edited since has a sheet of another shape: none until the next bake, as with a changed model
+				case MeshComponent built when built.IsValid() && built.GameObject.IsStatic && built.Model is { } model
+					&& model.GetVertices()?.Length == place.Vertices:
+					built.LightmapRect = rect;
+					break;
+			}
 		}
 	}
 
@@ -111,8 +121,16 @@ internal static partial class CoreBakedLighting
 
 		foreach ( var place in data.Places )
 		{
-			if ( bake.Scene.Directory.FindComponentByGuid( place.Renderer ) is ModelRenderer renderer && renderer.IsValid() )
-				renderer.LightmapRect = default;
+			switch ( bake.Scene.Directory.FindComponentByGuid( place.Renderer ) )
+			{
+				case ModelRenderer renderer when renderer.IsValid():
+					renderer.LightmapRect = default;
+					break;
+
+				case MeshComponent built when built.IsValid():
+					built.LightmapRect = default;
+					break;
+			}
 		}
 	}
 
@@ -154,6 +172,7 @@ internal static partial class CoreBakedLighting
 			frame[at + 1] = CoreRender.TextureIndex( on.Ways );
 			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
+			frame[at + 19] = on.Band != 0 ? CoreRender.TextureIndex( on.Band ) : 0.0f;
 			any = true;
 		}
 
@@ -241,6 +260,9 @@ internal static partial class CoreBakedLighting
 			if ( data.HasWalls )
 				on.Walls = CoreRenderDevice.CreateTextureRgba( data.VolumeWalls, across, data.VolumeZ * 3, false );
 
+			//Three half sheets wide, a colour each, linear - see BakeSheet.Band
+			if ( data.HasBand )
+				on.Band = CoreRenderDevice.CreateTextureRgba( data.SheetBand, Math.Max( data.SheetWidth / 2, 1 ) * 3, Math.Max( data.SheetHeight / 2, 1 ), false );
 
 			if ( data.HasSky )
 			{
@@ -326,7 +348,7 @@ internal static partial class CoreBakedLighting
 
 		var world = new BakeScene
 		{
-			Bounces = Math.Clamp( bake.Bounces, 1, 16 ),
+			Bounces = Math.Clamp( bake.Bounces, 0, 16 ),
 			SkyStrength = MathF.Max( bake.SkyStrength, 0.0f ),
 			AlbedoBoost = MathF.Max( bake.BounceStrength, 0.0f ),
 			SunCosine = MathF.Cos( MathF.Max( bake.SunWidth, 0.0f ) * 0.5f * MathF.PI / 180.0f ),
@@ -389,6 +411,7 @@ internal static partial class CoreBakedLighting
 
 		//The main bake's results, kept as the glow groups' passes reuse the same sheet and lattice
 		Half[] sheetLight = null, sheetWays = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
+		byte[] sheetBand = null;
 		byte[] volumeWalls = null;
 
 		var groups = world.GlowGroups();
@@ -412,8 +435,7 @@ internal static partial class CoreBakedLighting
 				sheet.Denoise( world, denoise );
 				sheet.Dilate();
 				sheet.Encode();
-
-				( sheetLight, sheetWays, sheetSky ) = ( sheet.Light, sheet.Ways, sheet.Sky );
+				( sheetLight, sheetWays, sheetSky, sheetBand ) = ( sheet.Light, sheet.Ways, sheet.Sky, sheet.Band );
 			}
 
 			volume.Lay( world.Bounds, spacing );
@@ -526,6 +548,7 @@ internal static partial class CoreBakedLighting
 			data.Sheet = sheetLight;
 			data.Ways = sheetWays;
 			data.SheetSky = sheetSky ?? [];
+			data.SheetBand = sheetBand ?? [];
 
 			foreach ( var receiver in world.Receivers )
 			{
@@ -535,6 +558,7 @@ internal static partial class CoreBakedLighting
 				{
 					Renderer = receiver.Renderer.Id,
 					Model = receiver.Model.ResourcePath ?? "",
+					Vertices = receiver.Model.GetVertices()?.Length ?? 0,
 					Rect = new Vector4( rect.X, rect.Y, rect.Z, rect.W ),
 				} );
 			}

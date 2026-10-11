@@ -260,6 +260,10 @@ internal sealed partial class CoreLiveBounce
 
 	private (Half[] Light, Half[] Lean) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining )
 	{
+		//Links each keeps, as the bake that made them laid them out - see BakeSurfels.Links
+		var surfelLinks = surfels > 0 ? data.SurfelLinks.Length / surfels : 0;
+		var probeLinks = points > 0 ? data.ProbeLinks.Length / points : 0;
+
 		//Over pi, as BakeScene.Direct: the sun square on and the lamps - the lights left out of the bake
 		var direct = new Vec3[surfels];
 
@@ -283,9 +287,9 @@ internal sealed partial class CoreLiveBounce
 			Parallel.For( 0, surfels, s =>
 			{
 				var gathered = direct[s];
-				var at = s * BakeSurfels.Links;
+				var at = s * surfelLinks;
 
-				for ( var k = 0; k < BakeSurfels.Links; ++k )
+				for ( var k = 0; k < surfelLinks; ++k )
 				{
 					var weight = (float)data.SurfelWeights[at + k];
 					if ( weight <= 0.0f ) break;
@@ -315,12 +319,12 @@ internal sealed partial class CoreLiveBounce
 			var z = p / ( data.VolumeX * data.VolumeY );
 
 			var at = origin + ( new Vec3( x, y, z ) * data.VolumeStep );
-			var links = p * BakeSurfels.Links;
+			var links = p * probeLinks;
 
 			var mean = Vec3.Zero;
 			var along = Vec3.Zero;
 
-			for ( var k = 0; k < BakeSurfels.Links; ++k )
+			for ( var k = 0; k < probeLinks; ++k )
 			{
 				var weight = (float)data.ProbeWeights[links + k];
 				if ( weight <= 0.0f ) break;

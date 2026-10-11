@@ -11,7 +11,7 @@ namespace Rinten.Bake;
 internal sealed class BakeSurfels
 {
 	/// <summary>Most links a surfel or a volume point keeps to the surfels it sees.</summary>
-	public const int Links = 32;
+	public const int Links = 64;
 
 	/// <summary>Most surfels, so a link fits two bytes.</summary>
 	public const int Most = ushort.MaxValue;
@@ -201,7 +201,7 @@ internal sealed class BakeSurfels
 			var at = position[s];
 			var face = normal[s];
 
-			const int Across = 11;
+			const int Across = 16;
 			Span<int> found = stackalloc int[Across * Across];
 			var hits = 0;
 			var open = Vec3.Zero;
@@ -283,7 +283,7 @@ internal sealed class BakeSurfels
 			var at = volume.Origin + ( new Vec3( x, y, z ) * volume.Step );
 			var random = new BakeRandom( ( (ulong)index * 0xC2B2AE3D27D4EB4Ful ) + 23, (ulong)index + 9 );
 
-			const int Across = 16;
+			const int Across = 32;
 			Span<int> found = stackalloc int[Across * Across];
 			var hits = 0;
 			var inside = 0;

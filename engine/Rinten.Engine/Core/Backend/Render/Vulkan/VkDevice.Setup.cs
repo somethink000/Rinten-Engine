@@ -584,7 +584,7 @@ internal static unsafe partial class VkDevice
 			features.PNext = &meshFeatures;
 		}
 
-		//Presenting is an extension even now. Asked for unconditionally: a device that cannot present is a compute device, and this engine draws.
+		//Presenting is an extension, asked for always: a device that cannot present is a compute device
 		deviceExtensions[extensionCount++] = names.Add( KhrSwapchain.ExtensionName );
 
 		//Memory budget extension: the driver's view of our usage, which is what decides allocation failures
@@ -1463,7 +1463,7 @@ internal static unsafe partial class VkDevice
 		//contents with. The wait is explicit because a headless run may have had no swapchain to wait through.
 		if ( device.Handle != 0 ) VkSubmitter.DeviceWaitIdle();
 
-		//The headset's session before the device it was made on - its swapchain images are the device's, and so are the eyes' views.
+		//The headset's session before its device - its swapchain images and the eyes' views are the device's
 		CoreXr.Shutdown();
 
 		//The portable frame's sun map is the device's own: into the graveyard before it is drained
@@ -1476,7 +1476,7 @@ internal static unsafe partial class VkDevice
 
 		VkPipelines.DestroyPipelines();
 
-		//And whatever the dialect kept to draw them in - after the pipelines made against it and before the device it was made on.
+		//And what the dialect kept to draw them in - after the pipelines made against it, before its device
 		dialect?.Release();
 
 		//After the pipelines, which were baked through it.
@@ -1663,7 +1663,22 @@ internal static unsafe partial class VkDevice
 			//and a device on it would be spoken to in 1.1's words whatever the instance said - see VkDialect.
 			instanceApi = speaks.Minor >= 3 ? Vk.Version13 : speaks.Minor == 2 ? Vk.Version12 : Vk.Version11;
 
-			if ( !CreateInstance( enableValidation ) || !PickPhysicalDevice() || !CreateDevice() )
+			//RADV traces rays in shaders on a card without the hardware (RDNA1), asked before its instance: a second one
+			var picked = CreateInstance( enableValidation ) && PickPhysicalDevice();
+
+			if ( picked && VkRays.AskEmulation( physicalDevice ) )
+			{
+				if ( messenger.Handle != 0 && extDebugUtils is not null ) extDebugUtils.DestroyDebugUtilsMessenger( instance, messenger, null );
+				vk.DestroyInstance( instance, null );
+
+				instance = default;
+				messenger = default;
+				physicalDevice = default;
+
+				picked = CreateInstance( enableValidation ) && PickPhysicalDevice();
+			}
+
+			if ( !picked || !CreateDevice() )
 			{
 				//Whichever of the three gave up has already said so in infoText.
 				Destroy();

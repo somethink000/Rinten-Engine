@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//The bake as the portable frame binds it (g_bakedSheet, g_bakedVolume): sheet light and sky beside its mask, ≤ 2048,
+//The bake as the portable frame binds it (g_bakedSheet, g_bakedVolume): sheet light and sky, ≤ 2048 a side,
 //the volume's layers as tiles with the live bounce below; glow layers folded in at their brightness
 internal static partial class CoreBakedLighting
 {
@@ -104,7 +104,7 @@ internal static partial class CoreBakedLighting
 		return made;
 	}
 
-	//Halved until it fits, each texel the mean of those it covers: light and glows rgb, sky seen a; the mask beside it
+	//Halved until it fits, each texel the mean of those it covers: light and glows rgb, sky seen a
 	private static void MakePortableSheet( PortablePictures made, BakedLightingData data, ReadOnlySpan<float> brightness )
 	{
 		var step = 1;
@@ -112,16 +112,15 @@ internal static partial class CoreBakedLighting
 
 		var width = Math.Max( data.SheetWidth / step, 1 );
 		var height = Math.Max( data.SheetHeight / step, 1 );
-		var pixels = new Half[width * 2 * height * 4];
+		var pixels = new Half[width * height * 4];
 
 		var sky = data.HasSky && data.SheetSky.Length == data.Sheet.Length ? data.SheetSky : null;
-		var mask = data.HasSheetMask ? data.SheetMask : null;
 		var share = 1.0f / ( step * step );
 
 		for ( var y = 0; y < height; ++y )
 		for ( var x = 0; x < width; ++x )
 		{
-			System.Numerics.Vector4 light = default, through = default;
+			System.Numerics.Vector4 light = default;
 
 			for ( var dy = 0; dy < step; ++dy )
 			for ( var dx = 0; dx < step; ++dx )
@@ -145,18 +144,12 @@ internal static partial class CoreBakedLighting
 				}
 
 				light += new System.Numerics.Vector4( r, g, b, sky is null ? 0.0f : (float)sky[texel + 3] );
-
-				if ( mask is not null )
-					through += new System.Numerics.Vector4( mask[texel], mask[texel + 1], mask[texel + 2], mask[texel + 3] ) / 255.0f;
-				else
-					through += System.Numerics.Vector4.One;
 			}
 
-			Put( pixels, ( ( y * width * 2 ) + x ) * 4, light * share );
-			Put( pixels, ( ( y * width * 2 ) + width + x ) * 4, through * share );
+			Put( pixels, ( ( y * width ) + x ) * 4, light * share );
 		}
 
-		made.Sheet = CoreRenderDevice.CreateTextureHalf( pixels, width * 2, height );
+		made.Sheet = CoreRenderDevice.CreateTextureHalf( pixels, width, height );
 		made.SheetWidth = width;
 		made.SheetHeight = height;
 	}

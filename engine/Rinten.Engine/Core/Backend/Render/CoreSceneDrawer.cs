@@ -2175,8 +2175,7 @@ internal sealed partial class CoreSceneDrawer
 
 		var hasSun = sunLight is not null;
 
-		//And whether it casts. The Shadows box on the sun was once read by nothing on this path, and a sun told to
-		//cast nothing had its shadows drawn anyway; its pages are neither baked nor read now - see CoreSunPages.
+		//And whether it casts: a sun told to cast nothing has its pages neither baked nor read - see CoreSunPages
 		var sunCasts = hasSun && sunLight.Shadows;
 
 		CoreRenderDevice.ZoneBegin( "frame block" );
@@ -2310,11 +2309,8 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		//A fully baked sun gets no pages; a shadow-baked one only needs pages for the fog march
-		var sunChannel = CoreSceneRenderer.BakedOn && sunLight is not null
-			? CoreBakedLighting.ChannelOf( sunLight ) : CoreBakedLighting.NotBaked;
-		var sunBaked = sunChannel == CoreBakedLighting.BakedWhole;
-		var sunPagesWanted = sunChannel < 0 || CoreSceneRenderer.FogVolumes;
+		//A baked sun is all in the bake: no pages - see Light.NotBaked
+		var sunBaked = CoreSceneRenderer.BakedOn && sunLight is not null && CoreBakedLighting.InBake( sunLight );
 
 		if ( CoreRenderDevice.PortableFrame )
 		{
@@ -2325,7 +2321,7 @@ internal sealed partial class CoreSceneDrawer
 		else
 		{
 			sunPages.Plan( frame, sunCasts && !sunBaked && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
-				Rinten.Rendering.DrawSettings.MeshLodPixels, stillWorld: sunPagesWanted );
+				Rinten.Rendering.DrawSettings.MeshLodPixels );
 
 			lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
 				!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
@@ -2550,7 +2546,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			CoreRenderDevice.ZoneBegin( "depth" );
 
-			//Under a name of its own: it was the one part of `depth` the report could not account for.
+			//Under a name of its own, so the report can account for it within `depth`
 			CoreRenderDevice.ZoneBegin( "prepass" );
 
 			if ( drawn && PrepassSlices > 0 ) meshRender.DrawCamera( appeared: false );
@@ -2599,7 +2595,15 @@ internal sealed partial class CoreSceneDrawer
 			//The air into its slice sheet, a march per froxel read in one tap; after the sun maps, before shading
 			var air = CoreVolumeFog.Draw( pixels, far );
 
-			//And the bake's bounce through hardware rays, where the card has them, before anything reads it
+			//The scene for hardware rays, where they are on: into the block before the passes after the pre-pass trace it
+			if ( CoreRays.On )
+			{
+				CoreRays.Build( scene );
+				CoreRays.Lay( frame );
+				CoreRenderDevice.SetupFrame( frame );
+			}
+
+			//And the bake's bounce through them, before anything reads it
 			CoreBakedLighting.TraceBounce( scene );
 
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
@@ -2621,7 +2625,13 @@ internal sealed partial class CoreSceneDrawer
 				laid = true;
 			}
 
-			if ( CorePasses.Find( AmbientOcclusion.IndirectPicture ) is { Index: > 0 } indirect )
+			//Traced near light where rays drew it, else what the occlusion gathered off the screen
+			if ( CorePasses.Find( CoreRayLight.Picture ) is { Index: > 0 } traced )
+			{
+				CoreSceneRenderer.LayScreenLight( frame, traced.Index, true );
+				laid = true;
+			}
+			else if ( CorePasses.Find( AmbientOcclusion.IndirectPicture ) is { Index: > 0 } indirect )
 			{
 				CoreSceneRenderer.LayScreenLight( frame, indirect.Index );
 				laid = true;
@@ -4331,8 +4341,7 @@ internal sealed partial class CoreSceneDrawer
 		bitmap.Clear( new Color( 0, 0, 0, 0 ) );
 		bitmap.DrawText( block, bitmap.Rect );
 
-		//Straight out of the bitmap's own pixels, which are already eight-bit RGBA: a copy
-		//into an array of colours was a picture's worth of garbage per new string (plan В5).
+		//Straight out of the bitmap's own pixels, already eight-bit RGBA: no copy into an array of colours per string
 		var texture = CoreRenderDevice.CreateTextureRgba( bitmap.GetBuffer(), width, height, srgb: true );
 
 		Rinten.UI.TextStats.Scope( System.Diagnostics.Stopwatch.GetTimestamp() - rasterStart, (long)width * height * 4 );
@@ -4616,7 +4625,7 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneBegin( "sheet draw" );
 
 			//Out of the sheet's own buffer, written once when it was walked: a kept frame's vertices are the same
-			//bytes every frame, and writing them into the frame's ring again was most of what drawing the sheet cost.
+			//bytes every frame, and are not written into the frame's ring again
 			var pipeline = Pick( uiSheetPipeline, uiSheetTwo );
 
 			foreach ( var batch in batches )
@@ -5441,8 +5450,8 @@ internal sealed partial class CoreSceneDrawer
 
 		System.Runtime.InteropServices.MemoryMarshal.Write( into, in matrix );
 
-		//The tint stays at sixty-four, where it has always been, and the mode goes after it - so a gizmo
-		//shader baked before this lane existed reads exactly what it read before. See g_mode in gizmo.slang.
+		//The tint stays at sixty-four and the mode goes after it, so a gizmo shader without this lane
+		//reads what it always did - see g_mode in gizmo.slang
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[64..],
 			new System.Numerics.Vector4( tint.r, tint.g, tint.b, tint.a ) );
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[80..],

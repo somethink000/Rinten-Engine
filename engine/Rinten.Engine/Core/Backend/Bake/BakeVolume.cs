@@ -16,8 +16,6 @@ internal sealed class BakeVolume
 	/// <summary>A colour channel each: four halves a point - constant, then the lean along x, y, z.</summary>
 	public Half[] Red, Green, Blue;
 
-	/// <summary>Four bytes a point, null where nothing is masked: each masked light's share, for movers.</summary>
-	public byte[] Mask;
 
 	/// <summary>Four halves a point: how much sky is seen, then its lean along x, y, z - see SkyLit.</summary>
 	public Half[] Sky;
@@ -74,7 +72,6 @@ internal sealed class BakeVolume
 		var leanG = new Vec3[count];
 		var leanB = new Vec3[count];
 		var valid = new bool[count];
-		var mask = scene.AnyMasked() ? new Vec4[count] : null;
 		var sky = new Vec4[count];
 
 		progress.Begin( "Tracing the volume", count );
@@ -160,15 +157,13 @@ internal sealed class BakeVolume
 			//A point inside a wall saw its inside and would darken everything near it: it takes its neighbours'
 			valid[index] = inside < taken * 0.25f;
 
-			if ( mask is not null ) mask[index] = MaskAt( scene, at, ref random );
-
 			sky[index] = SkyOf( open, taken, scene.SkyStrength );
 
 			progress.Step();
 		} );
 
-		Fill( constant, leanR, leanG, leanB, mask, sky, valid );
-		Encode( constant, leanR, leanG, leanB, mask, sky );
+		Fill( constant, leanR, leanG, leanB, sky, valid );
+		Encode( constant, leanR, leanG, leanB, sky );
 	}
 
 	//Escaping rays' direction sum and count into the sky's visibility as its first two bands, as the light's are
@@ -199,7 +194,6 @@ internal sealed class BakeVolume
 		var leanG = new Vec3[count];
 		var leanB = new Vec3[count];
 		var valid = new bool[count];
-		var mask = scene.AnyMasked() ? new Vec4[count] : null;
 		var sky = new Vec4[count];
 
 		var taken = across * across;
@@ -239,13 +233,11 @@ internal sealed class BakeVolume
 			leanB[index] = towardsB;
 			valid[index] = inside < taken * 0.25f;
 
-			if ( mask is not null ) mask[index] = MaskAt( scene, points[index], ref random );
-
 			progress.Step();
 		} );
 
-		Fill( constant, leanR, leanG, leanB, mask, sky, valid );
-		Encode( constant, leanR, leanG, leanB, mask, sky );
+		Fill( constant, leanR, leanG, leanB, sky, valid );
+		Encode( constant, leanR, leanG, leanB, sky );
 
 		return true;
 	}
@@ -370,7 +362,7 @@ internal sealed class BakeVolume
 	}
 
 	//Points that were inside something take the mean of their answered neighbours, a ring at a time.
-	private void Fill( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask, Vec4[] sky, bool[] valid )
+	private void Fill( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] sky, bool[] valid )
 	{
 		for ( var ring = 0; ring < 8; ++ring )
 		{
@@ -386,7 +378,6 @@ internal sealed class BakeVolume
 
 				var c = Vec3.Zero;
 				Vec3 r = Vec3.Zero, g = Vec3.Zero, b = Vec3.Zero;
-				var m = Vec4.Zero;
 				var open = Vec4.Zero;
 				var n = 0;
 
@@ -407,7 +398,6 @@ internal sealed class BakeVolume
 					r += leanR[near];
 					g += leanG[near];
 					b += leanB[near];
-					if ( mask is not null ) m += mask[near];
 					open += sky[near];
 					n++;
 				}
@@ -418,7 +408,6 @@ internal sealed class BakeVolume
 				leanR[index] = r / n;
 				leanG[index] = g / n;
 				leanB[index] = b / n;
-				if ( mask is not null ) mask[index] = m / n;
 				sky[index] = open / n;
 
 				grown[index] = true;
@@ -431,14 +420,13 @@ internal sealed class BakeVolume
 	}
 
 	//Into three pictures, one a colour, the lattice's layers side by side - see BakedVolume in frame.slang
-	private void Encode( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] mask, Vec4[] sky )
+	private void Encode( Vec3[] constant, Vec3[] leanR, Vec3[] leanG, Vec3[] leanB, Vec4[] sky )
 	{
 		var count = CountX * CountY * CountZ;
 
 		Red = new Half[count * 4];
 		Green = new Half[count * 4];
 		Blue = new Half[count * 4];
-		Mask = mask is null ? null : new byte[count * 4];
 		Sky = new Half[count * 4];
 
 		for ( var z = 0; z < CountZ; ++z )
@@ -454,43 +442,7 @@ internal sealed class BakeVolume
 			Put( Green, texel, constant[index].Y, leanG[index] );
 			Put( Blue, texel, constant[index].Z, leanB[index] );
 			Put( Sky, texel, sky[index].W, new Vec3( sky[index].X, sky[index].Y, sky[index].Z ) );
-
-			if ( Mask is null ) continue;
-
-			var through = Vec4.Clamp( mask[index], Vec4.Zero, Vec4.One );
-
-			Mask[texel + 0] = (byte)MathF.Round( through.X * 255.0f );
-			Mask[texel + 1] = (byte)MathF.Round( through.Y * 255.0f );
-			Mask[texel + 2] = (byte)MathF.Round( through.Z * 255.0f );
-			Mask[texel + 3] = (byte)MathF.Round( through.W * 255.0f );
 		}
-	}
-
-	//How much of each masked light reaches a point in the air through the still world: a handful of shadow
-	//rays at each, across the light's width. A channel no light reaches here lets everything through.
-	private static Vec4 MaskAt( BakeScene scene, Vec3 at, ref BakeRandom random )
-	{
-		const int Tries = 16;
-		Span<float> through = stackalloc float[BakeScene.MaskChannels];
-
-		for ( var c = 0; c < BakeScene.MaskChannels; ++c )
-		{
-			if ( scene.MaskedAt( c, at ) is not { } light )
-			{
-				through[c] = 1.0f;
-				continue;
-			}
-
-			//Facing the light, so the point does not shadow itself: it is in the air, and every side of it is open.
-			var towards = light.Kind == 0 ? -light.Forward : Vec3.Normalize( light.Position - at );
-			var sum = 0.0f;
-
-			for ( var i = 0; i < Tries; ++i ) sum += scene.Visible( light, at, towards, ref random );
-
-			through[c] = sum / Tries;
-		}
-
-		return new Vec4( through[0], through[1], through[2], through[3] );
 	}
 
 	private static void Put( Half[] into, int at, float constant, Vec3 lean )

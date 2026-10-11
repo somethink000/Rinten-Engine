@@ -359,14 +359,6 @@ uint LightWithholds( Light light )
 	return uint( round( frac( light.colour.w ) * 10.0 ) );
 }
 
-//Which channel of the baked mask holds a light's shadow of the still world, out of the hundredths of its kind word:
-//one more than the channel, nought for none - see Light.NotBaked and CoreSceneRenderer.MaskChannelOf. -1 where none does.
-int LightMaskChannel( Light light )
-{
-	uint hundredths = uint( round( frac( light.colour.w ) * 100.0 ) );
-	return int( hundredths % 10u ) - 1;
-}
-
 Light LightAt( uint index )
 {
 #ifdef PORTABLE
@@ -1096,7 +1088,7 @@ float SunLevel( uint level, float3 world, float3 step, float2 tilt, bool wide, f
 		: ShadowTap( uint( g_frame[0].sunMaps.x ), tap, compare );
 }
 
-float SunShadow( float3 world, float3 normal, float3 step, bool wide = true, bool stillWorld = true )
+float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 {
 	if ( !SunCasts() ) return 1.0;
 
@@ -1127,9 +1119,6 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true, boo
 	float3 facing = mul( float4( normal, 0.0 ), g_frame[0].sunToPages ).xyz;
 	float2 tilt = facing.xy / max( -facing.z, 0.1 );
 	float vis = 1.0;
-
-	//Not where the bake's mask holds the static shadow (BakedShadow); the pages may still be there for fog
-	if ( !stillWorld ) level = levels;
 
 	if ( level < levels )
 	{
@@ -1352,8 +1341,7 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 	float compare = depth - bias;
 	float texel = 1.0 / LampLayerTexels;
 
-	//A masked lamp's still world is in the bake's mask and its squares of the map are never drawn - see CoreLampMaps
-	float lit = LightMaskChannel( light ) >= 0 ? 1.0 : LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
+	float lit = LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
 
 	//This face's movers are in the movers map beside it where its bit is set - see CoreLampMaps
 	uint moversMap = uint( g_frame[0].sunDepth.z );
@@ -1856,23 +1844,34 @@ bool HasBakedVolume()
 #endif
 }
 
-//Whether lights' static shadows were baked into a mask rather than maps - see Light.NotBaked
-bool HasBakedMask()
-{
-#ifdef PORTABLE
-	return false;
-#else
-	return kBakedOn != 0 && g_frame[0].bakedMask.w > 0.5;
-#endif
-}
-
-//The mask channel with the sun's shadow, or -1, for sun-lit things that skip the light walk (a leaf's back)
-int SunMaskChannel()
-{
-	return HasBakedMask() ? int( g_frame[0].bakedSun.x ) - 1 : -1;
-}
-
 #ifndef PORTABLE
+
+//A sheet picture read cubic, B-spline in four filtered taps (Sigg and Hadwiger), so its texels do not show as
+//squares; it reaches two texels, which the sheet's gutters hold
+float4 SheetCubic( uint picture, float2 uv )
+{
+	float2 size;
+	g_textures[picture].GetDimensions( size.x, size.y );
+
+	float2 at = ( uv * size ) - 0.5;
+	float2 cell = floor( at );
+	float2 f = at - cell;
+
+	float2 f2 = f * f;
+	float2 f3 = f2 * f;
+	float2 w0 = ( ( -f3 + ( 3.0 * f2 ) ) - ( 3.0 * f ) + 1.0 ) / 6.0;
+	float2 w1 = ( ( 3.0 * f3 ) - ( 6.0 * f2 ) + 4.0 ) / 6.0;
+	float2 w2 = ( ( -3.0 * f3 ) + ( 3.0 * f2 ) + ( 3.0 * f ) + 1.0 ) / 6.0;
+	float2 w3 = f3 / 6.0;
+
+	float2 g0 = w0 + w1;
+	float2 g1 = w2 + w3;
+	float2 near = ( cell - 0.5 + ( w1 / g0 ) ) / size;
+	float2 far = ( cell + 1.5 + ( w3 / g1 ) ) / size;
+
+	return ( g0.y * ( ( g0.x * g_textures[picture].SampleLevel( near, 0.0 ) ) + ( g1.x * g_textures[picture].SampleLevel( float2( far.x, near.y ), 0.0 ) ) ) ) +
+		( g1.y * ( ( g0.x * g_textures[picture].SampleLevel( float2( near.x, far.y ), 0.0 ) ) + ( g1.x * g_textures[picture].SampleLevel( far, 0.0 ) ) ) );
+}
 
 //Baked lightmap diffuse with a dominant direction; only redistributes light for bent normals
 float3 BakedSheet( float2 uv, float3 normal )
@@ -1881,7 +1880,7 @@ float3 BakedSheet( float2 uv, float3 normal )
 	uint ways = uint( g_frame[0].bakedMaps.y );
 
 	//Both frame-uniform - see SkyTableAt.
-	float3 light = g_textures[sheet].SampleLevel( uv, 0.0 ).rgb;
+	float3 light = SheetCubic( sheet, uv ).rgb;
 	float4 way = g_textures[ways].SampleLevel( uv, 0.0 );
 
 	float lean = dot( normal, way.xyz ) * 0.5 + 0.5;
@@ -1927,7 +1926,7 @@ float3 BakedVolumeSpot( float3 world, float3 normal )
 	at = clamp( at, float3( 0.0, 0.0, 0.0 ), count - 1.0 );
 
 	//Frame-uniform - see SkyTableAt.
-	uint walls = uint( g_frame[0].bakedSun.y );
+	uint walls = uint( g_frame[0].bakedMore.x );
 	if ( walls == 0u ) return at;
 
 	float3 cell = min( floor( at ), count - 2.0 );
@@ -1981,12 +1980,6 @@ float4 BakedVolumeAt( uint picture, float3 at )
 	return lerp( low, high, between );
 }
 
-//Baked light-volume mask at a spot; the picture is frame-uniform - see SkyTableAt
-float4 BakedVolumeMask( float3 at )
-{
-	return BakedVolumeAt( uint( g_frame[0].bakedMask.y ), at );
-}
-
 //Whether the bake keeps the sky as visibility for the frame to light (SkyLit) - a bake before that has it in its light
 bool HasBakedSky()
 {
@@ -1997,7 +1990,7 @@ bool HasBakedSky()
 float4 BakedSkySheet( float2 uv )
 {
 	//Frame-uniform - see SkyTableAt.
-	return g_textures[uint( g_frame[0].bakedMaps.z )].SampleLevel( uv, 0.0 );
+	return SheetCubic( uint( g_frame[0].bakedMaps.z ), uv );
 }
 
 //How much sky a surface facing normal sees at a point of the volume: its visibility's two bands - see BakeVolume.Sky
@@ -2018,44 +2011,25 @@ float3 BakedGlows( float2 uv, bool sheet, float3 at )
 		float4 glow = g_frame[0].bakedGlow[i];
 		if ( glow.z <= 0.0 ) continue;
 
-		if ( sheet && glow.x > 0.5 ) sum += g_textures[uint( glow.x )].SampleLevel( uv, 0.0 ).rgb * glow.z;
+		if ( sheet && glow.x > 0.5 ) sum += SheetCubic( uint( glow.x ), uv ).rgb * glow.z;
 		else if ( !sheet && glow.y > 0.5 ) sum += BakedVolumeAt( uint( glow.y ), at ).rgb * glow.z;
 	}
 
 	return sum;
 }
 
-//Baked still-world shadow for a masked light, from the lightmap mask or else the volume mask
-float BakedMask( float3 world, float3 geometric, float2 lightmap, int channel )
-{
-	float4 through;
-
-	if ( g_frame[0].bakedMask.z > 0.5 && ( lightmap.x + lightmap.y ) > 0.0 )
-	{
-		//Frame-uniform - see SkyTableAt.
-		through = g_textures[uint( g_frame[0].bakedMask.x )].SampleLevel( lightmap, 0.0 );
-	}
-	else
-	{
-		//A step off the surface as BakedVolume takes it: a floor reads the air above it
-		through = BakedVolumeMask( BakedVolumeSpot( world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric ) );
-	}
-
-	return through[clamp( channel, 0, 3 )];
-}
-
-//Whether the frame relights the sun's and sky's bounce (CoreLiveBounce) - the bake left it out
+//Whether the frame lights the bounce of the lights left out of the bake (CoreLiveBounce)
 bool HasBakedBounce()
 {
-	return g_frame[0].bakedSun.z > 0.5;
+	return g_frame[0].bakedMore.y > 0.5;
 }
 
 //That bounce at a spot on a surface facing normal: its colour, times one plus its lean onto the normal
 float3 BakedBounce( float3 at, float3 normal )
 {
 	//Both frame-uniform - see SkyTableAt.
-	float3 light = BakedVolumeAt( uint( g_frame[0].bakedSun.z ), at ).rgb;
-	float3 lean = BakedVolumeAt( uint( g_frame[0].bakedSun.w ), at ).xyz;
+	float3 light = BakedVolumeAt( uint( g_frame[0].bakedMore.y ), at ).rgb;
+	float3 lean = BakedVolumeAt( uint( g_frame[0].bakedMore.z ), at ).xyz;
 
 	return light * max( 1.0 + dot( lean, normal ), 0.0 );
 }
@@ -2097,13 +2071,7 @@ float3 BakedVolume( float3 at, float3 normal )
 //A sheet texel's light rgb and how much sky it sees a
 float4 PortableSheet( float2 uv )
 {
-	return g_bakedSheet.SampleLevel( float2( uv.x * 0.5, uv.y ), 0.0 );
-}
-
-//A sheet texel's mask, a channel a masked light
-float4 PortableSheetMask( float2 uv )
-{
-	return g_bakedSheet.SampleLevel( float2( 0.5 + ( uv.x * 0.5 ), uv.y ), 0.0 );
+	return g_bakedSheet.SampleLevel( uv, 0.0 );
 }
 
 //Whether there is a volume to read
@@ -2133,21 +2101,6 @@ float4 PortableVolume( float3 world, bool bounce )
 	return lerp( g_bakedVolume.SampleLevel( low / size, 0.0 ), g_bakedVolume.SampleLevel( high / size, 0.0 ), at.y - below );
 }
 #endif
-
-//Min of baked still-world shadow and the live movers shadow; unchanged without a channel or mask
-float BakedShadow( float moving, float3 world, float3 geometric, float2 lightmap, int channel )
-{
-#ifdef PORTABLE
-	//The sheet's mask only: what moves takes the sun's map, which the portable frame draws whole
-	if ( channel < 0 || moving <= 0.0 || !HasBakedSheet() || ( lightmap.x + lightmap.y ) <= 0.0 ) return moving;
-
-	return min( moving, PortableSheetMask( lightmap )[clamp( channel, 0, 3 )] );
-#else
-	if ( channel < 0 || moving <= 0.0 || !HasBakedMask() ) return moving;
-
-	return min( moving, BakedMask( world, geometric, lightmap, channel ) );
-#endif
-}
 
 //Octahedral mapping of a direction; must match CoreEnvmap.Fold exactly
 float2 OctahedralUv( float3 direction )

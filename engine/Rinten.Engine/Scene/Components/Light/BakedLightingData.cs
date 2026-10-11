@@ -8,7 +8,7 @@ namespace Rinten;
 /// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 4;
+	public override int Version => 5;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -45,24 +45,8 @@ public sealed class BakedLightingData : BlobData
 	public Half[] VolumeGreen { get; set; } = [];
 	public Half[] VolumeBlue { get; set; } = [];
 
-	/// <summary>Four bytes a texel: each masked light's share through the still world; empty where none.</summary>
-	public byte[] SheetMask { get; set; } = [];
-
-	/// <summary>The same at each point of the volume, for what moves - laid out as its colours are.</summary>
-	public byte[] VolumeMask { get; set; } = [];
-
-	/// <summary>A light the bake holds something of, and what: its mask channel, or the whole of it.</summary>
-	public struct BakedLight
-	{
-		/// <summary>The light component.</summary>
-		public Guid Light;
-
-		/// <summary>The mask channel holding its shadow, nought to three, or -1 where it is baked whole.</summary>
-		public int Channel;
-	}
-
-	/// <summary>Every light the bake took more than the bounces of.</summary>
-	public List<BakedLight> Lights { get; set; } = new();
+	/// <summary>Every light all in the bake - its light, soft shadows and bounces; the frame draws none of them.</summary>
+	public List<Guid> Baked { get; set; } = new();
 
 	/// <summary>One BakedGlow group's light alone, scaled by its brightness in the frame.</summary>
 	public struct Glow
@@ -137,10 +121,6 @@ public sealed class BakedLightingData : BlobData
 	/// <summary>Whether the sky is kept as visibility; a bake before version 3 has it in its light.</summary>
 	public bool HasSky => HasVolume && VolumeSky.Length == VolumeRed.Length;
 
-	public bool HasSheetMask => HasSheet && SheetMask.Length >= SheetWidth * SheetHeight * 4;
-
-	public bool HasVolumeMask => HasVolume && VolumeMask.Length >= VolumeX * VolumeY * VolumeZ * 4;
-
 	//Counts every change, so whoever put it on the card knows to put it there again.
 	internal int Revision { get; private set; }
 
@@ -181,17 +161,9 @@ public sealed class BakedLightingData : BlobData
 		Packed( ref s, VolumeGreen );
 		Packed( ref s, VolumeBlue );
 
-		//Version 2: the masks and the lights.
-		PackedBytes( ref s, SheetMask );
-		PackedBytes( ref s, VolumeMask );
-
-		s.Write( Lights.Count );
-
-		foreach ( var light in Lights )
-		{
-			s.Write( light.Light );
-			s.Write( light.Channel );
-		}
+		//The lights in the bake, where version 2 to 4 kept masks and channels.
+		s.Write( Baked.Count );
+		foreach ( var light in Baked ) s.Write( light );
 
 		//Version 3: the glow groups and the sky's visibility.
 		s.Write( Glows.Count );
@@ -219,59 +191,45 @@ public sealed class BakedLightingData : BlobData
 		PackedBytes( ref s, SurfelDepth );
 		Packed( ref s, SurfelClusters );
 
-		s.Write( Bounced.Count );
-		foreach ( var light in Bounced ) s.Write( light );
-
 		writer.Stream = s;
 	}
 
-	/// <summary>An older bake: what its version held, the rest empty; before masks, lights stay in the frame.</summary>
+	/// <summary>An older bake: what its version held, the rest empty. Its masked lights are drawn in the frame.</summary>
 	public override void Upgrade( ref Reader reader, int fromVersion )
 	{
-		if ( fromVersion >= 3 )
-		{
-			ReadFirst( ref reader );
-			ReadSecond( ref reader );
-			ReadThird( ref reader );
-			VolumeWalls = [];
-			Touched();
-			return;
-		}
-
-		VolumeWalls = [];
-
-		if ( fromVersion >= 2 )
-		{
-			ReadFirst( ref reader );
-			ReadSecond( ref reader );
-			Glows = new List<Glow>();
-			SheetSky = [];
-			VolumeSky = [];
-			Touched();
-			return;
-		}
-
 		ReadFirst( ref reader );
-		SheetMask = [];
-		VolumeMask = [];
-		Lights = new List<BakedLight>();
-		Glows = new List<Glow>();
-		SheetSky = [];
-		VolumeSky = [];
-		IsOld = true;
+
+		if ( fromVersion == 1 ) IsOld = true;
+		if ( fromVersion >= 2 ) ReadMasks( ref reader );
+		if ( fromVersion >= 3 ) ReadThird( ref reader );
+		if ( fromVersion >= 4 ) ReadFourth( ref reader, true );
 
 		Touched();
 	}
 
-	//Whether this came out of a bake from before the masks - see Upgrade.
+	//Whether this is a first-version bake, which names no lights - see Upgrade
 	internal bool IsOld { get; private set; }
 
 	public override void Deserialize( ref Reader reader )
 	{
 		ReadFirst( ref reader );
-		ReadSecond( ref reader );
-		ReadThird( ref reader );
 
+		var s = reader.Stream;
+		var baked = s.Read<int>();
+		Baked = new List<Guid>( baked );
+		for ( var i = 0; i < baked; ++i ) Baked.Add( s.Read<Guid>() );
+		reader.Stream = s;
+
+		ReadThird( ref reader );
+		ReadFourth( ref reader, false );
+
+		Bounced = new List<Guid>( Baked );
+		Touched();
+	}
+
+	//What version 4 added: the volume's walls and the surfels; it kept the bounced lights apart, after them
+	private void ReadFourth( ref Reader reader, bool bounced )
+	{
 		var s = reader.Stream;
 		VolumeWalls = UnpackedBytes( ref s );
 
@@ -285,12 +243,14 @@ public sealed class BakedLightingData : BlobData
 		SurfelDepth = UnpackedBytes( ref s );
 		SurfelClusters = Unpacked<ushort>( ref s );
 
-		var bounced = s.Read<int>();
-		Bounced = new List<Guid>( bounced );
-		for ( var i = 0; i < bounced; ++i ) Bounced.Add( s.Read<Guid>() );
+		if ( bounced )
+		{
+			var count = s.Read<int>();
+			Bounced = new List<Guid>( count );
+			for ( var i = 0; i < count; ++i ) Bounced.Add( s.Read<Guid>() );
+		}
 
 		reader.Stream = s;
-		Touched();
 	}
 
 	//What version 3 added: the glow groups and the sky's visibility
@@ -310,19 +270,25 @@ public sealed class BakedLightingData : BlobData
 		reader.Stream = s;
 	}
 
-	//What version 2 added: the masks and the lights
-	private void ReadSecond( ref Reader reader )
+	//What versions 2 to 4 kept after the first: the masks, read past, and each light's channel - only those baked
+	//whole are in the bake; the bounces of all of them are
+	private void ReadMasks( ref Reader reader )
 	{
 		var s = reader.Stream;
 
-		SheetMask = UnpackedBytes( ref s );
-		VolumeMask = UnpackedBytes( ref s );
+		UnpackedBytes( ref s );
+		UnpackedBytes( ref s );
 
 		var lights = s.Read<int>();
-		Lights = new List<BakedLight>( lights );
+		Baked = new List<Guid>();
+		Bounced = new List<Guid>( lights );
 
 		for ( var i = 0; i < lights; ++i )
-			Lights.Add( new BakedLight { Light = s.Read<Guid>(), Channel = s.Read<int>() } );
+		{
+			var light = s.Read<Guid>();
+			if ( s.Read<int>() < 0 ) Baked.Add( light );
+			Bounced.Add( light );
+		}
 
 		reader.Stream = s;
 	}

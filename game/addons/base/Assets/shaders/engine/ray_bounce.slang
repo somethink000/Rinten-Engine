@@ -1,7 +1,7 @@
-//The bake volume's bounce through hardware rays (CoreLiveBounce, VkRays): each probe's rays light what they hit by
-//sun, lamps, a sky sample and the last bounce, kept as a running mean - DDGI's way, into the surfels' two pictures
+//The bounce of the lights left out of the bake, through hardware rays (CoreLiveBounce, VkRays): each probe's rays light
+//what they hit by those lights and the last bounce, kept as a running mean - DDGI's way, into the surfels' two pictures
 
-//Header, lamps, the sky's table and every instance's colours - see CoreLiveBounce.Params
+//Header, lamps and every instance's colours - see CoreLiveBounce.Parameters
 [[vk::binding(0,0)]] StructuredBuffer<float4> g_params;
 
 //Each probe's light by colour: constant and lean, a float4 a colour
@@ -24,9 +24,7 @@ static const float Pi = 3.14159265;
 
 //Where the parts of the header are, in float4s - CoreLiveBounce writes the same
 static const uint HeaderAt = 0u;
-static const uint SkyAt = 6u;
-static const uint SkySide = 8u;
-static const uint LampsAt = SkyAt + ( SkySide * SkySide );
+static const uint LampsAt = 6u;
 static const uint MostLamps = 32u;
 static const uint RecordsAt = LampsAt + ( MostLamps * 3u );
 
@@ -40,28 +38,11 @@ uint LampCount() { return asuint( g_params[HeaderAt + 2u].w ); }
 float3 SunTowards() { return g_params[HeaderAt + 3u].xyz; }
 float3 SunColour() { return g_params[HeaderAt + 4u].rgb; }
 float Keep() { return g_params[HeaderAt + 4u].w; }
-float SkyScale() { return g_params[HeaderAt + 5u].x; }
 
 RaytracingAccelerationStructure Scene()
 {
 	uint2 address = Address();
 	return RaytracingAccelerationStructure( ( uint64_t( address.y ) << 32 ) | uint64_t( address.x ) );
-}
-
-//A direction on the unfolded octahedron, y up - as BakeMath.Octahedron
-float2 Octahedron( float3 d )
-{
-	float3 n = d / max( abs( d.x ) + abs( d.y ) + abs( d.z ), 1e-8 );
-	if ( n.y >= 0.0 ) return n.xz;
-	return float2( ( 1.0 - abs( n.z ) ) * ( n.x >= 0.0 ? 1.0 : -1.0 ), ( 1.0 - abs( n.x ) ) * ( n.z >= 0.0 ? 1.0 : -1.0 ) );
-}
-
-//The sky from a direction, nearest cell of its 8x8 table
-float3 Sky( float3 direction )
-{
-	float2 o = ( Octahedron( direction ) * 0.5 ) + 0.5;
-	uint2 cell = min( uint2( o * float( SkySide ) ), uint2( SkySide - 1u, SkySide - 1u ) );
-	return g_params[SkyAt + ( cell.y * SkySide ) + cell.x].rgb * SkyScale();
 }
 
 //A small hash, a float in [0, 1)
@@ -80,16 +61,6 @@ float3 Spread( uint i, uint n, float turn )
 	float r = sqrt( max( 1.0 - ( z * z ), 0.0 ) );
 	float a = ( float( i ) * golden ) + turn;
 	return float3( r * cos( a ), z, r * sin( a ) );
-}
-
-//A cosine-weighted direction about n
-float3 Cosine( float3 n, float u, float v )
-{
-	float r = sqrt( u );
-	float a = 2.0 * Pi * v;
-	float3 side = abs( n.y ) < 0.999 ? normalize( cross( n, float3( 0.0, 1.0, 0.0 ) ) ) : float3( 1.0, 0.0, 0.0 );
-	float3 up = cross( n, side );
-	return normalize( ( side * ( r * cos( a ) ) ) + ( up * ( r * sin( a ) ) ) + ( n * sqrt( max( 1.0 - u, 0.0 ) ) ) );
 }
 
 //Whether anything stands between a point and a distance along a way
@@ -208,7 +179,7 @@ float3 Arriving( RaytracingAccelerationStructure scene, float3 from, float3 way,
 	float3 albedo = g_params[record].rgb;
 	float3 glow = g_params[record + 1u].rgb;
 
-	//Over pi, all of it: the sun square on, each lamp, the sky one cosine sample at a time, and the last bounce
+	//Over pi, all of it: the sun square on, each lamp, and the last bounce
 	float3 lit = 0.0;
 
 	float3 sun = SunTowards();
@@ -219,8 +190,6 @@ float3 Arriving( RaytracingAccelerationStructure scene, float3 from, float3 way,
 
 	for ( uint i = 0u; i < min( LampCount(), MostLamps ); ++i ) lit += Lamp( scene, i, lifted, n );
 
-	float3 skyward = Cosine( n, Random( seed ), Random( seed ) );
-	if ( !Blocked( scene, lifted, skyward, 10000.0 ) ) lit += Sky( skyward );
 
 	lit += Bounced( lifted, n );
 

@@ -86,8 +86,9 @@ public sealed partial class AmbientOcclusion : BasePostProcess<AmbientOcclusion>
 			from = into;
 		}
 
-		//And the light those horizons hide, at medium and high: from last frame's picture, once there is one
-		if ( UserQuality >= 2 && Camera.IsValid() )
+		//And the light those horizons hide, at medium and high: from last frame's picture, once there is one - unless rays
+		//trace it (CoreRayLight)
+		if ( UserQuality >= 2 && Camera.IsValid() && !CoreRayLight.On )
 		{
 			var known = history.TryGetValue( Camera, out var last );
 			var device = known ? last.ColorTarget?.core?.Device() ?? 0 : 0;

@@ -9,12 +9,8 @@ namespace Rinten;
 //the scene as it stands, moving things included, a share of the probes a frame - DDGI's way, into the same two pictures
 internal sealed partial class CoreLiveBounce
 {
-	/// <summary>Whether the bounce is traced with rays: the player's setting, where the card can.</summary>
-	internal static bool Rays => Wanted && VkRays.On && !CoreRenderDevice.PortableFrame;
-
-	[ConVar( "r_raytracing", ConVarFlags.Saved,
-		Help = "Hardware ray tracing for lighting, where the card has it (0 off, 1 on). Off by default - see RenderSettings.RayTracing." )]
-	internal static bool Wanted { get; set; }
+	/// <summary>Whether the bounce is traced with rays - see CoreRays.On.</summary>
+	internal static bool Rays => CoreRays.On;
 
 	//Rays each probe casts an update, and the most probes traced a frame
 	private const int RaysPerProbe = 32;
@@ -24,9 +20,7 @@ internal sealed partial class CoreLiveBounce
 	private const float Kept = 0.85f;
 
 	//The parameters' layout, in float4s - ray_bounce.slang reads the same
-	private const int SkyAt = 6;
-	private const int SkySide = 8;
-	private const int LampsAt = SkyAt + ( SkySide * SkySide );
+	private const int LampsAt = 6;
 	private const int TracedLamps = 32;
 	private const int RecordsAt = LampsAt + ( TracedLamps * 3 );
 
@@ -38,10 +32,6 @@ internal sealed partial class CoreLiveBounce
 	private readonly ulong[] parameters = new ulong[3];
 	private readonly int[] parameterRoom = new int[3];
 	private int frame, first, turn;
-
-	//Each material's mean colour and glow, as the bake reads them - see BakeMaterial
-	private static readonly Dictionary<Material, (Vec3 Albedo, Vec3 Glow)> colours = new();
-	private static readonly Dictionary<Texture, Vec3> means = new();
 
 	//The sun, sky and lamps as last read on the main thread
 	private void LookForRays( Scene scene )
@@ -66,7 +56,7 @@ internal sealed partial class CoreLiveBounce
 		lamps = LampsOf( scene );
 	}
 
-	/// <summary>Traces this frame's share of the probes into the pictures; in the frame's recording.</summary>
+	/// <summary>Traces this frame's share of the probes into the pictures, through CoreRays as built.</summary>
 	public void Trace( Scene scene )
 	{
 		if ( !Rays || Light == 0 || Lean == 0 || sky is null || points == 0 ) return;
@@ -86,16 +76,9 @@ internal sealed partial class CoreLiveBounce
 		if ( output == 0 ) output = CoreRenderDevice.CreateBuffer( new byte[points * 2 * 8] );
 		if ( state == 0 || output == 0 ) return;
 
-		var placed = new List<VkRays.Instance>();
-		var records = new List<(Vec3 Albedo, Vec3 Glow)>();
+		if ( CoreRays.Address == 0 ) return;
 
-		Gather( scene, placed, records );
-		if ( placed.Count == 0 ) return;
-
-		var address = VkFrame.RaysBuild( CollectionsMarshal.AsSpan( placed ) );
-		if ( address == 0 ) return;
-
-		var words = Parameters( address, records );
+		var words = Parameters( CoreRays.Address, CoreRays.Records );
 		var slot = frame++ % parameters.Length;
 
 		if ( parameters[slot] == 0 || parameterRoom[slot] < words.Length )
@@ -120,91 +103,7 @@ internal sealed partial class CoreLiveBounce
 		VkFrame.RaysCopy( output, (long)points * 8, Lean, across, data.VolumeZ );
 	}
 
-	//Every drawn rigid mesh of the scene as an instance, and its record: what it reflects, and what it glows if it moves
-	private static void Gather( Scene scene, List<VkRays.Instance> placed, List<(Vec3 Albedo, Vec3 Glow)> records )
-	{
-		var tables = CoreSceneTables.Of( scene );
-
-		for ( var i = 0; i < tables.InstanceCount; ++i )
-		{
-			var entry = tables.EntryAt( i );
-			if ( entry is not { Live: true, Mesh: { Pooled: true } mesh } ) continue;
-			if ( entry.Renderer is SkinnedModelRenderer || entry.RenderType == ModelRenderer.ShadowRenderType.Off ) continue;
-			if ( entry.Layer != CoreSceneTables.DrawLayer.Game ) continue;
-
-			var (albedo, glow) = ColoursOf( entry );
-
-			//A still glow's light is in the bake already
-			if ( entry.Renderer is { } renderer && renderer.GameObject.IsStatic ) glow = Vec3.Zero;
-
-			placed.Add( new VkRays.Instance { Mesh = mesh, Transform = tables.RecordAt( i ).World, Record = (uint)records.Count } );
-			records.Add( (albedo, glow) );
-		}
-	}
-
-	//The mean over its materials, times its tint
-	private static (Vec3 Albedo, Vec3 Glow) ColoursOf( CoreSceneTables.Entry entry )
-	{
-		var albedo = Vec3.Zero;
-		var glow = Vec3.Zero;
-		var counted = 0;
-
-		if ( entry.Override is { } over )
-		{
-			( albedo, glow ) = ColoursOf( over );
-			counted = 1;
-		}
-		else if ( entry.Model is { } model )
-		{
-			foreach ( var material in model.Materials )
-			{
-				var (a, g) = ColoursOf( material );
-				albedo += a;
-				glow += g;
-				counted++;
-			}
-		}
-
-		if ( counted == 0 ) return (new Vec3( 0.5f ), Vec3.Zero);
-
-		var tint = new Vec3( entry.Tint.r, entry.Tint.g, entry.Tint.b );
-		return (Vec3.Min( albedo / counted * tint, new Vec3( 0.95f ) ), glow / counted);
-	}
-
-	private static (Vec3 Albedo, Vec3 Glow) ColoursOf( Material material )
-	{
-		if ( material?.core is null ) return (new Vec3( 0.5f ), Vec3.Zero);
-		if ( colours.TryGetValue( material, out var known ) ) return known;
-
-		var tint = CoreResources.LiveTint( material );
-		var albedo = MeanOf( material.GetTexture( "Color" ) ) * new Vec3( tint.r, tint.g, tint.b );
-		albedo *= 1.0f - Math.Clamp( material.GetFloat( "Metalness", 0.0f ), 0.0f, 1.0f );
-
-		var glow = Vec3.Zero;
-
-		if ( CoreResources.Feature( material, "F_EMISSION" ) != 0 )
-		{
-			var said = material.core.Values.TryGetValue( "EmissiveColor", out var value ) ? new Vec3( value.x, value.y, value.z ) : Vec3.One;
-			glow = said * MeanOf( material.GetTexture( "Emission" ) ) * material.GetFloat( "EmissionStrength", 0.0f );
-		}
-
-		known = (albedo, glow);
-		colours[material] = known;
-		return known;
-	}
-
-	private static Vec3 MeanOf( Texture texture )
-	{
-		if ( texture is null ) return Vec3.One;
-		if ( means.TryGetValue( texture, out var known ) ) return known;
-
-		var mean = BakePicture.Of( texture, true )?.Mean() ?? System.Numerics.Vector4.One;
-		known = new Vec3( mean.X, mean.Y, mean.Z );
-		means[texture] = known;
-		return known;
-	}
-
-	//The words ray_bounce.slang reads: header, sky table, lamps, records
+	//The words ray_bounce.slang reads: header, lamps, records
 	private float[] Parameters( ulong address, List<(Vec3 Albedo, Vec3 Glow)> records )
 	{
 		var words = new float[( RecordsAt + ( records.Count * 2 ) ) * 4];
@@ -227,15 +126,6 @@ internal sealed partial class CoreLiveBounce
 		Put( 3, towards.X, towards.Y, towards.Z, 0.0f );
 		Put( 4, colour.X, colour.Y, colour.Z, Kept );
 		Put( 5, 1.0f, 0.0f, 0.0f, 0.0f );
-
-		for ( var cell = 0; cell < SkySide * SkySide; ++cell )
-		{
-			var ox = ( ( ( ( cell % SkySide ) + 0.5f ) / SkySide ) * 2.0f ) - 1.0f;
-			var oy = ( ( ( ( cell / SkySide ) + 0.5f ) / SkySide ) * 2.0f ) - 1.0f;
-			var radiance = sky.Radiance( BakeMath.FromOctahedron( ox, oy ) );
-
-			Put( SkyAt + cell, radiance.X, radiance.Y, radiance.Z, 0.0f );
-		}
 
 		for ( var i = 0; i < Math.Min( lamps.Count, TracedLamps ); ++i )
 		{

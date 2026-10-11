@@ -34,9 +34,9 @@ internal static class BakeGpu
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
-	//Floats of sums a texel of the sheet hands back: light and squares, lean and weight, insides, each masked light's
-	//share, and the sky's escaping directions and count - see bake_trace.slang's main
-	internal const int SheetFloats = 20;
+	//Floats of sums a texel of the sheet hands back: light and squares, lean and weight, insides, and the sky's
+	//escaping directions and count - see bake_trace.slang's main
+	internal const int SheetFloats = 16;
 
 	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
 	internal const int ProbeFloats = 20;
@@ -384,6 +384,7 @@ internal static class BakeGpu
 		w[20] = (uint)glowAt;
 		w[21] = (uint)scene.Pass;
 		w[22] = grouped ? (uint)groupsAt : 0u;
+		w[23] = F( scene.ContactNear );
 
 		if ( grouped )
 			for ( var t = 0; t < triangles; ++t ) w[groupsAt + t] = (uint)scene.GroupOf[t];
@@ -483,17 +484,13 @@ internal static class BakeGpu
 			w[at] = (uint)light.Kind;
 			Put( w, at + 1, light.Position );
 			w[at + 4] = F( light.Range );
-			//A sun whose bounce the frame relights gives the bake none - see BakeScene.LiveBounce
-			Put( w, at + 5, scene.LiveBounce && light.Live ? Vec3.Zero : light.Colour );
+			Put( w, at + 5, light.Colour );
 			Put( w, at + 8, light.Forward );
 			w[at + 11] = F( light.CosInner );
 			w[at + 12] = F( light.CosOuter );
 			w[at + 13] = F( light.Falloff );
 			w[at + 14] = F( light.Radius );
 			w[at + 15] = ( light.Shadows ? 1u : 0u ) | ( light.Whole ? 2u : 0u );
-
-			//Which channel of the mask its shadow goes into, all ones for none.
-			w[at + 16] = light.Mask >= 0 ? (uint)light.Mask : uint.MaxValue;
 
 			w[at + 17] = (uint)light.Shape;
 			w[at + 18] = F( light.HalfWidth );

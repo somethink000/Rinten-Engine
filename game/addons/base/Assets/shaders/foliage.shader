@@ -343,9 +343,7 @@ Out Shade( V2F i, bool front )
 
 				if ( lit > 0.0 )
 				{
-					int channel = SunMaskChannel();
-					float shadow = SunShadow( i.world, n, n, true, channel < 0 );
-					shadow = BakedShadow( shadow, i.world, n, i.lightmap, channel );
+					float shadow = SunShadow( i.world, n, n, true );
 
 					gain += g_frame[0].sunColour.rgb * ( lit * shadow );
 				}

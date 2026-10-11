@@ -22,9 +22,6 @@ internal sealed class BakeSheet
 	/// <summary>Four halves a texel: which way the light came from, and how much it leans.</summary>
 	public Half[] Ways;
 
-	/// <summary>Four bytes a texel, null where nothing is masked: each masked light's share reaching it.</summary>
-	public byte[] Mask;
-
 	/// <summary>Four halves a texel: which way the sky is open xyz, how much is seen w - see SkyLit.</summary>
 	public Half[] Sky;
 
@@ -42,10 +39,6 @@ internal sealed class BakeSheet
 
 	//The sky straight from the texel: the escaping rays' direction summed xyz, their share w
 	private Vec4[] sky;
-
-	//The mask while baking: each channel's share let through and its trust - null where nothing is masked
-	private Vec4[] mask;
-	private float[] maskVariance;
 
 	/// <summary>Gives each receiver a square at the density, within <paramref name="most"/>; too big gets less.</summary>
 	public static bool Pack( BakeScene scene, float density, int most, out int side )
@@ -277,7 +270,6 @@ internal sealed class BakeSheet
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
-		StartMask( scene, count );
 
 		for ( var i = 0; i < texels.Count; ++i )
 		{
@@ -298,35 +290,10 @@ internal sealed class BakeSheet
 			variance[at] = MathF.Max( ( squares / samples ) - ( meanLuma * meanLuma ), 0.0f ) / samples;
 			valid[at] = inside < samples * 0.35f;
 
-			if ( mask is not null )
-				EndMask( at, new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), samples );
-
-			sky[at] = SkyOf( new Vec4( sums[o + 16], sums[o + 17], sums[o + 18], sums[o + 19] ), samples, scene.SkyStrength );
+			sky[at] = SkyOf( new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), samples, scene.SkyStrength );
 		}
 
 		return true;
-	}
-
-	private void StartMask( BakeScene scene, int count )
-	{
-		mask = scene.AnyMasked() ? new Vec4[count] : null;
-		maskVariance = mask is null ? null : new float[count];
-
-		//Through until traced: a texel nothing reaches, not even the gutter's dilation, must not come out a shadow.
-		if ( mask is not null ) Array.Fill( mask, Vec4.One );
-	}
-
-	//A texel's mask out of what its samples summed, and how noisy that is.
-	private void EndMask( int at, Vec4 sum, int samples )
-	{
-		var seen = sum / samples;
-		mask[at] = seen;
-
-		//Each channel is a mean of coin tosses, noisy as p(1 - p) over their count; the filter asks the noisiest
-		var worst = MathF.Max( MathF.Max( seen.X * ( 1.0f - seen.X ), seen.Y * ( 1.0f - seen.Y ) ),
-			MathF.Max( seen.Z * ( 1.0f - seen.Z ), seen.W * ( 1.0f - seen.W ) ) );
-
-		maskVariance[at] = worst / samples;
 	}
 
 	/// <summary>Traces every texel, on every thread; <paramref name="progress"/> counts texels as they finish.</summary>
@@ -339,7 +306,6 @@ internal sealed class BakeSheet
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
-		StartMask( scene, count );
 
 		var texels = new List<int>();
 		for ( var i = 0; i < count; ++i ) if ( !float.IsPositiveInfinity( owned[i] ) ) texels.Add( i );
@@ -362,22 +328,8 @@ internal sealed class BakeSheet
 			var inside = 0;
 			var open = Vec4.Zero;
 
-			//Which light each channel of the mask is here - see BakeScene.MaskedAt.
-			var masked = mask is null ? null : new BakeLight[BakeScene.MaskChannels];
-			if ( masked is not null )
-				for ( var c = 0; c < masked.Length; ++c ) masked[c] = scene.MaskedAt( c, p );
-
-			Span<float> through = stackalloc float[BakeScene.MaskChannels];
-			through.Clear();
-
 			for ( var s = 0; s < samples; ++s )
 			{
-				if ( masked is not null )
-				{
-					for ( var c = 0; c < masked.Length; ++c )
-						through[c] += masked[c] is { } maskedLight ? scene.Visible( maskedLight, p, g, ref random ) : 1.0f;
-				}
-
 				var lean = Vec3.Zero;
 				var direct = scene.Direct( p, n, g, ref random, true, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
 
@@ -417,8 +369,6 @@ internal sealed class BakeSheet
 			//A texel whose rays mostly came out of the back of something is under a wall or inside a pillar,
 			//and what it measured is the dark inside of that. It is filled from its neighbours instead.
 			valid[at] = inside < samples * 0.35f;
-
-			if ( masked is not null ) EndMask( at, new Vec4( through[0], through[1], through[2], through[3] ), samples );
 
 			sky[at] = SkyOf( open, samples, scene.SkyStrength );
 
@@ -472,8 +422,6 @@ internal sealed class BakeSheet
 		var from = light;
 		var fromWays = towards;
 		var fromVariance = variance;
-		var fromMask = mask;
-		var fromMaskVariance = maskVariance;
 
 		for ( var pass = 0; pass < 4; ++pass )
 		{
@@ -482,15 +430,9 @@ internal sealed class BakeSheet
 			var toWays = new Vec3[count];
 			var toVariance = new float[count];
 
-			//The mask by the same neighbours - its shadow edges are edges too - with its own noise for what is alike
-			var toMask = fromMask is null ? null : new Vec4[count];
-			var toMaskVariance = fromMask is null ? null : new float[count];
-
 			var src = from;
 			var srcWays = fromWays;
 			var srcVariance = fromVariance;
-			var srcMask = fromMask;
-			var srcMaskVariance = fromMaskVariance;
 
 			Parallel.For( 0, Height, y =>
 			{
@@ -503,13 +445,6 @@ internal sealed class BakeSheet
 						to[at] = src[at];
 						toWays[at] = srcWays[at];
 						toVariance[at] = srcVariance[at];
-
-						if ( srcMask is not null )
-						{
-							toMask[at] = srcMask[at];
-							toMaskVariance[at] = srcMaskVariance[at];
-						}
-
 						continue;
 					}
 
@@ -522,12 +457,6 @@ internal sealed class BakeSheet
 					var ways = Vec3.Zero;
 					var noise = 0.0f;
 					var total = 0.0f;
-
-					var maskSum = Vec4.Zero;
-					var maskNoise = 0.0f;
-					var maskTotal = 0.0f;
-					var maskCentre = srcMask is null ? Vec4.Zero : srcMask[at];
-					var maskSigma = srcMask is null ? 1.0f : ( strength * MathF.Sqrt( srcMaskVariance[at] ) ) + 1e-3f;
 
 					for ( var dy = -2; dy <= 2; ++dy )
 					{
@@ -560,24 +489,7 @@ internal sealed class BakeSheet
 							ways += srcWays[near] * w;
 							noise += srcVariance[near] * w * w;
 							total += w;
-
-							if ( srcMask is not null )
-							{
-								var apartMask = Vec4.Abs( srcMask[near] - maskCentre );
-								var most = MathF.Max( MathF.Max( apartMask.X, apartMask.Y ), MathF.Max( apartMask.Z, apartMask.W ) );
-								var wm = kernel[dx + 2] * kernel[dy + 2] * facing * standing * MathF.Exp( -most / maskSigma );
-
-								maskSum += srcMask[near] * wm;
-								maskNoise += srcMaskVariance[near] * wm * wm;
-								maskTotal += wm;
-							}
 						}
-					}
-
-					if ( srcMask is not null )
-					{
-						toMask[at] = maskTotal > 1e-8f ? maskSum / maskTotal : maskCentre;
-						toMaskVariance[at] = maskTotal > 1e-8f ? maskNoise / ( maskTotal * maskTotal ) : srcMaskVariance[at];
 					}
 
 					if ( total > 1e-8f )
@@ -598,15 +510,11 @@ internal sealed class BakeSheet
 			from = to;
 			fromWays = toWays;
 			fromVariance = toVariance;
-			fromMask = toMask;
-			fromMaskVariance = toMaskVariance;
 		}
 
 		light = from;
 		towards = fromWays;
 		variance = fromVariance;
-		mask = fromMask;
-		maskVariance = fromMaskVariance;
 	}
 
 	/// <summary>Fills unanswered texels from answered ones beside them, a ring at a time, for clean edges.</summary>
@@ -631,7 +539,6 @@ internal sealed class BakeSheet
 
 					var sum = Vec3.Zero;
 					var ways = Vec3.Zero;
-					var masks = Vec4.Zero;
 					var skies = Vec4.Zero;
 					var n = 0;
 
@@ -650,7 +557,6 @@ internal sealed class BakeSheet
 							sum += light[near];
 							ways += towards[near];
 							skies += sky[near];
-							if ( mask is not null ) masks += mask[near];
 							n++;
 						}
 					}
@@ -660,7 +566,6 @@ internal sealed class BakeSheet
 					light[at] = sum / n;
 					towards[at] = ways / n;
 					sky[at] = skies / n;
-					if ( mask is not null ) mask[at] = masks / n;
 
 					//Its normal from the same neighbours, for the directions below.
 					if ( float.IsPositiveInfinity( owned[at] ) ) normal[at] = Vec3.Zero;
@@ -683,7 +588,6 @@ internal sealed class BakeSheet
 		Light = new Half[count * 4];
 		Ways = new Half[count * 4];
 		Sky = new Half[count * 4];
-		Mask = mask is null ? null : new byte[count * 4];
 
 		for ( var i = 0; i < count; ++i )
 		{
@@ -714,16 +618,6 @@ internal sealed class BakeSheet
 			Sky[( i * 4 ) + 1] = (Half)openWay.Y;
 			Sky[( i * 4 ) + 2] = (Half)openWay.Z;
 			Sky[( i * 4 ) + 3] = (Half)Math.Min( open.W, 60000.0f );
-
-			if ( Mask is null ) continue;
-
-			//A texel nobody owns lets everything through, so a filter reaching it does not darken an owned edge
-			var m = ownerOf[i] >= 0 ? Vec4.Clamp( mask[i], Vec4.Zero, Vec4.One ) : Vec4.One;
-
-			Mask[( i * 4 ) + 0] = (byte)MathF.Round( m.X * 255.0f );
-			Mask[( i * 4 ) + 1] = (byte)MathF.Round( m.Y * 255.0f );
-			Mask[( i * 4 ) + 2] = (byte)MathF.Round( m.Z * 255.0f );
-			Mask[( i * 4 ) + 3] = (byte)MathF.Round( m.W * 255.0f );
 		}
 	}
 

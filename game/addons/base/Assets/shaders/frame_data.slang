@@ -57,8 +57,7 @@ struct FrameData
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
 	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
-	float4 bakedMask;    //Sheet mask's index x, volume's y, one if the sheet has one z, one if any mask w
-	float4 bakedSun;     //Sun's mask channel plus one x (nought none), walls' picture y, bounce's colour z and lean w
+	float4 bakedMore;    //Walls' picture x, the live bounce's colour y and lean z (nought for none)
 	float4 bakedGlow[4]; //Glow layers: sheet's index x, volume's y, group brightness z (BakedGlow); nought for none
 
 	//How many of the four probes are filled is x; nothing after it matters when zero
@@ -129,8 +128,13 @@ struct FrameData
 	//the volume's layers to a row of tiles z, one where its bounce half is filled w
 	float4 portableBake;
 
-	//The screen's indirect light picture by table index x, nought for none - see AmbientOcclusion; spare yzw
+	//The screen's indirect light picture by table index x, nought for none - see AmbientOcclusion; one in y where rays
+	//traced it, its a then the share of them that got out (ray_light.shader); spare zw
 	float4 screenLight;
+
+	//The scene's ray structure's address in 24-bit parts xy and its top 16 bits w, its instances' colours picture z;
+	//nought for none
+	float4 rays;
 };
 
 #ifdef WEBGL

@@ -462,7 +462,6 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 			if ( area.x <= 0.0 ) continue;
 
 			float areaShadow = LampShadow( s.world, geometric, light, distance );
-			areaShadow = BakedShadow( areaShadow, s.world, geometric, s.lightmap, LightMaskChannel( light ) );
 
 			if ( areaShadow <= 0.0 ) continue;
 
@@ -533,21 +532,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		float shadow;
 
-		//Where the bake holds this light's static shadow (Light.NotBaked); its maps then hold only movers
-		int channel = LightMaskChannel( light );
-
 		if ( light.colour.w < 0.5 )
 		{
-			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow; not the pages
-			//where the mask has the static answer
-			shadow = SunShadow( s.world, geometric, geometric, true, channel < 0 );
-			shadow = BakedShadow( shadow, s.world, geometric, s.lightmap, channel );
+			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow
+			shadow = SunShadow( s.world, geometric, geometric, true );
 		}
 		else
 		{
 			//Out of the lamp's faces, where it casts - see LampShadow.
 			shadow = LampShadow( s.world, geometric, light, distance );
-			shadow = BakedShadow( shadow, s.world, geometric, s.lightmap, channel );
 		}
 
 		//Shadow blocks only this light; lights add independently, so nothing gives it back
@@ -654,8 +647,16 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	if ( g_frame[0].screenLight.x > 0.5 && g_frame[0].settings.y > 0.0 )
 	{
 		//Frame-uniform - see SkyTableAt.
-		screenLight = g_textures[uint( g_frame[0].screenLight.x )].SampleLevel( s.screen / g_frame[0].settings.yz, 0.0 ).rgb;
+		float4 gathered = g_textures[uint( g_frame[0].screenLight.x )].SampleLevel( s.screen / g_frame[0].settings.yz, 0.0 );
+		screenLight = gathered.rgb;
 		screenLit = true;
+
+		//Traced: the share of the rays that got out is what sees the sky and the bake, in place of the horizons' guess
+		if ( g_frame[0].screenLight.y > 0.5 )
+		{
+			visible = saturate( gathered.a );
+			screenVisible = visible;
+		}
 	}
 #endif
 
@@ -685,7 +686,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		ambientSky = BakedSheet( s.lightmap, normal ) + BakedGlows( s.lightmap, true, s.world );
 		visible = 1.0;
 
-		//The sun's and sky's bounce as they are now, from the volume a step off the surface as below
+		//The bounce of the lights left out of the bake, as they are now, from the volume a step off the surface
 		if ( HasBakedBounce() )
 			ambientSky += BakedBounce( BakedVolumeSpot( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric ), normal );
 

@@ -2,7 +2,7 @@
 namespace Rinten;
 
 //Collects and applies post-process effects from cameras and volumes; supports editor previews
-/// <summary>Manages post-processing effects for cameras and volumes within a scene, handling their application during rendering and editor preview stages.</summary>
+/// <summary>Builds the post-processing effects of cameras and volumes onto each camera, editor previews included.</summary>
 public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSystem>, Component.ISceneStage
 {
 	[ConVar( "r_postprocess", ConVarFlags.Saved, Help = "Enable or disable post process effects." )]
@@ -111,7 +111,7 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 		var anchor = target.PostProcessAnchor.IsValid() ? target.PostProcessAnchor : source.PostProcessAnchor;
 		var pos = anchor.IsValid() ? anchor.WorldPosition : target.WorldPosition;
 
-		//Reuse cleared lists; this runs per camera per tick and used to allocate a lot
+		//Lists cleared and reused: this runs per camera per tick
 		effects.Clear();
 
 		gathered.Clear();
@@ -122,7 +122,7 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 			if ( Keeps( effect ) ) effects.Add( new WeightedEffect { Effect = effect, Weight = 1 } );
 		}
 
-		//A scene without a volume system has no volumes, which is not the same as no scene: a preview rendering one asset has neither.
+		//A scene without a volume system has no volumes - a preview rendering one asset has neither
 		if ( Scene.GetSystem<VolumeSystem>() is { } volumeSystem )
 		{
 			inVolumes.Clear();
@@ -135,7 +135,7 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 				if ( volume.IsValid() ) standing.Add( volume );
 			}
 
-			//By priority, which is what decides who overrides whom. Sorted in place: the list is this system's own and lives as long as it does.
+			//By priority, which decides who overrides whom; sorted in place, as the list is this system's own
 			standing.Sort( static ( a, b ) => a.Priority.CompareTo( b.Priority ) );
 
 			foreach ( var volume in standing )
@@ -155,13 +155,16 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 		Build( target );
 	}
 
-	//Whether an effect goes into the camera's list: a live one, and in a headset only one a headset can take - see BasePostProcess.AllowedInHeadset.
+	//Whether an effect goes in: a live one, and in a headset one it can take - see BasePostProcess.AllowedInHeadset
 	private static bool Keeps( BasePostProcess effect )
 		=> effect.IsValid() && ( !Game.IsRunningInVR || effect.AllowedInHeadset );
 
 	//Builds effects one kind at a time so volume copies blend with the camera's; groups without GroupBy
 	private void Build( CameraComponent target )
 	{
+		//Before the effects, which may step aside for it
+		CoreRayLight.Build( target );
+
 		foreach ( var of in kinds.Values ) of.Clear();
 
 		foreach ( var entry in effects )
@@ -184,7 +187,7 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 			var ctx = new PostProcessContext
 			{
 				Camera = target,
-				//The list itself: an effect reads it inside its Build and nowhere after, and a copy of it was an array per kind per camera every tick.
+				//The list itself: an effect reads it inside its Build and nowhere after, so it is not copied
 				Components = of,
 			};
 
@@ -204,8 +207,8 @@ public sealed partial class PostProcessSystem : GameObjectSystem<PostProcessSyst
 	//And the volumes it is standing in, to be sorted by priority.
 	private readonly List<PostProcessVolume> standing = new();
 
-	//The gathered effects by kind, kept between ticks with their lists. The lists are cleared and reused rather than dropped: the same
-	//handful of kinds appear every tick, and a dictionary rebuilt from nothing every tick is the allocation this was meant to remove.
+	//The gathered effects by kind, kept between ticks with their lists, which are cleared and reused: the same
+	//handful of kinds appears every tick
 	private readonly Dictionary<Type, List<WeightedEffect>> kinds = new();
 
 	//Called in editor mode, when a volume is selected: only what that volume does, on whichever camera is drawing.

@@ -13,17 +13,17 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 {
 	/// <summary>How many texels of the atlas a metre of surface gets.</summary>
 	[Property, Group( "Surfaces" ), Range( 1, 64 )]
-	public float TexelsPerMetre { get; set; } = 16.0f;
+	public float TexelsPerMetre { get; set; } = 32.0f;
 
-	/// <summary>The widest the atlas may be. A scene that needs more at the density above gets less density, evenly.</summary>
+	/// <summary>The widest the atlas may be; a scene needing more at that density gets less, evenly.</summary>
 	[Property, Group( "Surfaces" ), Range( 256, 8192 ), Step( 256 )]
 	public int MaxResolution { get; set; } = 4096;
 
 	/// <summary>Paths traced a texel. Noise goes as one over its square root; the filter takes what is left.</summary>
-	[Property, Group( "Surfaces" ), Range( 16, 4096 )]
-	public int Samples { get; set; } = 512;
+	[Property, Group( "Surfaces" ), Range( 16, 16384 )]
+	public int Samples { get; set; } = 2048;
 
-	/// <summary>How hard the filter smooths what the rays left noisy. Nought is the raw trace. It follows each texel's own noise, so a sharp shadow stays sharp.</summary>
+	/// <summary>How hard the filter smooths the trace's noise, nought for none; sharp shadows stay sharp.</summary>
 	[Property, Group( "Surfaces" ), Range( 0, 8 )]
 	public float Denoise { get; set; } = 3.0f;
 
@@ -35,19 +35,19 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 	[Property, Group( "Volume" ), Range( 64, 4096 )]
 	public int VolumeSamples { get; set; } = 1024;
 
-	/// <summary>How many times light may bounce before a path stops. Past the second, a path goes on only as often as it still carries light.</summary>
+	/// <summary>How often light may bounce; past the second, a path goes on as often as it carries light.</summary>
 	[Property, Group( "Light" ), Range( 1, 16 )]
 	public int Bounces { get; set; } = 6;
 
-	/// <summary>The sky's light, against what the frame gives an open surface. One is the same: a bake of an open field is the picture the frame already drew, and what changes is the corners and the bounce.</summary>
+	/// <summary>The sky's light against the frame's on an open surface; at one, an open field bakes as drawn.</summary>
 	[Property, Group( "Light" ), Range( 0, 4 )]
 	public float SkyStrength { get; set; } = 1.0f;
 
-	/// <summary>How much of the light surfaces throw back, against what their colour says. Above one is a cheat, and looks like one.</summary>
+	/// <summary>How much light surfaces throw back against what their colour says; above one is a cheat.</summary>
 	[Property, Group( "Light" ), Range( 0, 2 )]
 	public float BounceStrength { get; set; } = 1.0f;
 
-	/// <summary>How wide the sun is across, in degrees - the real one is half of one. What decides how soft a baked sun's shadow is.</summary>
+	/// <summary>The sun's width in degrees (the real one is half), which sets how soft its baked shadow is.</summary>
 	[Property, Group( "Light" ), Range( 0, 10 )]
 	public float SunWidth { get; set; } = 0.53f;
 

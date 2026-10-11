@@ -70,15 +70,11 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 		}
 	} = true;
 
-	//A baked light keeps its bounces and its still world's shadow in the bake and stays lit in the frame; four may overlap
+	//A baked light is all in the bake - its light, soft shadows and bounces - and costs the frame nothing; what moves
+	//takes it from the bake's volume. A light that must shadow or light what moves as it moves is left out of it
 	/// <summary>Whether this light is kept out of the bake, lighting only as the frame draws it.</summary>
 	[Property, Order( -4 ), Title( "Not Baked" )]
 	public bool NotBaked { get; set; }
-
-	//For a corridor lamp that needs no shadow of what walks past: free to draw, movers lit by it from the bake's volume
-	/// <summary>Whether the whole light lives in the bake rather than the frame, shadows and all.</summary>
-	[Property, Order( -3 ), HideIf( nameof( NotBaked ), true ), Title( "Whole Light In Bake" )]
-	public bool BakedWhole { get; set; }
 
 	//Diffuse and specular are kept apart in shading; the bake leaves out a light without diffuse
 	/// <summary>Which lighting terms this light is allowed to contribute to.</summary>

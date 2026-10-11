@@ -6,8 +6,8 @@ using Vec3 = System.Numerics.Vector3;
 
 namespace Rinten;
 
-//The bounce of the sun, sky and every lamp the bake left out, off a bake's surfels, solved again on a worker whenever one
-//changes, as Enlighten does: surfels lit directly, each gathering what its links send, then the volume's points the surfels
+//The bounce of the lights the bake left out, off its surfels, solved again on a worker whenever one changes, as
+//Enlighten does: surfels lit directly, each gathering what its links send, then the volume's points the surfels
 internal sealed partial class CoreLiveBounce
 {
 	//Milliseconds between looks at the sun, sky and lamps
@@ -260,7 +260,7 @@ internal sealed partial class CoreLiveBounce
 
 	private (Half[] Light, Half[] Lean) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining )
 	{
-		//Over pi, as BakeScene.Direct: the sun square on, the sky where the surfel sees it, and the lamps
+		//Over pi, as BakeScene.Direct: the sun square on and the lamps - the lights left out of the bake
 		var direct = new Vec3[surfels];
 
 		Parallel.For( 0, surfels, s =>
@@ -269,7 +269,6 @@ internal sealed partial class CoreLiveBounce
 			var facing = Vec3.Dot( normal[s], way );
 
 			if ( facing > 0.0f && shade != Vec3.Zero ) arriving += shade * ( facing * BakeMath.InvPi * SunSeen( s, way ) );
-			if ( seen[s] > 0.0f ) arriving += with.Radiance( open[s] ) * seen[s];
 
 			foreach ( var lamp in shining ) arriving += LampAt( s, lamp );
 

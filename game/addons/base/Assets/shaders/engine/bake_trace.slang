@@ -53,6 +53,7 @@ uint EmitterCount() { return Word( 19 ); }
 uint GlowAt() { return Word( 20 ); }       //Per world triangle: TowardsGlow's chance per square metre
 uint Pass() { return Word( 21 ); }         //Nought the main bake, else the glow group baked alone
 uint GroupsAt() { return Word( 22 ); }     //Per world triangle: its glow group; no table where none has one
+float ContactNear() { return Float( 23 ); } //A first hit nearer than this is touching geometry - see BakeScene.ContactNear
 
 //Whether a triangle's glow is in this pass - BakeScene.Surface
 bool GlowsNow( uint t ) { return ( GroupsAt() == 0u ? 0u : Word( GroupsAt() + t ) ) == Pass(); }
@@ -503,10 +504,9 @@ float3 Environment( float3 d )
 }
 
 //A lamp, as BakeGpu.Pack writes it: 0 kind, position, range, colour, forward, inner and outer cosine, falloff,
-//radius, flags (1 shadows, 2 whole) 16 mask channel (all ones for none), shape, half extents 20 right xyz
+//radius, flags (1 shadows, 2 whole) 17 shape, half extents 20 right xyz
 static const uint LightShadows = 1u;
 static const uint LightBaked = 2u;
-static const uint NoMask = 0xFFFFFFFFu;
 
 //A random point on a shaped lamp and the cosine it gives off at towards a point - BakeScene.PointOn
 float3 PointOn( uint at, float3 position, inout Random random, out float cosine )
@@ -688,86 +688,6 @@ float3 Direct( float3 position, float3 normal, float3 geometric, inout Random ra
 	return sum;
 }
 
-//The light a channel of the mask holds at a point - the one of that channel whose reach takes it
-//in, lights of one channel never overlapping - or all ones where none does. See BakeScene.MaskedAt.
-uint MaskedAt( uint channel, float3 position )
-{
-	uint count = LightCount();
-
-	for ( uint i = 0; i < count; ++i )
-	{
-		uint at = LightsAt() + ( i * LightWords );
-		if ( Word( at + 16 ) != channel ) continue;
-
-		if ( Word( at ) == 0u ) return i;
-
-		float range = Float( at + 4 );
-		float3 apart = Float3( at + 1 ) - position;
-
-		if ( dot( apart, apart ) <= range * range ) return i;
-	}
-
-	return NoMask;
-}
-
-//Whether one shadow ray from a point reaches a light, at a point across its width - see BakeScene.Visible.
-float Visible( uint index, float3 position, float3 geometric, inout Random random )
-{
-	uint at = LightsAt() + ( index * LightWords );
-
-	float3 aim;
-	float distance;
-
-	if ( Word( at ) == 0u )
-	{
-		float u = random.Next();
-		float v = random.Next();
-		aim = InCone( -Float3( at + 8 ), SunCosine(), u, v );
-		distance = 1e5;
-	}
-	else if ( Word( at ) == 1u && Word( at + 17 ) != 0u )
-	{
-		float cosine;
-		float3 toPoint = PointOn( at, position, random, cosine ) - position;
-		distance = length( toPoint );
-
-		if ( distance < 1e-5 ) return 1.0;
-
-		aim = toPoint / distance;
-	}
-	else
-	{
-		float3 target = Float3( at + 1 );
-		float3 toLight = target - position;
-		float length0 = length( toLight );
-
-		if ( length0 < 1e-5 ) return 1.0;
-
-		float radius = Float( at + 14 );
-		float u = random.Next();
-		float v = random.Next();
-
-		if ( radius > 0.0 )
-		{
-			float3 right, up;
-			Basis( toLight / length0, right, up );
-
-			float r = radius * sqrt( u );
-			float angle = 2.0 * Pi * v;
-
-			target += ( right * ( r * cos( angle ) ) ) + ( up * ( r * sin( angle ) ) );
-		}
-
-		float3 toPoint = target - position;
-		distance = length( toPoint );
-		aim = toPoint / max( distance, 1e-6 );
-	}
-
-	if ( dot( geometric, aim ) <= 0.0 ) return 0.0;
-
-	return Blocked( Offset( position, geometric, aim ), aim, distance - ( Lift * 2.0 ) ) ? 0.0 : 1.0;
-}
-
 //Power heuristic - BakeScene.Weight
 float Weight( float picked, float other ) { return picked * picked / max( ( picked * picked ) + ( other * other ), 1e-30 ); }
 
@@ -875,7 +795,7 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 		Surface s = SurfaceOf( hit, origin, direction );
 
-		if ( s.back )
+		if ( s.back || ( bounce == 0u && hit.distance < ContactNear() ) )
 		{
 			if ( bounce == 0 ) inside = true;
 			return gathered;
@@ -941,24 +861,15 @@ void main( uint3 id : SV_DispatchThreadID )
 	float3 n = g_texels[( texel * 3 ) + 1].xyz;
 	float3 g = g_texels[( texel * 3 ) + 2].xyz;
 
-	float4 sumSquares = g_sums[( texel * 5 ) + 0];
-	float4 wayWeight = g_sums[( texel * 5 ) + 1];
-	float4 insideSpare = g_sums[( texel * 5 ) + 2];
-	float4 through = g_sums[( texel * 5 ) + 3];
-	float4 open = g_sums[( texel * 5 ) + 4];
-
-	//Which light each channel of the mask is here.
-	uint masked[4];
-	for ( uint c = 0; c < 4u; ++c ) masked[c] = MaskedAt( c, p );
+	float4 sumSquares = g_sums[( texel * 4 ) + 0];
+	float4 wayWeight = g_sums[( texel * 4 ) + 1];
+	float4 insideSpare = g_sums[( texel * 4 ) + 2];
+	float4 open = g_sums[( texel * 4 ) + 3];
 
 	for ( uint s = 0; s < g_samples; ++s )
 	{
 		Random random;
 		random.state = Hash( texel ^ Hash( g_sampleBase + s + g_seed ) );
-
-		[unroll]
-		for ( uint c = 0; c < 4u; ++c )
-			through[c] += masked[c] != NoMask ? Visible( masked[c], p, g, random ) : 1.0;
 
 		float3 lean = float3( 0.0, 0.0, 0.0 );
 		float3 direct = Direct( p, n, g, random, true, lean ) + GlowDirect( p, n, g, random, lean );
@@ -992,11 +903,10 @@ void main( uint3 id : SV_DispatchThreadID )
 		insideSpare.x += behind ? 1.0 : 0.0;
 	}
 
-	g_sums[( texel * 5 ) + 0] = sumSquares;
-	g_sums[( texel * 5 ) + 1] = wayWeight;
-	g_sums[( texel * 5 ) + 2] = insideSpare;
-	g_sums[( texel * 5 ) + 3] = through;
-	g_sums[( texel * 5 ) + 4] = open;
+	g_sums[( texel * 4 ) + 0] = sumSquares;
+	g_sums[( texel * 4 ) + 1] = wayWeight;
+	g_sums[( texel * 4 ) + 2] = insideSpare;
+	g_sums[( texel * 4 ) + 3] = open;
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

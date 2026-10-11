@@ -509,8 +509,8 @@ internal static unsafe class CoreSceneRenderer
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
 
-			//Skip lights fully baked into the scene (Light.BakedWhole); shadow-only baked lights stay
-			if ( BakedOn && CoreBakedLighting.ChannelOf( light ) == CoreBakedLighting.BakedWhole ) continue;
+			//Skip lights baked into the scene - see Light.NotBaked
+			if ( BakedOn && CoreBakedLighting.InBake( light ) ) continue;
 
 			var reach = Reach( light, from );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
@@ -569,13 +569,8 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 4] = source.Colour.r;
 			LightBlock[at + 5] = source.Colour.g;
 			LightBlock[at + 6] = source.Colour.b;
-			//Kind; in its fraction what the light is withheld from (LightWithholds); in its hundredths the baked mask
-			//channel plus one, nought for none - see LightMaskChannel
-			var channel = BakedOn && lights[i] is { } baked ? CoreBakedLighting.ChannelOf( baked ) : CoreBakedLighting.NotBaked;
-			LightBlock[at + 7] = source.Kind + ( source.Withholds * 0.1f ) + ( channel >= 0 ? ( channel + 1 ) * 0.01f : 0.0f );
-
-			//And the sun's, for what lights by the sun without walking the lights - see SunMaskChannel.
-			if ( source.Kind == 0 && channel >= 0 ) block[BakedAt + 20] = channel + 1;
+			//Kind; in its fraction what the light is withheld from - see LightWithholds
+			LightBlock[at + 7] = source.Kind + ( source.Withholds * 0.1f );
 
 			LightBlock[at + 8] = source.Forward.x;
 			LightBlock[at + 9] = source.Forward.y;
@@ -634,16 +629,6 @@ internal static unsafe class CoreSceneRenderer
 		AreaOn = shaped && CoreAreaLights.Write( block );
 
 		CoreRenderDevice.ZoneEnd();
-	}
-
-	//Which channel of the baked mask holds a light's shadow of the still world, out of its
-	//record's kind word - -1 where none does. The C# twin of LightMaskChannel in frame.slang.
-	internal static int MaskChannelOf( float kindWord )
-	{
-		var fraction = kindWord - MathF.Floor( kindWord );
-		var hundredths = (int)MathF.Round( fraction * 100.0f );
-
-		return ( hundredths % 10 ) - 1;
 	}
 
 	//The flat ambient light the scene's components ask for - see AmbientAt.
@@ -789,7 +774,7 @@ internal static unsafe class CoreSceneRenderer
 	internal const int BakedAt = FogAt + 12;
 
 	//Envmap probes: a header (count, size, roughness bands, RGBM scale) then four probes
-	internal const int ProbesAt = BakedAt + 40;
+	internal const int ProbesAt = BakedAt + 36;
 
 	//Time: wall clock, frame delta and scene clock, so all passes of a frame animate in sync
 	internal const int TimeAt = ProbesAt + 4 + ( CoreEnvmap.MostProbes * 16 );
@@ -853,7 +838,10 @@ internal static unsafe class CoreSceneRenderer
 	//The screen's indirect light - see LayScreenLight.
 	internal const int ScreenLightAt = PortableBakeAt + 4;
 
-	internal const int FrameFloats = ScreenLightAt + 4;
+	//The scene's ray structure and its records' picture - see CoreRays.Lay.
+	internal const int RaysAt = ScreenLightAt + 4;
+
+	internal const int FrameFloats = RaysAt + 4;
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]
@@ -1012,6 +1000,9 @@ internal static unsafe class CoreSceneRenderer
 
 		frame[ShadowAt + 1] = 0.0f;
 
+		//Laid again after the pre-pass by whichever pass drew them
+		Array.Clear( frame, ScreenLightAt, 8 );
+
 		OcclusionOn = false;
 		SkyTableOn = skyTable != 0;
 	}
@@ -1029,11 +1020,12 @@ internal static unsafe class CoreSceneRenderer
 	}
 
 	//The indirect light the occlusion pass gathered off the screen, by table index - see AmbientOcclusion
-	internal static void LayScreenLight( float[] frame, int picture )
+	internal static void LayScreenLight( float[] frame, int picture, bool traced = false )
 	{
 		if ( frame is null || frame.Length < FrameFloats || picture <= 0 ) return;
 
 		frame[ScreenLightAt] = picture;
+		frame[ScreenLightAt + 1] = traced ? 1.0f : 0.0f;
 	}
 
 	//The sheet of air this view drew, by its place in the picture table, with the shape the

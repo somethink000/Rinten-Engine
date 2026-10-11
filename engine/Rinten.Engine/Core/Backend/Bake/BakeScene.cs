@@ -198,14 +198,8 @@ internal sealed class BakeLight
 	/// <summary>The light component this is, so the frame can find what was baked of it.</summary>
 	public Guid Id;
 
-	/// <summary>The whole of it is in the bake, and none of it in the frame - see Light.BakedWhole.</summary>
+	/// <summary>The whole of it is in the bake, and none of it in the frame - see Light.NotBaked.</summary>
 	public bool Whole;
-
-	/// <summary>A sun the frame relights the bounce of (CoreLiveBounce): the bake leaves its bounce out.</summary>
-	public bool Live;
-
-	/// <summary>The mask channel its static-world shadow bakes into, or -1 - see BakeScene.AssignMasks.</summary>
-	public int Mask = -1;
 
 	/// <summary>A point light's shape (PointLight.AreaShapes), half extents and width axis - see AreaLamp.</summary>
 	public int Shape;
@@ -271,15 +265,16 @@ internal sealed class BakeScene
 	/// <summary>The sky as it was when gathered.</summary>
 	public readonly BakeSky Sky = new();
 
-	/// <summary>Whether the frame relights sun and sky bounces (CoreLiveBounce): the bake leaves them out.</summary>
-	public bool LiveBounce;
-
 	public float SkyStrength = 1.0f;
 	public float AlbedoBoost = 1.0f;
 	public int Bounces = 4;
 
 	/// <summary>How wide the sun is, as the cosine of its angular radius.</summary>
 	public float SunCosine = MathF.Cos( 0.27f * MathF.PI / 180.0f );
+
+	/// <summary>Metres: a first hit nearer than this is geometry the point touches, like a pillar's foot on the floor -
+	/// counted as inside, so the texel is filled from its neighbours rather than shaded by the contact.</summary>
+	public float ContactNear;
 
 	/// <summary>How far off a surface a ray starts, in metres - see Offset.</summary>
 	public const float Lift = 0.002f;
@@ -366,7 +361,6 @@ internal sealed class BakeScene
 		GroupOf = groupOf.ToArray();
 
 		GatherLights( scene );
-		AssignMasks();
 		GatherSky( scene );
 	}
 
@@ -566,10 +560,8 @@ internal sealed class BakeScene
 				Shadows = light.Shadows,
 				Id = light.Id,
 
-				//A shadowless baked light bakes only its bounces and stays in the frame as it is
-				Whole = light.BakedWhole,
-				Mask = !light.BakedWhole && light.Shadows ? 0 : -1,
-				Live = light is DirectionalLight && !light.BakedWhole,
+				//All of it in the bake - see Light.NotBaked
+				Whole = true,
 			};
 
 			switch ( light )
@@ -613,59 +605,6 @@ internal sealed class BakeScene
 		}
 	}
 
-	/// <summary>How many lights a mask texel can hold: one a channel of its RGBA8.</summary>
-	public const int MaskChannels = 4;
-
-	//Assigns shadow mask channels so overlapping lights never share; overflow lights are baked fully
-	private void AssignMasks()
-	{
-		var asking = new List<BakeLight>();
-
-		foreach ( var light in Lights )
-		{
-			if ( light.Mask >= 0 ) asking.Add( light );
-			light.Mask = -1;
-		}
-
-		asking.Sort( static ( a, b ) =>
-			a.Kind == 0 != ( b.Kind == 0 ) ? ( a.Kind == 0 ? -1 : 1 ) : BakeMath.Luma( b.Colour ).CompareTo( BakeMath.Luma( a.Colour ) ) );
-
-		for ( var i = 0; i < asking.Count; ++i )
-		{
-			var light = asking[i];
-			var taken = 0;
-
-			for ( var j = 0; j < i; ++j )
-			{
-				var other = asking[j];
-				if ( other.Mask >= 0 && Overlap( light, other ) ) taken |= 1 << other.Mask;
-			}
-
-			for ( var channel = 0; channel < MaskChannels; ++channel )
-			{
-				if ( ( taken & ( 1 << channel ) ) != 0 ) continue;
-
-				light.Mask = channel;
-				break;
-			}
-
-			if ( light.Mask >= 0 ) continue;
-
-			//Its bounces stay baked; its still world's shadow is drawn in the frame
-			Log.Info( $"baked lighting: a light at {light.Position.X:0.#},{light.Position.Y:0.#},{light.Position.Z:0.#} overlaps {MaskChannels} other " +
-				"lights with baked shadows, which is all a texel holds - its shadows stay realtime" );
-		}
-	}
-
-	//Whether two lights can reach the same point - the sun reaches every one.
-	private static bool Overlap( BakeLight a, BakeLight b )
-	{
-		if ( a.Kind == 0 || b.Kind == 0 ) return true;
-
-		var reach = a.Range + b.Range;
-		return Vec3.DistanceSquared( a.Position, b.Position ) < reach * reach;
-	}
-
 	/// <summary>A random point on a shaped lamp, and its emitting cosine towards a point - nought from behind.</summary>
 	public static Vec3 PointOn( BakeLight light, Vec3 position, ref BakeRandom random, out float cosine )
 	{
@@ -707,80 +646,6 @@ internal sealed class BakeScene
 		if ( light.Shape == 3 ) cosine = MathF.Abs( cosine );
 
 		return point;
-	}
-
-	/// <summary>One shadow ray toward a random point on the light: 1 if it gets through.</summary>
-	public float Visible( BakeLight light, Vec3 position, Vec3 geometric, ref BakeRandom random )
-	{
-		Vec3 aim;
-		float distance;
-
-		if ( light.Kind == 1 && light.Shape != 0 )
-		{
-			var on = PointOn( light, position, ref random, out _ );
-			var toPoint = on - position;
-			distance = toPoint.Length();
-
-			if ( distance < 1e-5f ) return 1.0f;
-
-			aim = toPoint / distance;
-		}
-		else if ( light.Kind == 0 )
-		{
-			aim = BakeMath.InCone( -light.Forward, SunCosine, random.Float(), random.Float() );
-			distance = 1e5f;
-		}
-		else
-		{
-			var at = light.Position;
-			var toLight = at - position;
-			var length = toLight.Length();
-
-			if ( length < 1e-5f ) return 1.0f;
-
-			if ( light.Radius > 0.0f )
-			{
-				BakeMath.Basis( toLight / length, out var right, out var up );
-
-				var r = light.Radius * MathF.Sqrt( random.Float() );
-				var angle = 2.0f * BakeMath.Pi * random.Float();
-
-				at += ( right * ( r * MathF.Cos( angle ) ) ) + ( up * ( r * MathF.Sin( angle ) ) );
-			}
-
-			var toPoint = at - position;
-			distance = toPoint.Length();
-			aim = toPoint / MathF.Max( distance, 1e-6f );
-		}
-
-		if ( Vec3.Dot( geometric, aim ) <= 0.0f ) return 0.0f;
-
-		var from = Offset( position, geometric, aim );
-
-		return Bvh.Blocked( from, aim, distance - ( Lift * 2.0f ) ) ? 0.0f : 1.0f;
-	}
-
-	/// <summary>The light a mask channel holds at a point (channels never overlap), or null.</summary>
-	public BakeLight MaskedAt( int channel, Vec3 position )
-	{
-		foreach ( var light in Lights )
-		{
-			if ( light.Mask != channel ) continue;
-			if ( light.Kind == 0 || Vec3.DistanceSquared( light.Position, position ) <= light.Range * light.Range ) return light;
-		}
-
-		return null;
-	}
-
-	/// <summary>Whether any light has a channel of the mask - a bake with none writes no mask.</summary>
-	public bool AnyMasked()
-	{
-		if ( Pass != 0 ) return false;
-
-		foreach ( var light in Lights )
-			if ( light.Mask >= 0 ) return true;
-
-		return false;
 	}
 
 	private void GatherSky( Scene scene ) => Sky.Gather( scene );
@@ -1035,9 +900,9 @@ internal sealed class BakeScene
 		return position + ( geometric * ( side * ( Lift + ( scale * 2e-6f ) ) ) );
 	}
 
-	/// <summary>The sky from one direction as a bounced ray sees it: none in a glow pass or where relit live.</summary>
+	/// <summary>The sky from one direction as a bounced ray sees it: none in a glow group's pass.</summary>
 	public Vec3 Environment( Vec3 direction )
-		=> Pass != 0 || LiveBounce ? Vec3.Zero : Sky.Radiance( direction ) * SkyStrength;
+		=> Pass != 0 ? Vec3.Zero : Sky.Radiance( direction ) * SkyStrength;
 
 	/// <summary>Direct lamp light over pi at a point, and its dominant direction; as surface_shading.slang.</summary>
 	public Vec3 Direct( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, bool bakedOnly, ref Vec3 towards )
@@ -1047,7 +912,7 @@ internal sealed class BakeScene
 
 		foreach ( var light in Lights )
 		{
-			if ( ( bakedOnly && !light.Whole ) || ( LiveBounce && light.Live ) ) continue;
+			if ( bakedOnly && !light.Whole ) continue;
 
 			var arriving = DirectOne( light, position, normal, geometric, ref random, out var l );
 
@@ -1177,7 +1042,7 @@ internal sealed class BakeScene
 
 			var s = Surface( hit, origin, direction );
 
-			if ( s.Back )
+			if ( s.Back || ( bounce == 0 && hit.Distance < ContactNear ) )
 			{
 				if ( bounce == 0 ) inside = true;
 				return gathered;

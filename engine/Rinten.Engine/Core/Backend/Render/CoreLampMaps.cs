@@ -55,9 +55,6 @@ internal sealed class CoreLampMaps : IDisposable
 		public int First, Faces, Class;
 		public bool Spot;
 
-		/// <summary>Whether the bake's mask holds its still world's shadow: only movers are drawn.</summary>
-		public bool Masked;
-
 		/// <summary>Texels a face of it is across.</summary>
 		public int Size => SizeOf( Class );
 
@@ -217,12 +214,6 @@ internal sealed class CoreLampMaps : IDisposable
 
 			lamp.Seen = frameNumber;
 
-			//The mask has its still world - see Light.NotBaked
-			var masked = CoreSceneRenderer.MaskChannelOf( kind ) >= 0;
-			if ( masked != lamp.Masked ) Forget( lamp );
-
-			lamp.Masked = masked;
-
 			//A panel or disc lights only forward: a face wholly behind it is read by nothing - see AreaLamp
 			var shape = kind < 1.5f ? records[at + 11] : 0.0f;
 			var front = new Vector3( records[at + 8], records[at + 9], records[at + 10] );
@@ -241,16 +232,6 @@ internal sealed class CoreLampMaps : IDisposable
 		{
 			Release( lamp );
 			lamps.Remove( lamp.Light );
-		}
-
-		//A masked lamp has nothing to bake: every face held. After every Keep, as a bigger map forgets all
-		foreach ( var lamp in lamps.Values )
-		{
-			if ( !lamp.Masked ) continue;
-
-			Array.Fill( lamp.Baked, true );
-			Array.Fill( lamp.Held, true );
-			lamp.Travelling = false;
 		}
 
 		//The faces to draw, nearest lamp first: what this frame cannot do without, then bakes that can wait for room.
@@ -286,9 +267,6 @@ internal sealed class CoreLampMaps : IDisposable
 
 			if ( lamp.Whole() )
 			{
-				//A masked lamp with nothing moving in sight reads no map at all: LampShadow stops at the first test
-				if ( lamp.Masked && lamp.Moving == 0 ) continue;
-
 				records[at + 14] = lamp.First;
 				records[at + 15] = lamp.Class;
 

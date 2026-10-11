@@ -121,6 +121,16 @@ struct FrameData
 
 	//Area lamps' LTC tables by table index: inverse matrix x, magnitude and Fresnel y - see CoreAreaLights
 	float4 area;
+
+	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; spare yzw
+	float4 shadow;
+
+	//The portable frame's bake (CoreBakedLighting.Portable): the sheet's light half wide x and high y, nought for none,
+	//the volume's layers to a row of tiles z, one where its bounce half is filled w
+	float4 portableBake;
+
+	//The screen's indirect light picture by table index x, nought for none - see AmbientOcclusion; spare yzw
+	float4 screenLight;
 };
 
 #ifdef WEBGL

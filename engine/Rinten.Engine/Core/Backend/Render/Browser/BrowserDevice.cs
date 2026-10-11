@@ -112,6 +112,13 @@ internal static class BrowserDevice
 	//Binding for the second eye's frame block in stereo passes; must match webgl2.js SecondFrameBinding
 	internal const int SecondFrameBinding = 6;
 
+	//The portable frame's bake, its sheet and its volume - see g_bakedSheet in frame.slang and CoreBakedLighting.Portable
+	internal const int BakedSheetBinding = 8;
+	internal const int BakedVolumeBinding = 9;
+
+	//What those two hold where there is no bake: one texel of nothing
+	internal static int noBakeImage, noBakeView;
+
 	internal static int defaultParams;
 	internal static int pushRing;
 	internal static int defaultMaterial;
@@ -301,7 +308,9 @@ internal static class BrowserDevice
 		{"binding":{{{ShadowSamplerBinding}}},"visibility":{{{Stage.Fragment}}},"sampler":{"type":"comparison"}},
 		{"binding":{{{FilterSamplerBinding}}},"visibility":{{{Stage.Fragment}}},"sampler":{"type":"filtering"}},
 		{"binding":5,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"float","viewDimension":"2d"}},
-		{"binding":{{{SecondFrameBinding}}},"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage","minBindingSize":{{{FrameBlockSize}}}}}
+		{"binding":{{{SecondFrameBinding}}},"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage","minBindingSize":{{{FrameBlockSize}}}}},
+		{"binding":{{{BakedSheetBinding}}},"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"float","viewDimension":"2d"}},
+		{"binding":{{{BakedVolumeBinding}}},"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"float","viewDimension":"2d"}}
 		]}
 		""";
 
@@ -342,7 +351,10 @@ internal static class BrowserDevice
 		var empty = new byte[SkyTableSide * SkyTableSide * 8];
 		BrowserNative.WriteTexture( skyTableImage, 0, 0, 0, SkyTableSide, SkyTableSide, SkyTableSide * 8, empty );
 
-		return shadowView != 0 && skyTableView != 0;
+		noBakeImage = MakeTexture( 1, 1, FormatRgba16Float, TextureUse.TextureBinding | TextureUse.CopyDst );
+		noBakeView = noBakeImage != 0 ? MakeView( noBakeImage, FormatRgba16Float ) : 0;
+
+		return shadowView != 0 && skyTableView != 0 && noBakeView != 0;
 	}
 
 	private static bool CreateDefaults()
@@ -368,6 +380,8 @@ internal static class BrowserDevice
 			Bind.Sampler( ShadowSamplerBinding, shadowSampler ),
 			Bind.Sampler( FilterSamplerBinding, clampSampler ),
 			Bind.View( 5, skyTableView ),
+			Bind.View( BakedSheetBinding, noBakeView ),
+			Bind.View( BakedVolumeBinding, noBakeView ),
 
 			//Every entry the layout has, the second eye's block included - with six the page
 			//refused the group on every start ("did not match the expected number of entries").
@@ -415,6 +429,7 @@ internal static class BrowserDevice
 
 		ReleaseTexture( ref shadowImage, ref shadowView );
 		ReleaseTexture( ref skyTableImage, ref skyTableView );
+		ReleaseTexture( ref noBakeImage, ref noBakeView );
 
 		//CoreSkyTable sends the table again rather than leave the next device a cleared one
 		CoreSkyTable.Forget();

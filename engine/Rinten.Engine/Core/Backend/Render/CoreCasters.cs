@@ -25,6 +25,9 @@ internal sealed class CoreCasters
 	private System.Numerics.Vector4[] sphere = [];
 	private bool[] still = [];
 	private bool[] moving = [];
+
+	//Whether the frame has a bake, so that what is not static counts as moving - see Look
+	private bool movable;
 	private uint[] moves = [];
 	private int[] triangles = [];
 
@@ -35,8 +38,8 @@ internal sealed class CoreCasters
 	private long changesSeen = -1;
 	private readonly List<int> changed = new();
 
-	//Casters the tables do not hold that changed where they stand - the ground under a brush - as spheres in the world, the last
-	//StirredMost of them, and how many there have ever been. Every drawer's maps read them as changes of the still world; see Stir.
+	//Casters the tables do not hold that moved - the ground under a brush - as world spheres: the last StirredMost,
+	//and how many there have ever been. Every drawer's maps read them as changes of the still world; see Stir
 	private static readonly List<System.Numerics.Vector4> stirred = new();
 	private static long stirredEver;
 	private const int StirredMost = 256;
@@ -112,9 +115,13 @@ internal sealed class CoreCasters
 
 		Count = count;
 
-		//Everything, where this drawer has fallen out of the tables' log of changes - its first look among them.
-		if ( !tables.ChangesSince( ref changesSeen, changed ) )
+		//Everything, where this drawer has fallen out of the tables' log of changes - its first look among them -
+		//or where a bake came or went, which decides what of the world is still - see Movable
+		var baked = CoreSceneRenderer.BakedOn;
+
+		if ( !tables.ChangesSince( ref changesSeen, changed ) | baked != movable )
 		{
+			movable = baked;
 			Whole = true;
 
 			for ( var slot = 0; slot < count; slot++ ) Look( tables, slot );
@@ -157,9 +164,11 @@ internal sealed class CoreCasters
 
 		var casts = shown && ( record.Flags & CoreMeshShaders.InstanceNoShadow ) == 0;
 
-		//Moving: posed, deformed, moved since still, or NeverStill. Vertex-shader wind does not count
+		//Moving: posed, deformed, moved since still, or NeverStill; wind does not count. With a bake all that is not static
+		//moves too, as UE's movable: a baked light's still world comes from the bake, so the rest casts only into movers
 		var nowMoves = casts && ( entry.Posed || ( entry.Loose && ( entry.Skinned || entry.Morphed ) ) ||
-			record.Moving != 0 || ( record.Flags & CoreMeshShaders.InstanceNeverStill ) != 0 );
+			record.Moving != 0 || ( record.Flags & CoreMeshShaders.InstanceNeverStill ) != 0 ||
+			( movable && entry.Renderer is { } renderer && renderer.GameObject is { IsStatic: false } ) );
 		//All triangles a light's list may hold, including self-moving surfaces the pre-pass skips
 		var nowTriangles = casts ? entry.OneSided + entry.TwoSided + entry.CutOut + entry.Moving : 0;
 

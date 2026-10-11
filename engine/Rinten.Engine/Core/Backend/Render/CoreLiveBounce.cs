@@ -444,9 +444,20 @@ internal sealed class CoreLiveBounce
 		return ( data.SurfelSun[first + ( cell >> 3 )] >> ( cell & 7 ) ) & 1;
 	}
 
+	/// <summary>The last solve's colour a point, for the portable frame, which puts it in its own picture.</summary>
+	public Half[] Solved { get; private set; }
+
+	/// <summary>Counts solves landed, so the portable frame knows to write it again.</summary>
+	public int Landed { get; private set; }
+
 	//Into the two pictures in place, made the first time
 	private void Upload( (Half[] Light, Half[] Lean) solved )
 	{
+		Solved = solved.Light;
+		Landed++;
+
+		if ( CoreRenderDevice.PortableFrame ) return;
+
 		var across = data.VolumeX * data.VolumeY;
 		var down = data.VolumeZ;
 

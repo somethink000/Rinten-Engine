@@ -1037,7 +1037,16 @@ float PortableSunShadow( float3 world, float3 normal, float3 step )
 
 	float compare = at.z - ( ShadowBiasTexels * perTexel ) - ( 0.5 * ( abs( slope.x ) + abs( slope.y ) ) );
 
-	return g_sunShadow.SampleCmpLevelZero( uv, compare );
+	if ( g_frame[0].shadow.x < 0.5 ) return g_sunShadow.SampleCmpLevelZero( uv, compare );
+
+	//Four filtered compares half a texel out each way: a soft edge two texels wide for four reads
+	float2 nudge = float2( 0.5, 0.5 ) / texels;
+	float lit = g_sunShadow.SampleCmpLevelZero( uv + float2( -nudge.x, -nudge.y ), compare - ( 0.5 * ( slope.x + slope.y ) ) );
+	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( nudge.x, -nudge.y ), compare + ( 0.5 * ( slope.x - slope.y ) ) );
+	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( -nudge.x, nudge.y ), compare + ( 0.5 * ( slope.y - slope.x ) ) );
+	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( nudge.x, nudge.y ), compare + ( 0.5 * ( slope.x + slope.y ) ) );
+
+	return lit * 0.25;
 }
 #endif
 
@@ -1048,10 +1057,14 @@ static const float SunSourceTan = 0.004651;
 //each side for every metre it stands behind it - see SunSourceTan, ShadowEdge, ShadowBlocker and ShadowFilter.
 float SunSoft( uint map, uint depthMap, float3 tap, float compare, float texel, float2 slope, float texelWorld, float zScale )
 {
-	if ( depthMap == 0u ) return ShadowSharp( map, tap, compare, slope );
+	float quality = g_frame[0].shadow.x;
+	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, tap, compare, slope );
 
 	float lit;
 	if ( !ShadowEdge( map, tap, compare, texel, slope, lit ) ) return lit;
+
+	//A fixed edge a texel each side, without the blocker search
+	if ( quality < 1.5 ) return ShadowFilter( map, tap, compare, texel, slope, 1.0 );
 
 	float blocker = ShadowBlocker( depthMap, tap, compare, texel, slope );
 	float behind = blocker < 0.0 ? 0.0 : ( compare - blocker ) / max( zScale, 1e-8 );
@@ -1253,10 +1266,13 @@ void LampAxes( float3 forward, out float3 right, out float3 up )
 float LampLit( uint map, uint depthMap, float3 at, float compare, float texel, float2 slope, Light light,
 	float along, float far, float b, float texelWorld )
 {
-	if ( depthMap == 0u ) return ShadowSharp( map, at, compare, slope );
+	float quality = g_frame[0].shadow.x;
+	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, at, compare, slope );
 
 	float lit;
 	if ( !ShadowEdge( map, at, compare, texel, slope, lit ) ) return lit;
+
+	if ( quality < 1.5 ) return ShadowFilter( map, at, compare, texel, slope, 1.0 );
 
 	//What shades it, back out of the depth the face holds into metres down it.
 	float blocker = ShadowBlocker( depthMap, at, compare, texel, slope );
@@ -1823,8 +1839,8 @@ float3 ApplyFog( float3 lit, float3 world, float3 eye, float2 screen )
 bool HasBakedSheet()
 {
 #ifdef PORTABLE
-	//Two pictures out of the table, which the portable frame has none of.
-	return false;
+	//Its own picture, bound as the frame's - see PortableSheet.
+	return g_frame[0].portableBake.x > 0.5;
 #else
 	return kBakedOn != 0 && g_frame[0].bakedMaps.w > 0.5;
 #endif
@@ -2072,11 +2088,60 @@ float3 BakedVolume( float3 at, float3 normal )
 
 #endif
 
+#ifdef PORTABLE
+//The portable frame's bake, bound as its own since it has no table: sheet light and sky left, mask right;
+//the volume's layers as tiles, the bounce below - see CoreBakedLighting.Portable
+[[vk::binding(8,1)]] Sampler2D g_bakedSheet;
+[[vk::binding(9,1)]] Sampler2D g_bakedVolume;
+
+//A sheet texel's light rgb and how much sky it sees a
+float4 PortableSheet( float2 uv )
+{
+	return g_bakedSheet.SampleLevel( float2( uv.x * 0.5, uv.y ), 0.0 );
+}
+
+//A sheet texel's mask, a channel a masked light
+float4 PortableSheetMask( float2 uv )
+{
+	return g_bakedSheet.SampleLevel( float2( 0.5 + ( uv.x * 0.5 ), uv.y ), 0.0 );
+}
+
+//Whether there is a volume to read
+bool HasPortableVolume()
+{
+	return g_frame[0].volumeCount.x > 0.5 && g_frame[0].portableBake.z > 0.5;
+}
+
+//The volume at a point: light rgb and sky seen a, or with bounce the live bounce rgb - each layer a tile, lerped
+float4 PortableVolume( float3 world, bool bounce )
+{
+	float3 count = g_frame[0].volumeCount.xyz;
+	float columns = g_frame[0].portableBake.z;
+	float rows = ceil( count.y / columns );
+
+	float3 at = clamp( ( world - g_frame[0].volumeOrigin.xyz ) * g_frame[0].volumeOrigin.w, float3( 0.0, 0.0, 0.0 ), count - 1.0 );
+
+	float below = floor( at.y );
+	float above = min( below + 1.0, count.y - 1.0 );
+
+	float2 size = float2( columns * count.x, rows * count.z * 2.0 );
+	float down = bounce ? rows * count.z : 0.0;
+
+	float2 low = float2( ( fmod( below, columns ) * count.x ) + at.x, ( floor( below / columns ) * count.z ) + at.z + down ) + 0.5;
+	float2 high = float2( ( fmod( above, columns ) * count.x ) + at.x, ( floor( above / columns ) * count.z ) + at.z + down ) + 0.5;
+
+	return lerp( g_bakedVolume.SampleLevel( low / size, 0.0 ), g_bakedVolume.SampleLevel( high / size, 0.0 ), at.y - below );
+}
+#endif
+
 //Min of baked still-world shadow and the live movers shadow; unchanged without a channel or mask
 float BakedShadow( float moving, float3 world, float3 geometric, float2 lightmap, int channel )
 {
 #ifdef PORTABLE
-	return moving;
+	//The sheet's mask only: what moves takes the sun's map, which the portable frame draws whole
+	if ( channel < 0 || moving <= 0.0 || !HasBakedSheet() || ( lightmap.x + lightmap.y ) <= 0.0 ) return moving;
+
+	return min( moving, PortableSheetMask( lightmap )[clamp( channel, 0, 3 )] );
 #else
 	if ( channel < 0 || moving <= 0.0 || !HasBakedMask() ) return moving;
 

@@ -6,7 +6,7 @@ using Rinten.Bake;
 namespace Rinten;
 
 //Runs bakes, uploads the results for the frame and gives each renderer its atlas square
-internal static class CoreBakedLighting
+internal static partial class CoreBakedLighting
 {
 	//What one component has on the card.
 	private sealed class Held
@@ -27,6 +27,9 @@ internal static class CoreBakedLighting
 		/// <summary>The sun's and sky's bounce, relit as they change; null for a bake without surfels.</summary>
 		public CoreLiveBounce Bounce;
 
+		/// <summary>The portable frame's two pictures and what they were made with - see Portable.</summary>
+		public PortablePictures Portable;
+
 		public void Release()
 		{
 			foreach ( var texture in new[] { Sheet, Ways, Red, Green, Blue, SheetMask, VolumeMask, SheetSky, VolumeSky, Walls } )
@@ -40,6 +43,9 @@ internal static class CoreBakedLighting
 
 			Bounce?.Release();
 			Bounce = null;
+
+			Portable?.Release();
+			Portable = null;
 
 			Array.Clear( GlowSheet );
 			Array.Clear( GlowVolume );
@@ -121,8 +127,8 @@ internal static class CoreBakedLighting
 		Array.Clear( frame, at, 40 );
 		writing = null;
 
-		//The portable frame reads neither sheet nor volume (HasBakedSheet, HasBakedVolume): nothing is uploaded
-		if ( CoreRenderDevice.PortableFrame ) return false;
+		Array.Clear( frame, CoreSceneRenderer.PortableBakeAt, 4 );
+		PortableSheet = PortableVolume = 0;
 
 		var bake = Of( scene );
 		if ( bake is null || bake.Data is not { } data ) return false;
@@ -136,6 +142,10 @@ internal static class CoreBakedLighting
 		if ( on.Revision != data.Revision ) Upload( on, data );
 
 		writing = on;
+
+		//Its own two pictures in the portable frame, which has no table to read the full one's out of
+		if ( CoreRenderDevice.PortableFrame ) return WritePortable( frame, on, data, scene );
+
 		var any = false;
 
 		if ( on.Sheet != 0 && on.Ways != 0 )
@@ -230,6 +240,11 @@ internal static class CoreBakedLighting
 
 		foreach ( var light in data.Lights ) on.Lights[light.Light] = light.Channel;
 
+		if ( data.HasBounce ) on.Bounce = new CoreLiveBounce( data );
+
+		//The portable frame makes pictures of its own, out of the data, as it writes the frame
+		if ( CoreRenderDevice.PortableFrame ) return;
+
 		//Linear, as everything in a mask is a fraction and not a colour.
 		if ( data.HasVolumeMask )
 		{
@@ -257,7 +272,6 @@ internal static class CoreBakedLighting
 			if ( data.HasWalls )
 				on.Walls = CoreRenderDevice.CreateTextureRgba( data.VolumeWalls, across, data.VolumeZ * 3, false );
 
-			if ( data.HasBounce ) on.Bounce = new CoreLiveBounce( data );
 
 			if ( data.HasSky )
 			{

@@ -15,20 +15,20 @@ internal static unsafe partial class VkDevice
 	//-- the numbers the shaders share --------------------------------------
 
 
-	/// <summary>Bindless table size: asks for Wanted, takes what the device allows; never below Least (shader clamp)</summary>
+	/// <summary>Bindless table size: Wanted, or what the device allows; never below Least.</summary>
 	public const uint BindlessSlotsWanted = 16384;
 	public const uint BindlessSlotsLeast = 4096;
 
-	/// <summary>What every pipeline's depth attachment is. One format for the whole engine: 32-bit float depth exists everywhere that matters, and one format means pipelines and the swapchain's depth image can never disagree.</summary>
+	/// <summary>Every pipeline's depth format: 32-bit float, so pipelines and swapchain depth agree.</summary>
 	public const Format DepthFormat = Format.D32Sfloat;
 
 	/// <summary>HDR scene format; half floats so light can go past 1 before tonemapping</summary>
 	public const Format SceneFormat = Format.R16G16B16A16Sfloat;
 
-	/// <summary>World and post chain format: E5B9G9R9 where the device supports it fully, else SceneFormat. No alpha</summary>
+	/// <summary>World and post format: E5B9G9R9 where fully supported, else SceneFormat; no alpha.</summary>
 	public static Format WorldFormat { get; private set; } = Format.R16G16B16A16Sfloat;
 
-	/// <summary>The normals and how rough they are, kept alongside the colour so the passes that come after the world can ask about a surface they did not see drawn: xyz the normal in view space, w the roughness.</summary>
+	/// <summary>View-space normals xyz and roughness w, for passes after the world.</summary>
 	public const Format NormalFormat = Format.R8G8B8A8Unorm;
 
 	/// <summary>Velocity: xy = screen motion, z = writer's depth, w = written flag (zero motion is still valid)</summary>
@@ -37,40 +37,40 @@ internal static unsafe partial class VkDevice
 	/// <summary>The finished picture, at the window's size, for the passes that run after the compose.</summary>
 	public const Format FinalFormat = Format.A2B10G10R10UnormPack32;
 
-	/// <summary>Half-size pass format: small floats for faster filtering; falls back to SceneFormat if unsupported</summary>
+	/// <summary>Half-size pass format: small floats, else SceneFormat.</summary>
 	public static Format CompactFormat { get; private set; } = SceneFormat;
 
 	//The same format as a compute shader names a storage image of it - see CoreShaderParams.DeclareOutputs.
 	internal static string CompactStorageName => CompactFormat == Format.B10G11R11UfloatPack32 ? "r11f_g11f_b10f" : "rgba16f";
 
-	/// <summary>Every pipeline carries this much push constant space, for both stages. 128 bytes is the guaranteed minimum everywhere - a matrix and a bit.</summary>
+	/// <summary>Push constant bytes every pipeline carries for both stages: the guaranteed 128.</summary>
 	public const uint PushConstantSize = 128;
 
 	/// <summary>Max bones per skinned draw; fixed because a descriptor range can slide but not resize</summary>
 	public const uint MaxBones = 128;
 	public const uint BoneBlockSize = MaxBones * 64;
 
-	/// <summary>How many blend shapes one object can be pushed by at once. A face carries more shapes than this on paper - a full FACS set is hundreds - but what is written per object is one weight per shape the model has, and a model with more than this many is one nobody has.</summary>
+	/// <summary>Most blend shapes one object is pushed by at once, a weight per shape of its model.</summary>
 	public const uint MaxMorphs = 256;
 
-	/// <summary>One object's worth of morph weights in the frame's scratch, kept to the same sixty-four byte step the bone block uses so either can follow either without a storage buffer landing off its alignment.</summary>
+	/// <summary>One object's morph weights in scratch, on the bone block's 64-byte step for alignment.</summary>
 	public const uint MorphBlockSize = MaxMorphs * 4;
 
 	/// <summary>Engine vertex stride; must match EngineVertexBytes in vertex_frame.slang</summary>
 	public const uint EngineVertexStride = PackedVertex.Size;
 
-	/// <summary>The side buffers that ride beside it, a vertex at a time: the four bone links a skin binds, and the run of blend-shape deltas a morph binds.</summary>
+	/// <summary>Per-vertex side buffers: a skin's four bone links and a morph's deltas.</summary>
 	public const uint EngineSideStride = 8;
 	/// <summary>Storage buffers per compute set 0 / vertex-pulling set 2; sized for the culling pass, the widest</summary>
 	public const uint ObjectBindings = 10;
 
-	/// <summary>How many levels of the depth pyramid one dispatch writes - a 32x32 tile of the first reduced through group memory down to one texel.</summary>
+	/// <summary>Depth pyramid levels one dispatch writes: a 32x32 tile down to one texel.</summary>
 	public const uint PyramidLevelsAtOnce = 6;
 
 	/// <summary>How many levels one fold of a picture's chain stores into at most - see picture_fold.slang.</summary>
 	public const uint FoldLevelsAtOnce = 6;
 
-	/// <summary>How many lights one frame can have. Sixteen, and the nearest sixteen at that. A real renderer clusters them and lifts the limit; this is the shape that gets a lit scene on the screen, and the clustering can arrive behind the same buffer.</summary>
+	/// <summary>Most lights one frame has: the nearest sixteen.</summary>
 	public const uint MaxLights = 16;
 
 
@@ -106,7 +106,7 @@ internal static unsafe partial class VkDevice
 	/// <summary>Material sets the pool can hold. Live pictures plus the ones still in the graveyard for frames in flight: running out at a thousand was a scene reload, not a leak.</summary>
 	public const uint TextureSets = 8192;
 
-	/// <summary>How many objects may bring their own buffers at once. One per drawn chunk of a voxel world, which is what asked for this and what sets the number: a few hundred are in view at a time, and running out is a draw that does not happen rather than a crash.</summary>
+	/// <summary>Most objects with their own buffers at once - one per drawn voxel chunk.</summary>
 	public const uint ObjectSets = 2048;
 
 	/// <summary>Which picture a pass is drawing into. Matches sbc_render_target.</summary>
@@ -117,26 +117,26 @@ internal static unsafe partial class VkDevice
 	public const int TargetPost = 6;
 	public const int TargetSceneColour = 7;
 
-	/// <summary>The two screen-size pictures the passes after the compose alternate between - see CorePostBlit and Stage.AfterPostProcess.</summary>
+	/// <summary>The two screen-size pictures the passes after the compose alternate between.</summary>
 	public const int TargetFinal = 11;
 	public const int TargetFinalSecond = 12;
 
-	/// <summary>The world's pictures again at the window's size, in the world's own format and with a chain of halvings: what the effects run over after a temporal upscaler has carried the world up and before the compose takes the curve - see CoreSceneDrawer. Made the first time one is drawn.</summary>
+	/// <summary>The world's pictures at window size with halvings, for effects after a temporal upscaler.</summary>
 	public const int TargetDisplay = 13;
 	public const int TargetDisplaySecond = 14;
 
 
-	/// <summary>The sky's colour by elevation and by angle to the sun, drawn once a frame for the surfaces to read their ambient out of - see SkyAmbient in frame.slang. Thirty-two texels each way is a thousand of them for a function the sky pass evaluated two million times.</summary>
+	/// <summary>The sky by elevation and sun angle, drawn once a frame for SkyAmbient.</summary>
 	public const int TargetSkyTable = 17;
 	public const uint SkyTableSide = 64;
 
-	/// <summary>One layer of a shadow map as the target - a level of the sun's pages, or a zone of the map of what moves. Opened a layer at a time and drawn a rectangle at a time: see VkFrame.ShadowBegin and ShadowArea, and CoreSunPages.</summary>
+	/// <summary>One shadow map layer as the target, drawn a rectangle at a time - see VkFrame.ShadowBegin.</summary>
 	public const int TargetShadow = 19;
 
-	/// <summary>A level of one of the frame's pictures - see VkPictures and VkFrame.PictureBegin. A pipeline for it is baked against the picture's own format, which is handed over with it.</summary>
+	/// <summary>A level of a frame picture, its pipeline baked against the format handed with it.</summary>
 	public const int TargetPicture = 20;
 
-	/// <summary>Set in the format handed with <see cref="TargetPicture"/> for a pass that tests against the world's depth - see VkFrame.PictureBegin.</summary>
+	/// <summary>Set in TargetPicture's format for a pass testing against the world's depth.</summary>
 	public const int PictureWithDepth = 0x40000000;
 
 
@@ -197,7 +197,7 @@ internal static unsafe partial class VkDevice
 	//Who made the card the device is on - PCI's number: 0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel.
 	internal static uint VendorId;
 
-	//Whether the device is opened with buffer device addresses for NVIDIA's NGX, as 1.2's feature - see CoreDlss and VkModern.ChainFeatures.
+	//Whether the device has buffer device addresses for NVIDIA's NGX - see CoreDlss and VkModern
 	internal static bool ngxDeviceAddress;
 	internal static Device device;
 
@@ -210,15 +210,15 @@ internal static unsafe partial class VkDevice
 	//everything, the layout of set 0 - a material - and the pool its descriptor sets come from.
 	internal static Sampler sampler;
 
-	//What the post passes read with: no wrapping, because a tap that runs off the edge of the screen should find the edge rather
-	//than the other side. Point for depth, which must not be averaged between surfaces at different distances; linear for colour.
+	//What post passes read with: clamped, so a tap off the screen finds its edge; point for depth, which must
+	//not average across distances, linear for colour
 	internal static Sampler clampSampler;
 	internal static Sampler pointSampler;
 
 	//Max-reduction sampler for the depth pyramid: coarse texels must report the farthest depth
 	internal static Sampler farthestSampler;
 
-	//Whether the device gave us samplerFilterMinmax, so the pyramid's sampler may take the farthest rather than the average.
+	//Whether the device has samplerFilterMinmax, so the pyramid takes the farthest, not the average
 	internal static bool filterMinmax;
 
 	internal static DescriptorSetLayout textureSetLayout;
@@ -227,18 +227,18 @@ internal static unsafe partial class VkDevice
 	//because writing an image wants a storage image and the texture set has none - it was made for passes that only read.
 	internal static DescriptorSetLayout pyramidSetLayout;
 
-	//And the set a fold of a picture's chain runs through: two levels to read and the levels it stores into - see VkFrame.FoldChain.
+	//The set a fold of a picture's chain runs through: two levels to read and those stored into
 	internal static DescriptorSetLayout foldSetLayout;
 
-	//Set 2 of a compute pass over the frame's pictures: the levels it stores into, then the buffers - see VkFrame.PassDispatch.
+	//Set 2 of a compute pass over the frame's pictures: levels stored into, then buffers
 	internal static DescriptorSetLayout passSetLayout;
 
-	//How many levels one pass may store into, and how many buffers it may write. Twelve since FSR 3's passes: its luma pyramid stores into nine - a counter,
-	//the frame's numbers, six levels of a chain and a depth - see CoreFsr3. The buffers come after, at binding twelve; nothing declared them before.
+	//Levels one pass may store into and buffers it may write: twelve, as FSR 3's luma pyramid stores nine
+	//(see CoreFsr3); buffers follow at binding twelve
 	internal const uint PassImages = 12;
 	internal const uint PassBuffers = 4;
 
-	//Whether the device stores into the smaller float formats - the bloom's chains are one where it does. See CompactFormat.
+	//Whether the device stores into small float formats, as the bloom chains want - see CompactFormat
 	internal static bool storageExtended;
 
 	//Whether a compute pass may store into a picture without naming its format - see VkDevice.Setup, where it is asked for.
@@ -246,7 +246,7 @@ internal static unsafe partial class VkDevice
 
 	internal static DescriptorPool descriptorPool;
 
-	//The parameters a material has when nobody set any - and what every plain texture points at, so its set is complete without one of its own.
+	//A material's parameters when none are set, which every plain texture points at
 	internal static VkBuffer defaultParams;
 	internal static DeviceMemory defaultParamsMemory;
 
@@ -282,10 +282,10 @@ internal static unsafe partial class VkDevice
 
 
 
-	//Compares rather than reads: the hardware does the depth test at four taps and averages them, which is most of what soft edges are.
+	//Compares rather than reads: the hardware tests four taps and averages them
 
-	//Set 1: what the frame knows. Binding 0 is the bone matrices of whatever is being drawn - a different slice of scratch per draw -
-	//and binding 1 is the camera and the lights, one slice for the whole frame. Both are read at an offset, so one set serves every draw.
+	//Set 1, the frame: binding 0 the bones of the draw, a slice of scratch each; binding 1 the camera and
+	//lights, one slice a frame; both at offsets, so one set serves every draw
 	internal static DescriptorSetLayout boneSetLayout;
 
 	//Set 2: per-object storage buffers, so shaders can pull any vertex format without new layouts
@@ -300,14 +300,14 @@ internal static unsafe partial class VkDevice
 	//indexes the table draws with whatever slot zero holds - so this is a capability, not a requirement.
 	internal static bool bindless;
 
-	//How this device is spoken to - see VkDialect. Chosen with the device, and the only thing that may call what Vulkan 1.3 added.
+	//How this device is spoken to (VkDialect), chosen with it; the only caller of what Vulkan 1.3 added
 	internal static VkDialect dialect;
 
 	//The frame this device can hold - see RenderTier. The full one until a device says otherwise,
 	//which is what everything asked before there is a device - a bake, a test - is asking about.
 	internal static RenderTier Tier => dialect?.Tier ?? RenderTier.Full;
 
-	//Destroys a view, having told whatever may have kept something made around it - see VkDialect.ForgetView. The one way a view goes.
+	//Destroys a view, telling whatever kept something around it - see VkDialect.ForgetView
 	internal static void DestroyView( ImageView view )
 	{
 		if ( view.Handle == 0 ) return;
@@ -327,7 +327,7 @@ internal static unsafe partial class VkDevice
 	//where it is made, instead of becoming an image that was never created and a driver that is handed it anyway.
 	internal static uint maxImageSize = 16384;
 
-	//The device's memory types, asked for once. Every buffer and image creation needs them, and they never change while the device is open.
+	//The device's memory types, asked once: every creation needs them and they never change
 	internal static PhysicalDeviceMemoryProperties memoryProperties;
 
 	//Nanoseconds per timestamp tick, or zero when the graphics queue cannot timestamp at all
@@ -345,8 +345,8 @@ internal static unsafe partial class VkDevice
 	//What the material sampler was last made with. The setting, clamped - not the device's ceiling.
 	internal static float anisotropyAsked = 1.0f;
 
-	//The biggest edge a texture may arrive at, or zero for whatever it is. A texture with mips that is larger than this starts from the
-	//first level that fits: the top levels are simply not uploaded, and the picture on the device is a quarter the memory per level dropped.
+	//The biggest edge a texture arrives at, nought for any: a larger mipped one starts at the first level
+	//that fits, its top levels never uploaded
 	internal static uint textureMaxEdge;
 
 	//Whether depth can be blitted; required for rendering the world below window resolution
@@ -370,26 +370,26 @@ internal static unsafe partial class VkDevice
 	//Whether one indirect call may draw many args; without it batches must be split per command
 	internal static bool multiDraw;
 
-	//Whether an index may be any 32-bit number rather than one under 2^24. The cluster raster's index names a visible entry and a vertex
-	//of its cluster in one word - see CoreMeshShaders.EntryShift - so without this a frame may hold no more than 131072 visible clusters.
+	//Whether an index may be any 32-bit number: the cluster raster packs entry and vertex in one word
+	//(CoreMeshShaders.EntryShift); without it a frame holds at most 131072 visible clusters
 	internal static bool fullIndex;
 
 	//Whether the device draws mesh stages (VK_EXT_mesh_shader). Asked for, never demanded: a desktop card from before
 	//2018, most phones and every browser have none, and the indexed draw is what the world is drawn by everywhere.
 	internal static bool meshShaders;
 
-	//Every stage a draw may have, for the sets and the push range every graphics pipeline shares: the mesh stage too where the device
-	//has it. One answer for all of them, so any two pipelines' layouts stay compatible - a set bound under one is bound under the next.
+	//Every stage a draw may have, for the sets and push range all graphics pipelines share, mesh too where
+	//present; one answer, so a set bound under one pipeline stays bound under the next
 	internal static ShaderStageFlags DrawStages => ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit
 		| ( meshShaders ? ShaderStageFlags.MeshBitExt : 0 );
 
-	//vkCmdDrawIndexedIndirectCount: a draw whose count the card wrote.
+	//VkCmdDrawIndexedIndirectCount: a draw whose count the card wrote
 	internal static bool drawIndirectCount;
 
 	//Whether multiview (both headset eyes in one pass) is available; on whenever supported
 	internal static bool multiview;
 
-	//And how many of them one call may name, which is one where the above is missing and is worth reading even where it is not.
+	//How many one call may name: one where the above is missing
 	internal static uint maxDrawIndirect = 1;
 
 
@@ -403,7 +403,7 @@ internal static unsafe partial class VkDevice
 
 	internal static bool Ready => isReady;
 
-	//A queue call returned VK_ERROR_DEVICE_LOST. Further submits are refused so the driver is not hammered after the first failure.
+	//A queue call returned VK_ERROR_DEVICE_LOST: further submits are refused
 	private static volatile bool isLost;
 
 	internal static bool Lost => isLost;
@@ -414,8 +414,7 @@ internal static unsafe partial class VkDevice
 		if ( result == Result.ErrorDeviceLost ) isLost = true;
 	}
 
-	//The strings the ABI used to hand out as fixed buffers. Plain strings here: nothing outlives
-	//the call that reads them any more, because the caller is managed and copies at the assignment.
+	//The ABI's strings, as plain strings: the managed caller copies them at the assignment
 	internal static string infoText = "not initialised";
 	internal static string deviceNameText = "";
 
@@ -427,8 +426,8 @@ internal static unsafe partial class VkDevice
 	internal static int trackedBufferCount;
 	internal static int trackedTextureCount;
 
-	//The pictures the frame draws into - a view's world, normals, depth and post pictures, the window's backdrop - by the memory each was
-	//given, so letting one go takes its bytes off again. Not in the textures above: those are what the engine loads, these are what it renders.
+	//The frame's pictures - a view's world, normals, depth, post pictures, the window's backdrop - by the
+	//memory each was given; not the loaded textures above
 	private static readonly Dictionary<ulong, long> targetMemory = new();
 	internal static long trackedTargetBytes;
 
@@ -456,7 +455,7 @@ internal static unsafe partial class VkDevice
 
 	private static readonly Logger log = new( "Render" );
 
-	//What the core used to say through the ABI's log seam.
+	//What the core says through the ABI's log seam
 	internal static void Say( string message ) => log.Info( message );
 
 	//A line only somebody chasing the device wants: hidden until trace is on.
@@ -520,7 +519,7 @@ internal static unsafe partial class VkDevice
 			{
 				var wanted = System.Text.Encoding.UTF8.GetByteCount( chars, value.Length );
 
-				//A name is never worth truncating in the middle of a character, so a value that will not fit is cut by characters until it does.
+				//A name is cut by whole characters until it fits, never mid-character
 				var take = value.Length;
 
 				while ( wanted > capacity - 1 && take > 0 )
@@ -537,10 +536,10 @@ internal static unsafe partial class VkDevice
 		return written;
 	}
 
-	//The index of a memory type with these properties that suits these requirement bits, or uint.MaxValue if the device has no such memory.
+	//The memory type with these properties suiting these bits, or uint.MaxValue for none
 	internal static uint FindMemoryType( uint typeBits, MemoryPropertyFlags properties )
 	{
-		//From the copy taken when the device opened - this is asked on every allocation, and the answer never changes while the device is open.
+		//From the copy taken when the device opened; asked on every allocation
 		for ( var i = 0u; i < memoryProperties.MemoryTypeCount; ++i )
 		{
 			var allowed = ( typeBits & ( 1u << (int)i ) ) != 0;
@@ -586,7 +585,7 @@ internal static unsafe partial class VkDevice
 
 			if ( size > deviceHeap ) deviceHeap = size;
 
-			//Only a type this buffer could actually have counts towards the window: a heap the host can see but this allocation may not use is no help to it.
+			//Only a type this buffer could have counts towards the window
 			if ( ( typeBits & ( 1u << (int)i ) ) == 0 ) continue;
 			if ( ( type.PropertyFlags & Shared ) != Shared ) continue;
 
@@ -595,8 +594,8 @@ internal static unsafe partial class VkDevice
 
 		if ( sharedHeap == 0 ) return false;
 
-		//Within a sixteenth of the biggest device-local heap counts as all of it: the two are often reported as the same heap, and where they
-		//are not, a BAR window is smaller than that by orders of magnitude, not by a rounding of how much the driver reserves for itself.
+		//Within a sixteenth of the biggest device-local heap counts as all of it: they are often the same heap,
+		//and a BAR window is smaller by orders of magnitude
 		return sharedHeap >= deviceHeap - ( deviceHeap / 16 );
 	}
 
@@ -611,7 +610,7 @@ internal static unsafe partial class VkDevice
 		{
 			SType = StructureType.BufferCreateInfo,
 			Size = MaterialParamSize,
-			//Copied into as well as read: a material's numbers are written in place when they change - see VkFrame.MaterialNumbers.
+			//Copied into as well as read: material numbers are written in place - see VkFrame.MaterialNumbers
 			Usage = BufferUsageFlags.UniformBufferBit | BufferUsageFlags.TransferDstBit,
 			SharingMode = SharingMode.Exclusive,
 		};
@@ -682,11 +681,11 @@ internal static unsafe partial class VkDevice
 
 	private static readonly List<Grave> graveyard = new( 256 );
 
-	//Queue submissions, counted. One queue means they finish in order, so one completed ticket stands for everything at or before it.
+	//Queue submissions counted; one queue finishes in order, so a completed ticket covers all before it
 	private static ulong submittedTicket;
 	private static ulong completedTicket;
 
-	//Whether a frame is being recorded, and the sentinel a grave carries while the ticket that recording will submit under is not known yet.
+	//Whether a frame is recording, and the sentinel a grave carries until its ticket is known
 	private static bool recordingOpen;
 
 	private const ulong RecordingSentinel = ulong.MaxValue;
@@ -763,7 +762,7 @@ internal static unsafe partial class VkDevice
 	//Everything ever submitted is done - what follows a device-wide wait.
 	internal static void AllTicketsDone() => TicketDone( submittedTicket );
 
-	//The last submission a fence has proved finished - see TicketDone. What a buffer on its way back to the host waits for; see VkReadbacks.
+	//The last submission a fence proved finished (TicketDone); readbacks wait for it
 	internal static ulong CompletedTicket => completedTicket;
 
 	//Whether a recording is open, whose ticket is not known until it is submitted.
@@ -793,7 +792,7 @@ internal static unsafe partial class VkDevice
 		}
 	}
 
-	//A frame has begun recording: resources retired from here on may be named by it, and wait for its ticket rather than for anything already known.
+	//A frame began recording: what is retired from here waits for its ticket
 	internal static void RecordingBegan()
 	{
 		lock ( renderLock ) recordingOpen = true;
@@ -873,8 +872,8 @@ internal static unsafe partial class VkDevice
 		} );
 	}
 
-	//These two take a number of further submissions to outlast, because a frame's fence does not answer for the present that follows it: the
-	//semaphore the presentation engine waits on and the swapchain whose image it shows are still the queue's business after the fence has signalled.
+	//These two outlast a number of further submissions: a frame's fence does not cover the present after it,
+	//whose semaphore and swapchain image stay the queue's business
 	internal static void RetireSemaphore( VkSemaphore semaphore, uint after = 0 )
 	{
 		if ( semaphore.Handle == 0 ) return;
@@ -906,7 +905,7 @@ internal static unsafe partial class VkDevice
 		Retire( new Grave { Ticket = StampForNow(), Bindless = slot, Block = -1 } );
 	}
 
-	//Destroys everything in the graveyard regardless of tickets. Only for device shutdown, after the device has been waited idle.
+	//Destroys the whole graveyard regardless of tickets; only at shutdown, after waiting idle
 	internal static void DrainGraveyard()
 	{
 		for ( var i = 0; i < graveyard.Count; ++i ) Bury( graveyard[i] );
@@ -963,15 +962,15 @@ internal static unsafe partial class VkDevice
 		return SetKind.Texture;
 	}
 
-	//A pool of the shape everything here allocates out of: materials, the frame's own sets, and storage buffers per object that pulls its own
-	//vertices. The counts are what one of these holds, not what the device may have. Running out of them is answered by making another one.
+	//A pool of the shape everything here allocates from: materials, frame sets, per-object storage buffers;
+	//the counts are one pool's, and running out makes another
 	private static DescriptorPool MakeDescriptorPool()
 	{
 		var poolSizes = stackalloc DescriptorPoolSize[5];
 
-		//And two a frame set in the portable frame, whose sun map and sky table are both bound there - see portableSunMap and skyTableImage.
+		//And four a frame set in the portable frame: its sun map, sky table and bake's two pictures - see portableSunMap.
 		poolSizes[0].Type = DescriptorType.CombinedImageSampler;
-		poolSizes[0].DescriptorCount = ( TextureSets * MaterialTextures ) + 64;
+		poolSizes[0].DescriptorCount = ( TextureSets * MaterialTextures ) + 128;
 
 		//Three per frame set - the bones, the frame, and the blend shape weights - and a set per
 		//frame in flight, per instanced draw that points the bone slot at a buffer of its own.
@@ -986,7 +985,7 @@ internal static unsafe partial class VkDevice
 		poolSizes[3].Type = DescriptorType.StorageBuffer;
 		poolSizes[3].DescriptorCount = ( ObjectBindings * ObjectSets ) + 32 + ( 64 * PassBuffers );
 
-		//The depth pyramid's levels and the glow's, written as storage images - a level a binding, which the pool never said it had room for.
+		//The depth pyramid's and glow's levels as storage images, a level a binding
 		poolSizes[4].Type = DescriptorType.StorageImage;
 		poolSizes[4].DescriptorCount = 64 * ( PyramidLevelsAtOnce + FoldLevelsAtOnce + PassImages );
 
@@ -1081,7 +1080,7 @@ internal static unsafe partial class VkDevice
 
 		if ( vk.AllocateDescriptorSets( device, &info, &set ) != Result.Success )
 		{
-			//A set that will not come out of a pool made for it is a set no pool can hold: the layout wants more than one of these has room for.
+			//A set that will not come out of a fresh pool wants more than any pool holds
 			SetText( "a descriptor set larger than a pool" );
 			return false;
 		}
@@ -1095,8 +1094,7 @@ internal static unsafe partial class VkDevice
 		return true;
 	}
 
-	//Gives one back to the pool it came from, which is why it is not free to call vkFreeDescriptorSets
-	//directly any more: with several pools, the set alone no longer says where it belongs.
+	//Gives a set back to its own pool: with several pools, the set alone does not say which
 	internal static void FreeDescriptorSet( DescriptorSet set )
 	{
 		if ( set.Handle == 0 || device.Handle == 0 ) return;

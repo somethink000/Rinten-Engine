@@ -463,6 +463,8 @@ internal static unsafe class CoreSceneRenderer
 		//Scene time while playing, so pause and time scale apply; wall clock in the editor
 		block[TimeAt + 2] = scene.IsValid() && !scene.IsEditor ? (float)scene.TimeNow : RealTime.Now;
 
+		block[ShadowFilterAt] = Math.Clamp( ShadowFilterQuality, 0, 2 );
+
 		if ( !scene.IsValid() )
 		{
 			LightsInFrame = 0;
@@ -842,7 +844,20 @@ internal static unsafe class CoreSceneRenderer
 	//The area lamps' LTC tables - see CoreAreaLights.
 	internal const int AreaAt = SkyLightAt + 4;
 
-	internal const int FrameFloats = AreaAt + 4;
+	//How shadow edges are filtered - see ShadowFilterQuality.
+	internal const int ShadowFilterAt = AreaAt + 4;
+
+	//The portable frame's bake - see CoreBakedLighting.Portable.
+	internal const int PortableBakeAt = ShadowFilterAt + 4;
+
+	//The screen's indirect light - see LayScreenLight.
+	internal const int ScreenLightAt = PortableBakeAt + 4;
+
+	internal const int FrameFloats = ScreenLightAt + 4;
+
+	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
+		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]
+	internal static int ShadowFilterQuality { get; set; } = 2;
 
 	//The exposure a block was written with - see SetFinish
 	internal static float ExposureOf( float[] frame )
@@ -1011,6 +1026,14 @@ internal static unsafe class CoreSceneRenderer
 		frame[ShadowAt + 1] = picture;
 
 		OcclusionOn = frame[SettingsAt + 1] > 0.0f;
+	}
+
+	//The indirect light the occlusion pass gathered off the screen, by table index - see AmbientOcclusion
+	internal static void LayScreenLight( float[] frame, int picture )
+	{
+		if ( frame is null || frame.Length < FrameFloats || picture <= 0 ) return;
+
+		frame[ScreenLightAt] = picture;
 	}
 
 	//The sheet of air this view drew, by its place in the picture table, with the shape the

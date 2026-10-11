@@ -644,6 +644,21 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	}
 #endif
 
+	//The light the occlusion's horizons hide, out of last frame's picture: where it is, the occluded share of the
+	//ambient is replaced by it, the bake's included - see IndirectPs in ambient_occlusion.shader
+	float3 screenLight = float3( 0.0, 0.0, 0.0 );
+	float screenVisible = visible;
+	bool screenLit = false;
+
+#ifndef PORTABLE
+	if ( g_frame[0].screenLight.x > 0.5 && g_frame[0].settings.y > 0.0 )
+	{
+		//Frame-uniform - see SkyTableAt.
+		screenLight = g_textures[uint( g_frame[0].screenLight.x )].SampleLevel( s.screen / g_frame[0].settings.yz, 0.0 ).rgb;
+		screenLit = true;
+	}
+#endif
+
 	float3 lit = litDiffuse + litSpecular;
 
 	//Lit by the sky table where there is a sky, so a wall facing it takes its colour; none without one
@@ -703,10 +718,35 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		}
 		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
+#else
+	//The portable frame's bake: no directions and no walls, the sky by the normal, the bounce from the volume
+	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
+	{
+		float4 baked = PortableSheet( s.lightmap );
+
+		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
+		skyReach = saturate( baked.a );
+		visible = 1.0;
+
+		if ( HasPortableVolume() && g_frame[0].portableBake.w > 0.5 )
+			ambientSky += PortableVolume( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), true ).rgb;
+	}
+	else if ( HasPortableVolume() )
+	{
+		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
+		float4 baked = PortableVolume( lifted, false );
+
+		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
+		skyReach = saturate( baked.a );
+
+		if ( g_frame[0].portableBake.w > 0.5 ) ambientSky += PortableVolume( lifted, true ).rgb;
+	}
 #endif
 
 	//Metal has no diffuse to light: what it does with the sky is reflect it, which is what the rest of this does.
-	float3 ambient = albedo * ambientSky * ( 1.0 - metalness ) * occlusion * visible;
+	if ( screenLit ) visible = screenVisible;
+
+	float3 ambient = albedo * ( ( ambientSky * visible ) + screenLight ) * ( 1.0 - metalness ) * occlusion;
 
 	//Sky/probe reflection everywhere, not only in probe boxes, so metals aren't black outdoors
 	float3 away = reflect( -v, normal );

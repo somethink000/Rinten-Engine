@@ -25,6 +25,9 @@ internal static unsafe class BrowserTextures
 		/// <summary>Bytes per 4x4 block where held in blocks; nought where held as pixels.</summary>
 		public int BlockBytes;
 
+		/// <summary>Bytes a pixel where held as pixels: four, or eight for half floats.</summary>
+		public int TexelBytes;
+
 		/// <summary>The block format a picture held as pixels came in, for later writes - see WriteLevel.</summary>
 		public CoreBlockCompression.Kind? Unpacked;
 
@@ -87,7 +90,7 @@ internal static unsafe class BrowserTextures
 	}
 
 	//A picture out of levels lying back to back.
-	private static ulong CreateFromPixels( byte* pixels, ReadOnlySpan<MipSlice> mips, long byteCount, string format, int blockBytes = 0 )
+	private static ulong CreateFromPixels( byte* pixels, ReadOnlySpan<MipSlice> mips, long byteCount, string format, int blockBytes = 0, int texelBytes = 4 )
 	{
 		if ( mips.Length == 0 ) return 0;
 
@@ -115,7 +118,7 @@ internal static unsafe class BrowserTextures
 			//A block format is written a whole block at a time, so a level is as wide as its blocks - a
 			//level of two by two is one block, four by four - and a row of the upload is a row of blocks.
 			var (w, h, row) = blockBytes == 0
-				? (mips[i].Width, mips[i].Height, mips[i].Width * 4)
+				? (mips[i].Width, mips[i].Height, mips[i].Width * texelBytes)
 				: (( mips[i].Width + 3 ) & ~3, ( mips[i].Height + 3 ) & ~3, ( ( mips[i].Width + 3 ) / 4 ) * blockBytes);
 
 			BrowserNative.WriteTexture( image, i, 0, 0, w, h, row,
@@ -131,6 +134,7 @@ internal static unsafe class BrowserTextures
 			MipCount = mips.Length,
 			Bytes = byteCount,
 			BlockBytes = blockBytes,
+			TexelBytes = texelBytes,
 		};
 
 		made.View = BrowserDevice.MakeView( image, format );
@@ -156,7 +160,7 @@ internal static unsafe class BrowserTextures
 		return handle;
 	}
 
-	//transcoder_texture_format - what the page's transcoder is asked to turn UASTC into; see basis_worker.js.
+	//What the page's transcoder turns UASTC into (transcoder_texture_format) - see basis_worker.js
 	private const int TranscodeEtc1Rgb = 0;
 	private const int TranscodeEtc2Rgba = 1;
 	private const int TranscodeBc7 = 6;
@@ -337,7 +341,7 @@ internal static unsafe class BrowserTextures
 
 		var stored = (CoreTextureFile.TextureFormat)format;
 
-		if ( !Enum.IsDefined( stored ) )
+		if ( !Enum.IsDefined( stored ) && format != HalfFormat )
 		{
 			BrowserDevice.infoText = "the browser has no such picture format";
 			return 0;
@@ -370,6 +374,10 @@ internal static unsafe class BrowserTextures
 
 		if ( stored == CoreTextureFile.TextureFormat.Rgba8 )
 			return CreateFromPixels( pixelData, mips, at, rgba );
+
+		//Half floats, the bake's light - see CoreRenderDevice.CreateTextureHalf
+		if ( format == HalfFormat )
+			return CreateFromPixels( pixelData, mips, at, BrowserDevice.FormatRgba16Float, texelBytes: 8 );
 
 		if ( stored == CoreTextureFile.TextureFormat.Rgb9e5 )
 			return CreateFromPixels( pixelData, mips, at, BrowserDevice.FormatRgb9e5 );
@@ -524,9 +532,16 @@ internal static unsafe class BrowserTextures
 		}
 
 		BrowserNative.WriteTexture( target.Image, level, x, y, width, height, stride,
-			new Span<byte>( data, ( ( height - 1 ) * stride ) + ( width * 4 ) ) );
+			new Span<byte>( data, ( ( height - 1 ) * stride ) + ( width * Math.Max( target.TexelBytes, 4 ) ) ) );
 		return 1;
 	}
+
+	//The device's own half float format number - VkTextures.HalfFormat, which this side must take the same
+	private const int HalfFormat = 6;
+
+	/// <summary>A picture's view, for binding it outside a material; nought for none.</summary>
+	internal static int ViewOf( ulong texture )
+		=> textures.TryGetValue( texture, out var found ) ? found.BindView : 0;
 
 	//Every level unpacked to RGBA8 and put up as one chain.
 	private static ulong CreateUnpacked( CoreBlockCompression.Kind kind, byte* pixelData, ReadOnlySpan<MipSlice> mips, string format )
@@ -666,6 +681,7 @@ internal static unsafe class BrowserTextures
 			into.MipCount = from.MipCount;
 			into.Bytes = from.Bytes;
 			into.BlockBytes = from.BlockBytes;
+			into.TexelBytes = from.TexelBytes;
 			into.Unpacked = from.Unpacked;
 
 			textures[target] = into;

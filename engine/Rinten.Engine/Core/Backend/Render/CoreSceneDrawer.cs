@@ -2618,6 +2618,12 @@ internal sealed partial class CoreSceneDrawer
 				laid = true;
 			}
 
+			if ( CorePasses.Find( AmbientOcclusion.IndirectPicture ) is { Index: > 0 } indirect )
+			{
+				CoreSceneRenderer.LayScreenLight( frame, indirect.Index );
+				laid = true;
+			}
+
 			//And the picture of the depth itself, for the surfaces that read what is behind them - see DepthPicture.
 			if ( CorePasses.Find( DepthPicture.PictureName ) is { Index: > 0 } depthPicture )
 			{
@@ -5648,7 +5654,7 @@ internal sealed partial class CoreSceneDrawer
 			var a = lines[i * 2];
 			var b = lines[i * 2 + 1];
 
-			//x: line side; y: +1 at the start, -1 at the end, so the shader turns one way across; z: width in pixels
+			//X: the line's side; y: +1 at the start, -1 at the end, so the shader turns one way; z: width
 			var startLeft = Corner( a, b.Position, 1, 1, thickness );
 			var startRight = Corner( a, b.Position, -1, 1, thickness );
 			var endLeft = Corner( b, a.Position, 1, -1, thickness );

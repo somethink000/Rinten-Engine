@@ -207,6 +207,16 @@ internal static partial class CoreBakedLighting
 		return any;
 	}
 
+	/// <summary>Whether a scene has a bake it reads.</summary>
+	internal static bool Baked( Scene scene ) => Of( scene ) is not null;
+
+	/// <summary>Traces a scene's bounce with hardware rays, where the card has them; in the frame's recording.</summary>
+	internal static void TraceBounce( Scene scene )
+	{
+		if ( !CoreLiveBounce.Rays || Of( scene ) is not { } bake ) return;
+		if ( held.TryGetValue( bake, out var on ) ) on.Bounce?.Trace( scene );
+	}
+
 	//What Write found for the frame being written, for ChannelOf.
 	private static Held writing;
 

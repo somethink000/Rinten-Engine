@@ -26,11 +26,11 @@ internal static unsafe class VkBuffers
 		public ulong Data;
 	}
 
-	//The descriptor sets that name a pair of buffers, by the pair. Kept rather than made per draw: a chunk of a voxel world is drawn
-	//every frame out of buffers that never change, so the set that names them is written once and bound for as long as the chunk exists.
+	//Sets naming a pair of buffers, by the pair: a voxel chunk draws every frame from buffers that never
+	//change, so its set is written once and kept while the chunk lives
 	private static readonly Dictionary<ulong, ObjectSet> objectSets = new();
 
-	//The two handles as one key. Handles count from one and are never reused while a buffer lives, so a pair of them is a pair of buffers.
+	//The two handles as one key; handles are never reused while their buffer lives
 	private static ulong ObjectKey( ulong geometry, ulong data ) => ( geometry * 1099511628211ul ) ^ data;
 
 	internal static VkBuffer Get( ulong handle )
@@ -45,8 +45,8 @@ internal static unsafe class VkBuffers
 	{
 		if ( geometry == 0 ) return default;
 
-		//A draw with nothing else to read still needs a complete set, so the geometry stands in for the second binding. A shader that does not
-		//declare it never looks, and one that does reads its own vertices - which is wrong but bounded, where an unwritten descriptor is not.
+		//A draw with nothing else still needs a complete set, so the geometry stands in for the second binding:
+		//a shader reading it gets its own vertices, wrong but bounded, unlike an unwritten descriptor
 		if ( data == 0 ) data = geometry;
 
 		var key = ObjectKey( geometry, data );
@@ -65,8 +65,7 @@ internal static unsafe class VkBuffers
 
 		for ( var i = 0u; i < VkDevice.ObjectBindings; ++i )
 		{
-			//The first two are what the caller brought; the rest stand the geometry in, for the same reason the second one does when a draw brought
-			//nothing for it. An unwritten descriptor is what this is avoiding, and a shader that does not declare a binding never looks at it.
+			//The first two are the caller's; the rest stand the geometry in, so no descriptor is left unwritten
 			infos[i].Buffer = i == 1 ? dataBuffer : geometryBuffer;
 			infos[i].Offset = 0;
 			infos[i].Range = Vk.WholeSize;
@@ -128,8 +127,8 @@ internal static unsafe class VkBuffers
 				return 0;
 			}
 
-			//Through the same staging ring the level loads through, which already names every way a buffer can be read next - vertices, indices, a
-			//shader that pulls, a compute pass, and the arguments of an indirect draw - so what is written here is visible to the frame that reads it.
+			//Through the staging ring the loads use, which covers every way a buffer is read next, so the frame
+			//reading it sees what is written here
 			return VkTextures.UploadToBuffer( found.Buffer, data, (ulong)size, (ulong)offset ) ? 1 : 0;
 		}
 	}
@@ -186,6 +185,11 @@ internal static unsafe class VkBuffers
 		}
 	}
 
+	//What a buffer is also made for where the rays are on: an address, and a mesh their structures are built from
+	private static BufferUsageFlags RayUsage => VkRays.On
+		? BufferUsageFlags.ShaderDeviceAddressBit | BufferUsageFlags.AccelerationStructureBuildInputReadOnlyBitKhr
+		: 0;
+
 	internal static ulong Create( byte* data, long size )
 	{
 		lock ( VkDevice.renderLock )
@@ -213,7 +217,7 @@ internal static unsafe class VkBuffers
 				//Every use a mesh buffer may have, including indirect args and storage for vertex-pulling shaders
 				Usage = BufferUsageFlags.VertexBufferBit | BufferUsageFlags.IndexBufferBit |
 					BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferDstBit |
-					BufferUsageFlags.TransferSrcBit | BufferUsageFlags.IndirectBufferBit,
+					BufferUsageFlags.TransferSrcBit | BufferUsageFlags.IndirectBufferBit | RayUsage,
 				SharingMode = SharingMode.Exclusive,
 			};
 
@@ -243,8 +247,7 @@ internal static unsafe class VkBuffers
 				MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit |
 				MemoryPropertyFlags.HostCoherentBit );
 
-			//Where the host can write the fast memory directly, staging is a copy that buys nothing: the bytes would end up in the same place, having been
-			//written twice. That is every integrated part and every discrete one with a resizable BAR, and on those the shorter path is also the older one.
+			//Where the host writes the fast memory directly - integrated parts, resizable BAR - staging buys nothing
 			var writeStraightIn = sharedWithHost != uint.MaxValue &&
 				VkDevice.HostCanWriteTheFastMemory( requirements.MemoryTypeBits );
 
@@ -289,16 +292,19 @@ internal static unsafe class VkBuffers
 				return 0;
 			}
 
-			//One allocation per buffer. Drivers cap the allocation count around four thousand, so a real asset pipeline sub-allocates from
-			//big blocks - but that is bookkeeping this renderer has not earned yet, and the cap is far from where the demos and tests live.
+			//One allocation per buffer; drivers cap the count near four thousand, far from where this lives
 			var staged = false;
 			var allocated = Result.ErrorOutOfDeviceMemory;
 
 			for ( var i = 0; i < choiceCount && made.Memory.Handle == 0; ++i )
 			{
+				//With an address where the rays read meshes straight out of their buffers - see VkRays
+				var addressed = new MemoryAllocateFlagsInfo { SType = StructureType.MemoryAllocateFlagsInfo, Flags = MemoryAllocateFlags.DeviceAddressBit };
+
 				var allocate = new MemoryAllocateInfo
 				{
 					SType = StructureType.MemoryAllocateInfo,
+					PNext = VkRays.On ? &addressed : null,
 					AllocationSize = requirements.Size,
 					MemoryTypeIndex = choiceType[i],
 				};
@@ -366,7 +372,7 @@ internal static unsafe class VkBuffers
 
 				System.Buffer.MemoryCopy( data, mapped, size, size );
 
-				//Coherent memory needs no flush; unmapping keeps the address space clean and makes plain that nothing writes this buffer again.
+				//Coherent memory needs no flush; unmapping says nothing writes this buffer again
 				VkDevice.vk.UnmapMemory( VkDevice.device, made.Memory );
 			}
 
@@ -376,7 +382,7 @@ internal static unsafe class VkBuffers
 
 			var handle = buffers.Add( made );
 
-			//By the handle the managed side knows it by, so a message about a buffer can be traced back to the mesh that made it.
+			//By the managed handle, so a message about a buffer traces back to its mesh
 			VkDevice.NameHandle( ObjectType.Buffer, made.Buffer.Handle, "mesh buffer", handle );
 			VkDevice.NameHandle( ObjectType.DeviceMemory, made.Memory.Handle, "mesh buffer memory", handle );
 
@@ -493,7 +499,7 @@ internal static unsafe class VkBuffers
 					PCommandBufferInfos = &commandSubmit,
 				};
 
-				//Everything before it has to have happened: what is being read was written by a frame, and a frame is a different submission.
+				//Everything before it must have happened: what is read was written by a frame, another submission
 				VkSubmitter.DeviceWaitIdle();
 
 				if ( VkDevice.dialect.Submit( VkDevice.graphicsQueue, &submit, fence ) != Result.Success ) return 0;
@@ -528,8 +534,8 @@ internal static unsafe class VkBuffers
 			//- so it goes to the graveyard rather than dying here, and nobody waits for anything.
 			VkDevice.RetireBuffer( found.Buffer, found.Memory );
 
-			//And any set that named it stops being a set anybody may bind. Retired rather than only forgotten: a voxel world remakes
-			//a chunk's buffers every time somebody digs, and a pool that only ever hands sets out runs dry in an afternoon of it.
+			//And any set naming it is retired, not forgotten: a voxel world remakes buffers on every dig, and a
+			//pool that only hands sets out runs dry
 			RetireSetsNaming( buffer );
 
 			VkDevice.trackedBufferBytes -= (long)found.Bytes;

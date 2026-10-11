@@ -2599,6 +2599,9 @@ internal sealed partial class CoreSceneDrawer
 			//The air into its slice sheet, a march per froxel read in one tap; after the sun maps, before shading
 			var air = CoreVolumeFog.Draw( pixels, far );
 
+			//And the bake's bounce through hardware rays, where the card has them, before anything reads it
+			CoreBakedLighting.TraceBounce( scene );
+
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
 
 			//An "Occlusion" picture drawn here darkens surfaces (AmbientOcclusion); laid into the block, re-sent,

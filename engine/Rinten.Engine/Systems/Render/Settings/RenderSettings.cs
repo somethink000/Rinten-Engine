@@ -83,6 +83,16 @@ public partial class RenderSettings
 		}
 	}
 
+	/// <summary>Whether lighting uses hardware ray tracing (RTX, RDNA2+, Arc); off by default.</summary>
+	public bool RayTracing
+	{
+		get => ConVarSystem.GetInt( "r_raytracing", 0, true ) != 0;
+		set => ConVarSystem.SetInt( "r_raytracing", value ? 1 : 0, true );
+	}
+
+	/// <summary>Whether this card can trace rays, so a menu offers RayTracing only where it works.</summary>
+	public bool RayTracingAvailable => VkRays.On;
+
 	public float MotionBlurScale
 	{
 		get => VideoSettings.Get<float>( "motionblur.scale", 1.0f );
@@ -94,8 +104,8 @@ public partial class RenderSettings
 		}
 	}
 
-	//The upscaler's settings are its convars, which keep themselves - see DrawSettings.Upscaler and the ones beside it. They were kept in the video
-	//cookie and written into the convars only when changed, so a game started again came up with the setting on the screen and native on the card.
+	//The upscaler's settings are convars that keep themselves - see DrawSettings.Upscaler - so a restarted
+	//game shows and draws the same setting
 
 	public UpscalerMode UpscalerMode
 	{
@@ -117,7 +127,7 @@ public partial class RenderSettings
 		set => ConVarSystem.SetFloat( "r_fsr_rcas_sharpness", Math.Clamp( value, 0.0f, 1.0f ), true );
 	}
 
-	/// <summary>FSR3 quality preset (Ultra Performance / Performance / Balanced / Quality / Native), maps to a discrete render-resolution multiplier. Only used when <see cref="UpscalerMode"/> is <see cref="UpscalerMode.FSR3"/>.</summary>
+	/// <summary>FSR3 quality preset, a render-resolution multiplier; only with UpscalerMode FSR3.</summary>
 	public Fsr3UpscalerQuality Fsr3UpscalerQuality
 	{
 		get => (Fsr3UpscalerQuality)ConVarSystem.GetInt( "r_fsr3_quality", (int)Fsr3UpscalerQuality.Quality, true );
@@ -135,7 +145,7 @@ public partial class RenderSettings
 		set => ConVarSystem.SetFloat( "r_fsr3_sharpness", Math.Clamp( value, 0.0f, 1.0f ), true );
 	}
 
-	/// <summary>DLSS quality preset (Ultra Performance / Performance / Balanced / Quality / DLAA), maps to a discrete render-resolution multiplier. Only used when <see cref="UpscalerMode"/> is <see cref="UpscalerMode.DLSS"/>. DLSS has no sharpness control.</summary>
+	/// <summary>DLSS quality preset, a render-resolution multiplier; only with UpscalerMode DLSS.</summary>
 	public DlssQuality DlssQuality
 	{
 		get => (DlssQuality)ConVarSystem.GetInt( "r_dlss_quality", (int)DlssQuality.Quality, true );
@@ -146,14 +156,14 @@ public partial class RenderSettings
 		}
 	}
 
-	/// <summary>Which DLSS network draws: nought is the newest the shipped library has, the rest are NGX's render presets by number - 1 is A.</summary>
+	/// <summary>Which DLSS network draws: nought the newest shipped, the rest NGX presets by number, 1 is A.</summary>
 	public int DlssPreset
 	{
 		get => ConVarSystem.GetInt( "r_dlss_preset", 0, true );
 		set => ConVarSystem.SetInt( "r_dlss_preset", Math.Clamp( value, 0, 26 ), true );
 	}
 
-	/// <summary>How much of the window's resolution the engine's own temporal upscaler draws the world at - one is temporal anti-aliasing at native.</summary>
+	/// <summary>How much of the window the engine's temporal upscaler draws at; one is native TAA.</summary>
 	public float TemporalRenderScale
 	{
 		get => ConVarSystem.GetFloat( "r_taa_scale", 1.0f, true );
@@ -167,14 +177,14 @@ public partial class RenderSettings
 		set => ConVarSystem.SetFloat( "r_taa_sharpness", Math.Clamp( value, 0.0f, 1.0f ), true );
 	}
 
-	/// <summary>Keep the processor from running frames ahead of the card - AMD Anti-Lag or NVIDIA Reflex, whichever the card has: 0 off, 1 on, 2 on with Reflex's boost. On Linux with an AMD card this is Mesa's layer, which a restart switches on.</summary>
+	/// <summary>Keeps the processor from running ahead: Anti-Lag or Reflex - 0 off, 1 on, 2 with boost.</summary>
 	public int LowLatency
 	{
 		get => ConVarSystem.GetInt( "r_low_latency", 0, true );
 		set => ConVarSystem.SetInt( "r_low_latency", Math.Clamp( value, 0, 2 ), true );
 	}
 
-	/// <summary>Returns whether the given <see cref="UpscalerMode"/> is usable on the current graphics device. The temporal ones need the full frame; DLSS needs an NVIDIA card whose driver has NGX, and the DLSS library beside the game - see CoreDlss.</summary>
+	/// <summary>Whether an UpscalerMode works on this device - temporal needs the full frame, DLSS NGX.</summary>
 	public static bool IsUpscalerModeSupported( UpscalerMode mode ) => CoreUpscale.Supported( mode );
 
 	public void ResetVideoConfig()
@@ -221,7 +231,7 @@ public partial class RenderSettings
 		VideoSettings.Save();
 	}
 
-	//We want benchmarks to have all similar settings. Set them here. The only fluctuations we should see are resolution and hardware.
+	//Benchmarks share settings, so only resolution and hardware vary
 	internal void ApplySettingsForBenchmarks()
 	{
 		ResetVideoConfig();

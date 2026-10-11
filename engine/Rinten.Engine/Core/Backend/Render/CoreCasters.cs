@@ -117,7 +117,7 @@ internal sealed class CoreCasters
 
 		//Everything, where this drawer has fallen out of the tables' log of changes - its first look among them -
 		//or where a bake came or went, which decides what of the world is still - see Movable
-		var baked = CoreSceneRenderer.BakedOn;
+		var baked = tables.Movable;
 
 		if ( !tables.ChangesSince( ref changesSeen, changed ) | baked != movable )
 		{
@@ -169,6 +169,7 @@ internal sealed class CoreCasters
 		var nowMoves = casts && ( entry.Posed || ( entry.Loose && ( entry.Skinned || entry.Morphed ) ) ||
 			record.Moving != 0 || ( record.Flags & CoreMeshShaders.InstanceNeverStill ) != 0 ||
 			( movable && entry.Renderer is { } renderer && renderer.GameObject is { IsStatic: false } ) );
+
 		//All triangles a light's list may hold, including self-moving surfaces the pre-pass skips
 		var nowTriangles = casts ? entry.OneSided + entry.TwoSided + entry.CutOut + entry.Moving : 0;
 

@@ -8,7 +8,7 @@ namespace Rinten;
 
 //The bounce of the sun, sky and every lamp the bake left out, off a bake's surfels, solved again on a worker whenever one
 //changes, as Enlighten does: surfels lit directly, each gathering what its links send, then the volume's points the surfels
-internal sealed class CoreLiveBounce
+internal sealed partial class CoreLiveBounce
 {
 	//Milliseconds between looks at the sun, sky and lamps
 	private const long Every = 100;
@@ -41,6 +41,9 @@ internal sealed class CoreLiveBounce
 	//Most rounds of bouncing a solve takes, each one bounce more; it stops sooner once a round changes little
 	private const int MostRounds = 12;
 	private bool told;
+
+	//Which way the last update went - see Tick
+	private bool traced;
 
 	private Task<(Half[] Light, Half[] Lean)> solving;
 	private long looked;
@@ -111,6 +114,20 @@ internal sealed class CoreLiveBounce
 	/// <summary>Puts a finished solve on the card, and starts another where the sun or sky moved. Main thread.</summary>
 	public void Tick( Scene scene )
 	{
+		//Traced on the card where the player turned rays on - see Trace; only the sun, sky and lamps are read here.
+		//Switched either way, the other path starts over rather than keeping what this one left.
+		if ( Rays != traced )
+		{
+			traced = Rays;
+			sky = null;
+		}
+
+		if ( traced )
+		{
+			LookForRays( scene );
+			return;
+		}
+
 		if ( solving is { IsCompleted: true } )
 		{
 			if ( solving.IsCompletedSuccessfully ) Upload( solving.Result );
@@ -483,6 +500,8 @@ internal sealed class CoreLiveBounce
 	/// <summary>Takes the pictures off the card; a solve still running lands nowhere.</summary>
 	public void Release()
 	{
+		ReleaseRays();
+
 		if ( Light != 0 ) CoreRenderDevice.DestroyTexture( Light );
 		if ( Lean != 0 ) CoreRenderDevice.DestroyTexture( Lean );
 

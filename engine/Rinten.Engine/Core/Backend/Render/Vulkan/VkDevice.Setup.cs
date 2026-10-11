@@ -480,6 +480,10 @@ internal static unsafe partial class VkDevice
 
 		CoreLatency.ChainFeatures( &features );
 
+		//And hardware rays, optional, where the card has all they need - see VkRays.
+		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
+		VkRays.ChainFeatures( &features );
+
 		//Asked about rather than demanded, which is why none of these is in a dialect's Missing: ground seen
 		//at a glancing angle is a smear without the first, and that is a worse picture rather than no picture.
 		PhysicalDeviceFeatures supported;
@@ -543,7 +547,7 @@ internal static unsafe partial class VkDevice
 		if ( StatsZone is not null && !statsQueries )
 			Log.Warning( $"RINTEN_ZONE_STATS asked for '{StatsZone}' and this device has no pipeline statistics" );
 
-		var deviceExtensions = stackalloc byte*[24];
+		var deviceExtensions = stackalloc byte*[32];
 		var extensionCount = 0u;
 
 		//Mesh stages, where the device has them - asked about, and the indexed draw stands in without.
@@ -589,6 +593,8 @@ internal static unsafe partial class VkDevice
 		if ( memoryBudget ) deviceExtensions[extensionCount++] = names.Add( "VK_EXT_memory_budget" );
 
 		if ( VkFovea.Extension is { } fovea ) deviceExtensions[extensionCount++] = names.Add( fovea );
+
+		foreach ( var ray in VkRays.Wanted ) deviceExtensions[extensionCount++] = names.Add( ray );
 
 		//NGX's extensions for DLSS where present; skip the buffer-address ext on 1.2 (it's core there)
 		foreach ( var latency in latencyExtensions )
@@ -638,6 +644,7 @@ internal static unsafe partial class VkDevice
 		dialect.FeaturesDone();
 		VkFovea.FeaturesDone();
 		CoreLatency.FeaturesDone();
+		VkRays.FeaturesDone();
 
 		if ( opened != Result.Success )
 		{
@@ -658,6 +665,7 @@ internal static unsafe partial class VkDevice
 		vk.CurrentDevice = device;
 
 		CoreLatency.DeviceMade();
+		VkRays.DeviceMade();
 
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
 
@@ -1461,6 +1469,8 @@ internal static unsafe partial class VkDevice
 		//The portable frame's sun map is the device's own: into the graveyard before it is drained
 		if ( portableSunMap != 0 ) VkTextures.ShadowMapDestroy( portableSunMap );
 		portableSunMap = 0;
+
+		VkRays.Destroy();
 
 		DrainGraveyard();
 

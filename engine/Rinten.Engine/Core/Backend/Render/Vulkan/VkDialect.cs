@@ -6,7 +6,7 @@ using Silk.NET.Vulkan;
 
 namespace Rinten;
 
-//The formats a pass draws into: what dynamic rendering learns from the pipeline, and what a render pass object has to be told to be made at all.
+//The formats a pass draws into: learnt by dynamic rendering, told to a render pass object
 internal struct VkPassFormats
 {
 	public Format Colour0;
@@ -16,7 +16,7 @@ internal struct VkPassFormats
 	/// <summary>Undefined where the pass has no depth.</summary>
 	public Format Depth;
 
-	/// <summary>Which layers one draw goes to at once, a bit a layer - nought for the one picture every pass but a headset's draws. See VkDevice.multiview.</summary>
+	/// <summary>Layers one draw goes to, a bit each; nought for every pass but a headset's.</summary>
 	public uint ViewMask;
 
 	public static VkPassFormats Of( Format colour, Format depth = Format.Undefined )
@@ -38,10 +38,10 @@ internal abstract unsafe class VkDialect
 	/// <summary>What the dialect is called in a log line.</summary>
 	public abstract string Name { get; }
 
-	/// <summary>What this device lacks to be spoken to this way, or null where it lacks nothing. Asked of a candidate before anything is made on it.</summary>
+	/// <summary>What this device lacks to be spoken to this way, or null; asked before anything is made.</summary>
 	public abstract string Missing( PhysicalDevice candidate );
 
-	/// <summary>The features a device is opened with, chained onto <paramref name="features"/>: what the dialect itself needs, and whatever of the optional ones the device has. Kept alive until <see cref="FeaturesDone"/>.</summary>
+	/// <summary>Chains the dialect's features and the optional ones the device has, until FeaturesDone.</summary>
 	public abstract void ChainFeatures( PhysicalDevice physical, PhysicalDeviceFeatures2* features );
 
 	/// <summary>The device is made, or was refused: the chain may go.</summary>
@@ -52,19 +52,19 @@ internal abstract unsafe class VkDialect
 
 	public abstract void EndRendering( CommandBuffer commands );
 
-	/// <summary>Tells a pipeline what it will be drawn in: <paramref name="rendering"/> names the formats, and is either chained onto the pipeline as it is or turned into the render pass those formats make.</summary>
+	/// <summary>Tells a pipeline its formats, chained on or made into the render pass they need.</summary>
 	public abstract bool DescribePass( GraphicsPipelineCreateInfo* pipeline, PipelineRenderingCreateInfo* rendering );
 
 	public abstract void Barrier( CommandBuffer commands, DependencyInfo* dependency );
 
-	/// <summary>A submission to the queue - after whatever frame the submit thread still holds, because the queue may have one user at a time and that one has to go in first. See VkSubmitter.</summary>
+	/// <summary>A submission to the queue, after any frame the submit thread holds - see VkSubmitter.</summary>
 	public Result Submit( Queue queue, SubmitInfo2* submit, Fence fence )
 	{
 		VkSubmitter.Drain();
 		return SubmitNow( queue, submit, fence );
 	}
 
-	/// <summary>The submission itself, in this dialect's words - for the submit thread, which is the queue's user already.</summary>
+	/// <summary>The submission itself in this dialect's words, for the submit thread.</summary>
 	public abstract Result SubmitNow( Queue queue, SubmitInfo2* submit, Fence fence );
 
 	/// <summary>The card's clock written into a query when the commands so far have reached a stage.</summary>
@@ -88,7 +88,7 @@ internal abstract unsafe class VkDialect
 	}
 }
 
-//Vulkan 1.3, spoken as written: dynamic rendering, synchronisation2, and the table of pictures that makes the full frame possible.
+//Vulkan 1.3 as written: dynamic rendering, synchronisation2 and the picture table the full frame needs
 internal sealed unsafe class VkModern : VkDialect
 {
 	public override RenderTier Tier => RenderTier.Full;
@@ -156,13 +156,13 @@ internal sealed unsafe class VkModern : VkDialect
 		VkDevice.drawIndirectCount = has12.DrawIndirectCount;
 		features12->DrawIndirectCount = has12.DrawIndirectCount;
 
-		//Buffer device addresses, which NVIDIA's NGX asks for - see CoreDlss - on an NVIDIA card only, and only where the card has them.
-		features12->BufferDeviceAddress = VkDevice.ngxDeviceAddress && has12.BufferDeviceAddress;
+		//Buffer device addresses, for NVIDIA's NGX (CoreDlss) or the rays (VkRays), where the card has them
+		features12->BufferDeviceAddress = ( VkDevice.ngxDeviceAddress || VkRays.WantsAddresses ) && has12.BufferDeviceAddress;
 
 		//A semaphore that counts, which Reflex's sleep is signalled through - see CoreLatency. Where the card has one.
 		features12->TimelineSemaphore = CoreLatency.Reflex && has12.TimelineSemaphore;
 
-		//Both eyes of a headset in one pass. Every 1.1 device has it; asked rather than assumed all the same - see VkDevice.multiview.
+		//Both eyes of a headset in one pass; asked rather than assumed - see VkDevice.multiview
 		var has11 = new PhysicalDeviceVulkan11Features { SType = StructureType.PhysicalDeviceVulkan11Features };
 		var hasEleven = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2, PNext = &has11 };
 		VkDevice.vk.GetPhysicalDeviceFeatures2( physical, &hasEleven );

@@ -521,6 +521,7 @@ internal static class CoreBakedLighting
 			Surfels = surfels.Data,
 			SurfelSun = surfels.Sun,
 			SurfelDepth = surfels.Depth,
+			SurfelClusters = surfels.Cluster,
 			SurfelLinks = surfels.Link,
 			SurfelWeights = surfels.Weight,
 			ProbeLinks = surfels.ProbeLink,
@@ -561,7 +562,7 @@ internal static class CoreBakedLighting
 		data.Touched();
 
 		Log.Info( $"baked lighting: {world.Corners.Length / 3} triangles, {world.Receivers.Count} surfaces on a {sheetSide}² atlas, " +
-			$"{volume.CountX}x{volume.CountY}x{volume.CountZ} volume points {volume.Step:0.##} m apart, {surfels.Count} surfels, {glows.Count} glow layers, " +
+			$"{volume.CountX}x{volume.CountY}x{volume.CountZ} volume points {volume.Step:0.##} m apart, {surfels.Count} surfels in {surfels.Clusters} clusters, {glows.Count} glow layers, " +
 			$"{( DateTime.UtcNow - started ).TotalSeconds:0.0} s" );
 
 		return data;

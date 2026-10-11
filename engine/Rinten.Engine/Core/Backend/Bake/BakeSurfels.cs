@@ -11,7 +11,7 @@ namespace Rinten.Bake;
 internal sealed class BakeSurfels
 {
 	/// <summary>Most links a surfel or a volume point keeps to the surfels it sees.</summary>
-	public const int Links = 16;
+	public const int Links = 32;
 
 	/// <summary>Most surfels, so a link fits two bytes.</summary>
 	public const int Most = ushort.MaxValue;
@@ -45,11 +45,16 @@ internal sealed class BakeSurfels
 	/// <summary>DepthBytes a surfel: how far it sees by octahedron direction, for lamps lit live - see DepthOf.</summary>
 	public byte[] Depth = [];
 
-	/// <summary>Links a surfel: the surfels it sees, each with the share of its view it fills.</summary>
+	/// <summary>Each surfel's cluster: neighbours facing its way with no wall between; their light is the mean.</summary>
+	public ushort[] Cluster = [];
+
+	public int Clusters;
+
+	/// <summary>Links a surfel: the clusters it sees, each with the share of its view it fills.</summary>
 	public ushort[] Link = [];
 	public Half[] Weight = [];
 
-	/// <summary>The same for each volume point, over its whole sphere.</summary>
+	/// <summary>The clusters each volume point sees, over its whole sphere.</summary>
 	public ushort[] ProbeLink = [];
 	public Half[] ProbeWeight = [];
 
@@ -118,6 +123,66 @@ internal sealed class BakeSurfels
 			if ( !cells.TryGetValue( key, out var list ) ) cells[key] = list = new List<int>();
 			list.Add( s );
 		}
+
+		Gather( scene );
+	}
+
+	//Clusters as Enlighten's: a cell three spacings wide by normal axis, split where a wall stands between a surfel
+	//and the cluster's first - so a link reaches a patch of wall rather than a point, and none reaches through
+	private void Gather( BakeScene scene )
+	{
+		Cluster = new ushort[Count];
+
+		var seeds = new List<int>();
+		var groups = new Dictionary<(int, int, int, int), List<int>>();
+		var wide = spacing * 3.0f;
+
+		for ( var s = 0; s < Count; ++s )
+		{
+			var at = position[s];
+			var face = normal[s];
+			var axis = Axis( face );
+			var key = ((int)MathF.Floor( at.X / wide ), (int)MathF.Floor( at.Y / wide ), (int)MathF.Floor( at.Z / wide ), axis);
+
+			if ( !groups.TryGetValue( key, out var found ) ) groups[key] = found = new List<int>();
+
+			var joined = -1;
+
+			foreach ( var cluster in found )
+			{
+				var seed = seeds[cluster];
+				var from = BakeScene.Offset( position[seed], normal[seed], face );
+				var to = BakeScene.Offset( at, face, face );
+				var apart = to - from;
+				var length = apart.Length();
+
+				if ( length > 1e-4f && scene.Bvh.Blocked( from, apart / length, length ) ) continue;
+
+				joined = cluster;
+				break;
+			}
+
+			if ( joined < 0 && seeds.Count < Most )
+			{
+				joined = seeds.Count;
+				seeds.Add( s );
+				found.Add( joined );
+			}
+
+			Cluster[s] = (ushort)Math.Max( joined, 0 );
+		}
+
+		Clusters = seeds.Count;
+	}
+
+	//Which way a normal mostly points: an axis and its sign, nought to five
+	private static int Axis( Vec3 face )
+	{
+		var a = Vec3.Abs( face );
+
+		if ( a.X >= a.Y && a.X >= a.Z ) return face.X >= 0.0f ? 0 : 1;
+		if ( a.Y >= a.Z ) return face.Y >= 0.0f ? 2 : 3;
+		return face.Z >= 0.0f ? 4 : 5;
 	}
 
 	/// <summary>Traces each surfel's sun by direction, its sky and the surfels it sees. Any thread.</summary>
@@ -218,7 +283,7 @@ internal sealed class BakeSurfels
 			var at = volume.Origin + ( new Vec3( x, y, z ) * volume.Step );
 			var random = new BakeRandom( ( (ulong)index * 0xC2B2AE3D27D4EB4Ful ) + 23, (ulong)index + 9 );
 
-			const int Across = 8;
+			const int Across = 16;
 			Span<int> found = stackalloc int[Across * Across];
 			var hits = 0;
 			var inside = 0;
@@ -250,7 +315,7 @@ internal sealed class BakeSurfels
 		FillProbes( volume, valid );
 	}
 
-	//The surfel by where a ray landed, facing as the surface it landed on; -1 for the back of something or none near
+	//The cluster of the surfel by where a ray landed, facing as the surface it landed on; -1 for a back or none near
 	private int Landed( BakeScene scene, Vec3 from, Vec3 direction, in BakeHit hit )
 	{
 		var face = scene.Facing[hit.Triangle];
@@ -280,7 +345,7 @@ internal sealed class BakeSurfels
 			}
 		}
 
-		return best;
+		return best < 0 ? -1 : Cluster[best];
 	}
 
 	//The most seen surfels of a view, each by its share of the rays; the share of those left out goes to the kept ones

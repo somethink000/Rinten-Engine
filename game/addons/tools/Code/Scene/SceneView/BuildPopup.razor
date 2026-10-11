@@ -1,7 +1,6 @@
 @using System.Threading
 @using Rinten
 @using Rinten.UI
-@using Editor.Inspectors
 @namespace Editor
 @attribute [StyleSheet( "BuildPopup.razor.scss" )]
 @inherits Popup
@@ -15,7 +14,7 @@
 
 		@if ( Lighting.IsValid() )
 		{
-			<ControlSheet Target="@settings" />
+			<Editor.Inspectors.ControlSheet Target="@settings" />
 		}
 
 		<div class="status">

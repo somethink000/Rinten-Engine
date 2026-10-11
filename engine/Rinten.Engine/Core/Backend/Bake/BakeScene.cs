@@ -157,7 +157,7 @@ internal sealed class BakeMaterial
 
 		var strength = material.GetFloat( "EmissionStrength", 0.0f );
 
-		if ( strength > 0.0f && material.GetFeature( "F_EMISSION" ) != 0 )
+		if ( strength > 0.0f && CoreResources.Feature( material, "F_EMISSION" ) != 0 )
 		{
 			var glow = material.core.Values.TryGetValue( "EmissiveColor", out var said )
 				? new Vec3( said.x, said.y, said.z )

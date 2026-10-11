@@ -440,6 +440,17 @@ internal static class CoreResources
 			? (seen.Masked, seen.Translucent, seen.TwoSided)
 			: (false, false, false);
 
+	/// <summary>A feature as the material's shader build has it: said outright, or implied by a map it holds.</summary>
+	public static int Feature( Material material, string name )
+	{
+		if ( material?.core is not { } core ) return 0;
+
+		var (named, told) = FeatureInputs( core );
+		var values = CoreSceneRenderer.FeatureValues( named, told, ( what, field ) => Has( core, what, field ) );
+
+		return values.TryGetValue( name, out var value ) ? value : 0;
+	}
+
 	/// <summary>Alpha cutoff of a live material (AlphaCutoff from its file), defaulting to 0.5 when unset</summary>
 	public static float LiveCutoff( Material material )
 	{

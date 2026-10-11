@@ -33,7 +33,14 @@ internal sealed class CoreLiveBounce
 
 	//What each surfel gives off, over pi: the last solve's, and the one being made
 	private Vec3[] lit, next;
-	private bool first = true;
+
+	//Each surfel's cluster, and each cluster's middle, size and mean of what its surfels give off
+	private readonly int[] clusterOf, members;
+	private readonly Vec3[] middle, glow;
+
+	//Most rounds of bouncing a solve takes, each one bounce more; it stops sooner once a round changes little
+	private const int MostRounds = 12;
+	private bool told;
 
 	private Task<(Half[] Light, Half[] Lean)> solving;
 	private long looked;
@@ -71,6 +78,28 @@ internal sealed class CoreLiveBounce
 			open[s] = Read( at + 9 );
 			seen[s] = data.Surfels[at + 12];
 		}
+
+		clusterOf = new int[surfels];
+		var clusters = 0;
+
+		for ( var s = 0; s < surfels; ++s )
+		{
+			clusterOf[s] = data.SurfelClusters[s];
+			clusters = Math.Max( clusters, clusterOf[s] + 1 );
+		}
+
+		members = new int[clusters];
+		middle = new Vec3[clusters];
+		glow = new Vec3[clusters];
+
+		for ( var s = 0; s < surfels; ++s )
+		{
+			members[clusterOf[s]]++;
+			middle[clusterOf[s]] += position[s];
+		}
+
+		for ( var c = 0; c < clusters; ++c )
+			if ( members[c] > 0 ) middle[c] /= members[c];
 
 		bounced = new HashSet<Guid>( data.Bounced );
 		low = new Vec3( data.VolumeOrigin.x, data.VolumeOrigin.y, data.VolumeOrigin.z );
@@ -114,11 +143,20 @@ internal sealed class CoreLiveBounce
 		spare = sky;
 		( sky, towards, colour, lamps ) = ( current, way, shade, found );
 
-		//From nothing it takes a few rounds to fill the bounces in; after that each solve adds one more
-		var rounds = first ? 4 : 2;
-		first = false;
+		solving = Task.Run( () =>
+		{
+			var clock = System.Diagnostics.Stopwatch.StartNew();
+			var solved = Solve( current, way, shade, found );
 
-		solving = Task.Run( () => Solve( current, way, shade, found, rounds ) );
+			//Once, so the cost is in the log without a line every time the sun moves
+			if ( !told )
+			{
+				told = true;
+				Log.Info( $"baked lighting: bounce relit in {clock.Elapsed.TotalMilliseconds:0.0} ms on a worker - {surfels} surfels, {glow.Length} clusters, {found.Count} lamps" );
+			}
+
+			return solved;
+		} );
 	}
 
 	//Every lamp lit now whose bounce the bake does not hold and whose reach meets the volume
@@ -203,7 +241,7 @@ internal sealed class CoreLiveBounce
 		shade = new Vec3( emitted.r, emitted.g, emitted.b );
 	}
 
-	private (Half[] Light, Half[] Lean) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining, int rounds )
+	private (Half[] Light, Half[] Lean) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining )
 	{
 		//Over pi, as BakeScene.Direct: the sun square on, the sky where the surfel sees it, and the lamps
 		var direct = new Vec3[surfels];
@@ -221,8 +259,11 @@ internal sealed class CoreLiveBounce
 			direct[s] = arriving;
 		} );
 
-		for ( var round = 0; round < rounds; ++round )
+		//Until a round moves the light by under a hundredth, so what an old light left behind is gone too
+		for ( var round = 0; round < MostRounds; ++round )
 		{
+			Mean();
+
 			Parallel.For( 0, surfels, s =>
 			{
 				var gathered = direct[s];
@@ -233,14 +274,18 @@ internal sealed class CoreLiveBounce
 					var weight = (float)data.SurfelWeights[at + k];
 					if ( weight <= 0.0f ) break;
 
-					gathered += lit[data.SurfelLinks[at + k]] * weight;
+					gathered += glow[data.SurfelLinks[at + k]] * weight;
 				}
 
 				next[s] = albedo[s] * gathered;
 			} );
 
 			( lit, next ) = ( next, lit );
+
+			if ( Settled() ) break;
 		}
+
+		Mean();
 
 		var light = new Half[points * 4];
 		var lean = new Half[points * 4];
@@ -264,9 +309,9 @@ internal sealed class CoreLiveBounce
 				var weight = (float)data.ProbeWeights[links + k];
 				if ( weight <= 0.0f ) break;
 
-				var s = data.ProbeLinks[links + k];
-				var given = lit[s] * weight;
-				var apart = position[s] - at;
+				var c = data.ProbeLinks[links + k];
+				var given = glow[c] * weight;
+				var apart = middle[c] - at;
 				var length = apart.Length();
 
 				mean += given;
@@ -342,6 +387,32 @@ internal sealed class CoreLiveBounce
 		var far = ( Clear( x0, y1 ) * ( 1.0f - tx ) ) + ( Clear( x1, y1 ) * tx );
 
 		return ( near * ( 1.0f - ty ) ) + ( far * ty );
+	}
+
+	//Whether the last round changed the light by under a hundredth of the brightest, lit against next
+	private bool Settled()
+	{
+		var most = 0.0f;
+		var moved = 0.0f;
+
+		for ( var s = 0; s < surfels; ++s )
+		{
+			most = MathF.Max( most, BakeMath.Luma( lit[s] ) );
+			moved = MathF.Max( moved, MathF.Abs( BakeMath.Luma( lit[s] ) - BakeMath.Luma( next[s] ) ) );
+		}
+
+		return moved <= most * 0.01f;
+	}
+
+	//Each cluster's light as the mean of its surfels'
+	private void Mean()
+	{
+		Array.Clear( glow );
+
+		for ( var s = 0; s < surfels; ++s ) glow[clusterOf[s]] += lit[s];
+
+		for ( var c = 0; c < glow.Length; ++c )
+			if ( members[c] > 0 ) glow[c] /= members[c];
 	}
 
 	//How much of the sun from a direction reaches a surfel: its bits, bilinear across the octahedron's cells

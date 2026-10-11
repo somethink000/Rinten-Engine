@@ -104,11 +104,14 @@ public sealed class BakedLightingData : BlobData
 	/// <summary>Every light whose bounce is in the bake; the frame relights the rest's - see CoreLiveBounce.</summary>
 	public List<Guid> Bounced { get; set; } = new();
 
-	/// <summary>The surfels each surfel sees, BakeSurfels.Links each, and the share of its view they fill.</summary>
+	/// <summary>Each surfel's cluster - see BakeSurfels.Cluster.</summary>
+	public ushort[] SurfelClusters { get; set; } = [];
+
+	/// <summary>The clusters each surfel sees, BakeSurfels.Links each, and the share of its view they fill.</summary>
 	public ushort[] SurfelLinks { get; set; } = [];
 	public Half[] SurfelWeights { get; set; } = [];
 
-	/// <summary>The surfels each volume point sees, laid out as the surfels' own.</summary>
+	/// <summary>The clusters each volume point sees, laid out as the surfels' own.</summary>
 	public ushort[] ProbeLinks { get; set; } = [];
 	public Half[] ProbeWeights { get; set; } = [];
 
@@ -122,7 +125,7 @@ public sealed class BakedLightingData : BlobData
 			var count = Surfels.Length / Bake.BakeSurfels.Floats;
 
 			return SurfelSun.Length == count * Bake.BakeSurfels.SunBytes
-				&& SurfelDepth.Length == count * Bake.BakeSurfels.DepthBytes
+				&& SurfelDepth.Length == count * Bake.BakeSurfels.DepthBytes && SurfelClusters.Length == count
 				&& SurfelLinks.Length == count * Bake.BakeSurfels.Links && SurfelWeights.Length == SurfelLinks.Length
 				&& ProbeLinks.Length == VolumeX * VolumeY * VolumeZ * Bake.BakeSurfels.Links && ProbeWeights.Length == ProbeLinks.Length;
 		}
@@ -214,6 +217,7 @@ public sealed class BakedLightingData : BlobData
 		Packed( ref s, ProbeLinks );
 		Packed( ref s, ProbeWeights );
 		PackedBytes( ref s, SurfelDepth );
+		Packed( ref s, SurfelClusters );
 
 		s.Write( Bounced.Count );
 		foreach ( var light in Bounced ) s.Write( light );
@@ -279,6 +283,7 @@ public sealed class BakedLightingData : BlobData
 		ProbeLinks = Unpacked<ushort>( ref s );
 		ProbeWeights = Unpacked<Half>( ref s );
 		SurfelDepth = UnpackedBytes( ref s );
+		SurfelClusters = Unpacked<ushort>( ref s );
 
 		var bounced = s.Read<int>();
 		Bounced = new List<Guid>( bounced );

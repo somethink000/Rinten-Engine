@@ -1,7 +1,7 @@
 namespace Rinten;
 
 //A shaped lamp in a glowing mesh: a panel for a flat one, a tube for a long one, a ball otherwise; never baked,
-//since the glow itself is - see BakeScene.TowardsGlow
+//since a still glow itself is - see BakeScene.TowardsGlow - and a moving one has its bounce relit (CoreLiveBounce)
 /// <summary>Lights the scene from this object's glowing material in the shape of its mesh, as the frame draws it.</summary>
 [Expose]
 [Title( "Mesh Light" )]
@@ -28,6 +28,13 @@ public sealed class MeshLight : Component, Component.ExecuteInEditor
 
 	private GameObject holder;
 	private PointLight lamp;
+
+	//Which way a panel faces along its thin axis, and the transform that was found for - see Facing
+	private float facing = 1.0f;
+	private Transform facedFor;
+
+	//Emission maps' means, read once a picture: the colour the bake gives their glow - see BakeMaterial.MeanGlow
+	private static readonly Dictionary<Texture, Vector3> means = new();
 
 	protected override void OnEnabled()
 	{
@@ -81,7 +88,8 @@ public sealed class MeshLight : Component, Component.ExecuteInEditor
 
 		if ( thinnest < middle * Flat )
 		{
-			//Lit on the side forward points to: stood just off that face, clear of the mesh
+			//Lit on the open side: stood just off that face, clear of the mesh
+			forward *= Facing( forward );
 			lamp.AreaShape = PointLight.AreaShapes.Rectangle;
 			lamp.AreaSize = new Vector2( longest, middle );
 			centre += forward * ( ( bounds.Size[order[2]] * 0.5f ) + 0.005f );
@@ -105,10 +113,37 @@ public sealed class MeshLight : Component, Component.ExecuteInEditor
 		holder.LocalRotation = Rotation.LookAt( forward, up );
 
 		//Radiance times area is the intensity a point light of that colour gives straight on
+		//A still glow in a bake has its diffuse light there already, as UE's emissive meshes; the lamp adds the reflections
+		var baked = GameObject.IsStatic && Scene.GetAllComponents<BakedLighting>().Any( b => b.HasBake );
+		lamp.Contribution = baked ? Light.LightContribution.Specular
+			: Light.LightContribution.Diffuse | Light.LightContribution.Specular | Light.LightContribution.Transmissive;
+
 		lamp.LightColor = glow.Colour;
 		lamp.Brightness = glow.Strength * Strength * area;
 		lamp.Radius = Radius;
 		lamp.Shadows = Shadows;
+	}
+
+	//Along the thin axis or against it: the side a short ray finds open, or down for a level panel - a ceiling light
+	private float Facing( Vector3 axis )
+	{
+		var transform = WorldTransform;
+		if ( facedFor == transform ) return facing;
+		facedFor = transform;
+
+		var world = WorldRotation * axis;
+		var centre = WorldPosition;
+
+		bool Open( Vector3 way ) => !Scene.Trace.Ray( centre, centre + ( way * 1.0f ) ).IgnoreGameObjectHierarchy( GameObject ).Run().Hit;
+
+		var ahead = Open( world );
+		var behind = Open( -world );
+
+		facing = ahead != behind ? ( ahead ? 1.0f : -1.0f )
+			: MathF.Abs( world.y ) > 0.7f ? ( Vector3.Dot( world, Vector3.Down ) >= 0.0f ? 1.0f : -1.0f )
+			: 1.0f;
+
+		return facing;
 	}
 
 	private static Vector3 Axis( int index ) => index switch
@@ -134,13 +169,34 @@ public sealed class MeshLight : Component, Component.ExecuteInEditor
 		return default;
 	}
 
+	//As BakeMaterial.Of reads it: strength times colour times the map's mean, the albedo's too where it says so
 	private static (Color Colour, float Strength) GlowOf( Material material )
 	{
-		if ( material?.core is null || material.GetFeature( "F_EMISSION" ) == 0 ) return default;
+		if ( material?.core is null || CoreResources.Feature( material, "F_EMISSION" ) == 0 ) return default;
 
 		var strength = material.GetFloat( "EmissionStrength", 0.0f );
-		var colour = material.core.Values.TryGetValue( "EmissiveColor", out var said ) ? new Color( said.x, said.y, said.z ) : Color.White;
+		var colour = material.core.Values.TryGetValue( "EmissiveColor", out var said ) ? new Vector3( said.x, said.y, said.z ) : Vector3.One;
 
-		return (colour, strength);
+		colour *= MeanOf( material.GetTexture( "Emission" ) );
+		if ( material.GetFloat( "EmissiveUseAlbedo", 0.0f ) > 0.5f ) colour *= MeanOf( material.GetTexture( "Color" ) );
+
+		//The brightest channel goes to the strength, so the colour stays a colour
+		var peak = MathF.Max( colour.x, MathF.Max( colour.y, colour.z ) );
+		if ( peak <= 0.0f ) return default;
+
+		colour /= peak;
+		return (new Color( colour.x, colour.y, colour.z ), strength * peak);
+	}
+
+	private static Vector3 MeanOf( Texture texture )
+	{
+		if ( texture is null ) return Vector3.One;
+		if ( means.TryGetValue( texture, out var known ) ) return known;
+
+		var mean = Bake.BakePicture.Of( texture, true )?.Mean() ?? System.Numerics.Vector4.One;
+		known = new Vector3( mean.X, mean.Y, mean.Z );
+		means[texture] = known;
+
+		return known;
 	}
 }

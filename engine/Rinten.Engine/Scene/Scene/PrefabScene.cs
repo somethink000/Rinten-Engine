@@ -90,7 +90,11 @@ public partial class PrefabScene : Scene, IJsonConvert
 
 		var jso = base.Serialize( options );
 
-		jso["__properties"] = Root?.Scene?.SerializeProperties() ?? SerializeProperties();
+		var properties = Root?.Scene?.SerializeProperties() ?? SerializeProperties();
+
+		//A prefab carries no bake of its own: the scene it is placed in has that
+		properties.Remove( "Lighting" );
+		jso["__properties"] = properties;
 #pragma warning disable CS0612
 		jso["__variables"] = Json.ToNode( Variables?.Serialize() );
 #pragma warning restore CS0612

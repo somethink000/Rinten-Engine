@@ -12,9 +12,14 @@
 			<span class="heading">Lighting</span>
 		</div>
 
-		@if ( Lighting.IsValid() )
+		@if ( Settings is not null )
 		{
-			<Editor.Inspectors.ControlSheet Target="@settings" />
+			<Editor.Inspectors.ControlSheet Target="@settings" PropertyFilter="@ShownRows" />
+
+			<div class="more" onclick="@ToggleAdvanced">
+				<i>@( advanced ? "expand_less" : "expand_more" )</i>
+				<label>@( advanced ? "Fewer settings" : "More settings" )</label>
+			</div>
 		}
 
 		<div class="status">
@@ -44,21 +49,29 @@
 	BakedLighting lighting;
 	SerializedObject settings;
 	CancellationTokenSource baking;
+	bool advanced;
 
 	//The scene being edited, not a game played from it
 	Scene EditedScene => SceneView?.TabSession?.Scene;
 
-	BakedLighting Lighting
+	BakedLighting Lighting => EditedScene.IsValid() ? EditedScene.Lighting : null;
+
+	//The bake's settings as rows; an edit leaves the scene to be saved
+	SerializedObject Settings
 	{
 		get
 		{
-			if ( !lighting.IsValid() || lighting.Scene != EditedScene )
-			{
-				lighting = EditedScene?.GetAllComponents<BakedLighting>().FirstOrDefault();
-				settings = lighting.IsValid() ? lighting.GetSerialized() : null;
-			}
+			if ( Lighting is not { } now ) return null;
+			if ( ReferenceEquals( now, lighting ) ) return settings;
 
-			return lighting;
+			lighting = now;
+			settings = Game.TypeLibrary.GetSerializedObject( now );
+			settings.OnPropertyChanged += _ =>
+			{
+				if ( now.Scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
+			};
+
+			return settings;
 		}
 	}
 
@@ -99,29 +112,21 @@
 		return popup;
 	}
 
-	//The scene's first bake makes the object that keeps it, undoably
-	BakedLighting Ensure()
+	//The main settings always; the Advanced group once asked for
+	bool Shown( SerializedProperty property ) => advanced || property.GroupName != "Advanced";
+
+	Func<SerializedProperty, bool> ShownRows => Shown;
+
+	void ToggleAdvanced()
 	{
-		if ( Lighting.IsValid() ) return lighting;
-
-		var scene = EditedScene;
-		if ( !scene.IsValid() ) return null;
-
-		using ( SceneView.TabSession.UndoScope( "Add Baked Lighting" ).WithGameObjectCreations().Push() )
-		{
-			var holder = scene.CreateObject();
-			holder.Name = "Baked Lighting";
-			holder.Components.Create<BakedLighting>();
-		}
-
-		lighting = null;
-		return Lighting;
+		advanced = !advanced;
+		StateHasChanged();
 	}
 
 	//Async void as a click handler: everything it can throw is caught here
 	async void Bake()
 	{
-		if ( baking is not null || Ensure() is not { } target ) return;
+		if ( baking is not null || Lighting is not { } target ) return;
 
 		baking = new CancellationTokenSource();
 		StateHasChanged();
@@ -153,5 +158,5 @@
 		StateHasChanged();
 	}
 
-	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, lighting?.Data );
+	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data, advanced );
 }

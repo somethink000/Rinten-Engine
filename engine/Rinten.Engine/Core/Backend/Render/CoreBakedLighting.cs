@@ -8,7 +8,7 @@ namespace Rinten;
 //Runs bakes, uploads the results for the frame and gives each renderer its atlas square
 internal static partial class CoreBakedLighting
 {
-	//What one component has on the card.
+	//What one scene's bake has on the card.
 	private sealed class Held
 	{
 		public int Revision = -1;
@@ -58,28 +58,17 @@ internal static partial class CoreBakedLighting
 		}
 	}
 
-	//Every bake that is switched on, whichever scene it is in.
-	private static readonly List<BakedLighting> enabled = new();
-
 	private static readonly Dictionary<BakedLighting, Held> held = new();
 
-	//The bake a scene reads: the first switched on in it that has one.
+	//The bake a scene reads, where it has one switched on.
 	private static BakedLighting Of( Scene scene )
+		=> scene?.LightingIfAny is { Enabled: true, HasBake: true } bake ? bake : null;
+
+	//Tells every renderer the bake has a square for where it is. On the first frame that reads the bake rather than
+	//when it is loaded, as a mesh has no model until it has started
+	private static void Place( BakedLighting bake )
 	{
-		if ( scene is null ) return null;
-
-		foreach ( var bake in enabled )
-			if ( bake.Scene == scene && bake.HasBake ) return bake;
-
-		return null;
-	}
-
-	//Tells every renderer the bake has a square for where it is, and starts the bake being read.
-	internal static void Place( BakedLighting bake )
-	{
-		if ( bake is null ) return;
-
-		if ( !enabled.Contains( bake ) ) enabled.Add( bake );
+		bake.Placed = true;
 
 		if ( bake.Data is not { } data || !bake.Scene.IsValid() ) return;
 
@@ -108,14 +97,15 @@ internal static partial class CoreBakedLighting
 		=> renderer.IsValid() && renderer is not SkinnedModelRenderer && renderer.GameObject.IsStatic
 			&& string.Equals( renderer.Model?.ResourcePath ?? "", place.Model ?? "", StringComparison.OrdinalIgnoreCase );
 
-	//Takes a bake off its renderers and off the card.
+	//Takes a bake off its renderers and off the card; the next frame that reads it places it again.
 	internal static void Unplace( BakedLighting bake )
 	{
 		if ( bake is null ) return;
 
-		enabled.Remove( bake );
-
 		if ( held.Remove( bake, out var was ) ) was.Release();
+
+		if ( !bake.Placed ) return;
+		bake.Placed = false;
 
 		if ( bake.Data is not { } data || !bake.Scene.IsValid() ) return;
 
@@ -150,6 +140,8 @@ internal static partial class CoreBakedLighting
 
 		var bake = Of( scene );
 		if ( bake is null || bake.Data is not { } data ) return false;
+
+		if ( !bake.Placed ) Place( bake );
 
 		if ( !held.TryGetValue( bake, out var on ) )
 		{

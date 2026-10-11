@@ -43,13 +43,13 @@ internal static class CoreEnvmap
 
 		var box = CoreSceneRenderer.FirstEnabled<SkyBox2D>( scene );
 		var sun = CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene );
-		var bake = CoreSceneRenderer.FirstEnabled<BakedLighting>( scene );
+		var bake = scene.LightingIfAny is { Enabled: true } lighting ? lighting.Data?.Revision ?? 0 : 0;
 
 		return new Sky( box is not null || sun is not null,
 			sun is null ? default : -sun.WorldRotation.Forward.Normal,
 			sun?.EmittedColor ?? default,
 			box?.Tint ?? default,
-			bake?.Data?.Revision ?? 0 );
+			bake );
 	}
 
 	//True when the sky changed enough since capture: sun a degree round, or 2% brighter or another colour

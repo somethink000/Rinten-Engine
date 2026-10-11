@@ -183,6 +183,7 @@ public partial class Scene : GameObject
 		Clear();
 		ProcessDeletes();
 		ShutdownSystems();
+		ResetLighting();
 
 		GC.SuppressFinalize( this );
 

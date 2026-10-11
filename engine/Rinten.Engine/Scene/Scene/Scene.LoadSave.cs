@@ -81,6 +81,7 @@ public partial class Scene : GameObject
 
 			ProcessDeletes();
 			NavMesh.Reset();
+			ResetLighting();
 		}
 
 		if ( !IsEditor && options.ShowLoadingScreen )
@@ -286,6 +287,8 @@ public partial class Scene : GameObject
 
 		if ( this is not PrefabScene )
 		{
+			jso.Add( "Lighting", Lighting.Serialize() );
+
 			var serializedSystems = SerializeGameObjectSystems();
 			if ( serializedSystems is not null )
 			{
@@ -406,6 +409,12 @@ public partial class Scene : GameObject
 		if ( !isSystemScene )
 		{
 			NavMesh.Deserialize( data["NavMesh"] as JsonObject );
+		}
+
+		//Nor the bake, which a scene added on top does not get to change either
+		if ( !isSystemScene && !keepPhysicsMode && this is not PrefabScene && data["Lighting"] is JsonObject lighting )
+		{
+			Lighting.Deserialize( lighting );
 		}
 	}
 

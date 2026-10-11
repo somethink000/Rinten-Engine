@@ -294,11 +294,7 @@ public static class PerfScenario
 			return;
 		}
 
-		if ( scene.GetAllComponents<BakedLighting>().FirstOrDefault() is not { } lighting )
-		{
-			Log.Warning( "-perfbake: the scene has no Baked Lighting component" );
-			return;
-		}
+		var lighting = scene.Lighting;
 
 		var started = RealTime.Now;
 

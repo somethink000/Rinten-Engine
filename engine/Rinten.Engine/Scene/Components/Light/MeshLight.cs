@@ -114,7 +114,7 @@ public sealed class MeshLight : Component, Component.ExecuteInEditor
 
 		//Radiance times area is the intensity a point light of that colour gives straight on
 		//A still glow in a bake has its diffuse light there already, as UE's emissive meshes; the lamp adds the reflections
-		var baked = GameObject.IsStatic && Scene.GetAllComponents<BakedLighting>().Any( b => b.HasBake );
+		var baked = GameObject.IsStatic && Scene.LightingIfAny is { HasBake: true };
 		lamp.Contribution = baked ? Light.LightContribution.Specular
 			: Light.LightContribution.Diffuse | Light.LightContribution.Specular | Light.LightContribution.Transmissive;
 

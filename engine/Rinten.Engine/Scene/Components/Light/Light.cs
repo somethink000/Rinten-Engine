@@ -35,12 +35,11 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	[Property, Range( 0, 100 ), Order( -5 )]
 	public float Brightness { get; set; } = 1.0f;
 
-	//Distance exponent: 1 is inverse square, 0 no falloff (ends at radius), above 1 falls off faster
-	/// <summary>How fast the light dies with distance, as the power the distance is raised to.</summary>
+	//1 is inverse square, 0 no falloff (ends at radius), above 1 falls off faster
+	/// <summary>How fast the light dies with distance, as the power the squared distance is raised to.</summary>
 	[Property, Range( 0, 2 ), Order( -4 )]
-	public float Attenuation { get; set; } = 0.15f;
+	public float Attenuation { get; set; } = 1.0f;
 
-	//The power the shading raises distance to, within its limits.
 	internal float Falloff => Attenuation.Clamp( 0.0f, 2.0f );
 
 	//Colour times brightness; culling range uses this too, so bright lights aren't cut off early

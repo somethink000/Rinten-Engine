@@ -392,7 +392,6 @@ internal static class BakeGpu
 		w[20] = (uint)glowAt;
 		w[21] = (uint)scene.Pass;
 		w[22] = grouped ? (uint)groupsAt : 0u;
-		w[23] = F( scene.ContactNear );
 
 		if ( grouped )
 			for ( var t = 0; t < triangles; ++t ) w[groupsAt + t] = (uint)scene.GroupOf[t];

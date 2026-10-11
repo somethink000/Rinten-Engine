@@ -215,8 +215,8 @@ internal sealed class BakeSheet
 		Unocclude( scene );
 	}
 
-	//Unocclude: four rays along a texel's face, and where one finds the back of something - a wall standing on the
-	//floor, the inside of a pillar - within the texel, its centre goes out past it, so it measures the open side
+	//Unocclude: a texel whose centre is inside something (a wall on the floor) moves out past the back face its rays
+	//find, but only onto its own face - a corner's overlap has a way out on each side, and the far one is outdoors
 	private void Unocclude( BakeScene scene )
 	{
 		var count = Width * Height;
@@ -252,7 +252,7 @@ internal sealed class BakeSheet
 
 				pushed[at] = true;
 
-				if ( hit.Distance <= size && hit.Distance < nearest )
+				if ( hit.Distance <= size && hit.Distance < nearest && OnOwnFace( at, way * ( hit.Distance + ( size * 0.5f ) ) ) )
 				{
 					nearest = hit.Distance;
 					moved = from + ( way * hit.Distance ) + ( facing * BakeScene.Lift * 10.0f );
@@ -261,6 +261,22 @@ internal sealed class BakeSheet
 
 			position[at] = moved;
 		} );
+	}
+
+	//Whether a step from a texel's centre lands on a texel of the same receiver and face
+	private bool OnOwnFace( int at, Vec3 step )
+	{
+		var a = across[at];
+		var d = down[at];
+		if ( a.LengthSquared() <= 1e-12f || d.LengthSquared() <= 1e-12f ) return true;
+
+		var x = (int)MathF.Floor( ( at % Width ) + 0.5f + ( Vec3.Dot( step, a ) / a.LengthSquared() ) );
+		var y = (int)MathF.Floor( ( at / Width ) + 0.5f + ( Vec3.Dot( step, d ) / d.LengthSquared() ) );
+		if ( x < 0 || y < 0 || x >= Width || y >= Height ) return false;
+
+		var to = ( y * Width ) + x;
+
+		return !float.IsPositiveInfinity( owned[to] ) && ownerOf[to] == ownerOf[at] && Vec3.Dot( geometric[to], geometric[at] ) > 0.99f;
 	}
 
 	//Widens the reach of the texels of a triangle's face to where this triangle covers them

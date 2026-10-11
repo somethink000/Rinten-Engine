@@ -335,10 +335,6 @@ internal sealed class BakeScene
 	/// <summary>How wide the sun is, as the cosine of its angular radius.</summary>
 	public float SunCosine = MathF.Cos( 0.27f * MathF.PI / 180.0f );
 
-	/// <summary>Metres: a first hit nearer than this is geometry the point touches, like a pillar's foot on the floor -
-	/// counted as inside, so the texel is filled from its neighbours rather than shaded by the contact.</summary>
-	public float ContactNear;
-
 	/// <summary>How far off a surface a ray starts, in metres - see Offset.</summary>
 	public const float Lift = 0.002f;
 
@@ -1138,7 +1134,8 @@ internal sealed class BakeScene
 
 			var s = Surface( hit, origin, direction );
 
-			if ( s.Back || ( bounce == 0 && hit.Distance < ContactNear ) )
+			//A back face first is a point inside something; a front one however near is what shades it
+			if ( s.Back )
 			{
 				if ( bounce == 0 ) inside = true;
 				return gathered;

@@ -53,7 +53,6 @@ uint EmitterCount() { return Word( 19 ); }
 uint GlowAt() { return Word( 20 ); }       //Per world triangle: TowardsGlow's chance per square metre
 uint Pass() { return Word( 21 ); }         //Nought the main bake, else the glow group baked alone
 uint GroupsAt() { return Word( 22 ); }     //Per world triangle: its glow group; no table where none has one
-float ContactNear() { return Float( 23 ); } //A first hit nearer than this is touching geometry - see BakeScene.ContactNear
 
 //Whether a triangle's glow is in this pass - BakeScene.Surface
 bool GlowsNow( uint t ) { return ( GroupsAt() == 0u ? 0u : Word( GroupsAt() + t ) ) == Pass(); }
@@ -793,7 +792,8 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 		Surface s = SurfaceOf( hit, origin, direction );
 
-		if ( s.back || ( bounce == 0u && hit.distance < ContactNear() ) )
+		//A back face first is a point inside something; a front one however near is what shades it
+		if ( s.back )
 		{
 			if ( bounce == 0 ) inside = true;
 			return gathered;

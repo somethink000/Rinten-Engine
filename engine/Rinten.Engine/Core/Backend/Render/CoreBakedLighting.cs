@@ -352,9 +352,6 @@ internal static partial class CoreBakedLighting
 			SkyStrength = MathF.Max( bake.SkyStrength, 0.0f ),
 			AlbedoBoost = MathF.Max( bake.BounceStrength, 0.0f ),
 			SunCosine = MathF.Cos( MathF.Max( bake.SunWidth, 0.0f ) * 0.5f * MathF.PI / 180.0f ),
-
-			//Half a texel: what is nearer than that is touching the surface, not lighting it
-			ContactNear = 0.5f / MathF.Max( bake.TexelsPerMetre, 1.0f ),
 		};
 
 		world.Gather( scene );

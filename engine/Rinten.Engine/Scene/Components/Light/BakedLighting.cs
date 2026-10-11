@@ -13,7 +13,7 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 {
 	/// <summary>How many texels of the atlas a metre of surface gets.</summary>
 	[Property, Group( "Surfaces" ), Range( 1, 64 )]
-	public float TexelsPerMetre { get; set; } = 32.0f;
+	public float TexelsPerMetre { get; set; } = 16.0f;
 
 	/// <summary>The widest the atlas may be; a scene needing more at that density gets less, evenly.</summary>
 	[Property, Group( "Surfaces" ), Range( 256, 8192 ), Step( 256 )]
@@ -21,7 +21,7 @@ public sealed partial class BakedLighting : Component, Component.ExecuteInEditor
 
 	/// <summary>Paths traced a texel. Noise goes as one over its square root; the filter takes what is left.</summary>
 	[Property, Group( "Surfaces" ), Range( 16, 16384 )]
-	public int Samples { get; set; } = 2048;
+	public int Samples { get; set; } = 512;
 
 	/// <summary>How hard the filter smooths the trace's noise, nought for none; sharp shadows stay sharp.</summary>
 	[Property, Group( "Surfaces" ), Range( 0, 8 )]

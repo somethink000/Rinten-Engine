@@ -14,6 +14,9 @@ internal sealed class BakeSheet
 	//Texels of gutter around each square, so filtering at its edge reads its own light.
 	private const int Gutter = 2;
 
+	//Texels a side the smallest receiver gets, so a small prop's contact shadow is more than a blur
+	private const int SmallestSide = 16;
+
 	public int Width, Height;
 
 	/// <summary>Four halves a texel: the light, and one where the texel is a surface's.</summary>
@@ -119,13 +122,13 @@ internal sealed class BakeSheet
 			//and its long way too - within four times what the area alone asks
 			var even = sheet > 1e-6f ? MathF.Sqrt( world / sheet ) : MathF.Sqrt( world );
 			var longest = world > 1e-8f ? stretched / world : even;
-			wanted[r] = Math.Clamp( longest, even, even * 4.0f );
+			wanted[r] = Math.Clamp( longest, even, even * 4.0f ) * receiver.Scale;
 		}
 
 		for ( var attempt = 0; attempt < 48; ++attempt )
 		{
 			for ( var r = 0; r < receivers.Count; ++r )
-				receivers[r].Side = Math.Clamp( (int)MathF.Ceiling( wanted[r] * density ), 8, Math.Max( most / 2, 8 ) );
+				receivers[r].Side = Math.Clamp( (int)MathF.Ceiling( wanted[r] * density ), SmallestSide, Math.Max( most / 2, SmallestSide ) );
 
 			//The smallest power of two it all goes into, up to the most.
 			for ( var size = 128; size <= most; size *= 2 )

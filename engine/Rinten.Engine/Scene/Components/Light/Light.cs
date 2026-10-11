@@ -11,9 +11,9 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	internal SceneLight SceneObject => _sceneObject;
 
 	//Source size drives highlight size and shadow penumbra (see surface_shading.slang, frame.slang)
-	/// <summary>How wide the light is, in metres: its highlight's size and its shadow's softness.</summary>
-	[Property, Group( "Shadows" ), Range( 0.0f, 2.0f ), Title( "Source Width" )]
-	public float SourceRadius { get; set; } = 0.05f;
+	/// <summary>Half the light's width in metres (a shaded bulb is about 0.1): highlight size, shadow softness.</summary>
+	[Property, Group( "Shadows" ), Range( 0.0f, 2.0f ), Title( "Source Radius" )]
+	public float SourceRadius { get; set; } = 0.1f;
 
 	/// <summary>The main color of the light</summary>
 	[Property]

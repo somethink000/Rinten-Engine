@@ -1195,6 +1195,14 @@ internal sealed class BakeReceiver
 	/// <summary>Where it was packed, in texels, with its side.</summary>
 	public int X, Y, Side;
 
+	/// <summary>Its density against the bake's - see ModelRenderer.LightmapScale.</summary>
+	public float Scale => Math.Clamp( Renderer switch
+	{
+		ModelRenderer model => model.LightmapScale,
+		MeshComponent mesh => mesh.LightmapScale,
+		_ => 1.0f,
+	}, 0.125f, 8.0f );
+
 	public BakeReceiver( Component renderer, Model model, int first, int count )
 	{
 		Renderer = renderer;

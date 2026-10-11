@@ -34,7 +34,7 @@ internal static class CoreEnvmap
 	}
 
 	//The sun and sky a probe was captured under, so a changed sky can trigger a recapture
-	internal readonly record struct Sky( bool Has, Vector3 Sun, Color SunColour, Color Tint );
+	internal readonly record struct Sky( bool Has, Vector3 Sun, Color SunColour, Color Tint, int Bake );
 
 	//The sky and the sun a scene is lit by now, as CoreSceneRenderer.SetSky reads them.
 	internal static Sky SkyOf( Scene scene )
@@ -43,11 +43,13 @@ internal static class CoreEnvmap
 
 		var box = CoreSceneRenderer.FirstEnabled<SkyBox2D>( scene );
 		var sun = CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene );
+		var bake = CoreSceneRenderer.FirstEnabled<BakedLighting>( scene );
 
 		return new Sky( box is not null || sun is not null,
 			sun is null ? default : -sun.WorldRotation.Forward.Normal,
 			sun?.EmittedColor ?? default,
-			box?.Tint ?? default );
+			box?.Tint ?? default,
+			bake?.Data?.Revision ?? 0 );
 	}
 
 	//True when the sky changed enough since capture: sun a degree round, or 2% brighter or another colour
@@ -63,6 +65,9 @@ internal static class CoreEnvmap
 		var was = one.Sky;
 
 		if ( now.Has != was.Has ) return true;
+
+		//A new bake, or the bake turned off: the room the probe saw is lit differently
+		if ( now.Bake != was.Bake ) return true;
 		if ( now.Sun.Dot( was.Sun ) < 0.99985f ) return true;
 
 		static bool Apart( Color a, Color b )
@@ -82,8 +87,8 @@ internal static class CoreEnvmap
 	//When the last capture was drawn - see MayCapture.
 	private static float capturedAt = -1.0f;
 
-	//Whether a probe may draw now: not within the same few milliseconds as the last capture of any probe. Each probe already waits a quarter of a
-	//second between its own; a sky that changed asks every probe at once, and six draws each in one tick was a frame that stood still for all of them.
+	//Whether a probe may draw now: not in the same few ms as any probe's last capture, so a changed sky's
+	//captures spread over ticks instead of stalling one frame
 	internal static bool MayCapture => job is null && ( capturedAt < 0.0f || RealTime.Now - capturedAt > 0.03f || RealTime.Now < capturedAt );
 
 	//The folds that are done, onto the device - asked once a frame, see Write.
@@ -134,15 +139,14 @@ internal static class CoreEnvmap
 	//Whether anything has been captured at all.
 	internal static bool Any => held.Count > 0;
 
-	//Draws the world from one probe and keeps what it saw. Six frames of its own, so this must not be called while one is open - reading a view waits for
-	//the device, and a frame cannot wait for itself. The component calls it from a tick and from the bake button, both of which are outside the drawing.
+	//Draws the world from one probe and keeps what it saw: six frames of its own, so never while one is open -
+	//reading a view waits for the device. Called from a tick and from the bake button
 	internal static bool Capture( Scene scene, EnvmapProbe probe, bool wait = false )
 	{
 		if ( !scene.IsValid() || probe is null || !probe.IsValid() || !probe.GameObject.IsValid() ) return false;
 		if ( !CoreNative.Available || !CoreRenderDevice.Initialize() ) return false;
 
-		//And not at all in the portable frame, where no pixel may sample what this would make - see Write, and kProbesOn in frame.slang. Six
-		//draws of the world and a fold of what they saw, per probe, for a picture that is never read: on a phone that is the loading screen.
+	//And not in the portable frame, where no pixel samples it - see Write and kProbesOn in frame.slang
 		if ( CoreRenderDevice.PortableFrame ) return false;
 		if ( !CoreSceneDrawer.EnsureResources() ) return false;
 
@@ -176,7 +180,7 @@ internal static class CoreEnvmap
 		return true;
 	}
 
-	//A capture under way: the probe, the faces drawn so far and the matrix each was drawn with, where the probe stood and the sky it was drawn under.
+	//A capture under way: the probe, faces drawn so far with their matrices, where it stood and its sky
 	private sealed class Job
 	{
 		public EnvmapProbe Probe;
@@ -258,7 +262,7 @@ internal static class CoreEnvmap
 		var probe = at.Probe;
 		var face = at.Next;
 
-		//Where the probe stands and what lights it, from its first face: a probe moved or a sky turned half way through is caught next time.
+			//Where the probe stands and what lights it, from its first face; a change mid-capture is caught next time
 		if ( face == 0 )
 		{
 			at.Where = probe.WorldPosition;
@@ -292,7 +296,7 @@ internal static class CoreEnvmap
 		}
 		catch ( Exception e )
 		{
-			//Said rather than swallowed: a probe that captured nothing looks exactly like a probe that is working and reflecting a black room.
+			//Said, not swallowed: a probe that captured nothing looks like one reflecting a black room
 			Log.Warning( $"the envmap probe on {probe.GameObject?.Name} did not capture: {e.Message}" );
 			return false;
 		}
@@ -393,8 +397,8 @@ internal static class CoreEnvmap
 			var slot = at + 4 + ( written * 16 );
 			var where = probe.WorldPosition;
 
-			//The box in world space, which is the component's local bounds moved to where it stands. Rotation is left out on purpose: a
-			//box projection wants axes to divide by, and a rotated box would mean a matrix per probe for a shape nobody authors turned.
+	//The box in world space: local bounds moved to where it stands. Rotation is left out - box projection
+	//divides by axes, and a rotated box would need a matrix per probe
 			var mins = where + probe.Bounds.Mins;
 			var maxs = where + probe.Bounds.Maxs;
 
@@ -568,7 +572,7 @@ internal static class CoreEnvmap
 		{
 			for ( var x = 0; x < Side; x++ )
 			{
-				//The middle of the texel, so that the two halves of the octahedron meet on the diagonal rather than a texel short.
+		//The texel's middle, so the octahedron's halves meet on the diagonal, not a texel short
 				var uv = new Vector2( ( x + 0.5f ) / Side, ( y + 0.5f ) / Side );
 				var direction = Unfold( uv );
 
@@ -686,14 +690,14 @@ internal static class CoreEnvmap
 
 		var root = MathF.Sqrt( under );
 
-		//One root either side of nought, because qa is negative over the whole range and qc is not: the positive one is the light.
+		//One root each side of nought, as qa is negative over the range and qc is not: the positive one is the light
 		var first = ( -qb + root ) / ( 2.0f * qa );
 		var second = ( -qb - root ) / ( 2.0f * qa );
 
 		return Math.Clamp( MathF.Max( first, second ), 0.0f, RgbmRange );
 	}
 
-	//One pixel of a drawn face, as light rather than as a colour: the display curve off it, then the tonemap - see Untonemapped.
+	//One pixel of a drawn face as light, not colour: the display curve off it, then the tonemap - see Untonemapped
 	private static Vector3 At( byte[] pixels, int size, int x, int y )
 	{
 		var i = ( ( y * size ) + x ) * 4;
@@ -710,7 +714,7 @@ internal static class CoreEnvmap
 		var taps = wideness < 0.3f ? 16 : wideness < 0.7f ? 32 : 48;
 		var spread = MathF.Max( wideness, 0.001f ) * ( MathF.PI * 0.5f );
 
-		//The golden angle, so that the taps of one texel do not line up with the taps of the next and turn the blur into a pattern.
+	//The golden angle, so one texel's taps don't line up with the next's and turn the blur into a pattern
 		const float Golden = 2.39996323f;
 
 		//Per-tap cone weights are the same for every texel, so they are computed once here
@@ -728,8 +732,7 @@ internal static class CoreEnvmap
 			acrossUp[tap] = MathF.Sin( around ) * MathF.Sin( along );
 		}
 
-		//A row at a time across the processors. Every texel reads the sharp picture and writes its own entry, so there is nothing to share and
-		//nothing to lock - and this was three seconds a probe on one core, which is where a scene with three of them spent nine seconds of its load.
+	//A row at a time across the processors: each texel reads the sharp picture and writes only its own entry
 		System.Threading.Tasks.Parallel.For( 0, Side, y =>
 		{
 			for ( var x = 0; x < Side; x++ )

@@ -130,8 +130,12 @@ public sealed class BakedLightingData : BlobData
 	/// <summary>Whether the sky is kept as visibility; a bake before version 3 has it in its light.</summary>
 	public bool HasSky => HasVolume && VolumeSky.Length == VolumeRed.Length;
 
-	//Counts every change, so whoever put it on the card knows to put it there again.
+	//New with every change and unique across bakes, so the card and the reflection probes know to catch up
 	internal int Revision { get; private set; }
+
+	private static int stamped;
+
+	public BakedLightingData() => Touched();
 
 	public bool HasSheet => SheetWidth > 0 && SheetHeight > 0 && Sheet.Length >= SheetWidth * SheetHeight * 4 && Ways.Length == Sheet.Length;
 
@@ -141,7 +145,7 @@ public sealed class BakedLightingData : BlobData
 
 	public bool IsEmpty => !HasSheet && !HasVolume;
 
-	internal void Touched() => Revision++;
+	internal void Touched() => Revision = System.Threading.Interlocked.Increment( ref stamped );
 
 	public override void Serialize( ref Writer writer )
 	{

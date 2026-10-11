@@ -87,10 +87,14 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		}
 	}
 
-	//An edited mesh has its origin moved back to the middle of what it now is once the edit is over - see CenterOrigin and the editor's undo scope, which is where every edit ends. Set by "Set Origin To Pivot", which is somebody saying where they want it, and cleared by "Center Origin".
+	//An edited mesh's origin returns to its middle when the edit ends - see CenterOrigin; this keeps it put
 	/// <summary>Keep the origin where it was put, instead of in the middle of the mesh.</summary>
 	[Property, Order( 5 ), Title( "Keep Origin" )]
 	public bool KeepOrigin { get; set; }
+
+	/// <summary>Lightmap density against the bake's: above one for detail and contact, below for plain walls.</summary>
+	[Property, Order( 6 ), Range( 0.125f, 8.0f )]
+	public float LightmapScale { get; set; } = 1.0f;
 
 	//How far off the middle an origin may be before it is moved, in metres.
 	const float OriginTolerance = 0.0001f;

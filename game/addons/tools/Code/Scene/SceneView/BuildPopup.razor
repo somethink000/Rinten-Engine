@@ -64,12 +64,18 @@
 
 	bool Baked => Lighting is { HasBake: true };
 
+	//No model or mesh in the scene is marked Static, so a bake has nothing to work on
+	bool NothingStill => EditedScene is { } scene
+		&& !scene.GetAllComponents<ModelRenderer>().Any( r => r.GameObject.IsStatic )
+		&& !scene.GetAllComponents<MeshComponent>().Any( m => m.GameObject.IsStatic );
+
 	string Status
 	{
 		get
 		{
 			if ( baking is not null ) return "Baking - progress is at the bottom of the editor";
-			if ( Lighting?.Data is not { IsEmpty: false } data ) return "Not baked";
+			if ( Lighting?.Data is not { IsEmpty: false } data )
+				return NothingStill ? "Not baked - only objects marked Static are baked, and none are" : "Not baked";
 
 			var sheet = data.HasSheet ? $"{data.SheetWidth}x{data.SheetHeight} atlas" : "no atlas";
 			var volume = data.HasVolume ? $"{data.VolumeX}x{data.VolumeY}x{data.VolumeZ} volume" : "no volume";

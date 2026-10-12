@@ -353,10 +353,22 @@ float3 WorldBehind( float2 screen, float depth )
 	return world.xyz / world.w;
 }
 
-//Withheld light terms from the kind's fraction: .1 no diffuse, .2 no specular, .3 neither
+//The kind's fraction in twentieths: twice the withheld terms (1 no diffuse, 2 no specular, 3 neither) plus one
+//where the light is in the bake - see CoreSceneRenderer.BuildFrame
+uint LightCode( Light light )
+{
+	return uint( round( frac( light.colour.w ) * 20.0 ) );
+}
+
 uint LightWithholds( Light light )
 {
-	return uint( round( frac( light.colour.w ) * 10.0 ) );
+	return LightCode( light ) >> 1;
+}
+
+//Whether the light is in the bake: a lightmapped surface has it already and takes only what movers shade of it
+bool LightBaked( Light light )
+{
+	return ( LightCode( light ) & 1u ) != 0u;
 }
 
 Light LightAt( uint index )
@@ -1088,6 +1100,55 @@ float SunLevel( uint level, float3 world, float3 step, float2 tilt, bool wide, f
 		: ShadowTap( uint( g_frame[0].sunMaps.x ), tap, compare );
 }
 
+//The movers map's part of the sun's shadow (1 lit), where it was drawn this frame and the point is in its square
+float SunMovers( float3 world, float3 step, float2 tilt, bool wide, float zFrom, float zScale )
+{
+	float side = g_frame[0].moverZone.z;
+	if ( kMoversOn == 0 || side <= 0.0 ) return 1.0;
+
+	float texelWorld = side / MoverTexels;
+	float3 lifted = mul( float4( world + ( step * ( texelWorld * SunLiftTexels ) ), 1.0 ), g_frame[0].sunToPages ).xyz;
+	float2 uv = ( lifted.xy - g_frame[0].moverZone.xy ) / side;
+	float edge = 4.0 / MoverTexels;
+
+	if ( any( uv <= edge ) || any( uv >= 1.0 - edge ) ) return 1.0;
+
+	float perTexel = texelWorld * zScale;
+	float compare = ( ( lifted.z - zFrom ) * zScale ) - ( ShadowBiasTexels * perTexel );
+	float3 tap = float3( uv, 0.0 );
+
+	return wide
+		? SunSoft( uint( g_frame[0].sunMaps.y ), uint( g_frame[0].sunDepth.y ), tap, compare, 1.0 / MoverTexels, tilt * perTexel, texelWorld, zScale )
+		: ShadowTap( uint( g_frame[0].sunMaps.y ), tap, compare );
+}
+
+//The still world's part of the sun's shadow (1 lit), from its pages
+float SunStill( float3 world, float3 step, float2 tilt, bool wide )
+{
+	float3 at = mul( float4( world, 1.0 ), g_frame[0].sunToPages ).xyz;
+	float2 fromEye = abs( at.xy - g_frame[0].sunEye.xy );
+	float away = max( fromEye.x, fromEye.y );
+
+	float page0 = g_frame[0].sunPages.x;
+	uint levels = uint( g_frame[0].sunPages.y );
+	uint whole = uint( g_frame[0].sunEye.z );
+	float reach0 = page0 * SunReachPages;
+
+	//The finest level that reaches this far from the eye, and of those the first every page of which has been baked.
+	uint level = away <= reach0 ? 0u : uint( ceil( log2( away / reach0 ) ) );
+	while ( level < levels && ( whole & ( 1u << level ) ) == 0u ) level++;
+
+	return level < levels ? SunLevel( level, world, step, tilt, wide, page0, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) : 1.0;
+}
+
+//The receiver's plane down the light: how much deeper it lies a metre across the maps and a metre up them -
+//see ShadowSharp. Held off the grazing edge, where it runs to infinity and the light is all but gone anyway.
+float2 SunTilt( float3 normal )
+{
+	float3 facing = mul( float4( normal, 0.0 ), g_frame[0].sunToPages ).xyz;
+	return facing.xy / max( -facing.z, 0.1 );
+}
+
 float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 {
 	if ( !SunCasts() ) return 1.0;
@@ -1099,62 +1160,32 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 	return PortableSunShadow( world, normal, step );
 #endif
 
-	float3 at = mul( float4( world, 1.0 ), g_frame[0].sunToPages ).xyz;
-	float2 fromEye = abs( at.xy - g_frame[0].sunEye.xy );
-	float away = max( fromEye.x, fromEye.y );
+	float2 tilt = SunTilt( normal );
 
-	float page0 = g_frame[0].sunPages.x;
-	uint levels = uint( g_frame[0].sunPages.y );
-	uint whole = uint( g_frame[0].sunEye.z );
-	float zFrom = g_frame[0].sunPages.z;
-	float zScale = g_frame[0].sunPages.w;
-	float reach0 = page0 * SunReachPages;
-
-	//The finest level that reaches this far from the eye, and of those the first every page of which has been baked.
-	uint level = away <= reach0 ? 0u : uint( ceil( log2( away / reach0 ) ) );
-	while ( level < levels && ( whole & ( 1u << level ) ) == 0u ) level++;
-
-	//The receiver's plane down the light: how much deeper it lies a metre across the maps and a metre up them -
-	//see ShadowSharp. Held off the grazing edge, where it runs to infinity and the light is all but gone anyway.
-	float3 facing = mul( float4( normal, 0.0 ), g_frame[0].sunToPages ).xyz;
-	float2 tilt = facing.xy / max( -facing.z, 0.1 );
-	float vis = 1.0;
-
-	if ( level < levels )
-	{
-		vis = SunLevel( level, world, step, tilt, wide, page0, zFrom, zScale );
-	}
-
-	//Movers map only when drawn this frame and the point is inside its square with room for the taps
-	float side = g_frame[0].moverZone.z;
-
-	if ( kMoversOn != 0 && side > 0.0 )
-	{
-		float texelWorld = side / MoverTexels;
-		float3 lifted = mul( float4( world + ( step * ( texelWorld * SunLiftTexels ) ), 1.0 ), g_frame[0].sunToPages ).xyz;
-		float2 uv = ( lifted.xy - g_frame[0].moverZone.xy ) / side;
-		float edge = 4.0 / MoverTexels;
-
-		if ( all( uv > edge ) && all( uv < 1.0 - edge ) )
-		{
-			float perTexel = texelWorld * zScale;
-
-			float compare = ( ( lifted.z - zFrom ) * zScale ) - ( ShadowBiasTexels * perTexel );
-			float3 tap = float3( uv, 0.0 );
-
-			vis = min( vis, wide
-				? SunSoft( uint( g_frame[0].sunMaps.y ), uint( g_frame[0].sunDepth.y ), tap, compare, 1.0 / MoverTexels, tilt * perTexel, texelWorld, zScale )
-				: ShadowTap( uint( g_frame[0].sunMaps.y ), tap, compare ) );
-		}
-	}
-
-	return vis;
+	return min( SunStill( world, step, tilt, wide ), SunMovers( world, step, tilt, wide, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) );
 }
 
 //The same, stepped off along the normal - what every surface wants.
 float SunShadow( float3 world, float3 normal )
 {
 	return SunShadow( world, normal, normal );
+}
+
+//How much of a baked sun movers take from a surface that has it in its lightmap: where the still world lets
+//it through and a mover does not. Only the movers map is read where no mover covers the point
+float SunMovedShade( float3 world, float3 normal )
+{
+#ifdef PORTABLE
+	return 0.0;
+#else
+	if ( !SunCasts() ) return 0.0;
+
+	float2 tilt = SunTilt( normal );
+	float movers = SunMovers( world, normal, tilt, true, g_frame[0].sunPages.z, g_frame[0].sunPages.w );
+	if ( movers >= 1.0 ) return 0.0;
+
+	return ( 1.0 - movers ) * SunStill( world, normal, tilt, true );
+#endif
 }
 
 #ifndef PORTABLE
@@ -1272,15 +1303,27 @@ float LampLit( uint map, uint depthMap, float3 at, float compare, float texel, f
 }
 #endif
 
-//Lamp visibility (1 lit) from its cube faces; face chosen for the stepped lookup point
-float LampShadow( float3 world, float3 normal, float3 step, Light light, float distance )
+//Where a point falls in a lamp's maps: the face, the tap, its depth to compare and how the receiver slopes
+struct LampTap
 {
-#ifdef PORTABLE
-	return 1.0;
-#else
+	uint face;
+	float3 at;
+	float compare;
+	float2 slope;
+	float along;
+	float far;
+	float b;
+	float texelWorld;
+};
+
+#ifndef PORTABLE
+//The face chosen for the stepped lookup point; false where the lamp has no faces or the point is outside them
+bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float distance, out LampTap t )
+{
+	t = (LampTap)0;
+
 	float first = light.cone.z;
-	uint map = uint( g_frame[0].sunMaps.w );
-	if ( first < 0.0 || map == 0u ) return 1.0;
+	if ( first < 0.0 || uint( g_frame[0].sunMaps.w ) == 0u ) return false;
 
 	bool spot = light.colour.w > 1.5;
 
@@ -1291,65 +1334,103 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 	float size = LampLayerTexels / float( 1u << sizeClass );
 	float fit = ( size - ( 2.0 * LampGuardTexels ) ) / size;
 
-	float texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
-	float steadyWorld = texelWorld * size / LampSteadyTexels;
+	t.texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
+	float steadyWorld = t.texelWorld * size / LampSteadyTexels;
 	float3 d = world + ( step * ( steadyWorld * LampLiftTexels ) ) - light.position.xyz;
 
 	float3 forward = light.direction.xyz;
-	uint face = 0u;
+	t.face = 0u;
 
 	if ( !spot )
 	{
 		//Down the largest of the three axes, in the order the faces are laid.
 		float3 extent = abs( d );
 
-		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( d.x ), 0.0, 0.0 ); face = d.x > 0.0 ? 0u : 1u; }
-		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( d.y ), 0.0 ); face = d.y > 0.0 ? 2u : 3u; }
-		else { forward = float3( 0.0, 0.0, sign( d.z ) ); face = d.z > 0.0 ? 4u : 5u; }
+		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( d.x ), 0.0, 0.0 ); t.face = d.x > 0.0 ? 0u : 1u; }
+		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( d.y ), 0.0 ); t.face = d.y > 0.0 ? 2u : 3u; }
+		else { forward = float3( 0.0, 0.0, sign( d.z ) ); t.face = d.z > 0.0 ? 4u : 5u; }
 	}
 
-	float along = dot( d, forward );
-	if ( along <= LampNear ) return 1.0;
+	t.along = dot( d, forward );
+	if ( t.along <= LampNear ) return false;
 
 	float3 right;
 	float3 up;
 	LampAxes( forward, right, up );
 
-	float2 uv = ( float2( dot( d, right ), dot( d, up ) ) * ( fit / ( halfTan * along ) ) * 0.5 ) + 0.5;
+	float2 uv = ( float2( dot( d, right ), dot( d, up ) ) * ( fit / ( halfTan * t.along ) ) * 0.5 ) + 0.5;
 
 	//The face's place in the map: the lamp's first square plus the face, counted layer by layer in squares of its size
 	uint perRow = 1u << sizeClass;
-	uint square = uint( first ) + face;
+	uint square = uint( first ) + t.face;
 	uint within = square % ( perRow * perRow );
 	float2 corner = float2( float( within % perRow ), float( within / perRow ) );
-	float3 at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
+	t.at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
 
 	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
 	//that projection's derivative, as a depth step differs at every range
-	float far = max( light.position.w, LampNear + 0.01 );
-	float b = LampNear * far / ( far - LampNear );
-	float depth = ( far / ( far - LampNear ) ) - ( b / along );
-	if ( depth >= 1.0 ) return 1.0;
+	t.far = max( light.position.w, LampNear + 0.01 );
+	t.b = LampNear * t.far / ( t.far - LampNear );
+	float depth = ( t.far / ( t.far - LampNear ) ) - ( t.b / t.along );
+	if ( depth >= 1.0 ) return false;
 
-	float perMetre = b / ( along * along );
+	float perMetre = t.b / ( t.along * t.along );
 	float bias = LampBiasTexels * steadyWorld * perMetre;
 
 	//Receiver plane slope on the face, constant across it in perspective depth; clamped at grazing
 	float facing = max( -dot( normal, d ), 0.1 * length( d ) );
-	float2 slope = float2( dot( normal, right ), dot( normal, up ) ) * ( b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
+	t.slope = float2( dot( normal, right ), dot( normal, up ) ) * ( t.b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
 
-	float compare = depth - bias;
-	float texel = 1.0 / LampLayerTexels;
+	t.compare = depth - bias;
+	return true;
+}
 
-	float lit = LampLit( map, uint( g_frame[0].sunMaps.z ), at, compare, texel, slope, light, along, far, b, texelWorld );
+//What the still world lets through of a lamp at a tap
+float LampStill( LampTap t, Light light )
+{
+	return LampLit( uint( g_frame[0].sunMaps.w ), uint( g_frame[0].sunMaps.z ), t.at, t.compare, 1.0 / LampLayerTexels, t.slope,
+		light, t.along, t.far, t.b, t.texelWorld );
+}
 
-	//This face's movers are in the movers map beside it where its bit is set - see CoreLampMaps
+//What the movers let through: one where the tap's face has no movers map this frame - see CoreLampMaps
+float LampMovers( LampTap t, Light light )
+{
 	uint moversMap = uint( g_frame[0].sunDepth.z );
+	if ( ( uint( light.shape.y ) & ( 1u << t.face ) ) == 0u || moversMap == 0u ) return 1.0;
 
-	if ( ( uint( light.shape.y ) & ( 1u << face ) ) != 0u && moversMap != 0u && lit > 0.0 )
-		lit *= LampLit( moversMap, uint( g_frame[0].sunDepth.w ), at, compare, texel, slope, light, along, far, b, texelWorld );
+	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), t.at, t.compare, 1.0 / LampLayerTexels, t.slope,
+		light, t.along, t.far, t.b, t.texelWorld );
+}
+#endif
 
-	return lit;
+//Lamp visibility (1 lit) from its cube faces; face chosen for the stepped lookup point
+float LampShadow( float3 world, float3 normal, float3 step, Light light, float distance )
+{
+#ifdef PORTABLE
+	return 1.0;
+#else
+	LampTap t;
+	if ( !LampTapOf( world, normal, step, light, distance, t ) ) return 1.0;
+
+	float lit = LampStill( t, light );
+	return lit > 0.0 ? lit * LampMovers( t, light ) : lit;
+#endif
+}
+
+//How much of a baked lamp movers take from a surface that has it in its lightmap: where the still world lets it
+//through and a mover does not. Only the movers are read where none covers the point
+float LampMovedShade( float3 world, float3 normal, Light light, float distance )
+{
+#ifdef PORTABLE
+	return 0.0;
+#else
+	LampTap t;
+	if ( !LampTapOf( world, normal, normal, light, distance, t ) ) return 0.0;
+
+	float movers = LampMovers( t, light );
+	if ( movers >= 1.0 ) return 0.0;
+
+	return ( 1.0 - movers ) * LampStill( t, light );
 #endif
 }
 

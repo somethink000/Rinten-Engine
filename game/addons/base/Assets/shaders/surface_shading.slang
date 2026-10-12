@@ -464,6 +464,9 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//With one light at most per pixel this is no loop: a trip count of one drops the back edge - see kManyLights
 	if ( kManyLights == 0 ) count = min( count, 1 );
 
+	//A surface with its own lightmap has the baked lights in it already - see LightBaked
+	bool sheetLit = HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0;
+
 	for ( int index = 0; index < count; ++index )
 	{
 		uint which = LightHere( walk, uint( index ) );
@@ -490,10 +493,13 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 			if ( area.x <= 0.0 ) continue;
 
-			float areaShadow = LampShadow( s.world, geometric, light, distance );
+			//A baked lamp on a lightmapped surface: only what movers take of it, taken away
+			bool areaTaken = sheetLit && LightBaked( light );
+			float areaShadow = areaTaken ? LampMovedShade( s.world, geometric, light, distance ) : LampShadow( s.world, geometric, light, distance );
 
 			if ( areaShadow <= 0.0 ) continue;
 
+			areaShadow *= areaTaken ? -1.0 : 1.0;
 			uint areaWithholds = LightWithholds( light );
 
 			if ( ( areaWithholds & 1u ) == 0u )
@@ -561,7 +567,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		float shadow;
 
-		if ( light.colour.w < 0.5 )
+		//A baked light on a lightmapped surface is in its lightmap: what movers shade of it is taken away, as
+		//UE's stationary lights shadow movers over a lightmap - one map of movers read where nothing else is
+		bool taken = sheetLit && LightBaked( light );
+
+		if ( taken )
+		{
+			shadow = light.colour.w < 0.5 ? SunMovedShade( s.world, geometric ) : LampMovedShade( s.world, geometric, light, distance );
+		}
+		else if ( light.colour.w < 0.5 )
 		{
 			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow
 			shadow = SunShadow( s.world, geometric, geometric, true );
@@ -574,6 +588,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		//Shadow blocks only this light; lights add independently, so nothing gives it back
 		if ( shadow <= 0.0 ) continue;
+
+		float sign = taken ? -1.0 : 1.0;
 
 		//What the light is kept out of - see Light.Contribution.
 		uint withholds = LightWithholds( light );
@@ -627,14 +643,14 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		if ( ( withholds & 2u ) != 0u ) specular = float3( 0.0, 0.0, 0.0 );
 
-		float3 reaching = light.colour.rgb * nDotL * attenuation * shadow;
+		float3 reaching = light.colour.rgb * nDotL * attenuation * shadow * sign;
 
 		//A shadow's edge let through redder where light scatters under it.
 		float3 shade = scatter > 0.0
 			? pow( float3( shadow, shadow, shadow ), float3( 1.0, 1.0, 1.0 ) - ( float3( 0.6, 0.25, 0.1 ) * scatter ) )
 			: float3( shadow, shadow, shadow );
 
-		litDiffuse += diffuse * light.colour.rgb * lit * attenuation * shade;
+		litDiffuse += diffuse * light.colour.rgb * lit * attenuation * shade * sign;
 
 		litSpecular += specular * reaching;
 	}
@@ -800,7 +816,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 reflectance = EnvBrdf( mirrorColour, roughness, nDotV ) * occlusion * seen * horizon;
 	float3 reflected = around * reflectance;
 
-	float3 shaded = lit + ambient + reflected + s.emission;
+	//Movers' shadows taken from a lightmap never take more than it holds
+	float3 shaded = max( lit + ambient, 0.0 ) + reflected + s.emission;
 
 	//Fog over everything, after emission so a lamp in fog is dimmed rather than floating in front of the haze
 	shaded = ApplyFog( shaded, s.world, EYE_FRAME( camera ).xyz, s.screen );

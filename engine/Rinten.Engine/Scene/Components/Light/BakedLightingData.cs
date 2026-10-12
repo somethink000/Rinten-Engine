@@ -8,7 +8,7 @@ namespace Rinten;
 /// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 7;
+	public override int Version => 8;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -69,6 +69,9 @@ public sealed class BakedLightingData : BlobData
 
 	/// <summary>Four halves a texel: which way the sky is open and how much is seen; the frame lights it.</summary>
 	public Half[] SheetSky { get; set; } = [];
+
+	/// <summary>Whether the volume holds only the baked lights' bounce, the frame drawing their direct light.</summary>
+	public bool VolumeIndirect { get; set; }
 
 	/// <summary>The sheet's first band over its light, half size - see BakeSheet.Band; empty before version 6.</summary>
 	public byte[] SheetBand { get; set; } = [];
@@ -210,23 +213,29 @@ public sealed class BakedLightingData : BlobData
 		//Version 7: each place's vertices.
 		foreach ( var place in Places ) s.Write( place.Vertices );
 
+		//Version 8: whether the volume left the baked lights' direct light to the frame.
+		s.Write( VolumeIndirect );
+
 		writer.Stream = s;
 	}
 
 	/// <summary>An older bake: what its version held, the rest empty. Its masked lights are drawn in the frame.</summary>
 	public override void Upgrade( ref Reader reader, int fromVersion )
 	{
+		//From version 5 on the layout starts over - see ReadFifth
+		if ( fromVersion >= 5 )
+		{
+			ReadFifth( ref reader );
+			if ( fromVersion >= 6 ) ReadBand( ref reader );
+			if ( fromVersion >= 7 ) ReadVertices( ref reader );
+			return;
+		}
+
 		ReadFirst( ref reader );
 
 		if ( fromVersion == 1 ) IsOld = true;
 		if ( fromVersion >= 2 ) ReadMasks( ref reader );
 		if ( fromVersion >= 3 ) ReadThird( ref reader );
-		if ( fromVersion >= 5 )
-		{
-			ReadFifth( ref reader );
-			if ( fromVersion >= 6 ) ReadBand( ref reader );
-			return;
-		}
 
 		if ( fromVersion >= 4 ) ReadFourth( ref reader, true );
 
@@ -240,7 +249,16 @@ public sealed class BakedLightingData : BlobData
 	{
 		ReadFifth( ref reader );
 		ReadBand( ref reader );
+		ReadVertices( ref reader );
 
+		var s = reader.Stream;
+		VolumeIndirect = s.Read<bool>();
+		reader.Stream = s;
+	}
+
+	//What version 7 added: each place's vertices
+	private void ReadVertices( ref Reader reader )
+	{
 		var s = reader.Stream;
 
 		for ( var i = 0; i < Places.Count; ++i )

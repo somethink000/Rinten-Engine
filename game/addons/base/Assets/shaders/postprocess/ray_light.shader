@@ -119,11 +119,17 @@ float3 RecordOf( uint record, uint which )
 float3 LightsAt( RaytracingAccelerationStructure scene, float3 at, float3 n )
 {
 	float3 sum = 0.0;
-	uint count = min( LightCount(), 8u );
+	uint count = LightCount();
+	uint traced = 0u;
 
-	for ( uint i = 0u; i < count; ++i )
+	for ( uint i = 0u; i < count && traced < 8u; ++i )
 	{
 		Light light = LightAt( i );
+
+		//A baked light's bounce is in the bake already
+		if ( LightBaked( light ) ) continue;
+
+		traced++;
 
 		float3 l;
 		float far = 10000.0;

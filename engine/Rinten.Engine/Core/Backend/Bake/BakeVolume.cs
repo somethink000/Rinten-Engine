@@ -133,22 +133,7 @@ internal sealed class BakeVolume
 			var towardsG = g * ( 2.0f / taken );
 			var towardsB = b * ( 2.0f / taken );
 
-			//And the lamps whose light is baked, straight to the point. One of those is a direction, not a spread,
-			//and projects onto the bands as a quarter of its light in the constant and half of it in the lean.
-			foreach ( var light in scene.Lights )
-			{
-				if ( !light.Whole || scene.Pass != 0 ) continue;
-
-				var direct = LampAt( scene, light, at, ref random, out var towards );
-
-				if ( direct == Vec3.Zero ) continue;
-
-				mean += direct * 0.25f;
-				towardsR += towards * ( direct.X * 0.5f );
-				towardsG += towards * ( direct.Y * 0.5f );
-				towardsB += towards * ( direct.Z * 0.5f );
-			}
-
+			//No lamp's light straight to the point: the frame draws that, shadowed, on what reads the volume
 			constant[index] = mean;
 			leanR[index] = towardsR;
 			leanG[index] = towardsG;
@@ -198,12 +183,11 @@ internal sealed class BakeVolume
 
 		var taken = across * across;
 
-		progress.Begin( "Lighting the volume from its lamps", count );
+		progress.Begin( "Reading the volume back", count );
 
 		Parallel.For( 0, count, new ParallelOptions { CancellationToken = cancel }, index =>
 		{
 			var o = index * BakeGpu.ProbeFloats;
-			var random = new BakeRandom( ( (ulong)index * 0xD1B54A32D192ED03ul ) + 17, (ulong)index + 1 );
 
 			var mean = new Vec3( sums[o], sums[o + 1], sums[o + 2] ) / taken;
 			var towardsR = new Vec3( sums[o + 4], sums[o + 5], sums[o + 6] ) * ( 2.0f / taken );
@@ -212,20 +196,6 @@ internal sealed class BakeVolume
 			var inside = sums[o + 7];
 
 			sky[index] = SkyOf( new Vec4( sums[o + 16], sums[o + 17], sums[o + 18], sums[o + 19] ), taken, scene.SkyStrength );
-
-			foreach ( var light in scene.Lights )
-			{
-				if ( !light.Whole || scene.Pass != 0 ) continue;
-
-				var direct = LampAt( scene, light, points[index], ref random, out var towards );
-
-				if ( direct == Vec3.Zero ) continue;
-
-				mean += direct * 0.25f;
-				towardsR += towards * ( direct.X * 0.5f );
-				towardsG += towards * ( direct.Y * 0.5f );
-				towardsB += towards * ( direct.Z * 0.5f );
-			}
 
 			constant[index] = mean;
 			leanR[index] = towardsR;
@@ -344,21 +314,6 @@ internal sealed class BakeVolume
 				}
 			}
 		}
-	}
-
-	//One baked lamp's light at a point over pi, as a surface facing it has it, shadowed across the lamp's width
-	private static Vec3 LampAt( BakeScene scene, BakeLight light, Vec3 at, ref BakeRandom random, out Vec3 towards )
-	{
-		//Asked with the normal at the lamp: its light square on, with a texel's falloff, cone and shadow
-		towards = light.Kind == 0 ? -light.Forward : Vec3.Normalize( light.Position - at );
-
-		var sum = Vec3.Zero;
-		const int Tries = 16;
-
-		for ( var i = 0; i < Tries; ++i )
-			sum += scene.DirectOne( light, at, towards, towards, ref random, out _ );
-
-		return sum / Tries;
 	}
 
 	//Points that were inside something take the mean of their answered neighbours, a ring at a time.

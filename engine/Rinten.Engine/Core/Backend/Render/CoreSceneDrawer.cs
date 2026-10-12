@@ -2309,8 +2309,8 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		//A baked sun is all in the bake: no pages - see Light.NotBaked
-		var sunBaked = CoreSceneRenderer.BakedOn && sunLight is not null && CoreBakedLighting.InBake( sunLight );
+		//A baked sun is all in an older bake: no pages. A newer one keeps them for movers and what has no lightmap
+		var sunBaked = CoreSceneRenderer.BakedOn && !CoreBakedLighting.Mixed && sunLight is not null && CoreBakedLighting.InBake( sunLight );
 
 		if ( CoreRenderDevice.PortableFrame )
 		{

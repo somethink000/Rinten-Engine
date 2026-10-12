@@ -509,8 +509,9 @@ internal static unsafe class CoreSceneRenderer
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
 
-			//Skip lights baked into the scene - see Light.NotBaked
-			if ( BakedOn && CoreBakedLighting.InBake( light ) ) continue;
+			//A light in a bake whose volume has no direct light is still drawn, for movers and what has no lightmap; in
+			//an older bake it is all there and skipped - see CoreBakedLighting.Mixed
+			if ( BakedOn && !CoreBakedLighting.Mixed && CoreBakedLighting.InBake( light ) ) continue;
 
 			var reach = Reach( light, from );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
@@ -569,8 +570,9 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 4] = source.Colour.r;
 			LightBlock[at + 5] = source.Colour.g;
 			LightBlock[at + 6] = source.Colour.b;
-			//Kind; in its fraction what the light is withheld from - see LightWithholds
-			LightBlock[at + 7] = source.Kind + ( source.Withholds * 0.1f );
+			//Kind; in its fraction, in twentieths, twice what it is withheld from and one where it is baked - see LightCode
+			var baked = lights[i] is { } inBake && BakedOn && CoreBakedLighting.InBake( inBake );
+			LightBlock[at + 7] = source.Kind + ( ( ( source.Withholds * 2 ) + ( baked ? 1 : 0 ) ) * 0.05f );
 
 			LightBlock[at + 8] = source.Forward.x;
 			LightBlock[at + 9] = source.Forward.y;

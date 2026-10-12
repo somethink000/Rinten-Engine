@@ -20,6 +20,9 @@ internal static partial class CoreBakedLighting
 		/// <summary>A first-version bake, which names no lights - see BakedLightingData.IsOld.</summary>
 		public bool Old;
 
+		/// <summary>The volume holds no direct light, so the frame draws the baked lights - see Mixed.</summary>
+		public bool Mixed;
+
 		/// <summary>Each glow layer's sheet and volume, and its group - see BakedGlow.</summary>
 		public readonly ulong[] GlowSheet = new ulong[BakedGlow.Groups], GlowVolume = new ulong[BakedGlow.Groups];
 		public readonly int[] GlowGroup = new int[BakedGlow.Groups];
@@ -54,6 +57,7 @@ internal static partial class CoreBakedLighting
 			Sheet = Ways = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
 			Baked.Clear();
 			Old = false;
+			Mixed = false;
 			Revision = -1;
 		}
 	}
@@ -218,6 +222,10 @@ internal static partial class CoreBakedLighting
 	private static Held writing;
 
 	//Whether a light is all in the bake the frame being written reads, so the frame draws none of it; valid after Write
+	//The bake being written leaves its lights' direct light to the frame where there is no lightmap, and the
+	//lightmap loses only what movers shade - as UE's stationary lights
+	internal static bool Mixed => writing is { Mixed: true };
+
 	internal static bool InBake( Light light )
 		=> writing is { Old: false } && light is { NotBaked: false } && writing.Baked.Contains( light.Id );
 
@@ -226,6 +234,7 @@ internal static partial class CoreBakedLighting
 		on.Release();
 		on.Revision = data.Revision;
 		on.Old = data.IsOld;
+		on.Mixed = data.VolumeIndirect;
 
 		foreach ( var light in data.Baked ) on.Baked.Add( light );
 
@@ -529,6 +538,8 @@ internal static partial class CoreBakedLighting
 			data.Baked.Add( light.Id );
 			data.Bounced.Add( light.Id );
 		}
+
+		data.VolumeIndirect = true;
 
 		if ( sheet is not null )
 		{

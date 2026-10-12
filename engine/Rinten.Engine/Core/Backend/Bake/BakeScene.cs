@@ -352,6 +352,18 @@ internal sealed class BakeScene
 	private readonly Dictionary<Texture, BakePicture> pictures = new();
 
 	/// <summary>Takes everything static out of a scene. Main thread: reads components and materials.</summary>
+	//Whether it is written into the scene: one made at run time has a new id each session, which no bake can
+	//name again, so it stays live - as only a level's own lights bake in UE and Source 2
+	internal static bool Saved( Component component )
+	{
+		if ( component.Flags.Contains( ComponentFlags.NotSaved ) ) return false;
+
+		for ( var go = component.GameObject; go is not null && go is not Scene; go = go.Parent )
+			if ( go.Flags.Contains( GameObjectFlags.NotSaved ) ) return false;
+
+		return true;
+	}
+
 	public void Gather( Scene scene )
 	{
 		ThreadSafe.AssertIsMainThread();
@@ -363,7 +375,7 @@ internal sealed class BakeScene
 		{
 			if ( !renderer.IsValid() || !renderer.Enabled || !renderer.Active ) continue;
 			if ( renderer is SkinnedModelRenderer ) continue;
-			if ( !renderer.GameObject.IsStatic ) continue;
+			if ( !renderer.GameObject.IsStatic || !Saved( renderer ) ) continue;
 
 			var model = renderer.Model;
 			if ( model is null || !model.IsValid() || model.IsError ) continue;
@@ -393,7 +405,7 @@ internal sealed class BakeScene
 		//The level's own meshes, built in the editor: each face an island of their sheet - see PolygonMesh.LayLightmap
 		foreach ( var built in scene.GetAllComponents<MeshComponent>() )
 		{
-			if ( !built.IsValid() || !built.Enabled || !built.Active || !built.GameObject.IsStatic ) continue;
+			if ( !built.IsValid() || !built.Enabled || !built.Active || !built.GameObject.IsStatic || !Saved( built ) ) continue;
 			if ( built.Model is not { } model || !model.IsValid() ) continue;
 
 			var first = corners.Count / 3;
@@ -625,7 +637,7 @@ internal sealed class BakeScene
 	{
 		foreach ( var light in scene.GetAllComponents<Light>() )
 		{
-			if ( !light.IsValid() || !light.Enabled || !light.Active || light.NotBaked ) continue;
+			if ( !light.IsValid() || !light.Enabled || !light.Active || light.NotBaked || !Saved( light ) ) continue;
 			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
 
 			var colour = light.EmittedColor;

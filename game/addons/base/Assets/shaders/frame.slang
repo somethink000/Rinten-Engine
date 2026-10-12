@@ -2023,20 +2023,26 @@ float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float4 reachX, fl
 	return trilinear * seen * ( ( facing * facing ) + 0.2 );
 }
 
-//Where in the lattice a point reads: moved within its cell towards the corners it sees and that face it (BakeVolume.Walls),
-//so one filtered read takes their light and not the other side of a wall's - as Unity's probe volumes warp theirs
-float3 BakedVolumeSpot( float3 world, float3 normal )
+//A point's place in the lattice, clamped inside it
+float3 BakedLatticeAt( float3 world )
+{
+	float3 at = ( world - g_frame[0].volumeOrigin.xyz ) * g_frame[0].volumeOrigin.w;
+	return clamp( at, float3( 0.0, 0.0, 0.0 ), g_frame[0].volumeCount.xyz - 1.0 );
+}
+
+//How much each of a lattice point's cell's eight corners counts for it (BakeVolume.Walls, BakedCorners): x's near
+//corners in nearSide, far in farSide, each along y then z. False where the bake has no walls
+bool BakedCornerWeights( float3 at, float3 normal, out float3 cell, out float4 nearSide, out float4 farSide )
 {
 	float3 count = g_frame[0].volumeCount.xyz;
-
-	float3 at = ( world - g_frame[0].volumeOrigin.xyz ) * g_frame[0].volumeOrigin.w;
-	at = clamp( at, float3( 0.0, 0.0, 0.0 ), count - 1.0 );
+	cell = min( floor( at ), count - 2.0 );
+	nearSide = 0.0;
+	farSide = 0.0;
 
 	//Frame-uniform - see SkyTableAt.
 	uint walls = uint( g_frame[0].bakedMore.x );
-	if ( walls == 0u ) return at;
+	if ( walls == 0u ) return false;
 
-	float3 cell = min( floor( at ), count - 2.0 );
 	float3 f = at - cell;
 
 	//A row of cells an axis; each texel that axis's reach of the cell's eight corners, a nibble each
@@ -2055,8 +2061,21 @@ float3 BakedVolumeSpot( float3 world, float3 normal )
 	float4 dy = lerp( f.yyyy, 1.0 - f.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
 	float4 dz = lerp( f.zzzz, 1.0 - f.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
 
-	float4 nearSide = BakedCorners( f.x, -1.0, dy, dz, ( x - ( xFar * 16.0 ) ) / 15.0, ( y - ( yFar * 16.0 ) ) / 15.0, ( z - ( zFar * 16.0 ) ) / 15.0, normal );
-	float4 farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0, normal );
+	nearSide = BakedCorners( f.x, -1.0, dy, dz, ( x - ( xFar * 16.0 ) ) / 15.0, ( y - ( yFar * 16.0 ) ) / 15.0, ( z - ( zFar * 16.0 ) ) / 15.0, normal );
+	farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0, normal );
+
+	return true;
+}
+
+//Where in the lattice a point reads: moved within its cell towards the corners it sees and that face it (BakeVolume.Walls),
+//so one filtered read takes their light and not the other side of a wall's - as Unity's probe volumes warp theirs
+float3 BakedVolumeSpot( float3 world, float3 normal )
+{
+	float3 at = BakedLatticeAt( world );
+
+	float3 cell;
+	float4 nearSide, farSide;
+	if ( !BakedCornerWeights( at, normal, cell, nearSide, farSide ) ) return at;
 
 	float4 both = nearSide + farSide;
 	float total = dot( both, float4( 1.0, 1.0, 1.0, 1.0 ) );
@@ -2232,6 +2251,36 @@ float3 BakedBounce( float3 at, float3 normal )
 	float3 lean = BakedVolumeAt( uint( g_frame[0].bakedMore.z ), at ).xyz;
 
 	return light * max( 1.0 + dot( lean, normal ), 0.0 );
+}
+
+//That bounce on a lightmapped surface: its cell's eight corners, trilinear, each as much as it stands in front of the
+//surface - weights of the corners and the surface alone, so smooth across cells, where the per-cell walls step at their faces
+float3 BakedBounceSmooth( float3 world, float3 geometric, float3 normal )
+{
+	float3 at = BakedLatticeAt( world );
+	float3 cell = min( floor( at ), g_frame[0].volumeCount.xyz - 2.0 );
+	float3 f = at - cell;
+
+	float3 sum = 0.0;
+	float total = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 8u; ++k )
+	{
+		float3 offset = float3( float( k & 1u ), float( ( k >> 1u ) & 1u ), float( k >> 2u ) );
+		float3 w3 = lerp( 1.0 - f, f, offset );
+
+		//A corner behind the surface sees the far side of what the surface is on - DDGI's smooth backface weight
+		float3 toCorner = offset - f;
+		float apart = length( toCorner );
+		float facing = apart > 1e-4 ? ( dot( toCorner / apart, geometric ) * 0.5 ) + 0.5 : 1.0;
+		float weight = w3.x * w3.y * w3.z * ( ( facing * facing ) + 0.05 );
+
+		sum += BakedBounce( cell + offset, normal ) * weight;
+		total += weight;
+	}
+
+	return total > 1e-5 ? sum / total : BakedBounce( at, normal );
 }
 
 //The volume's light at a spot (BakedVolumeSpot) on a surface facing normal

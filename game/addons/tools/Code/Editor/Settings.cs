@@ -10,8 +10,15 @@ public static class SettingsMenus
 		set => ConsoleSystem.SetValue( "r_fxaa", value ? "1" : "0" );
 	}
 
-	//No MSAA menu (10-07): no target the desktop draws is multisampled, so the menu wrote r_msaa and nothing on the editor's frame read it. The setting
-	//lives on as r_msaa and RenderSettings.AntiAliasQuality, which the web's frame does read; the menu comes back with the desktop's multisampling.
+	/// <summary>Whether lighting is traced with hardware rays (r_rt), where the card can.</summary>
+	[Menu( "Editor", "Settings/Ray Tracing" )]
+	public static bool RayTracing
+	{
+		get => EditorUtility.RenderSettings.RayTracing;
+		set => EditorUtility.RenderSettings.RayTracing = value;
+	}
+
+	//No MSAA entry: no desktop target is multisampled, and r_msaa is read by the web's frame alone
 
 	[Menu( "Editor", "Settings/Frame Rate Limit/10fps" )]
 	public static bool Frame10

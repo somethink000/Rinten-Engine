@@ -12,7 +12,7 @@ internal static class CoreRays
 	/// <summary>Whether rays are traced: the player's setting, where the card can.</summary>
 	internal static bool On => Wanted && VkRays.On && !CoreRenderDevice.PortableFrame;
 
-	[ConVar( "r_raytracing", ConVarFlags.Saved,
+	[ConVar( "r_rt", ConVarFlags.Saved,
 		Help = "Hardware ray tracing for lighting, where the card has it (0 off, 1 on). Off by default - see RenderSettings.RayTracing." )]
 	internal static bool Wanted { get; set; }
 

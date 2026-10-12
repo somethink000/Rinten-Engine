@@ -86,8 +86,8 @@ public partial class RenderSettings
 	/// <summary>Whether lighting uses hardware ray tracing (RTX, RDNA2+, Arc); off by default.</summary>
 	public bool RayTracing
 	{
-		get => ConVarSystem.GetInt( "r_raytracing", 0, true ) != 0;
-		set => ConVarSystem.SetInt( "r_raytracing", value ? 1 : 0, true );
+		get => ConVarSystem.GetInt( "r_rt", 0, true ) != 0;
+		set => ConVarSystem.SetInt( "r_rt", value ? 1 : 0, true );
 	}
 
 	/// <summary>Whether this card can trace rays, so a menu offers RayTracing only where it works.</summary>

@@ -153,7 +153,7 @@ internal static unsafe class VkRays
 	{
 		On = offered && VkDevice.vk.TryGetDeviceExtension( VkDevice.instance, VkDevice.device, out ext );
 
-		if ( On ) Log.Info( "hardware rays: the card can trace them - RenderSettings.RayTracing (r_raytracing) turns them on" );
+		if ( On ) Log.Info( "hardware rays: the card can trace them - RenderSettings.RayTracing (r_rt) turns them on" );
 	}
 
 	/// <summary>A buffer's address on the device.</summary>

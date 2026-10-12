@@ -745,7 +745,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		//The bounce of the lights left out of the bake, as they are now, from the volume a step off the surface
 		if ( HasBakedBounce() )
-			ambientSky += BakedBounce( BakedVolumeSpot( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric ), normal );
+			ambientSky += BakedBounceSmooth( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric, normal );
 
 		if ( HasBakedSky() && g_frame[0].bakedMaps.z > 0.5 )
 		{

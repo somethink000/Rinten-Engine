@@ -433,7 +433,7 @@ internal static partial class CoreBakedLighting
 				sheet.Rasterise( world, sheetSide );
 
 				//On the card where it can - the same bake, see BakeGpu - and on every core where it cannot.
-				if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
+				if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
 					sheet.Trace( world, samples, progress, stop );
 
 				progress.Begin( "Filtering", 1 );
@@ -475,7 +475,7 @@ internal static partial class CoreBakedLighting
 
 				if ( sheet is not null )
 				{
-					if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
+					if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
 						sheet.Trace( world, samples, progress, stop );
 
 					progress.Begin( "Filtering", 1 );

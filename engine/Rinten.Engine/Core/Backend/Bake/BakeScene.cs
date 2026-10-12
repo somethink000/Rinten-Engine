@@ -335,6 +335,20 @@ internal sealed class BakeScene
 	/// <summary>Texels along the sheet's side once BakeSheet.Pack has laid it out; nought before.</summary>
 	public int AtlasSide;
 
+	/// <summary>The gathering pass being traced on the processor; null traces whole paths.</summary>
+	public BakeGather Gathering
+	{
+		get;
+		set
+		{
+			field = value;
+			if ( value is not null ) atlasSpots ??= AtlasSpots();
+		}
+	}
+
+	//Each vertex's spot on the sheet in texels, negative off it - as BakeGpu packs it for the card
+	private System.Numerics.Vector2[] atlasSpots;
+
 	/// <summary>How wide the sun is, as the cosine of its angular radius.</summary>
 	public float SunCosine = MathF.Cos( 0.27f * MathF.PI / 180.0f );
 
@@ -924,6 +938,104 @@ internal sealed class BakeScene
 		return new Vec3( map.X, map.Y, map.Z ) * glow * material.Emission;
 	}
 
+	/// <summary>A world triangle's chance per square metre of being where a gather's light sample lands.</summary>
+	public float CacheDensity( int t ) => Gathering?.Lights is { Count: > 0 } lights ? lights.Floats[t] : 0.0f;
+
+	/// <summary>The light over pi the last pass left at a ray's landing on a lightmapped triangle.</summary>
+	public bool Cached( in BakeHit hit, out Vec3 light )
+	{
+		light = Vec3.Zero;
+		if ( Gathering?.Cache is not { } cache || atlasSpots is null ) return false;
+
+		var a = atlasSpots[Corners[hit.Triangle * 3]];
+		var b = atlasSpots[Corners[( hit.Triangle * 3 ) + 1]];
+		var c = atlasSpots[Corners[( hit.Triangle * 3 ) + 2]];
+		if ( a.X < 0.0f || b.X < 0.0f || c.X < 0.0f ) return false;
+
+		var spot = ( a * ( 1.0f - hit.U - hit.V ) ) + ( b * hit.U ) + ( c * hit.V );
+		var x = Math.Clamp( (int)spot.X, 0, AtlasSide - 1 );
+		var y = Math.Clamp( (int)spot.Y, 0, AtlasSide - 1 );
+		var at = ( ( y * AtlasSide ) + x ) * 4;
+
+		light = new Vec3( cache[at], cache[at + 1], cache[at + 2] );
+		return true;
+	}
+
+	//Where each vertex of a receiver lands on the sheet, in texels; off it, negative
+	private System.Numerics.Vector2[] AtlasSpots()
+	{
+		var spots = new System.Numerics.Vector2[Normals.Length];
+		Array.Fill( spots, new System.Numerics.Vector2( -1.0f ) );
+
+		foreach ( var receiver in Receivers )
+		{
+			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
+			{
+				for ( var k = 0; k < 3; ++k )
+				{
+					var v = Corners[( t * 3 ) + k];
+					var uv = System.Numerics.Vector2.Clamp( Uv1[v], System.Numerics.Vector2.Zero, System.Numerics.Vector2.One );
+					spots[v] = ( uv * receiver.Side ) + new System.Numerics.Vector2( receiver.X, receiver.Y );
+				}
+			}
+		}
+
+		return spots;
+	}
+
+	/// <summary>A point on a lit triangle of the cache, picked by power - bake_trace.slang's TowardsCache.</summary>
+	//The light it leaves towards the surface, over pi, unweighed; its way and the chance per steradian it was picked
+	public Vec3 TowardsCache( Vec3 position, Vec3 geometric, ref BakeRandom random, out Vec3 aim, out float chance )
+	{
+		aim = Vec3.Zero;
+		chance = 0.0f;
+
+		if ( Gathering?.Lights is not { Count: > 0 } lights ) return Vec3.Zero;
+
+		var floats = lights.Floats;
+		var list = MaterialOf.Length;
+		var count = lights.Count;
+
+		var picked = floats[list + ( ( count - 1 ) * CacheLights.RecordFloats ) + 1] * random.Float();
+		var root = MathF.Sqrt( random.Float() );
+		var turn = random.Float();
+
+		//The first whose power summed so far passes the pick
+		var low = 0;
+		var high = count - 1;
+
+		while ( low < high )
+		{
+			var middle = ( low + high ) / 2;
+			if ( floats[list + ( middle * CacheLights.RecordFloats ) + 1] > picked ) high = middle;
+			else low = middle + 1;
+		}
+
+		var record = list + ( low * CacheLights.RecordFloats );
+
+		var hit = new BakeHit { Triangle = BitConverter.SingleToInt32Bits( floats[record] ), U = root * ( 1.0f - turn ), V = root * turn };
+		var corner = new Vec3( floats[record + 2], floats[record + 3], floats[record + 4] );
+		var one = new Vec3( floats[record + 5], floats[record + 6], floats[record + 7] );
+		var two = new Vec3( floats[record + 8], floats[record + 9], floats[record + 10] );
+
+		var toPoint = corner + ( one * hit.U ) + ( two * hit.V ) - position;
+		hit.Distance = toPoint.Length();
+		if ( hit.Distance < 1e-5f ) return Vec3.Zero;
+
+		aim = toPoint / hit.Distance;
+		if ( Vec3.Dot( geometric, aim ) <= 0.0f ) return Vec3.Zero;
+
+		var s = Surface( hit, position, aim );
+		var facing = -Vec3.Dot( aim, s.Geometric );
+		if ( s.Back || facing <= 1e-6f ) return Vec3.Zero;
+
+		if ( !Cached( hit, out var cached ) ) return Vec3.Zero;
+		if ( Bvh.Blocked( Offset( position, geometric, aim ), aim, ( hit.Distance * 0.999f ) - ( Lift * 2.0f ) ) ) return Vec3.Zero;
+
+		chance = CacheDensity( hit.Triangle ) * hit.Distance * hit.Distance / facing;
+		return s.Albedo * cached;
+	}
+
 	//Power heuristic: how much of a sample picked one way counts, against the chance the other way had of it
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	public static float Weight( float picked, float other ) => picked * picked / MathF.Max( ( picked * picked ) + ( other * other ), 1e-30f );
@@ -1143,7 +1255,8 @@ internal sealed class BakeScene
 		{
 			if ( !Bvh.Nearest( origin, direction, 1e6f, out var hit ) )
 			{
-				escaped = bounce == 0;
+				//The sky is the frame's for a texel's own escapes, unless a pass gathers it into the light it leaves
+				escaped = bounce == 0 && ( Gathering is null || ( Gathering.Mode & BakeGpu.ModeSky ) == 0 );
 				return escaped ? gathered : gathered + ( carried * Environment( direction ) );
 			}
 
@@ -1159,7 +1272,7 @@ internal sealed class BakeScene
 			if ( s.Emission != Vec3.Zero )
 			{
 				//What TowardsGlow at the last point could have found as well counts only its share
-				var glow = density > 0.0f ? GlowDensity[hit.Triangle] : 0.0f;
+				var glow = density > 0.0f && Emitters.Length > 0 ? GlowDensity[hit.Triangle] : 0.0f;
 				var cosine = MathF.Abs( Vec3.Dot( direction, s.Geometric ) );
 
 				gathered += carried * s.Emission * ( glow > 0.0f && cosine > 1e-6f
@@ -1168,6 +1281,17 @@ internal sealed class BakeScene
 			}
 
 			if ( bounce >= Bounces ) return gathered;
+
+			//Gathering: the light the last pass found here, every bounce of it, in place of the rest of the path
+			if ( bounce == 0 && Gathering is not null && ( Gathering.Mode & BakeGpu.ModeGather ) != 0 && Cached( hit, out var cached ) )
+			{
+				//What TowardsCache could have found here as well counts only its share
+				var lit = CacheDensity( hit.Triangle );
+				var facing = MathF.Abs( Vec3.Dot( direction, s.Geometric ) );
+				var share = density > 0.0f && lit > 0.0f && facing > 1e-6f ? Weight( density, lit * hit.Distance * hit.Distance / facing ) : 1.0f;
+
+				return gathered + ( carried * s.Albedo * cached * share );
+			}
 
 			var ignored = Vec3.Zero;
 			gathered += carried * s.Albedo * ( Direct( s.Position, s.Normal, s.Geometric, ref random, false, ref ignored )

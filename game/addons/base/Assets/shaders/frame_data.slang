@@ -139,6 +139,9 @@ struct FrameData
 	//The probe grid of a scene with no bake (CoreProbeGrid): its four pictures' table indices, nought for none; the
 	//cascades and probes along x, y and z; each cascade's first cell xyz and step w - see GridLight
 	float4 grid[4];
+
+	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none
+	float4 bakedTexels;
 };
 
 #ifdef WEBGL

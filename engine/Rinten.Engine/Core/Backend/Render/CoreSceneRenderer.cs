@@ -846,7 +846,10 @@ internal static unsafe class CoreSceneRenderer
 	//The probe grid of a scene with no bake: its pictures, counts and cascades - see CoreProbeGrid.Lay.
 	internal const int GridAt = RaysAt + 4;
 
-	internal const int FrameFloats = GridAt + 16;
+	//The live bounce at the lightmap's detail: its sheet's table index - see CoreLiveBounce.Sheet.
+	internal const int BakedTexelsAt = GridAt + 16;
+
+	internal const int FrameFloats = BakedTexelsAt + 4;
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]
@@ -1655,7 +1658,8 @@ internal static unsafe class CoreSceneRenderer
 	//Whether the pipeline MakePipeline just could not make is only still compiling - see PipelineFor.
 	private static bool chainWaiting;
 
-	//Logs at powers of two when a shader accumulates many combo builds, each a compile mid-frame
+	//Says once a session when a shader passes MostBuilds, each a compile mid-frame; a material's features times the
+	//frame's targets reach a few dozen as a matter of course, and a reload of the shaders counts them all again
 	private static void Baked( PipelineKind kind, int live )
 	{
 		var name = string.IsNullOrWhiteSpace( kind.Shader ) ? StandardShader : kind.Shader;
@@ -1666,12 +1670,15 @@ internal static unsafe class CoreSceneRenderer
 
 		builds[name] = now;
 
-		//Powers of two from sixteen up, so an ordinary shader with a handful of builds never says anything.
-		if ( now < 16 || ( now & ( now - 1 ) ) != 0 ) return;
+		if ( now < MostBuilds || !toldBuilds.Add( name ) ) return;
 
-		Log.Warning( $"{name} is on {now} builds ({live} pipelines live) - " +
+		Log.Info( $"{name} is on {now} builds ({live} pipelines live) - many combos compile mid-frame; " +
 			$"the latest is combo {kind.Combo ?? "none"}" );
 	}
+
+	//Builds of one shader past which a build-up is worth a line, and the shaders already told of
+	private const int MostBuilds = 64;
+	private static readonly HashSet<string> toldBuilds = new( StringComparer.Ordinal );
 
 	//How many builds of each shader have been baked. Cleared with the caches.
 	private static readonly Dictionary<string, int> builds = new( StringComparer.Ordinal );

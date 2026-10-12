@@ -433,6 +433,9 @@ float3 BakedHighlight( float2 lightmap, float3 normal, float3 v, float nDotV, fl
 
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
+	//This pixel's turn of the soft shadows' taps - see ShadowFilter
+	ShadowTurnAt( s.screen );
+
 	//The decals first, where the frame has any: what they paint is what the lights see - see ApplyDecals.
 	if ( kDecalsOn != 0 ) ApplyDecals( s );
 
@@ -743,9 +746,12 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		lit += BakedHighlight( s.lightmap, normal, v, nDotV, roughness, lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness ) );
 		visible = 1.0;
 
-		//The bounce of the lights left out of the bake, as they are now, from the volume a step off the surface
+		//The bounce of the lights left out of the bake, as they are now: at the lightmap's detail where the bake linked
+		//its texels (CoreLiveBounce.Sheet), else from the volume a step off the surface
 		if ( HasBakedBounce() )
-			ambientSky += BakedBounceSmooth( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric, normal );
+			ambientSky += g_frame[0].bakedTexels.x > 0.5
+				? SheetFacesLinear( uint( g_frame[0].bakedTexels.x ), uint( g_frame[0].bakedMaps.x ), s.lightmap )
+				: BakedBounceSmooth( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric, normal );
 
 		if ( HasBakedSky() && g_frame[0].bakedMaps.z > 0.5 )
 		{

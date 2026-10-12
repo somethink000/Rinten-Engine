@@ -7,6 +7,12 @@
 [[vk::binding(1,0)]] StructuredBuffer<float4> g_texels;
 [[vk::binding(2,0)]] RWStructuredBuffer<float4> g_sums;
 
+//The last pass's light over pi a texel of the sheet, which a gathering pass reads where its rays land - see BakeSheet
+[[vk::binding(3,0)]] StructuredBuffer<float4> g_cache;
+
+//Each group of GuideTexels texels' picture of where its gathered light came from: GuideCells sums of brightness
+[[vk::binding(4,0)]] RWStructuredBuffer<float> g_guide;
+
 [[vk::push_constant]]
 cbuffer Push
 {
@@ -16,7 +22,9 @@ cbuffer Push
 	uint g_sampleBase;  //Samples taken before, for the random numbers
 	uint g_seed;
 	uint g_across;      //The volume's strata along each side of the sphere - see ProbeCs
-	uint g_pad1, g_pad2;
+	uint g_mode;        //What a texel's samples do - the Mode flags; nought traces whole paths
+	uint g_learn;       //Samples a texel takes evenly to fill its group's guide; nought for none
+
 };
 
 static const float Pi = 3.14159265;
@@ -53,6 +61,15 @@ uint EmitterCount() { return Word( 19 ); }
 uint GlowAt() { return Word( 20 ); }       //Per world triangle: TowardsGlow's chance per square metre
 uint Pass() { return Word( 21 ); }         //Nought the main bake, else the glow group baked alone
 uint GroupsAt() { return Word( 22 ); }     //Per world triangle: its glow group; no table where none has one
+uint AtlasAt() { return Word( 23 ); }      //Per vertex: its spot on the sheet in [0,1], negative off it; none at 0
+uint AtlasSide() { return Word( 24 ); }
+
+//A pass's sampling: a ray reads the light where it lands from g_cache rather than tracing on (a final gather, as
+//Lightmass's), the sky counts where a ray leaves, every lamp's straight light or none rather than the baked ones'
+static const uint ModeGather = 1u;
+static const uint ModeSky = 2u;
+static const uint ModeAllLights = 4u;
+static const uint ModeNoDirect = 8u;
 
 //Whether a triangle's glow is in this pass - BakeScene.Surface
 bool GlowsNow( uint t ) { return ( GroupsAt() == 0u ? 0u : Word( GroupsAt() + t ) ) == Pass(); }
@@ -176,6 +193,28 @@ float4 MaterialColour( uint m, float2 uv )
 	uint flags = Word( at + 9 );
 	if ( ( flags & FlagHasColour ) == 0u ) return float4( 1.0, 1.0, 1.0, 1.0 );
 	return Picture( Word( at + 10 ), Word( at + 11 ), Word( at + 12 ), uv );
+}
+
+//The light over pi the last pass left where a ray landed on a triangle with a place on the sheet
+bool Cached( Hit hit, out float3 light )
+{
+	light = float3( 0.0, 0.0, 0.0 );
+	if ( AtlasAt() == 0u ) return false;
+
+	uint c = CornersAt() + ( hit.triangle * 3 );
+	uint at = AtlasAt();
+
+	float2 a = asfloat( g_world.Load2( ( at + ( Word( c ) * 2 ) ) * 4 ) );
+	float2 b = asfloat( g_world.Load2( ( at + ( Word( c + 1 ) * 2 ) ) * 4 ) );
+	float2 d = asfloat( g_world.Load2( ( at + ( Word( c + 2 ) * 2 ) ) * 4 ) );
+	if ( a.x < 0.0 || b.x < 0.0 || d.x < 0.0 ) return false;
+
+	float side = float( AtlasSide() );
+	float2 spot = ( ( a * ( 1.0 - hit.u - hit.v ) ) + ( b * hit.u ) + ( d * hit.v ) ) * side;
+	uint2 texel = min( uint2( max( spot, 0.0 ) ), uint2( AtlasSide() - 1u, AtlasSide() - 1u ) );
+
+	light = g_cache[( texel.y * AtlasSide() ) + texel.x].rgb;
+	return true;
 }
 
 float2 Uv( uint t, float u, float v )
@@ -786,7 +825,8 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 		if ( !Nearest( origin, direction, 1e6, hit ) )
 		{
-			escaped = bounce == 0u;
+			//The sky is the frame's for a texel's own escapes, unless a pass gathers it into the light it leaves
+			escaped = bounce == 0u && ( g_mode & ModeSky ) == 0u;
 			return escaped ? gathered : gathered + ( carried * Environment( direction ) );
 		}
 
@@ -811,6 +851,10 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 		}
 
 		if ( bounce >= bounces ) return gathered;
+
+		//Gathering: the light the last pass found here, every bounce of it, in place of the rest of the path
+		float3 cached;
+		if ( bounce == 0u && ( g_mode & ModeGather ) != 0u && Cached( hit, cached ) ) return gathered + ( carried * s.albedo * cached );
 
 		float3 ignored = float3( 0.0, 0.0, 0.0 );
 		gathered += carried * s.albedo * ( Direct( s.position, s.normal, s.geometric, random, false, ignored )
@@ -847,13 +891,58 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 //---- a texel - BakeSheet.Trace -------------------------------------------------
 
-[shader("compute")]
-[numthreads(64, 1, 1)]
-void main( uint3 id : SV_DispatchThreadID )
-{
-	if ( id.x >= g_count ) return;
+//Guided final gather, as Lightmass's photon-guided one: neighbouring texels learn from their first rays where their
+//gathered light comes from, on a grid over the cosine-weighted hemisphere, and aim most rays there - from a headboard,
+//a nightstand lit from a hand's breadth is a sliver of the view that even rays hit too seldom to agree on
+static const uint GuideTexels = 8u;
+static const uint GuideSide = 8u;
+static const uint GuideCells = GuideSide * GuideSide;
 
-	uint texel = g_first + id.x;
+//Share of a guided texel's rays still spread evenly, and the least a cell keeps of an even share
+static const float GuideEven = 0.3;
+static const float GuideFloor = 0.1;
+
+//Each of the workgroup's texels' learning while it lasts, added into g_guide once the dispatch is through
+groupshared float gs_learn[64 * GuideCells];
+
+//The group's grid, floored, and its sum; false where it learned no light to aim at
+bool GuideOf( uint texel, out float cells[GuideCells], out float total )
+{
+	uint at = ( texel / GuideTexels ) * GuideCells;
+	float learned = 0.0;
+
+	[unroll]
+	for ( uint c = 0u; c < GuideCells; ++c )
+	{
+		cells[c] = g_guide[at + c];
+		learned += cells[c];
+	}
+
+	total = 0.0;
+	if ( learned <= 1e-12 ) return false;
+
+	float least = learned * GuideFloor / float( GuideCells );
+
+	[unroll]
+	for ( uint c = 0u; c < GuideCells; ++c )
+	{
+		cells[c] += least;
+		total += cells[c];
+	}
+
+	return true;
+}
+
+//The cell of the grid a pair of cosine-sampling numbers falls in
+uint CellOf( float u, float v )
+{
+	uint x = min( uint( u * float( GuideSide ) ), GuideSide - 1u );
+	uint y = min( uint( v * float( GuideSide ) ), GuideSide - 1u );
+	return ( y * GuideSide ) + x;
+}
+
+void TexelSamples( uint texel, uint slot, bool learning, bool guided )
+{
 
 	float4 centre = g_texels[( texel * 5 ) + 0];
 	float4 n = g_texels[( texel * 5 ) + 1];
@@ -872,6 +961,10 @@ void main( uint3 id : SV_DispatchThreadID )
 	float3 bouncedR = g_sums[at + 4u].xyz, bouncedG = g_sums[at + 5u].xyz, bouncedB = g_sums[at + 6u].xyz;
 	float3 straightR = g_sums[at + 7u].xyz, straightG = g_sums[at + 8u].xyz, straightB = g_sums[at + 9u].xyz;
 
+	float cells[GuideCells];
+	float total;
+	guided = guided && GuideOf( texel, cells, total );
+
 	for ( uint s = 0; s < g_samples; ++s )
 	{
 		Random random;
@@ -882,6 +975,31 @@ void main( uint3 id : SV_DispatchThreadID )
 
 		float u = random.Next();
 		float v = random.Next();
+
+		//Guided: a cell picked by its share of the light, a spot in it; the chance against an even pick weighs it back
+		float chance = 1.0;
+
+		if ( guided )
+		{
+			if ( random.Next() >= GuideEven )
+			{
+				float target = random.Next() * total;
+				uint picked = GuideCells - 1u;
+
+				for ( uint c = 0u; c < GuideCells; ++c )
+				{
+					target -= cells[c];
+					if ( target < 0.0 ) { picked = c; break; }
+				}
+
+				u = ( float( picked % GuideSide ) + random.Next() ) / float( GuideSide );
+				v = ( float( picked / GuideSide ) + random.Next() ) / float( GuideSide );
+			}
+
+			chance = GuideEven + ( ( 1.0 - GuideEven ) * cells[CellOf( u, v )] * float( GuideCells ) / total );
+		}
+
+		uint cell = CellOf( u, v );
 		float3 axis = n.xyz;
 		float3 direction = CosineAround( axis, u, v );
 
@@ -891,25 +1009,35 @@ void main( uint3 id : SV_DispatchThreadID )
 			v = random.Next();
 			axis = g;
 			direction = CosineAround( axis, u, v );
+			chance = 1.0;
 		}
 
-		float density = EmitterCount() > 0u ? dot( axis, direction ) * InvPi : 0.0;
+		float weight = 1.0 / chance;
+		float density = EmitterCount() > 0u ? dot( axis, direction ) * InvPi * chance : 0.0;
 
 		bool behind;
 		bool escaped;
 		float3 arriving = Arriving( Offset( p, g, direction ), direction, density, random, behind, escaped );
 
-		//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows
+		//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows - by its
+		//weight, so the samples kept still average to one where guided rays find insides more or less often
 		if ( behind )
 		{
-			insideSpare.x += 1.0;
+			insideSpare.x += weight;
 			continue;
 		}
 
-		if ( escaped ) open += float4( direction, 1.0 );
+		if ( escaped ) open += float4( direction, 1.0 ) * weight;
+
+		if ( learning ) gs_learn[( slot * GuideCells ) + cell] += Luma( arriving );
+
+		arriving *= weight;
 
 		float3 lean = float3( 0.0, 0.0, 0.0 );
-		float3 direct = Direct( p, n.xyz, g, random, true, lean ) + GlowDirect( p, n.xyz, g, random, lean );
+		float3 direct = float3( 0.0, 0.0, 0.0 );
+
+		if ( ( g_mode & ModeNoDirect ) == 0u )
+			direct = Direct( p, n.xyz, g, random, ( g_mode & ModeAllLights ) == 0u, lean ) + GlowDirect( p, n.xyz, g, random, lean );
 		float luma = Luma( arriving );
 
 		sumSquares += float4( direct + arriving, luma * luma );
@@ -944,6 +1072,39 @@ void main( uint3 id : SV_DispatchThreadID )
 	g_sums[at + 7u] = float4( straightR, 0.0 );
 	g_sums[at + 8u] = float4( straightG, 0.0 );
 	g_sums[at + 9u] = float4( straightB, 0.0 );
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void main( uint3 id : SV_DispatchThreadID, uint slot : SV_GroupIndex )
+{
+	//The same for the whole dispatch: BakeGpu ends the learning on a dispatch's edge
+	bool learning = g_sampleBase < g_learn;
+
+	if ( learning )
+	{
+		for ( uint c = 0u; c < GuideCells; ++c ) gs_learn[( slot * GuideCells ) + c] = 0.0;
+	}
+
+	if ( id.x < g_count ) TexelSamples( g_first + id.x, slot, learning, g_learn > 0u && !learning );
+
+	if ( !learning ) return;
+
+	GroupMemoryBarrierWithGroupSync();
+
+	//A group's first texel adds its group's learning in; dispatches start on a multiple of 64, so no group spans two
+	if ( id.x >= g_count || ( slot % GuideTexels ) != 0u ) return;
+
+	uint at = ( ( g_first + id.x ) / GuideTexels ) * GuideCells;
+
+	for ( uint c = 0u; c < GuideCells; ++c )
+	{
+		float sum = 0.0;
+
+		for ( uint k = 0u; k < GuideTexels; ++k ) sum += gs_learn[( ( slot + k ) * GuideCells ) + c];
+
+		g_guide[at + c] += sum;
+	}
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

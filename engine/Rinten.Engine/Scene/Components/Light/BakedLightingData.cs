@@ -8,7 +8,7 @@ namespace Rinten;
 /// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 8;
+	public override int Version => 9;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -72,6 +72,24 @@ public sealed class BakedLightingData : BlobData
 
 	/// <summary>Whether the volume holds only the baked lights' bounce, the frame drawing their direct light.</summary>
 	public bool VolumeIndirect { get; set; }
+
+	/// <summary>The live bounce sheet's blocks across and down; nought where the bake has none.</summary>
+	public int BounceWidth { get; set; }
+	public int BounceHeight { get; set; }
+
+	/// <summary>Each block's slot in TexelLinks, -1 for a block with none.</summary>
+	public int[] TexelSlots { get; set; } = [];
+
+	/// <summary>Each slot's surface and facing bin, which the frame smooths the bounce within.</summary>
+	public int[] TexelKeys { get; set; } = [];
+
+	/// <summary>The surfel clusters each slot's block sees, and the share of its view each fills.</summary>
+	public ushort[] TexelLinks { get; set; } = [];
+	public Half[] TexelWeights { get; set; } = [];
+
+	/// <summary>Whether the live bounce can be laid at the lightmap's detail, not read from the volume.</summary>
+	public bool HasTexelBounce => BounceWidth > 0 && BounceHeight > 0 && TexelSlots.Length == BounceWidth * BounceHeight
+		&& TexelLinks.Length > 0 && TexelLinks.Length == TexelWeights.Length && TexelKeys.Length * Bake.BakeSurfels.TexelLinks == TexelLinks.Length;
 
 	/// <summary>The sheet's first band over its light, half size - see BakeSheet.Band; empty before version 6.</summary>
 	public byte[] SheetBand { get; set; } = [];
@@ -216,6 +234,14 @@ public sealed class BakedLightingData : BlobData
 		//Version 8: whether the volume left the baked lights' direct light to the frame.
 		s.Write( VolumeIndirect );
 
+		//Version 9: the live bounce's sheet links.
+		s.Write( BounceWidth );
+		s.Write( BounceHeight );
+		Packed( ref s, TexelSlots );
+		Packed( ref s, TexelKeys );
+		Packed( ref s, TexelLinks );
+		Packed( ref s, TexelWeights );
+
 		writer.Stream = s;
 	}
 
@@ -228,6 +254,14 @@ public sealed class BakedLightingData : BlobData
 			ReadFifth( ref reader );
 			if ( fromVersion >= 6 ) ReadBand( ref reader );
 			if ( fromVersion >= 7 ) ReadVertices( ref reader );
+
+			if ( fromVersion >= 8 )
+			{
+				var s = reader.Stream;
+				VolumeIndirect = s.Read<bool>();
+				reader.Stream = s;
+			}
+
 			return;
 		}
 
@@ -253,6 +287,12 @@ public sealed class BakedLightingData : BlobData
 
 		var s = reader.Stream;
 		VolumeIndirect = s.Read<bool>();
+		BounceWidth = s.Read<int>();
+		BounceHeight = s.Read<int>();
+		TexelSlots = Unpacked<int>( ref s );
+		TexelKeys = Unpacked<int>( ref s );
+		TexelLinks = Unpacked<ushort>( ref s );
+		TexelWeights = Unpacked( ref s );
 		reader.Stream = s;
 	}
 

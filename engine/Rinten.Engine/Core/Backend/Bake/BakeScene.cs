@@ -332,6 +332,9 @@ internal sealed class BakeScene
 	public float AlbedoBoost = 1.0f;
 	public int Bounces = 4;
 
+	/// <summary>Texels along the sheet's side once BakeSheet.Pack has laid it out; nought before.</summary>
+	public int AtlasSide;
+
 	/// <summary>How wide the sun is, as the cosine of its angular radius.</summary>
 	public float SunCosine = MathF.Cos( 0.27f * MathF.PI / 180.0f );
 

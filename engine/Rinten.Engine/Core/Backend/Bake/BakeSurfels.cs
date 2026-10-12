@@ -58,6 +58,21 @@ internal sealed class BakeSurfels
 	public ushort[] ProbeLink = [];
 	public Half[] ProbeWeight = [];
 
+	/// <summary>Most links a block of the bounce sheet keeps - see Texels.</summary>
+	public const int TexelLinks = Links;
+
+	//Only blocks a surface owns have slots, and a ring round them so a filtered read at an island's edge reads no black
+	/// <summary>Each block of the bounce sheet's slot in the links, -1 for none.</summary>
+	public int[] TexelSlot = [];
+
+	//The live bounce at the lightmap's own detail, as Enlighten gathers its output pixels (CoreLiveBounce)
+	/// <summary>The clusters each slot's block sees over its face, by the cosine.</summary>
+	public ushort[] TexelLink = [];
+	public Half[] TexelWeight = [];
+
+	/// <summary>Each slot's surface and facing bin, which the bounce is smoothed within.</summary>
+	public int[] TexelKey = [];
+
 	private Vec3[] position = [], normal = [];
 	private float spacing;
 
@@ -206,6 +221,7 @@ internal sealed class BakeSurfels
 			var hits = 0;
 			var open = Vec3.Zero;
 			var escaped = 0;
+			var struck = 0;
 
 			//By the cosine, so each ray is worth the same share of what arrives
 			for ( var k = 0; k < Across * Across; ++k )
@@ -220,11 +236,13 @@ internal sealed class BakeSurfels
 					continue;
 				}
 
+				if ( Vec3.Dot( direction, scene.Facing[hit.Triangle] ) <= 0.0f ) struck++;
+
 				var landed = Landed( scene, from, direction, hit );
 				if ( landed >= 0 ) found[hits++] = landed;
 			}
 
-			Keep( found[..hits], Across * Across, Link, Weight, s * Links );
+			Keep( found[..hits], Across * Across, struck, Link, Weight, s * Links );
 
 			var way = open.LengthSquared() > 1e-8f ? Vec3.Normalize( open ) : face;
 			Put( ( s * Floats ) + 9, way );
@@ -287,12 +305,17 @@ internal sealed class BakeSurfels
 			Span<int> found = stackalloc int[Across * Across];
 			var hits = 0;
 			var inside = 0;
+			var missed = 0;
 
 			for ( var k = 0; k < Across * Across; ++k )
 			{
 				var direction = BakeMath.AnyDirection( ( ( k % Across ) + random.Float() ) / Across, ( ( k / Across ) + random.Float() ) / Across );
 
-				if ( !scene.Bvh.Nearest( at, direction, 1e6f, out var hit ) ) continue;
+				if ( !scene.Bvh.Nearest( at, direction, 1e6f, out var hit ) )
+				{
+					missed++;
+					continue;
+				}
 
 				if ( Vec3.Dot( direction, scene.Facing[hit.Triangle] ) > 0.0f )
 				{
@@ -304,7 +327,7 @@ internal sealed class BakeSurfels
 				if ( landed >= 0 ) found[hits++] = landed;
 			}
 
-			Keep( found[..hits], Across * Across, ProbeLink, ProbeWeight, index * Links );
+			Keep( found[..hits], Across * Across, Across * Across - inside - missed, ProbeLink, ProbeWeight, index * Links );
 
 			//As BakeVolume's: a point that saw mostly insides is in a wall, and takes a neighbour's
 			valid[index] = inside < Across * Across / 4;
@@ -313,6 +336,88 @@ internal sealed class BakeSurfels
 		} );
 
 		FillProbes( volume, valid );
+	}
+
+	/// <summary>Links each owned block to the clusters it sees, and the blocks round them to a neighbour's.</summary>
+	public void Texels( BakeScene scene, Vec3[] at, Vec3[] facing, int[] key, int width, int height, BakeProgress progress, CancellationToken cancel )
+	{
+		var count = width * height;
+
+		TexelSlot = new int[count];
+		Array.Fill( TexelSlot, -1 );
+
+		var owned = 0;
+		for ( var b = 0; b < count; ++b )
+			if ( facing[b] != Vec3.Zero ) TexelSlot[b] = owned++;
+
+		TexelLink = new ushort[owned * TexelLinks];
+		TexelWeight = new Half[owned * TexelLinks];
+		TexelKey = new int[owned];
+
+		for ( var b = 0; b < count; ++b )
+			if ( TexelSlot[b] >= 0 ) TexelKey[TexelSlot[b]] = key[b];
+
+		progress.Begin( "Linking the lightmap to the surfels", count );
+
+		Parallel.For( 0, count, new ParallelOptions { CancellationToken = cancel }, index =>
+		{
+			var slot = TexelSlot[index];
+
+			if ( slot < 0 )
+			{
+				progress.Step();
+				return;
+			}
+
+			var random = new BakeRandom( ( (ulong)index * 0x9E6C63D0676A9A99ul ) + 31, (ulong)index + 5 );
+
+			const int Across = 32;
+			var found = new int[Across * Across];
+			var hits = 0;
+			var struck = 0;
+
+			for ( var k = 0; k < Across * Across; ++k )
+			{
+				var direction = BakeMath.CosineAround( facing[index], ( ( k % Across ) + random.Float() ) / Across, ( ( k / Across ) + random.Float() ) / Across );
+
+				if ( !scene.Bvh.Nearest( at[index], direction, 1e6f, out var hit ) ) continue;
+				if ( Vec3.Dot( direction, scene.Facing[hit.Triangle] ) <= 0.0f ) struck++;
+
+				var landed = Landed( scene, at[index], direction, hit );
+				if ( landed >= 0 ) found[hits++] = landed;
+			}
+
+			Keep( found.AsSpan( 0, hits ), Across * Across, struck, TexelLink, TexelWeight, slot * TexelLinks, TexelLinks );
+
+			progress.Step();
+		} );
+
+		//Two rings round the owned blocks, each taking a neighbour's slot
+		for ( var ring = 0; ring < 2; ++ring )
+		{
+			var grown = (int[])TexelSlot.Clone();
+
+			for ( var y = 0; y < height; ++y )
+			{
+				for ( var x = 0; x < width; ++x )
+				{
+					var index = ( y * width ) + x;
+					if ( TexelSlot[index] >= 0 ) continue;
+
+					for ( var dy = -1; dy <= 1 && grown[index] < 0; ++dy )
+					for ( var dx = -1; dx <= 1 && grown[index] < 0; ++dx )
+					{
+						var xx = x + dx;
+						var yy = y + dy;
+						if ( xx < 0 || yy < 0 || xx >= width || yy >= height ) continue;
+
+						grown[index] = TexelSlot[( yy * width ) + xx];
+					}
+				}
+			}
+
+			TexelSlot = grown;
+		}
 	}
 
 	//The cluster of the surfel by where a ray landed, facing as the surface it landed on; -1 for a back or none near
@@ -348,8 +453,9 @@ internal sealed class BakeSurfels
 		return best < 0 ? -1 : Cluster[best];
 	}
 
-	//The most seen surfels of a view, each by its share of the rays; the share of those left out goes to the kept ones
-	private static void Keep( Span<int> found, int taken, ushort[] links, Half[] weights, int at )
+	//The most seen surfels of a view, each by its share of the rays; the share of those left out goes to the kept ones,
+	//as does that of rays that struck a front face with no surfel near to read - a small thing's light is its room's
+	private static void Keep( Span<int> found, int taken, int struck, ushort[] links, Half[] weights, int at, int most = Links )
 	{
 		if ( found.Length == 0 ) return;
 
@@ -367,12 +473,12 @@ internal sealed class BakeSurfels
 		var kept = runs[..count];
 		kept.Sort( static ( a, b ) => b.Rays.CompareTo( a.Rays ) );
 
-		var keep = Math.Min( count, Links );
+		var keep = Math.Min( count, most );
 		var rays = 0;
 
 		for ( var i = 0; i < keep; ++i ) rays += kept[i].Rays;
 
-		var scale = found.Length / (float)rays / taken;
+		var scale = Math.Max( struck, found.Length ) / (float)rays / taken;
 
 		for ( var i = 0; i < keep; ++i )
 		{

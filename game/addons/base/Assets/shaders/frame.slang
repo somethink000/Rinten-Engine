@@ -905,10 +905,23 @@ float ShadowSharp( uint map, float3 at, float compare, float2 slope )
 #endif
 }
 
-//The widest a shadow edge spreads each side, in the read map's texels, as far as ShadowEdge looks
-static const float ShadowSoftestTexels = 2.0;
+//The widest a shadow edge spreads each side, in the read map's texels - a lamp in a shade a metre from what it shades
+//over a blocker half way throws ten or twenty; ShadowEdge looks this far out, ShadowFilter spreads its taps as far
+static const float ShadowSoftestTexels = 16.0;
 
-//Five taps detect a shadow edge; when they agree, that's the final lit value and filtering is skipped
+//The near edge ShadowEdge checks first, and past which ShadowFilter turns from its grid to its spiral
+static const float ShadowNearTexels = 2.0;
+
+//A pixel's turn of the soft filter's spiral, from where it is on the screen (interleaved gradient noise, Jimenez 2014);
+//set by the shading before it reads shadows, nought where nothing set it
+static float g_shadowTurn = 0.0;
+
+void ShadowTurnAt( float2 screen )
+{
+	g_shadowTurn = 6.2831853 * frac( 52.9829189 * frac( dot( screen, float2( 0.06711056, 0.00583715 ) ) ) );
+}
+
+//Nine taps, near and far, detect a shadow edge; when they agree, that's the final lit value and filtering is skipped
 bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, out float lit )
 {
 #ifdef PORTABLE
@@ -916,23 +929,37 @@ bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, 
 	return false;
 #else
 	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
-	float reach = ShadowSoftestTexels;
 
-	float a = g_shadowMaps[map].SampleCmpLevelZero( at + float3( -reach * texel, -reach * texel, 0.0 ), compare - ( reach * ( slope.x + slope.y ) ) );
-	float b = g_shadowMaps[map].SampleCmpLevelZero( at + float3( reach * texel, -reach * texel, 0.0 ), compare + ( reach * ( slope.x - slope.y ) ) );
-	float c = g_shadowMaps[map].SampleCmpLevelZero( at + float3( -reach * texel, reach * texel, 0.0 ), compare + ( reach * ( slope.y - slope.x ) ) );
-	float d = g_shadowMaps[map].SampleCmpLevelZero( at + float3( reach * texel, reach * texel, 0.0 ), compare + ( reach * ( slope.x + slope.y ) ) );
+	float least = 1.0;
+	float most = 0.0;
+
+	[unroll]
+	for ( uint ring = 0u; ring < 2u; ++ring )
+	{
+		float reach = ring == 0u ? ShadowNearTexels : ShadowSoftestTexels * 0.75;
+
+		[unroll]
+		for ( uint k = 0u; k < 4u; ++k )
+		{
+			float2 o = float2( ( k & 1u ) != 0u ? reach : -reach, ( k & 2u ) != 0u ? reach : -reach );
+			float tap = g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+
+			least = min( least, tap );
+			most = max( most, tap );
+		}
+	}
+
 	float e = g_shadowMaps[map].SampleCmpLevelZero( at, compare );
-
-	float least = min( min( min( a, b ), min( c, d ) ), e );
-	float most = max( max( max( a, b ), max( c, d ) ), e );
+	least = min( least, e );
+	most = max( most, e );
 
 	lit = least;
 	return most - least >= 0.001;
 #endif
 }
 
-//PCSS blocker search: average occluder depth over 16 texels; negative when nothing blocks
+//PCSS blocker search: average occluder depth over nine gathers, a 3x3 spread half the softest edge wide, so a blocker
+//that throws a wide penumbra is found; negative when nothing blocks
 float ShadowBlocker( uint depthMap, float3 at, float compare, float texel, float2 slope )
 {
 #ifdef PORTABLE
@@ -941,11 +968,12 @@ float ShadowBlocker( uint depthMap, float3 at, float compare, float texel, float
 	float margin = 0.5 * ( abs( slope.x ) + abs( slope.y ) );
 	float sum = 0.0;
 	float found = 0.0;
+	float apart = ShadowSoftestTexels * 0.25;
 
 	[unroll]
-	for ( uint i = 0u; i < 4u; i++ )
+	for ( uint i = 0u; i < 9u; i++ )
 	{
-		float2 o = float2( ( i & 1u ) != 0u ? 1.0 : -1.0, ( i & 2u ) != 0u ? 1.0 : -1.0 );
+		float2 o = ( float2( float( i % 3u ), float( i / 3u ) ) - 1.0 ) * apart;
 		float4 d = g_depthMaps[depthMap].Gather( at + float3( o * texel, 0.0 ) );
 		float4 hit = step( d, ( compare + dot( o, slope ) - margin ).xxxx );
 
@@ -957,7 +985,8 @@ float ShadowBlocker( uint depthMap, float3 at, float compare, float texel, float
 #endif
 }
 
-//PCSS filter: 4x4 compared taps spread `soft` texels each side; under half a texel use ShadowSharp
+//PCSS filter `soft` texels each side: 4x4 compared taps on a grid up to ShadowNearTexels, past it 24 on a golden-angle
+//spiral turned by g_shadowTurn, as a stretched grid would band; under half a texel ShadowSharp
 float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slope, float soft )
 {
 #ifdef PORTABLE
@@ -966,6 +995,25 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 	if ( soft < 0.5 ) return ShadowSharp( map, at, compare, slope );
 
 	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
+
+	if ( soft > ShadowNearTexels )
+	{
+		static const uint Taps = 24u;
+		float spiral = 0.0;
+
+		[unroll]
+		for ( uint k = 0u; k < Taps; k++ )
+		{
+			//Evenly over the disc by area, each tap a golden angle round from the last
+			float r = soft * sqrt( ( float( k ) + 0.5 ) / float( Taps ) );
+			float a = ( float( k ) * 2.39996323 ) + g_shadowTurn;
+			float2 o = float2( cos( a ), sin( a ) ) * r;
+
+			spiral += g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+		}
+
+		return spiral / float( Taps );
+	}
 
 	//1-3-3-1 weights, so the outer taps fade into ShadowEdge's early answer; equal weights left a faint stair
 	static const float weights[4] = { 1.0, 3.0, 3.0, 1.0 };
@@ -1964,6 +2012,37 @@ float4 SheetFaces( uint picture, uint faces, float2 uv )
 	}
 
 	return total > 1e-5 ? sum / total : g_textures[picture].SampleLevel( uv, 0.0 );
+}
+
+//A sheet picture read bilinear over the four lightmap texels round a spot, each kept only where it lies on the pixel's
+//own face (as SheetFaces, at a quarter of its taps) - for what is smooth already, as the live bounce's sheet
+float3 SheetFacesLinear( uint picture, uint faces, float2 uv )
+{
+	float2 size;
+	g_textures[faces].GetDimensions( size.x, size.y );
+
+	float2 at = ( uv * size ) - 0.5;
+	float2 cell = floor( at );
+	float2 f = at - cell;
+
+	float own = g_textures[faces].SampleLevel( ( floor( uv * size ) + 0.5 ) / size, 0.0 ).a;
+
+	float3 sum = 0.0;
+	float total = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 4u; ++k )
+	{
+		float2 corner = float2( float( k & 1u ), float( k >> 1u ) );
+		float2 texel = ( cell + corner + 0.5 ) / size;
+		float2 w2 = lerp( 1.0 - f, f, corner );
+		float weight = w2.x * w2.y * ( abs( g_textures[faces].SampleLevel( texel, 0.0 ).a - own ) < ( 0.5 / 64.0 ) ? 1.0 : 0.0 );
+
+		sum += g_textures[picture].SampleLevel( texel, 0.0 ).rgb * weight;
+		total += weight;
+	}
+
+	return total > 1e-5 ? sum / total : g_textures[picture].SampleLevel( uv, 0.0 ).rgb;
 }
 
 //Baked lightmap diffuse at a normal: the light as the face took it, and - where the bake kept its first band - leaning

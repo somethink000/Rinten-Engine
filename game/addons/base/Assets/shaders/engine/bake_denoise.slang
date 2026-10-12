@@ -21,7 +21,7 @@
 //LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 //IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-//The light rgb, a texel of the square a float4
+//The light rgb and the variance of its mean in a, a texel of the square a float4
 [[vk::binding(0,0)]] StructuredBuffer<float4> g_light;
 
 //Albedo rgb, and one in a where the texel was pushed out of something (the unocclude mask)
@@ -50,8 +50,7 @@ cbuffer Push
 	float g_albedoBand;
 
 	float g_normalBand;
-	float g_strength;
-	uint g_pad0, g_pad1;
+	uint g_pad0, g_pad1, g_pad2;
 };
 
 //Half the patch compared around each texel: 3 is a 7x7
@@ -87,11 +86,9 @@ void main( uint3 id : SV_DispatchThreadID )
 	const int PatchArea = PatchSide * PatchSide;
 
 	float twoSpatial = 2.0 * g_spatial * g_spatial;
-	float twoLight = 2.0 * g_lightBand * g_lightBand;
+	float bandSquared = g_lightBand * g_lightBand;
 	float twoAlbedo = 2.0 * g_albedoBand * g_albedoBand;
 	float twoNormal = 2.0 * g_normalBand * g_normalBand;
-	float filter = g_strength * g_lightBand;
-	float filterTwoLight = filter * filter * twoLight;
 
 	float4 input = Light( at );
 	float3 inputAlbedo = Albedo( at ).rgb;
@@ -120,19 +117,25 @@ void main( uint3 id : SV_DispatchThreadID )
 				float4 searchAlbedo = Albedo( search );
 				float patch = 0.0;
 
+				//Rousselle et al.'s distance: the difference less what both texels' noise explains, over that noise - a
+				//blob the samples cannot tell from noise is smoothed, an edge the variance cannot explain stays
 				for ( int py = -HalfPatch; py <= HalfPatch; py++ )
 				{
 					for ( int px = -HalfPatch; px <= HalfPatch; px++ )
 					{
-						float3 delta = Light( at + int2( px, py ) ).rgb - Light( search + int2( px, py ) ).rgb;
-						patch += dot( delta, delta ) - twoLight;
+						float4 mine = Light( at + int2( px, py ) );
+						float4 theirs = Light( search + int2( px, py ) );
+						float3 delta = mine.rgb - theirs.rgb;
+
+						patch += ( ( dot( delta, delta ) / 3.0 ) - ( mine.a + min( mine.a, theirs.a ) ) )
+							/ ( 1e-4 + ( bandSquared * ( mine.a + theirs.a ) ) );
 					}
 				}
 
-				patch = max( 0.0, patch / ( 3.0 * float( PatchArea ) ) );
+				patch = max( 0.0, patch / float( PatchArea ) );
 
 				float weight = exp( -float( ( sx * sx ) + ( sy * sy ) ) / twoSpatial );
-				weight *= exp( -patch / filterTwoLight );
+				weight *= exp( -patch );
 
 				float3 albedoDelta = inputAlbedo - searchAlbedo.rgb;
 				weight *= exp( -dot( albedoDelta, albedoDelta ) / twoAlbedo );

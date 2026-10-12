@@ -64,6 +64,9 @@ internal static partial class CoreBakedLighting
 
 	private static readonly Dictionary<BakedLighting, Held> held = new();
 
+	//Lightmap texels a side of a block of the live bounce's sheet - see BakeSheet.BounceBlocks
+	internal const int BounceBlock = 4;
+
 	//The bake a scene reads, where it has one switched on.
 	private static BakedLighting Of( Scene scene )
 		=> scene?.LightingIfAny is { Enabled: true, HasBake: true } bake ? bake : null;
@@ -199,6 +202,9 @@ internal static partial class CoreBakedLighting
 				{
 					frame[at + 17] = CoreRender.TextureIndex( on.Bounce.Light );
 					frame[at + 18] = CoreRender.TextureIndex( on.Bounce.Lean );
+
+					//The sheet the worker lays; traced on the card, the bounce is in the volume alone
+					if ( on.Bounce.Sheet != 0 && !CoreLiveBounce.Rays ) frame[CoreSceneRenderer.BakedTexelsAt] = CoreRender.TextureIndex( on.Bounce.Sheet );
 				}
 			}
 		}
@@ -221,11 +227,11 @@ internal static partial class CoreBakedLighting
 	//What Write found for the frame being written, for InBake.
 	private static Held writing;
 
-	//Whether a light is all in the bake the frame being written reads, so the frame draws none of it; valid after Write
 	//The bake being written leaves its lights' direct light to the frame where there is no lightmap, and the
 	//lightmap loses only what movers shade - as UE's stationary lights
 	internal static bool Mixed => writing is { Mixed: true };
 
+	//Whether a light is all in the bake the frame being written reads, so the frame draws none of it; valid after Write
 	internal static bool InBake( Light light )
 		=> writing is { Old: false } && light is { NotBaked: false } && writing.Baked.Contains( light.Id );
 
@@ -411,6 +417,7 @@ internal static partial class CoreBakedLighting
 		Half[] sheetLight = null, sheetWays = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
 		byte[] sheetBand = null;
 		byte[] volumeWalls = null;
+		int bounceWidth = 0, bounceHeight = 0;
 
 		var groups = world.GlowGroups();
 		var glows = new List<BakedLightingData.Glow>();
@@ -426,7 +433,7 @@ internal static partial class CoreBakedLighting
 				sheet.Rasterise( world, sheetSide );
 
 				//On the card where it can - the same bake, see BakeGpu - and on every core where it cannot.
-				if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
+				if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
 					sheet.Trace( world, samples, progress, stop );
 
 				progress.Begin( "Filtering", 1 );
@@ -452,6 +459,13 @@ internal static partial class CoreBakedLighting
 			surfels.Trace( world, progress, stop );
 			surfels.Probes( world, volume, progress, stop );
 
+			//And each block of the lightmap, so the live bounce on a still surface is as fine as its lightmap's half
+			if ( sheet is not null )
+			{
+				sheet.BounceBlocks( BounceBlock, out bounceWidth, out bounceHeight, out var blockAt, out var blockFacing, out var blockKey );
+				surfels.Texels( world, blockAt, blockFacing, blockKey, bounceWidth, bounceHeight, progress, stop );
+			}
+
 			//Each glow group's light alone, on the same sheet and lattice - see BakedGlow
 			foreach ( var group in groups )
 			{
@@ -461,7 +475,7 @@ internal static partial class CoreBakedLighting
 
 				if ( sheet is not null )
 				{
-					if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
+					if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
 						sheet.Trace( world, samples, progress, stop );
 
 					progress.Begin( "Filtering", 1 );
@@ -530,6 +544,12 @@ internal static partial class CoreBakedLighting
 			SurfelWeights = surfels.Weight,
 			ProbeLinks = surfels.ProbeLink,
 			ProbeWeights = surfels.ProbeWeight,
+			BounceWidth = bounceWidth,
+			BounceHeight = bounceHeight,
+			TexelSlots = surfels.TexelSlot,
+			TexelKeys = surfels.TexelKey,
+			TexelLinks = surfels.TexelLink,
+			TexelWeights = surfels.TexelWeight,
 			Glows = glows,
 		};
 

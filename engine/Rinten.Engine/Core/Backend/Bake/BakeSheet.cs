@@ -46,6 +46,7 @@ internal sealed class BakeSheet
 	private System.Numerics.Vector4[] reach;
 	private float[] owned;        //Distance from the texel's centre to its triangle, in texels; +inf where none
 	private int[] ownerOf;        //Receiver whose square it is in, -1 where none
+	private int[] isle;           //Island of the unwrap the texel lies on, numbered across the sheet; -1 where none
 
 	//What each texel's surface reflects, for the denoiser to tell one material from another - see BakeDenoise
 	private Vec3[] albedo;
@@ -136,6 +137,7 @@ internal sealed class BakeSheet
 				if ( Shelve( receivers, size ) )
 				{
 					side = size;
+					scene.AtlasSide = size;
 					return true;
 				}
 			}
@@ -196,9 +198,13 @@ internal sealed class BakeSheet
 		albedo = new Vec3[count];
 		owned = new float[count];
 		ownerOf = new int[count];
+		isle = new int[count];
 
 		Array.Fill( owned, float.PositiveInfinity );
 		Array.Fill( ownerOf, -1 );
+		Array.Fill( isle, -1 );
+
+		var islands = 0;
 
 		for ( var r = 0; r < scene.Receivers.Count; ++r )
 		{
@@ -208,8 +214,10 @@ internal sealed class BakeSheet
 				for ( var x = receiver.X - Gutter; x < receiver.X + receiver.Side + Gutter; ++x )
 					if ( x >= 0 && y >= 0 && x < side && y < side ) ownerOf[( y * side ) + x] = r;
 
+			var islandOf = Islands( scene, receiver, ref islands );
+
 			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
-				Triangle( scene, receiver, t, side );
+				Triangle( scene, receiver, t, side, islandOf[t - receiver.FirstTriangle] );
 
 			for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
 				Covers( scene, receiver, t, side );
@@ -331,7 +339,54 @@ internal sealed class BakeSheet
 		return ( d1 >= -Slack && d2 >= -Slack && d3 >= -Slack ) || ( d1 <= Slack && d2 <= Slack && d3 <= Slack );
 	}
 
-	private void Triangle( BakeScene scene, BakeReceiver receiver, int t, int side )
+	//Each of the receiver's triangles' island: those that share a corner of the unwrap across a crease gentler than 60
+	//degrees are one, so a box unwrapped as a cross keeps its faces apart; numbered on from `next`
+	private static int[] Islands( BakeScene scene, BakeReceiver receiver, ref int next )
+	{
+		var count = receiver.TriangleCount;
+		var parent = new int[count];
+		for ( var i = 0; i < count; ++i ) parent[i] = i;
+
+		int Find( int i )
+		{
+			while ( parent[i] != i ) i = parent[i] = parent[parent[i]];
+			return i;
+		}
+
+		var corners = new Dictionary<(int, int), List<int>>();
+
+		for ( var i = 0; i < count; ++i )
+		{
+			var facing = scene.Facing[receiver.FirstTriangle + i];
+
+			for ( var k = 0; k < 3; ++k )
+			{
+				var uv = scene.Uv1[scene.Corners[( ( receiver.FirstTriangle + i ) * 3 ) + k]];
+				var spot = ( (int)MathF.Round( uv.X * 65536.0f ), (int)MathF.Round( uv.Y * 65536.0f ) );
+
+				if ( !corners.TryGetValue( spot, out var here ) ) corners[spot] = here = new List<int>();
+
+				foreach ( var other in here )
+					if ( Vec3.Dot( facing, scene.Facing[receiver.FirstTriangle + other] ) > 0.5f ) parent[Find( i )] = Find( other );
+
+				here.Add( i );
+			}
+		}
+
+		var numbered = new Dictionary<int, int>();
+		var island = new int[count];
+
+		for ( var i = 0; i < count; ++i )
+		{
+			var root = Find( i );
+			if ( !numbered.TryGetValue( root, out var number ) ) numbered[root] = number = next++;
+			island[i] = number;
+		}
+
+		return island;
+	}
+
+	private void Triangle( BakeScene scene, BakeReceiver receiver, int t, int side, int island )
 	{
 		var ia = scene.Corners[t * 3];
 		var ib = scene.Corners[( t * 3 ) + 1];
@@ -392,6 +447,7 @@ internal sealed class BakeSheet
 				var length = n.Length();
 				normal[at] = length > 1e-8f ? n / length : scene.Facing[t];
 				geometric[at] = scene.Facing[t];
+				isle[at] = island;
 				albedo[at] = scene.AlbedoAt( t, wb, wc );
 				across[at] = perX;
 				down[at] = perY;
@@ -399,8 +455,11 @@ internal sealed class BakeSheet
 		}
 	}
 
-	//Which way a texel's face looks, as one of 64 bins over the octahedron, over 64 - what the frame's filter keeps its
-	//taps to, so it does not reach into the face beside it where an unwrap packs faces edge to edge (SheetFaces)
+	//An island as one of 63 marks over 64 - what the frame's filter keeps its taps to (SheetFaces), so it blends across
+	//a curved model's triangles but not into the island packed beside it
+	private static float IslandKey( int island ) => ( ( island % 63 ) + 1 ) / 64.0f;
+
+	//Which way a texel's face looks, as one of 64 bins over the octahedron, over 64 - the mark where no island is known
 	private static float FaceOf( Vec3 facing )
 	{
 		var sum = MathF.Abs( facing.X ) + MathF.Abs( facing.Y ) + MathF.Abs( facing.Z );
@@ -514,15 +573,64 @@ internal sealed class BakeSheet
 	}
 
 	/// <summary>Traces every texel on the card (BakeGpu), leaving what Trace would; false where it could not.</summary>
-	public bool TraceOnCard( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
+	//A final gather as Lightmass's: a pass a bounce, each ray reading the last pass's filtered light where it lands,
+	//not a path that must find a room's few lit patches (lamps in shades) again at every step - which bakes spots
+	public bool TraceOnCard( BakeScene scene, int samples, float denoise, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = Width * Height;
 
 		var texels = new List<int>();
 		for ( var i = 0; i < count; ++i ) if ( !float.IsPositiveInfinity( owned[i] ) ) texels.Add( i );
 
-		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, progress, cancel, out var sums ) )
-			return false;
+		//Whole paths with no bounce to gather, or where the world was laid out for another sheet than this one
+		if ( scene.Bounces <= 0 || scene.AtlasSide != Width )
+		{
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, 0, null,
+				"Tracing the surfaces on the card", progress, cancel, out var whole ) ) return false;
+
+			Take( scene, texels, whole, samples );
+			return true;
+		}
+
+		//The passes before the last take a quarter of the samples: what they leave is filtered, then read by many rays
+		var early = Math.Max( samples / 4, 64 );
+		var cache = new float[count * 4];
+		Vec3[] lit = null;
+
+		for ( var pass = 0; pass < scene.Bounces; ++pass )
+		{
+			//The first finds every lamp's straight light and the sky; the rest, each a bounce more of light and sky
+			var mode = BakeGpu.ModeGather | BakeGpu.ModeSky | ( pass == 0 ? BakeGpu.ModeAllLights : BakeGpu.ModeNoDirect );
+
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, early, mode, cache,
+				$"Gathering bounce {pass + 1} of {scene.Bounces} on the card", progress, cancel, out var sums ) ) return false;
+
+			Take( scene, texels, sums, early );
+			Denoise( scene, denoise );
+			Dilate();
+
+			lit ??= (Vec3[])direct.Clone();
+
+			for ( var i = 0; i < count; ++i )
+			{
+				var l = Vec3.Max( lit[i] + light[i], Vec3.Zero );
+				cache[i * 4] = l.X;
+				cache[( i * 4 ) + 1] = l.Y;
+				cache[( i * 4 ) + 2] = l.Z;
+			}
+		}
+
+		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, BakeGpu.ModeGather, cache,
+			"Tracing the surfaces on the card", progress, cancel, out var last ) ) return false;
+
+		Take( scene, texels, last, samples );
+		return true;
+	}
+
+	//A pass's sums into the texels' light, straight light, bands, ways, noise and sky
+	private void Take( BakeScene scene, List<int> texels, float[] sums, int samples )
+	{
+		var count = Width * Height;
 
 		light = new Vec3[count];
 		direct = new Vec3[count];
@@ -544,7 +652,7 @@ internal sealed class BakeSheet
 			var squares = sums[o + 3];
 			var way = new Vec3( sums[o + 4], sums[o + 5], sums[o + 6] );
 			var weight = sums[o + 7];
-			var inside = (int)sums[o + 8];
+			var inside = (int)MathF.Round( sums[o + 8] );
 			var straight = new Vec3( sums[o + 9], sums[o + 10], sums[o + 11] );
 
 			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 16 + ( k * 4 )], sums[o + 17 + ( k * 4 )], sums[o + 18 + ( k * 4 )] );
@@ -552,8 +660,6 @@ internal sealed class BakeSheet
 			End( at, sum, straight, squares, way, weight, inside, samples, bands );
 			sky[at] = SkyOf( new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), Math.Max( samples - inside, 1 ), scene.SkyStrength );
 		}
-
-		return true;
 	}
 
 	/// <summary>Traces every texel, on every thread; <paramref name="progress"/> counts texels as they finish.</summary>
@@ -693,7 +799,7 @@ internal sealed class BakeSheet
 		if ( strength <= 0.0f ) return;
 
 		//Joint non-local means on the card, a square at a time; the filter below where it cannot
-		if ( DenoiseOnCard( scene ) ) return;
+		if ( DenoiseOnCard( scene, strength ) ) return;
 
 		var count = Width * Height;
 		var metres = new float[scene.Receivers.Count];
@@ -823,7 +929,7 @@ internal sealed class BakeSheet
 	}
 
 	//Each receiver's square with its gutter through BakeDenoise; false where the card would not take one
-	private bool DenoiseOnCard( BakeScene scene )
+	private bool DenoiseOnCard( BakeScene scene, float strength )
 	{
 		foreach ( var receiver in scene.Receivers )
 		{
@@ -836,6 +942,7 @@ internal sealed class BakeSheet
 			var partBands = new Vec3[w * h * 3];
 			var guide = new System.Numerics.Vector4[w * h];
 			var facing = new Vec3[w * h];
+			var spread = new float[w * h];
 
 			for ( var y = 0; y < h; ++y )
 				for ( var x = 0; x < w; ++x )
@@ -848,9 +955,10 @@ internal sealed class BakeSheet
 					for ( var c = 0; c < 3; ++c ) partBands[( i * 3 ) + c] = bounceBand[( at * 3 ) + c];
 					guide[i] = new System.Numerics.Vector4( albedo[at], valid[at] && !pushed[at] ? 0.0f : 1.0f );
 					facing[i] = mine ? normal[at] : Vec3.Zero;
+					spread[i] = variance[at];
 				}
 
-			if ( !BakeDenoise.Run( part, partBands, guide, facing, w, h, CancellationToken.None ) ) return false;
+			if ( !BakeDenoise.Run( part, partBands, guide, facing, spread, w, h, strength, CancellationToken.None ) ) return false;
 
 			for ( var y = 0; y < h; ++y )
 			{
@@ -901,6 +1009,7 @@ internal sealed class BakeSheet
 					//Only from the face it carries on: a box's faces sit side by side in its square, and a lit face's
 					//light filled into a dark one's border is a bright line down the edge once the frame filters it
 					var face = geometric[at];
+					var island = isle[at];
 
 					if ( face == Vec3.Zero )
 					{
@@ -911,7 +1020,11 @@ internal sealed class BakeSheet
 							if ( xx < 0 || yy < 0 || xx >= Width || yy >= Height ) continue;
 
 							var near = ( yy * Width ) + xx;
-							if ( known[near] && ownerOf[near] == ownerOf[at] ) face = geometric[near];
+							if ( known[near] && ownerOf[near] == ownerOf[at] )
+							{
+								face = geometric[near];
+								island = isle[near];
+							}
 						}
 					}
 
@@ -958,6 +1071,7 @@ internal sealed class BakeSheet
 					//Its normal from the same neighbours, for the directions below; its face for the next ring
 					if ( float.IsPositiveInfinity( owned[at] ) ) normal[at] = Vec3.Zero;
 					geometric[at] = face;
+					isle[at] = island;
 
 					grown[at] = true;
 					any = true;
@@ -986,7 +1100,7 @@ internal sealed class BakeSheet
 			Light[( i * 4 ) + 0] = (Half)Math.Min( l.X, 60000.0f );
 			Light[( i * 4 ) + 1] = (Half)Math.Min( l.Y, 60000.0f );
 			Light[( i * 4 ) + 2] = (Half)Math.Min( l.Z, 60000.0f );
-			Light[( i * 4 ) + 3] = (Half)( ownerOf[i] >= 0 ? FaceOf( geometric[i] ) : 0.0f );
+			Light[( i * 4 ) + 3] = (Half)( ownerOf[i] < 0 ? 0.0f : isle[i] >= 0 ? IslandKey( isle[i] ) : FaceOf( geometric[i] ) );
 
 			var way = towards[i];
 			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );
@@ -1008,6 +1122,51 @@ internal sealed class BakeSheet
 			Sky[( i * 4 ) + 1] = (Half)openWay.Y;
 			Sky[( i * 4 ) + 2] = (Half)openWay.Z;
 			Sky[( i * 4 ) + 3] = (Half)Math.Min( open.W, 60000.0f );
+		}
+	}
+
+	//Each block's owned texel nearest its middle, lifted off its face, and its island as its key - as the frame's sheet
+	/// <summary>Where the live bounce is gathered, a block of side texels each; none where no surface is.</summary>
+	public void BounceBlocks( int side, out int width, out int height, out Vec3[] at, out Vec3[] facing, out int[] key )
+	{
+		width = ( Width + side - 1 ) / side;
+		height = ( Height + side - 1 ) / side;
+		at = new Vec3[width * height];
+		facing = new Vec3[width * height];
+		key = new int[width * height];
+
+		for ( var by = 0; by < height; ++by )
+		{
+			for ( var bx = 0; bx < width; ++bx )
+			{
+				var best = -1;
+				var nearest = float.MaxValue;
+				var middle = ( side - 1 ) * 0.5f;
+
+				for ( var y = by * side; y < Math.Min( ( by + 1 ) * side, Height ); ++y )
+				{
+					for ( var x = bx * side; x < Math.Min( ( bx + 1 ) * side, Width ); ++x )
+					{
+						var texel = ( y * Width ) + x;
+						if ( float.IsPositiveInfinity( owned[texel] ) || geometric[texel] == Vec3.Zero ) continue;
+
+						var dx = x - ( bx * side ) - middle;
+						var dy = y - ( by * side ) - middle;
+						var apart = ( dx * dx ) + ( dy * dy );
+						if ( apart >= nearest ) continue;
+
+						nearest = apart;
+						best = texel;
+					}
+				}
+
+				if ( best < 0 ) continue;
+
+				var block = ( by * width ) + bx;
+				facing[block] = geometric[best];
+				key[block] = isle[best] >= 0 ? isle[best] : -1 - ( ( ownerOf[best] * 64 ) + (int)( FaceOf( geometric[best] ) * 64.0f ) );
+				at[block] = position[best] + ( geometric[best] * ( BakeScene.Lift * 4.0f ) );
+			}
 		}
 	}
 

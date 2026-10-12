@@ -31,42 +31,10 @@ internal sealed unsafe partial class ModelBuilder
 		public float PlacedX, PlacedY;
 	}
 
-	//Union-find over triangles, so connected ones end up in one island.
-	private sealed class Groups
-	{
-		private uint[] parent = Array.Empty<uint>();
-
-		public void Reset( int count )
-		{
-			if ( parent.Length < count ) parent = new uint[count];
-
-			for ( var i = 0; i < count; ++i ) parent[i] = (uint)i;
-		}
-
-		public uint Find( uint of )
-		{
-			while ( parent[of] != of )
-			{
-				parent[of] = parent[parent[of]];
-				of = parent[of];
-			}
-
-			return of;
-		}
-
-		public void Join( uint a, uint b )
-		{
-			a = Find( a );
-			b = Find( b );
-
-			if ( a != b ) parent[b] = a;
-		}
-	}
-
 	//Triangles past which an import keeps no sheet of its own - see GenerateLightmapUv
 	private const int MostLightmapTriangles = 65536;
 
-	//Normal dot threshold for joining triangles into one island (about 48 degrees)
+	//Normal dot for a triangle to join an island (about 48 degrees): to its neighbour and to the mean
 	private const float SameWay = 0.66f;
 
 	//The same direction at unit length, or +Z where there was none.
@@ -85,6 +53,13 @@ internal sealed unsafe partial class ModelBuilder
 			( a.x * b.y ) - ( a.y * b.x ) );
 
 	private static float DotOf( Vector3 a, Vector3 b ) => ( a.x * b.x ) + ( a.y * b.y ) + ( a.z * b.z );
+
+	//A face's normal times its area, never quite nought so a sliver still points somewhere
+	private static Vector3 Weighted( Face face )
+	{
+		var area = MathF.Max( face.Area, 1e-12f );
+		return new Vector3( face.Normal.x * area, face.Normal.y * area, face.Normal.z * area );
+	}
 
 	//A pair of vertices, in the order that makes an edge the same edge from either triangle.
 	private static ulong EdgeKey( uint a, uint b )
@@ -222,13 +197,16 @@ internal sealed unsafe partial class ModelBuilder
 
 		for ( var m = 0; m < meshes.Count; m++ ) ranges[m] = ( meshes[m].FirstVertex, meshes[m].VertexCount );
 
-		var groups = new Groups();
 		var edges = new Dictionary<ulong, uint>( EdgeHash.Instance );
 		var byRoot = new Dictionary<uint, uint>();
 		var order = new List<uint>();
 		var made = new Dictionary<ulong, uint>( EdgeHash.Instance );
 		var places = new Dictionary<(float, float, float), uint>();
 		var placeOf = Array.Empty<uint>();
+		var near = new List<List<uint>>();
+		var chartOf = new List<int>();
+		var bySize = new List<uint>();
+		var waiting = new Queue<uint>();
 
 		var flatIndices = CollectionsMarshal.AsSpan( indices );
 
@@ -299,7 +277,11 @@ internal sealed unsafe partial class ModelBuilder
 				placeOf[v] = place;
 			}
 
-			groups.Reset( faces.Count );
+			for ( var f = 0; f < faces.Count; ++f )
+			{
+				if ( f < near.Count ) near[f].Clear();
+				else near.Add( new List<uint>() );
+			}
 
 			edges.Clear();
 			edges.EnsureCapacity( faces.Count * 3 );
@@ -327,7 +309,47 @@ internal sealed unsafe partial class ModelBuilder
 						continue;
 					}
 
-					if ( DotOf( faces[(int)found].Normal, face.Normal ) >= SameWay ) groups.Join( found, at );
+					near[(int)found].Add( at );
+					near[(int)at].Add( found );
+				}
+			}
+
+			//Each island grows from its biggest face while a neighbour leans within the cone round the island's mean;
+			//neighbour to neighbour alone, a smooth pillow's front and back would join and flatten onto each other
+			chartOf.Clear();
+			bySize.Clear();
+
+			for ( var at = 0u; at < faces.Count; ++at )
+			{
+				chartOf.Add( -1 );
+				if ( faces[(int)at].Island >= 0 ) bySize.Add( at );
+			}
+
+			bySize.Sort( ( a, b ) => faces[(int)b].Area.CompareTo( faces[(int)a].Area ) );
+
+			foreach ( var seed in bySize )
+			{
+				if ( chartOf[(int)seed] >= 0 ) continue;
+
+				chartOf[(int)seed] = (int)seed;
+				var sum = Weighted( faces[(int)seed] );
+				waiting.Enqueue( seed );
+
+				while ( waiting.TryDequeue( out var at ) )
+				{
+					foreach ( var next in near[(int)at] )
+					{
+						var face = faces[(int)next];
+						if ( chartOf[(int)next] >= 0 || face.Island < 0 ) continue;
+
+						if ( DotOf( faces[(int)at].Normal, face.Normal ) < SameWay ) continue;
+						if ( DotOf( Normalised( sum ), face.Normal ) < SameWay ) continue;
+
+						chartOf[(int)next] = (int)seed;
+						var add = Weighted( face );
+						sum = new Vector3( sum.x + add.x, sum.y + add.y, sum.z + add.z );
+						waiting.Enqueue( next );
+					}
 				}
 			}
 
@@ -341,7 +363,7 @@ internal sealed unsafe partial class ModelBuilder
 
 				if ( face.Island < 0 ) continue;
 
-				var root = groups.Find( at );
+				var root = (uint)chartOf[(int)at];
 
 				if ( !byRoot.TryGetValue( root, out var which ) )
 				{

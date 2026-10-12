@@ -23,6 +23,13 @@ internal static class BakeGpu
 	//Samples a texel takes a dispatch.
 	private const int SamplesAtOnce = 4;
 
+	//The final gather's guide (bake_trace.slang's GuideTexels, GuideCells): texels sharing a grid, its cells, and the
+	//share of a texel's samples it learns from - within these bounds, and none below the least worth guiding
+	private const int GuideTexels = 8;
+	private const int GuideCells = 64;
+	private const int LeastLearning = 32;
+	private const int MostLearning = 256;
+
 	//Dispatches recorded a loop: enough to keep the card busy, few enough that the editor keeps drawing.
 	private const int DispatchesAtOnce = 4;
 
@@ -44,9 +51,17 @@ internal static class BakeGpu
 	private static readonly ulong[] pipelines = new ulong[2];
 	private static readonly int[] pipelineBuilt = { -1, -1 };
 
-	//Traces texels on the GPU into four float4 sums each; false means fall back to CPU. Blocks per step
+	//What a sheet pass's samples do - bake_trace.slang's Mode flags
+	internal const int ModeGather = 1;
+	internal const int ModeSky = 2;
+	internal const int ModeAllLights = 4;
+	internal const int ModeNoDirect = 8;
+
+	//Traces texels on the GPU into float4 sums; false means fall back to CPU. Blocks per step. Cache is the last pass's
+	//light over pi a texel of the sheet, four floats each, for a gathering mode to read
 	internal static bool Trace( BakeScene scene, Vec3[] position, Vec3[] normal, Vec3[] geometric, Vec3[] across, Vec3[] down,
-		System.Numerics.Vector4[] reach, List<int> texels, int samples, BakeProgress progress, CancellationToken cancel, out float[] sums )
+		System.Numerics.Vector4[] reach, List<int> texels, int samples, int mode, float[] cache, string stage, BakeProgress progress,
+		CancellationToken cancel, out float[] sums )
 	{
 		sums = null;
 
@@ -73,7 +88,7 @@ internal static class BakeGpu
 			inputs[o + 19] = reach[at].W;
 		}
 
-		return Run( scene, Kernel.Sheet, inputs, texels.Count, samples, 0, "Tracing the surfaces on the card", progress, cancel, out sums );
+		return Run( scene, Kernel.Sheet, inputs, texels.Count, samples, 0, mode, cache, stage, progress, cancel, out sums );
 	}
 
 	//Traces the volume's points, each direction of across x across strata once: five float4s of sums each - what
@@ -89,7 +104,7 @@ internal static class BakeGpu
 
 		for ( var i = 0; i < points.Length; ++i ) Put( inputs, i * 4, points[i] );
 
-		return Run( scene, Kernel.Probes, inputs, points.Length, across * across, across, "Tracing the volume on the card",
+		return Run( scene, Kernel.Probes, inputs, points.Length, across * across, across, 0, null, "Tracing the volume on the card",
 			progress, cancel, out sums );
 	}
 
@@ -98,8 +113,8 @@ internal static class BakeGpu
 	//The kernel's entry, and how many floats of sums an item has.
 	private static (string Entry, int Floats) Of( Kernel kernel ) => kernel == Kernel.Sheet ? ("main", SheetFloats) : ("ProbeCs", ProbeFloats);
 
-	private static bool Run( BakeScene scene, Kernel kernel, float[] inputs, int items, int samples, int across, string stage,
-		BakeProgress progress, CancellationToken cancel, out float[] sums )
+	private static bool Run( BakeScene scene, Kernel kernel, float[] inputs, int items, int samples, int across, int mode, float[] cache,
+		string stage, BakeProgress progress, CancellationToken cancel, out float[] sums )
 	{
 		sums = null;
 
@@ -117,9 +132,14 @@ internal static class BakeGpu
 
 		var (_, floats) = Of( kernel );
 
-		ulong worldBuffer = 0, inputBuffer = 0, sumBuffer = 0;
+		ulong worldBuffer = 0, inputBuffer = 0, sumBuffer = 0, cacheBuffer = 0, guideBuffer = 0;
 		ulong built = 0;
 		var made = false;
+
+		//The last gather learns from an eighth of its samples, ending on a dispatch's edge; the cache's passes, none
+		var learn = kernel == Kernel.Sheet && mode == ModeGather && samples >= LeastLearning * 4
+			? Math.Clamp( samples / 8, LeastLearning, MostLearning ) / SamplesAtOnce * SamplesAtOnce
+			: 0;
 
 		OnMain( () =>
 		{
@@ -129,8 +149,13 @@ internal static class BakeGpu
 			worldBuffer = CoreRenderDevice.CreateBuffer( MemoryMarshal.AsBytes( world.AsSpan() ) );
 			inputBuffer = CoreRenderDevice.CreateBuffer( MemoryMarshal.AsBytes( inputs.AsSpan() ) );
 			sumBuffer = CoreRenderDevice.CreateBuffer( new byte[items * floats * 4] );
+			cacheBuffer = kernel == Kernel.Sheet
+				? CoreRenderDevice.CreateBuffer( cache is { Length: > 0 } ? MemoryMarshal.AsBytes( cache.AsSpan() ) : new byte[16] )
+				: 0;
 
-			made = worldBuffer != 0 && inputBuffer != 0 && sumBuffer != 0;
+			guideBuffer = kernel == Kernel.Sheet ? CoreRenderDevice.CreateBuffer( new byte[( ( items / GuideTexels ) + 1 ) * GuideCells * 4] ) : 0;
+
+			made = worldBuffer != 0 && inputBuffer != 0 && sumBuffer != 0 && ( kernel != Kernel.Sheet || ( cacheBuffer != 0 && guideBuffer != 0 ) );
 		}, CancellationToken.None );
 
 		try
@@ -143,7 +168,8 @@ internal static class BakeGpu
 
 			//Every lamp is a shadow ray at every bounce, so a world of many has fewer items a dispatch
 			//- no dispatch should come near what a driver waits before it calls the card hung.
-			var atOnce = Math.Clamp( TexelsAtOnce / ( 1 + ( ( scene.Lights.Count + ( scene.Emitters.Length > 0 ? 1 : 0 ) ) / 4 ) ), 4096, TexelsAtOnce );
+			//On a multiple of a workgroup, so no guide's group of texels spans two dispatches
+			var atOnce = Math.Clamp( TexelsAtOnce / ( 1 + ( ( scene.Lights.Count + ( scene.Emitters.Length > 0 ? 1 : 0 ) ) / 4 ) ), 4096, TexelsAtOnce ) / 64 * 64;
 			var chunks = ( items + atOnce - 1 ) / atOnce;
 			var passes = ( samples + SamplesAtOnce - 1 ) / SamplesAtOnce;
 			var jobs = new List<(int First, int Count, int Base, int Samples)>( chunks * passes );
@@ -192,10 +218,12 @@ internal static class BakeGpu
 							push[3] = (uint)job.Base;
 							push[4] = seed;
 							push[5] = (uint)across;
+							push[6] = (uint)mode;
+							push[7] = (uint)learn;
 
-							Span<ulong> buffers = stackalloc ulong[3] { worldBuffer, inputBuffer, sumBuffer };
+							Span<ulong> buffers = stackalloc ulong[5] { worldBuffer, inputBuffer, sumBuffer, cacheBuffer, guideBuffer };
 
-							ok = CoreRenderDevice.Dispatch( built, buffers, ( job.Count + 63 ) / 64, 1, 1,
+							ok = CoreRenderDevice.Dispatch( built, kernel == Kernel.Sheet ? buffers : buffers[..3], ( job.Count + 63 ) / 64, 1, 1,
 								MemoryMarshal.AsBytes( push ) );
 						}
 					}
@@ -254,6 +282,8 @@ internal static class BakeGpu
 				if ( worldBuffer != 0 ) CoreRenderDevice.DestroyBuffer( worldBuffer );
 				if ( inputBuffer != 0 ) CoreRenderDevice.DestroyBuffer( inputBuffer );
 				if ( sumBuffer != 0 ) CoreRenderDevice.DestroyBuffer( sumBuffer );
+				if ( cacheBuffer != 0 ) CoreRenderDevice.DestroyBuffer( cacheBuffer );
+				if ( guideBuffer != 0 ) CoreRenderDevice.DestroyBuffer( guideBuffer );
 			}, CancellationToken.None, wait: false );
 		}
 	}
@@ -306,16 +336,16 @@ internal static class BakeGpu
 	//-- the world, in words - see bake_trace.slang's header ----------------------
 
 	//The last world packed, for the volume after the sheet: the same scene in the same pass is the same words
-	private sealed record PackedWorld( int Pass, uint[] Words );
+	private sealed record PackedWorld( int Pass, int Side, uint[] Words );
 
 	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BakeScene, PackedWorld> packed = new();
 
 	private static uint[] Packed( BakeScene scene )
 	{
-		if ( packed.TryGetValue( scene, out var held ) && held.Pass == scene.Pass ) return held.Words;
+		if ( packed.TryGetValue( scene, out var held ) && held.Pass == scene.Pass && held.Side == scene.AtlasSide ) return held.Words;
 
 		var words = Pack( scene );
-		packed.AddOrUpdate( scene, new PackedWorld( scene.Pass, words ) );
+		packed.AddOrUpdate( scene, new PackedWorld( scene.Pass, scene.AtlasSide, words ) );
 
 		return words;
 	}
@@ -365,7 +395,9 @@ internal static class BakeGpu
 		var emittersAt = skyAt + ( SkySide * SkySide * 3 );
 		var glowAt = emittersAt + ( scene.Emitters.Length * EmitterWords );
 		var groupsAt = glowAt + ( scene.Emitters.Length > 0 ? triangles : 0 );
-		var total = groupsAt + ( grouped ? triangles : 0 );
+		var atlasAt = groupsAt + ( grouped ? triangles : 0 );
+		var atlas = scene.AtlasSide > 0 && scene.Receivers.Count > 0;
+		var total = atlasAt + ( atlas ? vertices * 2 : 0 );
 
 		var w = new uint[total];
 
@@ -392,6 +424,29 @@ internal static class BakeGpu
 		w[20] = (uint)glowAt;
 		w[21] = (uint)scene.Pass;
 		w[22] = grouped ? (uint)groupsAt : 0u;
+		w[23] = atlas ? (uint)atlasAt : 0u;
+		w[24] = (uint)scene.AtlasSide;
+
+		//Each vertex's spot on the sheet, for a gathering ray to read the last pass's light at; off it, negative
+		if ( atlas )
+		{
+			w.AsSpan( atlasAt, vertices * 2 ).Fill( F( -1.0f ) );
+
+			foreach ( var receiver in scene.Receivers )
+			{
+				for ( var t = receiver.FirstTriangle; t < receiver.FirstTriangle + receiver.TriangleCount; ++t )
+				{
+					for ( var k = 0; k < 3; ++k )
+					{
+						var v = scene.Corners[( t * 3 ) + k];
+						var uv = System.Numerics.Vector2.Clamp( scene.Uv1[v], System.Numerics.Vector2.Zero, System.Numerics.Vector2.One );
+
+						w[atlasAt + ( v * 2 )] = F( ( ( uv.X * receiver.Side ) + receiver.X ) / scene.AtlasSide );
+						w[atlasAt + ( v * 2 ) + 1] = F( ( ( uv.Y * receiver.Side ) + receiver.Y ) / scene.AtlasSide );
+					}
+				}
+			}
+		}
 
 		if ( grouped )
 			for ( var t = 0; t < triangles; ++t ) w[groupsAt + t] = (uint)scene.GroupOf[t];

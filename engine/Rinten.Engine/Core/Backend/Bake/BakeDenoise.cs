@@ -9,13 +9,13 @@ namespace Rinten.Bake;
 //sheet at a time, in regions small enough that no dispatch comes near what a driver calls hung
 internal static class BakeDenoise
 {
-	//Half the search window, and the bandwidths of each guide
+	//Half the search window, and the bandwidths of each guide; the light's is in its noise's standard deviations at
+	//the default strength of three - twice Rousselle's, as a lightmap's bounce is smooth over far more than a pixel's
 	private const int HalfSearch = 10;
 	private const float Spatial = 5.0f;
-	private const float LightBand = 0.1f;
+	private const float LightBand = 0.9f;
 	private const float AlbedoBand = 1.0f;
 	private const float NormalBand = 0.1f;
-	private const float Strength = 10.0f;
 
 	//Texels a side a dispatch takes
 	private const int Region = 64;
@@ -23,9 +23,10 @@ internal static class BakeDenoise
 	private static ulong pipeline;
 	private static int pipelineBuilt = -1;
 
-	//Denoises one square of light in place, width by height; albedo's w is one where a texel was inside something, and a
-	//normal of nought marks a texel no surface owns. False where the card would not, which leaves it as it was
-	internal static bool Run( Vec3[] light, Vec3[] bands, Vec4[] albedo, Vec3[] normal, int width, int height, CancellationToken cancel )
+	//Denoises one square of light in place, width by height; albedo's w is one where a texel was inside something, a
+	//normal of nought marks a texel no surface owns, variance is each texel's mean's. False where the card would not
+	internal static bool Run( Vec3[] light, Vec3[] bands, Vec4[] albedo, Vec3[] normal, float[] variance, int width, int height,
+		float strength, CancellationToken cancel )
 	{
 		var count = width * height;
 		if ( count == 0 || !BakeGpu.Available ) return false;
@@ -54,7 +55,7 @@ internal static class BakeDenoise
 
 		for ( var i = 0; i < count; ++i )
 		{
-			lightIn[i] = new Vec4( light[i] * scale, 1.0f );
+			lightIn[i] = new Vec4( light[i] * scale, variance[i] * scale * scale );
 			albedoIn[i] = albedo[i];
 			normalIn[i] = new Vec4( normal[i], 0.0f );
 		}
@@ -103,10 +104,10 @@ internal static class BakeDenoise
 							push[3] = (uint)ry;
 							push[4] = HalfSearch;
 							push[5] = BitConverter.SingleToUInt32Bits( Spatial );
-							push[6] = BitConverter.SingleToUInt32Bits( LightBand );
+							push[6] = BitConverter.SingleToUInt32Bits( LightBand * strength / 3.0f );
 							push[7] = BitConverter.SingleToUInt32Bits( AlbedoBand );
 							push[8] = BitConverter.SingleToUInt32Bits( NormalBand );
-							push[9] = BitConverter.SingleToUInt32Bits( Strength );
+							push[9] = 0;
 							push[10] = 0;
 							push[11] = 0;
 

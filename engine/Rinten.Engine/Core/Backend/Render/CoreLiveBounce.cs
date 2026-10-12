@@ -38,6 +38,9 @@ internal sealed partial class CoreLiveBounce
 	private readonly int[] clusterOf, members;
 	private readonly Vec3[] middle, glow;
 
+	//Blocks either side a bounce sheet block is smoothed over - see SheetOf
+	private const int SmoothReach = 2;
+
 	//Most rounds of bouncing a solve takes, each one bounce more; it stops sooner once a round changes little
 	private const int MostRounds = 12;
 	private bool told;
@@ -45,7 +48,7 @@ internal sealed partial class CoreLiveBounce
 	//Which way the last update went - see Tick
 	private bool traced;
 
-	private Task<(Half[] Light, Half[] Lean)> solving;
+	private Task<(Half[] Light, Half[] Lean, Half[] Sheet)> solving;
 	private long looked;
 
 	//What the last solve was for, and a reading to fill next that no solve holds
@@ -55,6 +58,9 @@ internal sealed partial class CoreLiveBounce
 
 	/// <summary>The bounce volume's two pictures - colour, then its lean - nought until the first solve lands.</summary>
 	public ulong Light, Lean;
+
+	/// <summary>The bounce at the lightmap's detail, a block a texel; nought without links or before a solve.</summary>
+	public ulong Sheet;
 
 	public CoreLiveBounce( BakedLightingData data )
 	{
@@ -258,7 +264,7 @@ internal sealed partial class CoreLiveBounce
 		shade = new Vec3( emitted.r, emitted.g, emitted.b );
 	}
 
-	private (Half[] Light, Half[] Lean) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining )
+	private (Half[] Light, Half[] Lean, Half[] Sheet) Solve( BakeSky with, Vec3 way, Vec3 shade, List<Lamp> shining )
 	{
 		//Links each keeps, as the bake that made them laid them out - see BakeSurfels.Links
 		var surfelLinks = surfels > 0 ? data.SurfelLinks.Length / surfels : 0;
@@ -354,7 +360,82 @@ internal sealed partial class CoreLiveBounce
 			lean[( p * 4 ) + 2] = (Half)tilt.Z;
 		} );
 
-		return (light, lean);
+		return (light, lean, SheetOf());
+	}
+
+	//Each block's bounce over pi from the clusters it sees, then smoothed over its neighbours on the same surface and
+	//facing - a block's gather is a few hundred rays' worth, filtered as the lightmap's own light is (BakeDenoise)
+	private Half[] SheetOf()
+	{
+		if ( !data.HasTexelBounce ) return null;
+
+		var width = data.BounceWidth;
+		var height = data.BounceHeight;
+		var slots = data.TexelKeys.Length;
+		var links = BakeSurfels.TexelLinks;
+
+		var gathered = new Vec3[slots];
+
+		Parallel.For( 0, slots, slot =>
+		{
+			var sum = Vec3.Zero;
+			var at = slot * links;
+
+			for ( var k = 0; k < links; ++k )
+			{
+				var weight = (float)data.TexelWeights[at + k];
+				if ( weight <= 0.0f ) break;
+
+				sum += glow[data.TexelLinks[at + k]] * weight;
+			}
+
+			gathered[slot] = sum;
+		} );
+
+		var sheet = new Half[width * height * 4];
+
+		Parallel.For( 0, height, y =>
+		{
+			for ( var x = 0; x < width; ++x )
+			{
+				var block = ( y * width ) + x;
+				var slot = data.TexelSlots[block];
+				if ( slot < 0 ) continue;
+
+				var key = data.TexelKeys[slot];
+				var sum = Vec3.Zero;
+				var weight = 0.0f;
+
+				for ( var dy = -SmoothReach; dy <= SmoothReach; ++dy )
+				{
+					var yy = y + dy;
+					if ( yy < 0 || yy >= height ) continue;
+
+					for ( var dx = -SmoothReach; dx <= SmoothReach; ++dx )
+					{
+						var xx = x + dx;
+						if ( xx < 0 || xx >= width ) continue;
+
+						var other = data.TexelSlots[( yy * width ) + xx];
+						if ( other < 0 || data.TexelKeys[other] != key ) continue;
+
+						//Nearer counts more, a tent over the reach
+						var w = ( SmoothReach + 1 - Math.Abs( dx ) ) * ( SmoothReach + 1 - Math.Abs( dy ) );
+						sum += gathered[other] * w;
+						weight += w;
+					}
+				}
+
+				var light = weight > 0.0f ? sum / weight : gathered[slot];
+
+				sheet[( block * 4 ) + 0] = (Half)MathF.Min( light.X, 60000.0f );
+				sheet[( block * 4 ) + 1] = (Half)MathF.Min( light.Y, 60000.0f );
+				sheet[( block * 4 ) + 2] = (Half)MathF.Min( light.Z, 60000.0f );
+				sheet[( block * 4 ) + 3] = (Half)1.0f;
+			}
+		} );
+
+		return sheet;
 	}
 
 	//One lamp's light on a surfel over pi, as BakeScene.DirectOne without its shape, shadowed by the free distances
@@ -471,7 +552,7 @@ internal sealed partial class CoreLiveBounce
 	public int Landed { get; private set; }
 
 	//Into the two pictures in place, made the first time
-	private void Upload( (Half[] Light, Half[] Lean) solved )
+	private void Upload( (Half[] Light, Half[] Lean, Half[] Sheet) solved )
 	{
 		Solved = solved.Light;
 		Landed++;
@@ -481,18 +562,22 @@ internal sealed partial class CoreLiveBounce
 		var across = data.VolumeX * data.VolumeY;
 		var down = data.VolumeZ;
 
-		if ( Light == 0 || Lean == 0 )
+		if ( Light == 0 || Lean == 0 || ( solved.Sheet is not null && Sheet == 0 ) )
 		{
 			Release();
 			Light = CoreRenderDevice.CreateTextureHalf( solved.Light, across, down );
 			Lean = CoreRenderDevice.CreateTextureHalf( solved.Lean, across, down );
+
+			if ( solved.Sheet is not null ) Sheet = CoreRenderDevice.CreateTextureHalf( solved.Sheet, data.BounceWidth, data.BounceHeight );
 			return;
 		}
 
 		var stride = across * 8;
 
 		if ( !CoreRenderDevice.WriteTextureLevel( Light, 0, 0, 0, across, down, MemoryMarshal.AsBytes( solved.Light.AsSpan() ), stride )
-			|| !CoreRenderDevice.WriteTextureLevel( Lean, 0, 0, 0, across, down, MemoryMarshal.AsBytes( solved.Lean.AsSpan() ), stride ) )
+			|| !CoreRenderDevice.WriteTextureLevel( Lean, 0, 0, 0, across, down, MemoryMarshal.AsBytes( solved.Lean.AsSpan() ), stride )
+			|| ( solved.Sheet is not null && !CoreRenderDevice.WriteTextureLevel( Sheet, 0, 0, 0, data.BounceWidth, data.BounceHeight,
+				MemoryMarshal.AsBytes( solved.Sheet.AsSpan() ), data.BounceWidth * 8 ) ) )
 		{
 			//Made again by the next solve, which forgetting this one's light starts
 			Release();
@@ -507,7 +592,8 @@ internal sealed partial class CoreLiveBounce
 
 		if ( Light != 0 ) CoreRenderDevice.DestroyTexture( Light );
 		if ( Lean != 0 ) CoreRenderDevice.DestroyTexture( Lean );
+		if ( Sheet != 0 ) CoreRenderDevice.DestroyTexture( Sheet );
 
-		Light = Lean = 0;
+		Light = Lean = Sheet = 0;
 	}
 }

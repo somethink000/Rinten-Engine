@@ -40,7 +40,8 @@ internal static class CoreRayLight
 	/// <summary>Hangs the trace on a camera's stages; nothing where rays are off.</summary>
 	internal static void Build( CameraComponent camera )
 	{
-		if ( !On || !camera.IsValid() ) return;
+		//A scene with no bake takes its light from the probe grid, which keeps nothing of the screen
+		if ( !On || !camera.IsValid() || CoreProbeGrid.Takes( camera.Scene ) ) return;
 
 		var mine = kept.GetValue( camera, static _ => new Kept() );
 

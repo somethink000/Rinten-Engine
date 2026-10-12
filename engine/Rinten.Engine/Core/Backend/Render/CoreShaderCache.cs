@@ -39,7 +39,7 @@ internal static class CoreShaderCache
 	//Every key this run asked for - what a bake writes, so words nothing asks for drop out of the file
 	private static readonly HashSet<string> touched = new( StringComparer.Ordinal );
 
-	//The keys the baked file held when it was read: the engine's own, as the build baked them, apart from what this machine compiled beneath them.
+	//The keys in the baked file as read: the engine's own as the build baked them, not what this machine compiled
 	private static HashSet<string> baked = new( StringComparer.Ordinal );
 
 	//Every key asked for since Record, for WriteForGame. Null while nobody is recording.
@@ -59,7 +59,7 @@ internal static class CoreShaderCache
 	//The language a stage is wanted in when not said: a bake's, else what this device takes
 	internal static CoreShaderCompiler.Format Target => Baking ?? CoreRender.ShaderFormat;
 
-	//A shader file was edited, or a project that may carry its own was mounted: what the includes resolve to may be different now.
+	//A shader file was edited, or a project that may carry its own was mounted: the includes may resolve elsewhere
 	internal static void Changed()
 	{
 		CoreShaderFile.ForgetIncludes();
@@ -119,8 +119,7 @@ internal static class CoreShaderCache
 
 		try
 		{
-			//Through the seal: a shipped build's shaders are sealed like the rest of its content, and read as they are the text a key is made
-			//of is nothing like the text it was baked from - so every pass missed its own words and a game drew nothing. See SealedFile.
+			//Through the seal: a shipped build's shaders are sealed, and the sealed bytes are not the text a key is made of
 			text = CompiledFile.TextOf( path );
 		}
 		catch ( IOException e )
@@ -237,8 +236,7 @@ internal static class CoreShaderCache
 
 		var words = CoreRenderDevice.CompileShaderSource( source, directory, entry, stage, format );
 
-		//A stage that will not compile said nothing at all: the caller reads a null, gives up on whatever it was for - a cluster
-		//pass, a depth build - and the frame draws differently for a reason nobody can see. The compiler's own words, once per entry.
+		//The compiler's own words, once per entry: a caller only sees a null and the frame silently draws differently
 		if ( words is null && Once( "broken " + ( name ?? "" ) + "|" + entry ) )
 			log.Warning( $"{name ?? entry}: {entry} would not compile - {CoreRenderDevice.ShaderError}" );
 
@@ -947,6 +945,7 @@ internal static class EngineShaders
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
 	internal const string BakeDenoise = "shaders/engine/bake_denoise.slang";
 	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
+	internal const string RayGrid = "shaders/engine/ray_grid.slang";
 	internal const string SkyLight = "shaders/engine/sky_light.slang";
 
 	//UI shader for world-space panels; reads the frame block so stereo passes get each eye's view
@@ -1036,6 +1035,8 @@ internal static class EngineShaders
 		( BakeDenoise, "", Runs, false ),
 		//The probes' bounce through hardware rays - see CoreLiveBounce. Built everywhere, run where the card has rays.
 		( RayBounce, "", Runs, false ),
+		//The probe grid of a scene with no bake - see CoreProbeGrid
+		( RayGrid, "", Runs, false ),
 		//The sky light's filters - see CoreSkyLight. Full frame only: they draw into pictures
 		( SkyLight, "", SkyLightDraws, false ),
 	];

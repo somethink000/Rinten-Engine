@@ -719,11 +719,22 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//And the scene's own ambient light over both, as much as it asks - see SceneAmbient.
 	sky = SceneAmbient( sky );
 
+	//With no bake, the probe grid's light where it reaches: the sky as it gets in and every bounce, in place of the
+	//sky alone - its sky has the scene's ambient in it already (BakeSky)
+	float3 openSky = sky;
+	bool inGrid = false;
+
+#ifndef PORTABLE
+	float3 gridded;
+	inGrid = HasGrid() && GridLight( s.world, skyward, geometric, gridded );
+	if ( inGrid ) sky = gridded;
+#endif
+
 	//With a bake, its answer replaces the sky and AO guess rather than adding to it
 	float3 ambientSky = sky;
 
 	//How much of the sky the reflection sees, so indoor floors don't mirror the full sky
-	float skyReach = 1.0;
+	float skyReach = inGrid ? saturate( LightStrength( sky ) / max( LightStrength( openSky ), 1e-4 ) ) : 1.0;
 
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )

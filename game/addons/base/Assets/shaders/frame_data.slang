@@ -57,7 +57,7 @@ struct FrameData
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
 	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
-	float4 bakedMore;    //Walls' picture x, the live bounce's colour y and lean z, the sheet's first band w (nought for none)
+	float4 bakedMore;    //Walls' picture x, live bounce colour y and lean z, the sheet's first band w (nought for none)
 	float4 bakedGlow[4]; //Glow layers: sheet's index x, volume's y, group brightness z (BakedGlow); nought for none
 
 	//How many of the four probes are filled is x; nothing after it matters when zero
@@ -135,6 +135,10 @@ struct FrameData
 	//The scene's ray structure's address in 24-bit parts xy and its top 16 bits w, its instances' colours picture z;
 	//nought for none
 	float4 rays;
+
+	//The probe grid of a scene with no bake (CoreProbeGrid): its four pictures' table indices, nought for none; the
+	//cascades and probes along x, y and z; each cascade's first cell xyz and step w - see GridLight
+	float4 grid[4];
 };
 
 #ifdef WEBGL

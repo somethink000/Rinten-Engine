@@ -843,7 +843,10 @@ internal static unsafe class CoreSceneRenderer
 	//The scene's ray structure and its records' picture - see CoreRays.Lay.
 	internal const int RaysAt = ScreenLightAt + 4;
 
-	internal const int FrameFloats = RaysAt + 4;
+	//The probe grid of a scene with no bake: its pictures, counts and cascades - see CoreProbeGrid.Lay.
+	internal const int GridAt = RaysAt + 4;
+
+	internal const int FrameFloats = GridAt + 16;
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]

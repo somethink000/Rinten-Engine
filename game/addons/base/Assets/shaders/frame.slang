@@ -2131,6 +2131,99 @@ bool HasBakedBounce()
 	return g_frame[0].bakedMore.y > 0.5;
 }
 
+//Whether the frame has the probe grid of a scene with no bake - see CoreProbeGrid
+bool HasGrid()
+{
+	return g_frame[0].grid[0].x > 0.5;
+}
+
+//One probe's four texels: colour, lean, the way to walls along +x -x +y -y, and along +z -z with the inside share
+void GridProbe( int2 texel, out float3 colour, out float3 lean, out float4 walls, out float3 more )
+{
+	//All frame-uniform - see SkyTableAt.
+	colour = g_textures[uint( g_frame[0].grid[0].x )].Load( int3( texel, 0 ) ).rgb;
+	lean = g_textures[uint( g_frame[0].grid[0].y )].Load( int3( texel, 0 ) ).xyz;
+	walls = g_textures[uint( g_frame[0].grid[0].z )].Load( int3( texel, 0 ) );
+	more = g_textures[uint( g_frame[0].grid[0].w )].Load( int3( texel, 0 ) ).xyz;
+}
+
+//The grid's light on a surface facing normal, over pi: the finest cascade's eight nearest probes, each as much as it is in
+//front of the surface and sees the point past the walls it found - DDGI's weights. False past every cascade
+bool GridLight( float3 world, float3 normal, float3 geometric, out float3 light )
+{
+	light = 0.0;
+
+	float cascades = g_frame[0].grid[1].x;
+	int3 counts = int3( g_frame[0].grid[1].yzw );
+
+	for ( uint c = 0u; c < uint( cascades ); ++c )
+	{
+		float4 place = g_frame[0].grid[2u + c];
+		float step = place.w;
+
+		//Off the surface a little, so it is not shaded by the probes just behind it
+		float3 at = world + ( geometric * ( step * 0.2 ) );
+		float3 local = ( at / step ) - place.xyz;
+
+		if ( any( local < 0.5 ) || any( local > float3( counts ) - 1.5 ) ) continue;
+
+		int3 low = int3( floor( local ) );
+		float3 f = local - float3( low );
+		int3 first = int3( place.xyz );
+
+		float3 sum = 0.0;
+		float total = 0.0;
+		float3 plain = 0.0;
+
+		[unroll]
+		for ( uint k = 0u; k < 8u; ++k )
+		{
+			int3 corner = low + int3( k & 1u, ( k >> 1u ) & 1u, ( k >> 2u ) & 1u );
+			float3 w3 = lerp( 1.0 - f, f, float3( corner - low ) );
+			float trilinear = w3.x * w3.y * w3.z;
+
+			int3 cell = first + corner;
+			int3 slot = ( ( cell % counts ) + counts ) % counts;
+			int2 texel = int2( slot.x + ( counts.x * slot.y ), slot.z + ( counts.z * int( c ) ) );
+
+			float3 colour, lean, more;
+			float4 walls;
+			GridProbe( texel, colour, lean, walls, more );
+
+			float3 lit = colour * max( 1.0 + dot( lean, normal ), 0.0 );
+			plain += lit * trilinear;
+
+			//Inside something: it saw the back of a wall more than a quarter of the way round
+			if ( more.z > 0.25 ) continue;
+
+			float3 toProbe = ( float3( cell ) * step ) - at;
+			float apart = max( length( toProbe ), 1e-4 );
+			float3 way = toProbe / apart;
+
+			//In front of the surface counts, behind it a little - DDGI's smooth backface weight
+			float facing = ( dot( way, normal ) + 1.0 ) * 0.5;
+			float weight = ( facing * facing ) + 0.2;
+
+			//How far the probe saw towards this point, from the walls it found along the axes leaning that way
+			float3 from = -way;
+			float3 w = from * from;
+			float reach = ( w.x * ( from.x >= 0.0 ? walls.x : walls.y ) ) + ( w.y * ( from.y >= 0.0 ? walls.z : walls.w ) )
+				+ ( w.z * ( from.z >= 0.0 ? more.x : more.y ) );
+
+			if ( apart > reach ) weight *= pow( saturate( reach / apart ), 8.0 );
+
+			weight = max( weight, 1e-4 ) * trilinear;
+			sum += lit * weight;
+			total += weight;
+		}
+
+		light = total > 1e-3 ? sum / total : plain;
+		return true;
+	}
+
+	return false;
+}
+
 //That bounce at a spot on a surface facing normal: its colour, times one plus its lean onto the normal
 float3 BakedBounce( float3 at, float3 normal )
 {

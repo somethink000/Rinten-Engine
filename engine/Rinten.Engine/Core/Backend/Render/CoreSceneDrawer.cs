@@ -1674,6 +1674,9 @@ internal sealed partial class CoreSceneDrawer
 	//World picture handle the materials were built against; a change means they're stale (e.g. resize)
 	private ulong postBuiltFrom;
 
+	//The light of a scene with no bake, traced about this view's camera where rays are on - see CoreProbeGrid
+	private readonly CoreProbeGrid probeGrid = new();
+
 	//Screen exposure: a fixed number now, no auto-exposure
 	private float exposure = Rinten.Rendering.DrawSettings.Exposure;
 
@@ -2028,6 +2031,7 @@ internal sealed partial class CoreSceneDrawer
 		DropPostInputs();
 		skyLight.Release();
 		upscaler.Release();
+		probeGrid.Release();
 
 		for ( var i = 0; i < 2; i++ )
 		{
@@ -2600,6 +2604,10 @@ internal sealed partial class CoreSceneDrawer
 			{
 				CoreRays.Build( scene );
 				CoreRays.Lay( frame );
+
+				//And the light of a scene with no bake through them, about this view's camera
+				probeGrid.Trace( scene, position, frame );
+
 				CoreRenderDevice.SetupFrame( frame );
 			}
 

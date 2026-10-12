@@ -32,7 +32,7 @@
 
 [[vk::binding(3,0)]] RWStructuredBuffer<float4> g_out;
 
-//Three more of each texel - its light's first band a colour - smoothed by the same weights
+//Four more of each texel smoothed by the same weights: its light's first band a colour, then the way it mostly came
 [[vk::binding(4,0)]] StructuredBuffer<float4> g_bands;
 [[vk::binding(5,0)]] RWStructuredBuffer<float4> g_bandsOut;
 
@@ -52,6 +52,9 @@ cbuffer Push
 	float g_normalBand;
 	uint g_pad0, g_pad1, g_pad2;
 };
+
+//The float4s of g_bands a texel has - see BakeDenoise.Run
+static const uint Extras = 4u;
 
 //Half the patch compared around each texel: 3 is a 7x7
 static const int HalfPatch = 3;
@@ -96,12 +99,18 @@ void main( uint3 id : SV_DispatchThreadID )
 
 	uint here = ( uint( at.y ) * g_width ) + uint( at.x );
 	float3 denoised = input.rgb;
-	float3 bands[3] = { g_bands[here * 3u].xyz, g_bands[( here * 3u ) + 1u].xyz, g_bands[( here * 3u ) + 2u].xyz };
+	float3 bands[Extras];
+
+	[unroll]
+	for ( uint c = 0u; c < Extras; ++c ) bands[c] = g_bands[( here * Extras ) + c].xyz;
 
 	if ( length( inputNormal ) > Epsilon )
 	{
 		float3 sum = 0.0;
-		float3 bandSums[3] = { float3( 0.0, 0.0, 0.0 ), float3( 0.0, 0.0, 0.0 ), float3( 0.0, 0.0, 0.0 ) };
+		float3 bandSums[Extras];
+
+		[unroll]
+		for ( uint c = 0u; c < Extras; ++c ) bandSums[c] = float3( 0.0, 0.0, 0.0 );
 		float total = 0.0;
 
 		for ( int sy = -g_halfSearch; sy <= g_halfSearch; sy++ )
@@ -152,7 +161,7 @@ void main( uint3 id : SV_DispatchThreadID )
 				uint there = ( uint( search.y ) * g_width ) + uint( search.x );
 
 				[unroll]
-				for ( uint c = 0u; c < 3u; ++c ) bandSums[c] += weight * g_bands[( there * 3u ) + c].xyz;
+				for ( uint c = 0u; c < Extras; ++c ) bandSums[c] += weight * g_bands[( there * Extras ) + c].xyz;
 			}
 		}
 
@@ -161,12 +170,12 @@ void main( uint3 id : SV_DispatchThreadID )
 			denoised = sum / total;
 
 			[unroll]
-			for ( uint c = 0u; c < 3u; ++c ) bands[c] = bandSums[c] / total;
+			for ( uint c = 0u; c < Extras; ++c ) bands[c] = bandSums[c] / total;
 		}
 	}
 
 	g_out[here] = float4( denoised, input.a );
 
 	[unroll]
-	for ( uint c = 0u; c < 3u; ++c ) g_bandsOut[( here * 3u ) + c] = float4( bands[c], 0.0 );
+	for ( uint c = 0u; c < Extras; ++c ) g_bandsOut[( here * Extras ) + c] = float4( bands[c], 0.0 );
 }

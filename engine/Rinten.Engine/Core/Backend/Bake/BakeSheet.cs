@@ -585,7 +585,7 @@ internal sealed class BakeSheet
 		//Whole paths with no bounce to gather, or where the world was laid out for another sheet than this one
 		if ( scene.Bounces <= 0 || scene.AtlasSide != Width )
 		{
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, 0, null,
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, 0, null, null,
 				"Tracing the surfaces on the card", progress, cancel, out var whole ) ) return false;
 
 			Take( scene, texels, whole, samples );
@@ -602,7 +602,10 @@ internal sealed class BakeSheet
 			//The first finds every lamp's straight light and the sky; the rest, each a bounce more of light and sky
 			var mode = BakeGpu.ModeGather | BakeGpu.ModeSky | ( pass == 0 ? BakeGpu.ModeAllLights : BakeGpu.ModeNoDirect );
 
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, early, mode, cache,
+			//Past the first, the cache's lit triangles are lights the gather aims at as well
+			var lights = pass == 0 ? null : CacheLights.Of( scene, cache, Width );
+
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, early, mode, cache, lights,
 				$"Gathering bounce {pass + 1} of {scene.Bounces} on the card", progress, cancel, out var sums ) ) return false;
 
 			Take( scene, texels, sums, early );
@@ -621,7 +624,7 @@ internal sealed class BakeSheet
 		}
 
 		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, BakeGpu.ModeGather, cache,
-			"Tracing the surfaces on the card", progress, cancel, out var last ) ) return false;
+			CacheLights.Of( scene, cache, Width ), "Tracing the surfaces on the card", progress, cancel, out var last ) ) return false;
 
 		Take( scene, texels, last, samples );
 		return true;
@@ -652,7 +655,7 @@ internal sealed class BakeSheet
 			var squares = sums[o + 3];
 			var way = new Vec3( sums[o + 4], sums[o + 5], sums[o + 6] );
 			var weight = sums[o + 7];
-			var inside = (int)MathF.Round( sums[o + 8] );
+			var inside = (int)sums[o + 8];
 			var straight = new Vec3( sums[o + 9], sums[o + 10], sums[o + 11] );
 
 			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 16 + ( k * 4 )], sums[o + 17 + ( k * 4 )], sums[o + 18 + ( k * 4 )] );
@@ -940,6 +943,7 @@ internal sealed class BakeSheet
 
 			var part = new Vec3[w * h];
 			var partBands = new Vec3[w * h * 3];
+			var partWays = new Vec3[w * h];
 			var guide = new System.Numerics.Vector4[w * h];
 			var facing = new Vec3[w * h];
 			var spread = new float[w * h];
@@ -953,12 +957,13 @@ internal sealed class BakeSheet
 
 					part[i] = light[at];
 					for ( var c = 0; c < 3; ++c ) partBands[( i * 3 ) + c] = bounceBand[( at * 3 ) + c];
+					partWays[i] = towards[at];
 					guide[i] = new System.Numerics.Vector4( albedo[at], valid[at] && !pushed[at] ? 0.0f : 1.0f );
 					facing[i] = mine ? normal[at] : Vec3.Zero;
 					spread[i] = variance[at];
 				}
 
-			if ( !BakeDenoise.Run( part, partBands, guide, facing, spread, w, h, strength, CancellationToken.None ) ) return false;
+			if ( !BakeDenoise.Run( part, partBands, partWays, guide, facing, spread, w, h, strength, CancellationToken.None ) ) return false;
 
 			for ( var y = 0; y < h; ++y )
 			{
@@ -970,6 +975,7 @@ internal sealed class BakeSheet
 					var at = ( ( y0 + y ) * Width ) + x0 + x;
 					light[at] = part[i];
 					for ( var c = 0; c < 3; ++c ) bounceBand[( at * 3 ) + c] = partBands[( i * 3 ) + c];
+					towards[at] = partWays[i];
 				}
 			}
 		}

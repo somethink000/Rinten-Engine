@@ -14,12 +14,7 @@
 
 		@if ( Settings is not null )
 		{
-			<Editor.Inspectors.ControlSheet Target="@settings" PropertyFilter="@ShownRows" />
-
-			<div class="more" onclick="@ToggleAdvanced">
-				<i>@( advanced ? "expand_less" : "expand_more" )</i>
-				<label>@( advanced ? "Fewer settings" : "More settings" )</label>
-			</div>
+			<Editor.Inspectors.ControlSheet Target="@settings" />
 		}
 
 		<div class="status">
@@ -49,7 +44,6 @@
 	BakedLighting lighting;
 	SerializedObject settings;
 	CancellationTokenSource baking;
-	bool advanced;
 
 	//The scene being edited, not a game played from it
 	Scene EditedScene => SceneView?.TabSession?.Scene;
@@ -112,17 +106,6 @@
 		return popup;
 	}
 
-	//The main settings always; the Advanced group once asked for
-	bool Shown( SerializedProperty property ) => advanced || property.GroupName != "Advanced";
-
-	Func<SerializedProperty, bool> ShownRows => Shown;
-
-	void ToggleAdvanced()
-	{
-		advanced = !advanced;
-		StateHasChanged();
-	}
-
 	//Async void as a click handler: everything it can throw is caught here
 	async void Bake()
 	{
@@ -158,5 +141,5 @@
 		StateHasChanged();
 	}
 
-	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data, advanced );
+	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data );
 }

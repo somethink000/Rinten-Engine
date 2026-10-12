@@ -46,22 +46,6 @@
 		}
 	}
 
-	//Opens the bake's less used settings under the main ones
-	.more
-	{
-		flex-direction: row;
-		flex-shrink: 0;
-		align-items: center;
-		column-gap: 4px;
-		padding: 0px 10px;
-		cursor: pointer;
-
-		> i { color: $text-disabled; font-size: 14px; }
-		> label { color: $ink-dim; font-size: $type-small; }
-
-		&:hover > label { color: $text-light; }
-	}
-
 	.status
 	{
 		flex-direction: row;

@@ -10,8 +10,9 @@
 //The last pass's light over pi a texel of the sheet, which a gathering pass reads where its rays land - see BakeSheet
 [[vk::binding(3,0)]] StructuredBuffer<float4> g_cache;
 
-//Each group of GuideTexels texels' picture of where its gathered light came from: GuideCells sums of brightness
-[[vk::binding(4,0)]] RWStructuredBuffer<float> g_guide;
+//The cache's lit triangles as lights (BakeSheet.CacheLights): each world triangle's chance per square metre, then the
+//picked ones, CacheLightFloats each - triangle, power summed so far, a corner and two edges
+[[vk::binding(4,0)]] StructuredBuffer<float> g_lights;
 
 [[vk::push_constant]]
 cbuffer Push
@@ -23,7 +24,8 @@ cbuffer Push
 	uint g_seed;
 	uint g_across;      //The volume's strata along each side of the sphere - see ProbeCs
 	uint g_mode;        //What a texel's samples do - the Mode flags; nought traces whole paths
-	uint g_learn;       //Samples a texel takes evenly to fill its group's guide; nought for none
+	uint g_cacheLights; //Lit triangles of the cache a gather samples as lights; nought for none
+	uint g_triangles;   //The world's triangles, where g_lights' list starts
 
 };
 
@@ -194,6 +196,11 @@ float4 MaterialColour( uint m, float2 uv )
 	if ( ( flags & FlagHasColour ) == 0u ) return float4( 1.0, 1.0, 1.0, 1.0 );
 	return Picture( Word( at + 10 ), Word( at + 11 ), Word( at + 12 ), uv );
 }
+
+static const uint CacheLightFloats = 11u;
+
+//A world triangle's chance per square metre of being where a gather's light sample lands; nought where it is no light
+float CacheDensity( uint t ) { return g_cacheLights == 0u ? 0.0 : g_lights[t]; }
 
 //The light over pi the last pass left where a ray landed on a triangle with a place on the sheet
 bool Cached( Hit hit, out float3 light )
@@ -807,6 +814,65 @@ float3 GlowDirect( float3 position, float3 normal, float3 geometric, inout Rando
 	return arriving;
 }
 
+//A point on one of the cache's lit triangles picked by power, seen from a surface: the light it leaves towards it, over
+//pi, unweighed - with its way and the chance per steradian it was picked; nought where it faces away or is hidden
+float3 TowardsCache( float3 position, float3 geometric, inout Random random, out float3 aim, out float chance )
+{
+	aim = float3( 0.0, 0.0, 0.0 );
+	chance = 0.0;
+
+	uint count = g_cacheLights;
+	if ( count == 0u ) return float3( 0.0, 0.0, 0.0 );
+
+	float pick = random.Next();
+	float root = sqrt( random.Next() );
+	float turn = random.Next();
+
+	//The first whose power summed so far passes the pick
+	uint list = g_triangles;
+	float picked = g_lights[list + ( ( count - 1u ) * CacheLightFloats ) + 1u] * pick;
+	uint low = 0u;
+	uint high = count - 1u;
+
+	while ( low < high )
+	{
+		uint middle = ( low + high ) / 2u;
+		if ( g_lights[list + ( middle * CacheLightFloats ) + 1u] > picked ) high = middle;
+		else low = middle + 1u;
+	}
+
+	uint record = list + ( low * CacheLightFloats );
+	uint t = asuint( g_lights[record] );
+
+	Hit hit;
+	hit.triangle = t;
+	hit.u = root * ( 1.0 - turn );
+	hit.v = root * turn;
+
+	float3 corner = float3( g_lights[record + 2u], g_lights[record + 3u], g_lights[record + 4u] );
+	float3 one = float3( g_lights[record + 5u], g_lights[record + 6u], g_lights[record + 7u] );
+	float3 two = float3( g_lights[record + 8u], g_lights[record + 9u], g_lights[record + 10u] );
+
+	float3 toPoint = corner + ( one * hit.u ) + ( two * hit.v ) - position;
+	hit.distance = length( toPoint );
+	if ( hit.distance < 1e-5 ) return float3( 0.0, 0.0, 0.0 );
+
+	aim = toPoint / hit.distance;
+	if ( dot( geometric, aim ) <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
+
+	Surface s = SurfaceOf( hit, position, aim );
+	float facing = -dot( aim, s.geometric );
+	if ( s.back || facing <= 1e-6 ) return float3( 0.0, 0.0, 0.0 );
+
+	float3 cached;
+	if ( !Cached( hit, cached ) ) return float3( 0.0, 0.0, 0.0 );
+
+	if ( Blocked( Offset( position, geometric, aim ), aim, ( hit.distance * 0.999 ) - ( Lift * 2.0 ) ) ) return float3( 0.0, 0.0, 0.0 );
+
+	chance = CacheDensity( t ) * hit.distance * hit.distance / facing;
+	return s.albedo * cached;
+}
+
 //Density: the caller's chance per steradian of this direction when it also sampled a glow, else nought
 //Escaped: the ray left straight to the sky, which the frame lights by the kept visibility - BakeScene.Arriving
 float3 Arriving( float3 origin, float3 direction, float density, inout Random random, out bool inside, out bool escaped )
@@ -842,7 +908,7 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 		if ( any( s.emission > 0.0 ) )
 		{
 			//What TowardsGlow at the last point could have found as well counts only its share
-			float glow = density > 0.0 ? Float( GlowAt() + hit.triangle ) : 0.0;
+			float glow = density > 0.0 && EmitterCount() > 0u ? Float( GlowAt() + hit.triangle ) : 0.0;
 			float cosine = abs( dot( direction, s.geometric ) );
 
 			gathered += carried * s.emission * ( glow > 0.0 && cosine > 1e-6
@@ -854,7 +920,15 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 		//Gathering: the light the last pass found here, every bounce of it, in place of the rest of the path
 		float3 cached;
-		if ( bounce == 0u && ( g_mode & ModeGather ) != 0u && Cached( hit, cached ) ) return gathered + ( carried * s.albedo * cached );
+		if ( bounce == 0u && ( g_mode & ModeGather ) != 0u && Cached( hit, cached ) )
+		{
+			//What TowardsCache could have found here as well counts only its share
+			float lit = CacheDensity( hit.triangle );
+			float facing = abs( dot( direction, s.geometric ) );
+			float share = density > 0.0 && lit > 0.0 && facing > 1e-6 ? Weight( density, lit * hit.distance * hit.distance / facing ) : 1.0;
+
+			return gathered + ( carried * s.albedo * cached * share );
+		}
 
 		float3 ignored = float3( 0.0, 0.0, 0.0 );
 		gathered += carried * s.albedo * ( Direct( s.position, s.normal, s.geometric, random, false, ignored )
@@ -891,58 +965,14 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 
 //---- a texel - BakeSheet.Trace -------------------------------------------------
 
-//Guided final gather, as Lightmass's photon-guided one: neighbouring texels learn from their first rays where their
-//gathered light comes from, on a grid over the cosine-weighted hemisphere, and aim most rays there - from a headboard,
-//a nightstand lit from a hand's breadth is a sliver of the view that even rays hit too seldom to agree on
-static const uint GuideTexels = 8u;
-static const uint GuideSide = 8u;
-static const uint GuideCells = GuideSide * GuideSide;
-
-//Share of a guided texel's rays still spread evenly, and the least a cell keeps of an even share
-static const float GuideEven = 0.3;
-static const float GuideFloor = 0.1;
-
-//Each of the workgroup's texels' learning while it lasts, added into g_guide once the dispatch is through
-groupshared float gs_learn[64 * GuideCells];
-
-//The group's grid, floored, and its sum; false where it learned no light to aim at
-bool GuideOf( uint texel, out float cells[GuideCells], out float total )
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void main( uint3 id : SV_DispatchThreadID )
 {
-	uint at = ( texel / GuideTexels ) * GuideCells;
-	float learned = 0.0;
+	if ( id.x >= g_count ) return;
 
-	[unroll]
-	for ( uint c = 0u; c < GuideCells; ++c )
-	{
-		cells[c] = g_guide[at + c];
-		learned += cells[c];
-	}
+	uint texel = g_first + id.x;
 
-	total = 0.0;
-	if ( learned <= 1e-12 ) return false;
-
-	float least = learned * GuideFloor / float( GuideCells );
-
-	[unroll]
-	for ( uint c = 0u; c < GuideCells; ++c )
-	{
-		cells[c] += least;
-		total += cells[c];
-	}
-
-	return true;
-}
-
-//The cell of the grid a pair of cosine-sampling numbers falls in
-uint CellOf( float u, float v )
-{
-	uint x = min( uint( u * float( GuideSide ) ), GuideSide - 1u );
-	uint y = min( uint( v * float( GuideSide ) ), GuideSide - 1u );
-	return ( y * GuideSide ) + x;
-}
-
-void TexelSamples( uint texel, uint slot, bool learning, bool guided )
-{
 
 	float4 centre = g_texels[( texel * 5 ) + 0];
 	float4 n = g_texels[( texel * 5 ) + 1];
@@ -961,10 +991,6 @@ void TexelSamples( uint texel, uint slot, bool learning, bool guided )
 	float3 bouncedR = g_sums[at + 4u].xyz, bouncedG = g_sums[at + 5u].xyz, bouncedB = g_sums[at + 6u].xyz;
 	float3 straightR = g_sums[at + 7u].xyz, straightG = g_sums[at + 8u].xyz, straightB = g_sums[at + 9u].xyz;
 
-	float cells[GuideCells];
-	float total;
-	guided = guided && GuideOf( texel, cells, total );
-
 	for ( uint s = 0; s < g_samples; ++s )
 	{
 		Random random;
@@ -975,31 +1001,6 @@ void TexelSamples( uint texel, uint slot, bool learning, bool guided )
 
 		float u = random.Next();
 		float v = random.Next();
-
-		//Guided: a cell picked by its share of the light, a spot in it; the chance against an even pick weighs it back
-		float chance = 1.0;
-
-		if ( guided )
-		{
-			if ( random.Next() >= GuideEven )
-			{
-				float target = random.Next() * total;
-				uint picked = GuideCells - 1u;
-
-				for ( uint c = 0u; c < GuideCells; ++c )
-				{
-					target -= cells[c];
-					if ( target < 0.0 ) { picked = c; break; }
-				}
-
-				u = ( float( picked % GuideSide ) + random.Next() ) / float( GuideSide );
-				v = ( float( picked / GuideSide ) + random.Next() ) / float( GuideSide );
-			}
-
-			chance = GuideEven + ( ( 1.0 - GuideEven ) * cells[CellOf( u, v )] * float( GuideCells ) / total );
-		}
-
-		uint cell = CellOf( u, v );
 		float3 axis = n.xyz;
 		float3 direction = CosineAround( axis, u, v );
 
@@ -1009,44 +1010,49 @@ void TexelSamples( uint texel, uint slot, bool learning, bool guided )
 			v = random.Next();
 			axis = g;
 			direction = CosineAround( axis, u, v );
-			chance = 1.0;
 		}
 
-		float weight = 1.0 / chance;
-		float density = EmitterCount() > 0u ? dot( axis, direction ) * InvPi * chance : 0.0;
+		float density = EmitterCount() > 0u || g_cacheLights > 0u ? dot( axis, direction ) * InvPi : 0.0;
 
 		bool behind;
 		bool escaped;
 		float3 arriving = Arriving( Offset( p, g, direction ), direction, density, random, behind, escaped );
 
-		//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows - by its
-		//weight, so the samples kept still average to one where guided rays find insides more or less often
+		//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows
 		if ( behind )
 		{
-			insideSpare.x += weight;
+			insideSpare.x += 1.0;
 			continue;
 		}
 
-		if ( escaped ) open += float4( direction, 1.0 ) * weight;
+		if ( escaped ) open += float4( direction, 1.0 );
 
-		if ( learning ) gs_learn[( slot * GuideCells ) + cell] += Luma( arriving );
+		//And a lit spot of the cache aimed at, by its power, weighed against the cosine ray's chance of that way
+		float3 aimed = float3( 0.0, 0.0, 0.0 );
+		float3 towardsLit;
+		float litChance;
+		float3 litLight = TowardsCache( p, g, random, towardsLit, litChance );
 
-		arriving *= weight;
+		if ( litChance > 0.0 )
+		{
+			float facing = dot( n.xyz, towardsLit );
+			if ( facing > 0.0 ) aimed = litLight * ( facing * InvPi * Weight( litChance, facing * InvPi ) / litChance );
+		}
 
 		float3 lean = float3( 0.0, 0.0, 0.0 );
 		float3 direct = float3( 0.0, 0.0, 0.0 );
 
 		if ( ( g_mode & ModeNoDirect ) == 0u )
 			direct = Direct( p, n.xyz, g, random, ( g_mode & ModeAllLights ) == 0u, lean ) + GlowDirect( p, n.xyz, g, random, lean );
-		float luma = Luma( arriving );
+		float luma = Luma( arriving + aimed );
 
-		sumSquares += float4( direct + arriving, luma * luma );
-		wayWeight += float4( lean + ( direction * luma ), Luma( direct ) + luma );
+		sumSquares += float4( direct + arriving + aimed, luma * luma );
+		wayWeight += float4( lean + ( direction * Luma( arriving ) ) + ( towardsLit * Luma( aimed ) ), Luma( direct ) + luma );
 		insideSpare.yzw += direct;
 
-		bouncedR += direction * arriving.r;
-		bouncedG += direction * arriving.g;
-		bouncedB += direction * arriving.b;
+		bouncedR += ( direction * arriving.r ) + ( towardsLit * aimed.r );
+		bouncedG += ( direction * arriving.g ) + ( towardsLit * aimed.g );
+		bouncedB += ( direction * arriving.b ) + ( towardsLit * aimed.b );
 
 		//The lights' way, and their light as it would fall square on, so a normal facing them takes all of it
 		float leaning = length( lean );
@@ -1072,39 +1078,6 @@ void TexelSamples( uint texel, uint slot, bool learning, bool guided )
 	g_sums[at + 7u] = float4( straightR, 0.0 );
 	g_sums[at + 8u] = float4( straightG, 0.0 );
 	g_sums[at + 9u] = float4( straightB, 0.0 );
-}
-
-[shader("compute")]
-[numthreads(64, 1, 1)]
-void main( uint3 id : SV_DispatchThreadID, uint slot : SV_GroupIndex )
-{
-	//The same for the whole dispatch: BakeGpu ends the learning on a dispatch's edge
-	bool learning = g_sampleBase < g_learn;
-
-	if ( learning )
-	{
-		for ( uint c = 0u; c < GuideCells; ++c ) gs_learn[( slot * GuideCells ) + c] = 0.0;
-	}
-
-	if ( id.x < g_count ) TexelSamples( g_first + id.x, slot, learning, g_learn > 0u && !learning );
-
-	if ( !learning ) return;
-
-	GroupMemoryBarrierWithGroupSync();
-
-	//A group's first texel adds its group's learning in; dispatches start on a multiple of 64, so no group spans two
-	if ( id.x >= g_count || ( slot % GuideTexels ) != 0u ) return;
-
-	uint at = ( ( g_first + id.x ) / GuideTexels ) * GuideCells;
-
-	for ( uint c = 0u; c < GuideCells; ++c )
-	{
-		float sum = 0.0;
-
-		for ( uint k = 0u; k < GuideTexels; ++k ) sum += gs_learn[( ( slot + k ) * GuideCells ) + c];
-
-		g_guide[at + c] += sum;
-	}
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

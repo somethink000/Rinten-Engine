@@ -63,6 +63,11 @@ Out MainPs( V2F i )
 		o.colour.rgb *= LightOn( i.world, i.normal, i.position.xy );
 	}
 
+	if ( ( sprite.Lighting & Lit2DFlag ) != 0 )
+	{
+		o.colour.rgb *= Light2DAt( i.world );
+	}
+
 	//As much of the fog as the sprite asked for: nought for one that is meant to read
 	//through it - a marker, a glow - one for anything that is part of the scene.
 	float fogStrength = float( sprite.FogStrengthCutout & 0xFFFF ) / 65535.0;

@@ -142,6 +142,21 @@ struct FrameData
 
 	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none
 	float4 bakedTexels;
+
+	//The 2D lighting sprites and tiles that ask for it are lit by: the global 2D light times its intensity rgb, one w
+	//where the scene has 2D lighting at all - nought, and a lit sprite is drawn unlit. See Light2DAt in sprite.slang
+	float4 light2d;
+
+	//The 2D light's pictures (CoreLight2D): how much the screen is shrunk inside them to leave their margin x, the
+	//scene's table index y and the light's w - nought where this view drew none; spare z
+	float4 light2dScene;
+
+	//How many 2D lights there are x, one in y where occluders shadow themselves; spare zw - see CoreSceneRenderer.SetLight2D
+	float4 light2dInfo;
+
+	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is
+	//w; which way a spot points on the plane xy, half its cone z (pi shines every way), how much of its edge fades w
+	float4 lights2d[96];
 };
 
 #ifdef WEBGL

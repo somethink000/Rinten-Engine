@@ -78,6 +78,21 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 		public Vector2 Offset;
 		public uint CameraFade;     //Two halves: lower 16 bits near distance, upper 16 bits far distance - see sprite_ps.shader
 		public Vector4 Region = new( 0, 0, 1, 1 );  //The part of the picture drawn: top left and size, in texture coordinates
+
+		//The bit of Lighting that asks for the scene's 2D lighting, above the 3D lit byte and below the tint's
+		//exponent - see Light2DAt in sprite.slang
+		internal const uint Lit2D = 1u << 8;
+
+		//The bit of Lighting that makes the sprite block 2D light by its picture's shape - see light2d_sprites.slang
+		internal const uint Occluder2D = 1u << 9;
+
+		//How brightly the sprite glows into the 2D lighting, in sixteenths, in the top byte of Lighting - see Emission2DOf
+		internal const int Emission2DShift = 24;
+
+		//A 2D emission strength as the top byte of Lighting carries it: sixteenths, up to just under sixteen
+		internal static uint Emission2DOf( float strength )
+			=> (uint)Math.Clamp( (int)MathF.Round( strength * 16.0f ), 0, 255 ) << Emission2DShift;
+
 		public SpriteData()
 		{
 
@@ -486,6 +501,9 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		int lightingFlag = c.Lighting ? 1 : 0;
 		uint packedExponent = (uint)(((byte)lightingFlag) | rgbe.a << 16);
+		if ( c.Lit2D ) packedExponent |= SpriteData.Lit2D;
+		if ( c.Occluder2D ) packedExponent |= SpriteData.Occluder2D;
+		packedExponent |= SpriteData.Emission2DOf( c.Emission2D );
 
 		uint packedFogAndAlpha = SpriteData.PackFogAndAlphaCutout( c.FogStrength, c.AlphaCutoff );
 

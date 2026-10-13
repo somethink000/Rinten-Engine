@@ -2018,6 +2018,7 @@ internal sealed partial class CoreSceneDrawer
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
 		CoreSkyLight.ForgetPipelines();
+		CoreLight2D.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
 		pyramidPipeline = 0;
@@ -2675,6 +2676,10 @@ internal sealed partial class CoreSceneDrawer
 		//own picture opens over the real depth, keeping what was shaded, for everything drawn the classic way.
 		var offscreen = false;
 
+		//The 2D lighting's pictures, out of the sprites already queued, before the world's picture opens - see CoreLight2D
+		var light2d = !overlayOnly && !StereoPass &&
+			CoreLight2D.Draw( scene, camera, frame, pixels.Width, pixels.Height );
+
 		CoreRenderDevice.ZoneBegin( "world opaque" );
 
 
@@ -2760,6 +2765,9 @@ internal sealed partial class CoreSceneDrawer
 
 			instancedInWorld = true;
 		}
+
+		//What of the 2D lighting Lighting2D.Debug asked to see, over the world it lit
+		if ( light2d && ( offscreen || worldFinishes ) ) CoreLight2D.DrawDebug( worldTarget );
 
 		//What lies over the world with its own depth (a held weapon), into the same picture so effects reach it
 		CoreRenderDevice.ZoneBegin( "world overlay" );
@@ -3236,6 +3244,7 @@ internal sealed partial class CoreSceneDrawer
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
 		CoreSkyLight.ForgetPipelines();
+		CoreLight2D.ForgetPipelines();
 	}
 
 	//Only the background pass is made upfront; sky pipelines bake on demand per frame specialization

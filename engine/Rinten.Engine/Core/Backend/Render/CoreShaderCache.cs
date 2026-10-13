@@ -947,6 +947,15 @@ internal static class EngineShaders
 	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
 	internal const string RayGrid = "shaders/engine/ray_grid.slang";
 	internal const string SkyLight = "shaders/engine/sky_light.slang";
+	internal const string Light2D = "shaders/engine/light2d.slang";
+	internal const string Light2DSprites = "shaders/engine/light2d_sprites.slang";
+	internal const string Light2DCascades = "shaders/engine/light2d_cascades.slang";
+
+	//The 2D light's jump flood, which stores whole floats where the cascades store half ones - see light2d_cascades.slang.
+	internal const string Light2DSeeds = "#define LIGHT2D_SEEDS 1\n";
+
+	//The tile maps' variant of the 2D light's sprite pass, which steps their animation - see CoreLight2D.IsTiles.
+	internal const string Light2DTiles = "#define LIGHT2D_TILE 1\n";
 
 	//UI shader for world-space panels; reads the frame block so stereo passes get each eye's view
 	internal const string UiWorld = "#define UI_WORLD 1\n";
@@ -1039,6 +1048,24 @@ internal static class EngineShaders
 		( RayGrid, "", Runs, false ),
 		//The sky light's filters - see CoreSkyLight. Full frame only: they draw into pictures
 		( SkyLight, "", SkyLightDraws, false ),
+		//The 2D lighting's debug view, its scene and its passes - see CoreLight2D. Full frame only
+		( Light2D, "", Light2DDraws, false ),
+		( Light2DSprites, "", Draws, false ),
+		( Light2DSprites, Light2DTiles, Draws, false ),
+		( Light2DCascades, Light2DSeeds, Light2DFloodRuns, false ),
+		( Light2DCascades, "", Light2DCascadeRuns, false ),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DFloodRuns =
+		[("SeedCs", CoreShaderCompiler.Stage.Compute), ("JumpCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DCascadeRuns =
+		[("CascadeCs", CoreShaderCompiler.Stage.Compute), ("IntegrateCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DDraws =
+	[
+		("DebugVs", CoreShaderCompiler.Stage.Vertex),
+		("DebugPs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] SkyLightDraws =

@@ -483,6 +483,10 @@ internal static unsafe class CoreSceneRenderer
 		SetAmbient( block, scene );
 		CoreRenderDevice.ZoneEnd();
 
+		CoreRenderDevice.ZoneBegin( "block light 2d" );
+		SetLight2D( block, scene );
+		CoreRenderDevice.ZoneEnd();
+
 		CoreRenderDevice.ZoneBegin( "block fog" );
 		SetFog( block, scene );
 		CoreRenderDevice.ZoneEnd();
@@ -642,6 +646,52 @@ internal static unsafe class CoreSceneRenderer
 		block[AmbientAt + 1] = ambient.g;
 		block[AmbientAt + 2] = ambient.b;
 		block[AmbientAt + 3] = Math.Clamp( ambient.a, 0.0f, 1.0f );
+	}
+
+	//The scene's 2D lighting - see Light2DAt here and in sprite.slang, and Lights2DAt. Off in a scene with no 2D light,
+	//so a sprite lit in 2D is drawn unlit rather than black in a scene nobody has lit. Gathered here, once a frame,
+	//rather than in the scene's update, which an editor scene that is not playing does not run
+	internal static void SetLight2D( float[] block, Scene scene )
+	{
+		var system = scene.GetSystem<SceneLight2DSystem>();
+		if ( system is null ) return;
+
+		system.Gather();
+
+		if ( !system.Active ) return;
+
+		var global = system.GlobalLight;
+
+		block[Light2DAt + 0] = global.r;
+		block[Light2DAt + 1] = global.g;
+		block[Light2DAt + 2] = global.b;
+		block[Light2DAt + 3] = 1.0f;
+
+		var lights = system.Lights;
+
+		block[Light2DInfoAt + 0] = lights.Count;
+		block[Light2DInfoAt + 1] = system.Settings.SelfShadow ? 1.0f : 0.0f;
+
+		for ( var i = 0; i < lights.Count; i++ )
+		{
+			var light = lights[i];
+			var at = Lights2DAt + ( i * Light2DFloats );
+
+			block[at + 0] = light.Position.x;
+			block[at + 1] = light.Position.y;
+			block[at + 2] = light.Position.z;
+			block[at + 3] = light.Range;
+
+			block[at + 4] = light.Radiance.r;
+			block[at + 5] = light.Radiance.g;
+			block[at + 6] = light.Radiance.b;
+			block[at + 7] = light.SourceSize;
+
+			block[at + 8] = light.Direction.x;
+			block[at + 9] = light.Direction.y;
+			block[at + 10] = light.HalfAngle;
+			block[at + 11] = light.Softness;
+		}
 	}
 
 	//Writes the scene's gradient fog into the frame block, read off the scene world
@@ -849,7 +899,20 @@ internal static unsafe class CoreSceneRenderer
 	//The live bounce at the lightmap's detail: its sheet's table index - see CoreLiveBounce.Sheet.
 	internal const int BakedTexelsAt = GridAt + 16;
 
-	internal const int FrameFloats = BakedTexelsAt + 4;
+	//The global 2D light, and whether the scene is lit in 2D at all - see SetLight2D.
+	internal const int Light2DAt = BakedTexelsAt + 4;
+
+	//How the 2D light's pictures are drawn and where they are - see CoreLight2D.Lay.
+	internal const int Light2DSceneAt = Light2DAt + 4;
+
+	//How many 2D lights the block carries and how occluders are lit - see SetLight2D.
+	internal const int Light2DInfoAt = Light2DSceneAt + 4;
+
+	//The 2D lights themselves, three float4s each - see lights2d in frame_data.slang.
+	internal const int Lights2DAt = Light2DInfoAt + 4;
+	internal const int Light2DFloats = 12;
+
+	internal const int FrameFloats = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]

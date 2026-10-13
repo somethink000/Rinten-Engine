@@ -1015,6 +1015,17 @@ internal static class CoreResources
 
 		var directory = System.IO.Path.GetDirectoryName( path ) ?? "";
 
+		//Where an include is looked for: the file's own folder, then the folders above it, then the compiler's search paths.
+		//Its own folder alone missed the engine's sprite shaders, which sit in shaders/sprite and include "sprite/sprite.slang";
+		//the search paths alone are empty where everything came out of the shader cache and nothing was compiled. The
+		//folders above are where the library's roots are - shaders/ and the assets above it - whether or not anything said so
+		var folders = new List<string>();
+
+		for ( var up = directory; !string.IsNullOrEmpty( up ) && folders.Count < 4; up = System.IO.Path.GetDirectoryName( up ) )
+			folders.Add( up );
+
+		folders.AddRange( CoreShaderCompiler.SearchPaths() );
+
 		foreach ( var line in text.Split( '\n' ) )
 		{
 			var trimmed = line.Trim();
@@ -1026,11 +1037,18 @@ internal static class CoreResources
 
 			if ( first < 0 || last <= first ) continue;
 
-			var full = System.IO.Path.GetFullPath(
-				System.IO.Path.Combine( directory, trimmed[( first + 1 )..last] ) );
+			var included = trimmed[( first + 1 )..last];
 
-			//The packed file counts as the file - see CompiledFile.
-			if ( Rinten.CompiledFile.Exists( full ) && Mentions( full, depth + 1, marker ) ) return true;
+			foreach ( var folder in folders )
+			{
+				var full = System.IO.Path.GetFullPath( System.IO.Path.Combine( folder, included ) );
+
+				//The packed file counts as the file - see CompiledFile. The first found is the one the compiler takes.
+				if ( !Rinten.CompiledFile.Exists( full ) ) continue;
+				if ( Mentions( full, depth + 1, marker ) ) return true;
+
+				break;
+			}
 		}
 
 		return false;

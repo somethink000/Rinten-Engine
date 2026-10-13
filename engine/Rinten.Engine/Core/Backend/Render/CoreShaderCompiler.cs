@@ -119,8 +119,8 @@ internal static unsafe partial class CoreShaderCompiler
 		}
 	}
 
-	//A copy of the search paths, taken while the lock is held.
-	private static string[] SearchPaths()
+	//A copy of the search paths, taken while the lock is held - and what CoreResources.Mentions follows an include through.
+	internal static string[] SearchPaths()
 	{
 		lock ( searchLock )
 		{

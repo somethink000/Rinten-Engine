@@ -140,7 +140,8 @@ struct FrameData
 	//cascades and probes along x, y and z; each cascade's first cell xyz and step w - see GridLight
 	float4 grid[4];
 
-	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none
+	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none; y one where
+	//the sheet's ways hold the straight light's way and share (BakedLightingData.StraightWays)
 	float4 bakedTexels;
 
 	//The 2D lighting sprites and tiles that ask for it are lit by: the global 2D light times its intensity rgb, one w

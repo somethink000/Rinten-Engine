@@ -54,6 +54,9 @@ internal sealed class BakeBvh
 	//Asked of a triangle that is not solid all over - a leaf cut out of a square - whether the ray goes through it here.
 	internal delegate bool Through( int triangle, float u, float v );
 
+	//How much of a ray gets by a world triangle it crosses, by whether it is solid all over - see BakeScene.Veil.
+	internal delegate Vec3 Veil( int triangle, float u, float v, bool tested );
+
 	private Through passes;
 
 	public int TriangleCount => source.Length;
@@ -339,6 +342,14 @@ internal sealed class BakeBvh
 	[MethodImpl( MethodImplOptions.AggressiveInlining )]
 	private bool Meets( int t, Vec3 origin, Vec3 direction, float furthest, out float distance, out float u, out float v, out bool back )
 	{
+		if ( !Crosses( t, origin, direction, furthest, out distance, out u, out v, out back ) ) return false;
+
+		return !( tested[t] && passes is not null && passes( source[t], u, v ) );
+	}
+
+	//Whether a ray crosses a tree triangle at all, however clear it is
+	private bool Crosses( int t, Vec3 origin, Vec3 direction, float furthest, out float distance, out float u, out float v, out bool back )
+	{
 		distance = 0.0f;
 		u = 0.0f;
 		v = 0.0f;
@@ -369,9 +380,117 @@ internal sealed class BakeBvh
 		//The determinant's sign is which way round the triangle is wound as the ray sees it: below nought, the ray is looking at its back.
 		back = det < 0.0f;
 
-		if ( tested[t] && passes is not null && passes( source[t], u, v ) ) return false;
-
 		return true;
+	}
+
+	/// <summary>How much of a ray gets through to <paramref name="furthest"/>, triangle by triangle.</summary>
+	public Vec3 Transmittance( Vec3 origin, Vec3 direction, float furthest, Veil veil )
+	{
+		if ( source.Length == 0 ) return Vec3.One;
+
+		var inverse = Inverse( direction );
+
+		Span<int> stack = stackalloc int[64];
+		var depth = 0;
+		var at = 0;
+		var through = Vec3.One;
+
+		if ( Enter( nodes[0], origin, inverse, furthest ) == float.MaxValue ) return Vec3.One;
+
+		while ( true )
+		{
+			ref readonly var node = ref nodes[at];
+
+			if ( node.Count > 0 )
+			{
+				for ( var t = node.First; t < node.First + node.Count; ++t )
+				{
+					if ( !Crosses( t, origin, direction, furthest, out _, out var u, out var v, out _ ) ) continue;
+
+					through *= veil( source[t], u, v, tested[t] );
+					if ( through.X <= 1e-4f && through.Y <= 1e-4f && through.Z <= 1e-4f ) return Vec3.Zero;
+				}
+			}
+			else
+			{
+				var left = node.First;
+
+				var leftHit = Enter( nodes[left], origin, inverse, furthest ) != float.MaxValue;
+				var rightHit = Enter( nodes[left + 1], origin, inverse, furthest ) != float.MaxValue;
+
+				if ( leftHit )
+				{
+					if ( rightHit && depth < stack.Length ) stack[depth++] = left + 1;
+
+					at = left;
+					continue;
+				}
+
+				if ( rightHit )
+				{
+					at = left + 1;
+					continue;
+				}
+			}
+
+			if ( depth == 0 ) break;
+
+			at = stack[--depth];
+		}
+
+		return through;
+	}
+
+	/// <summary>Whether a ray crosses, however clear, a triangle <paramref name="which"/> picks by its world index.</summary>
+	public bool Touches( Vec3 origin, Vec3 direction, float furthest, Predicate<int> which )
+	{
+		if ( source.Length == 0 ) return false;
+
+		var inverse = Inverse( direction );
+
+		Span<int> stack = stackalloc int[64];
+		var depth = 0;
+		var at = 0;
+
+		if ( Enter( nodes[0], origin, inverse, furthest ) == float.MaxValue ) return false;
+
+		while ( true )
+		{
+			ref readonly var node = ref nodes[at];
+
+			if ( node.Count > 0 )
+			{
+				for ( var t = node.First; t < node.First + node.Count; ++t )
+					if ( which( source[t] ) && Crosses( t, origin, direction, furthest, out _, out _, out _, out _ ) ) return true;
+			}
+			else
+			{
+				var left = node.First;
+
+				var leftHit = Enter( nodes[left], origin, inverse, furthest ) != float.MaxValue;
+				var rightHit = Enter( nodes[left + 1], origin, inverse, furthest ) != float.MaxValue;
+
+				if ( leftHit )
+				{
+					if ( rightHit && depth < stack.Length ) stack[depth++] = left + 1;
+
+					at = left;
+					continue;
+				}
+
+				if ( rightHit )
+				{
+					at = left + 1;
+					continue;
+				}
+			}
+
+			if ( depth == 0 ) break;
+
+			at = stack[--depth];
+		}
+
+		return false;
 	}
 
 	/// <summary>The nearest thing along a ray, within <paramref name="furthest"/>.</summary>

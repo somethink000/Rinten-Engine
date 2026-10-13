@@ -47,6 +47,7 @@ internal sealed class BakeSheet
 	private float[] owned;        //Distance from the texel's centre to its triangle, in texels; +inf where none
 	private int[] ownerOf;        //Receiver whose square it is in, -1 where none
 	private int[] isle;           //Island of the unwrap the texel lies on, numbered across the sheet; -1 where none
+	private int[] transmitter;    //One more than the material passing light through the texel, nought where none
 
 	//What each texel's surface reflects, for the denoiser to tell one material from another - see BakeDenoise
 	private Vec3[] albedo;
@@ -199,6 +200,7 @@ internal sealed class BakeSheet
 		owned = new float[count];
 		ownerOf = new int[count];
 		isle = new int[count];
+		transmitter = new int[count];
 
 		Array.Fill( owned, float.PositiveInfinity );
 		Array.Fill( ownerOf, -1 );
@@ -449,6 +451,7 @@ internal sealed class BakeSheet
 				geometric[at] = scene.Facing[t];
 				isle[at] = island;
 				albedo[at] = scene.AlbedoAt( t, wb, wc );
+				transmitter[at] = scene.Materials[scene.MaterialOf[t]].Transmits == Vec3.Zero ? 0 : scene.MaterialOf[t] + 1;
 				across[at] = perX;
 				down[at] = perY;
 			}
@@ -575,7 +578,7 @@ internal sealed class BakeSheet
 	/// <summary>Traces every texel on the card (BakeGpu), leaving what Trace would; false where it could not.</summary>
 	//A final gather as Lightmass's: a pass a bounce, each ray reading the last pass's filtered light where it lands,
 	//not a path that must find a room's few lit patches (lamps in shades) again at every step - which bakes spots
-	public bool TraceOnCard( BakeScene scene, int samples, float denoise, BakeProgress progress, CancellationToken cancel )
+	public bool TraceOnCard( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = Width * Height;
 
@@ -585,14 +588,15 @@ internal sealed class BakeSheet
 		//Whole paths with no bounce to gather, or where the world was laid out for another sheet than this one
 		if ( scene.Bounces <= 0 || scene.AtlasSide != Width )
 		{
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, 0, null, null,
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, samples, 0, null, null,
 				"Tracing the surfaces on the card", progress, cancel, out var whole ) ) return false;
 
 			Take( scene, texels, whole, samples );
 			return true;
 		}
 
-		//The passes before the last take a quarter of the samples: what they leave is filtered, then read by many rays
+		//The passes before the last take a quarter of the samples: what they leave is read by many rays, each aiming at
+		//the brightest of it, so it needs no filter of its own
 		var early = Math.Max( samples / 4, 64 );
 		var cache = new float[count * 4];
 		Vec3[] lit = null;
@@ -605,11 +609,10 @@ internal sealed class BakeSheet
 			//Past the first, the cache's lit triangles are lights the gather aims at as well
 			var lights = pass == 0 ? null : CacheLights.Of( scene, cache, Width );
 
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, early, mode, cache, lights,
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, early, mode, cache, lights,
 				$"Gathering bounce {pass + 1} of {scene.Bounces} on the card", progress, cancel, out var sums ) ) return false;
 
 			Take( scene, texels, sums, early );
-			Denoise( scene, denoise );
 			Dilate();
 
 			lit ??= (Vec3[])direct.Clone();
@@ -623,7 +626,7 @@ internal sealed class BakeSheet
 			}
 		}
 
-		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, BakeGpu.ModeGather, cache,
+		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, samples, BakeGpu.ModeGather, cache,
 			CacheLights.Of( scene, cache, Width ), "Tracing the surfaces on the card", progress, cancel, out var last ) ) return false;
 
 		Take( scene, texels, last, samples );
@@ -666,7 +669,58 @@ internal sealed class BakeSheet
 	}
 
 	/// <summary>Traces every texel, on every thread; <paramref name="progress"/> counts texels as they finish.</summary>
+	//With bounces, TraceOnCard's final gather: a pass a bounce, each reading the last pass's light where it lands
 	public void Trace( BakeScene scene, int samples, BakeProgress progress, CancellationToken cancel )
+	{
+		var count = Width * Height;
+
+		try
+		{
+			if ( scene.Bounces <= 0 || scene.AtlasSide != Width )
+			{
+				scene.Gathering = null;
+				TracePass( scene, samples, 0, "Tracing the surfaces", progress, cancel );
+				return;
+			}
+
+			var early = Math.Max( samples / 4, 64 );
+			var cache = new float[count * 4];
+			Vec3[] lit = null;
+
+			for ( var pass = 0; pass < scene.Bounces; ++pass )
+			{
+				var mode = BakeGpu.ModeGather | BakeGpu.ModeSky | ( pass == 0 ? BakeGpu.ModeAllLights : BakeGpu.ModeNoDirect );
+
+				scene.Gathering = new BakeGather { Mode = mode, Cache = cache, Lights = pass == 0 ? null : CacheLights.Of( scene, cache, Width ) };
+				TracePass( scene, early, mode, $"Gathering bounce {pass + 1} of {scene.Bounces}", progress, cancel );
+				Dilate();
+
+				lit ??= (Vec3[])direct.Clone();
+
+				var next = new float[count * 4];
+
+				for ( var i = 0; i < count; ++i )
+				{
+					var l = Vec3.Max( lit[i] + light[i], Vec3.Zero );
+					next[i * 4] = l.X;
+					next[( i * 4 ) + 1] = l.Y;
+					next[( i * 4 ) + 2] = l.Z;
+				}
+
+				cache = next;
+			}
+
+			scene.Gathering = new BakeGather { Mode = BakeGpu.ModeGather, Cache = cache, Lights = CacheLights.Of( scene, cache, Width ) };
+			TracePass( scene, samples, BakeGpu.ModeGather, "Tracing the surfaces", progress, cancel );
+		}
+		finally
+		{
+			scene.Gathering = null;
+		}
+	}
+
+	//One pass over every texel, on every thread, sampling as mode says - bake_trace.slang's main
+	private void TracePass( BakeScene scene, int samples, int mode, string stage, BakeProgress progress, CancellationToken cancel )
 	{
 		var count = Width * Height;
 
@@ -682,7 +736,10 @@ internal sealed class BakeSheet
 		var texels = new List<int>();
 		for ( var i = 0; i < count; ++i ) if ( !float.IsPositiveInfinity( owned[i] ) ) texels.Add( i );
 
-		progress.Begin( "Tracing the surfaces", texels.Count );
+		progress.Begin( stage, texels.Count );
+
+		//Whether a ray's way must carry its chance, for the glows' and the cache's lights to weigh theirs against
+		var aiming = scene.Gathering?.Lights is { Count: > 0 };
 
 		Parallel.For( 0, texels.Count, new ParallelOptions { CancellationToken = cancel }, i =>
 		{
@@ -716,7 +773,7 @@ internal sealed class BakeSheet
 					direction = BakeMath.CosineAround( axis, random.Float(), random.Float() );
 				}
 
-				var density = scene.Emitters.Length > 0 ? Vec3.Dot( axis, direction ) * BakeMath.InvPi : 0.0f;
+				var density = scene.Emitters.Length > 0 || aiming ? Vec3.Dot( axis, direction ) * BakeMath.InvPi : 0.0f;
 				var arriving = scene.Arriving( BakeScene.Offset( p, g, direction ), direction, density, ref random, out var behind, out var escaped );
 
 				//A spot of the texel inside something counts for nothing: the rest of the texel is what it shows
@@ -726,22 +783,38 @@ internal sealed class BakeSheet
 					continue;
 				}
 
-				if ( escaped ) open += new Vec4( direction, 1.0f );
+				if ( escaped ) open += new Vec4( direction, 1.0f ) * BakeScene.FirstVeil;
+
+				//And a lit spot of the cache aimed at by its power, weighed against the cosine ray's chance of that way
+				var aimed = Vec3.Zero;
+				var litLight = scene.TowardsCache( p, g, ref random, out var towardsLit, out var litChance );
+
+				if ( litChance > 0.0f )
+				{
+					var facing = Vec3.Dot( n, towardsLit );
+					if ( facing > 0.0f ) aimed = litLight * ( facing * BakeMath.InvPi * BakeScene.Weight( litChance, facing * BakeMath.InvPi ) / litChance );
+				}
 
 				var lean = Vec3.Zero;
-				var lit = scene.Direct( p, n, g, ref random, true, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
-				var luma = BakeMath.Luma( arriving );
+				var lit = ( mode & BakeGpu.ModeNoDirect ) != 0 ? Vec3.Zero
+					: scene.Direct( p, n, g, ref random, ( mode & BakeGpu.ModeAllLights ) == 0, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
 
-				sum += lit + arriving;
+				//And a leaf's back, through it: with the bounced light, which the denoiser smooths, and in no band
+				var through = transmitter[at] == 0 ? Vec3.Zero
+					: scene.Transmission( p, n, g, scene.Materials[transmitter[at] - 1].Transmits, mode, aiming, ref random );
+				var luma = BakeMath.Luma( arriving + aimed + through );
+
+				sum += lit + arriving + aimed + through;
 				straight += lit;
 				squares += luma * luma;
 
-				way += lean + ( direction * luma );
-				weight += BakeMath.Luma( lit ) + luma;
+				//The straight light's way alone, for the highlight - see bake_trace.slang's main
+				way += lean;
+				weight += BakeMath.Luma( lit );
 
-				bands[0] += direction * arriving.X;
-				bands[1] += direction * arriving.Y;
-				bands[2] += direction * arriving.Z;
+				bands[0] += ( direction * arriving.X ) + ( towardsLit * aimed.X );
+				bands[1] += ( direction * arriving.Y ) + ( towardsLit * aimed.Y );
+				bands[2] += ( direction * arriving.Z ) + ( towardsLit * aimed.Z );
 
 				//The lights' way, and their light as it would fall square on - see bake_trace.slang's main
 				var leaning = lean.Length();
@@ -1111,14 +1184,14 @@ internal sealed class BakeSheet
 			var way = towards[i];
 			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );
 
-			//How much light the unbent normal gets by the lean below - what it is divided back to
-			var n = normal[i];
-			var lean = n.LengthSquared() > 0.5f ? ( Vec3.Dot( n, way ) * 0.5f ) + 0.5f : 0.5f + ( way.Length() * 0.5f );
+			//The straight light's way and its share of the texel's light - what a highlight is made of (StraightWays)
+			var all = BakeMath.Luma( Vec3.Max( light[i] + direct[i], Vec3.Zero ) );
+			var straight = all > 1e-8f ? Math.Clamp( BakeMath.Luma( Vec3.Max( direct[i], Vec3.Zero ) ) / all, 0.0f, 1.0f ) : 0.0f;
 
 			Ways[( i * 4 ) + 0] = (Half)way.X;
 			Ways[( i * 4 ) + 1] = (Half)way.Y;
 			Ways[( i * 4 ) + 2] = (Half)way.Z;
-			Ways[( i * 4 ) + 3] = (Half)lean;
+			Ways[( i * 4 ) + 3] = (Half)straight;
 
 			var open = sky[i];
 			var openWay = new Vec3( open.X, open.Y, open.Z );

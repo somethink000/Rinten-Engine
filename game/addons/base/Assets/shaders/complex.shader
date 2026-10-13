@@ -39,6 +39,9 @@ FEATURES
 	//Parallax by height map; off by default since it adds a dependent read before every other sample
 	Feature( F_PARALLAX, 0..1, "Maps" ) < Map( g_tHeight ); >;
 
+	//Light through a thin sheet from behind - a curtain, a lampshade, paper; foliage.shader has the same for leaves
+	Feature( F_TRANSMISSION, 0..1, "Transmission" );
+
 }
 
 PARAMETERS
@@ -80,6 +83,18 @@ PARAMETERS
 	//Distant cutout fixes, off by default: Boost lifts alpha per mip, Narrow raises the cutoff per mip
 	float g_flOpacityMipBoost < Default( 0 ); Range( 0, 1 ); UiGroup( "Rendering" ); Feature( F_ALPHA ); >;
 	float g_flOpacityMipNarrow < Default( 0 ); Range( 0, 0.2 ); UiGroup( "Rendering" ); Feature( F_ALPHA ); >;
+
+	//How much of the light behind the sheet comes through, against what it reflects: nought is opaque
+	float g_flTransmission < Default( 0.5 ); Range( 0, 2 ); UiGroup( "Transmission" ); Feature( F_TRANSMISSION ); >;
+
+	//What colour the light is once through, on top of the surface's own
+	float3 g_vTransmissionColour < Default3( 1, 1, 1 ); UiType( Color ); UiGroup( "Transmission" ); Feature( F_TRANSMISSION ); >;
+
+	//How tightly a light behind the sheet glows towards the eye; cloth scatters wide, so low
+	float g_flTransmissionSpread < Default( 2.0 ); Range( 1, 32 ); UiGroup( "Transmission" ); Feature( F_TRANSMISSION ); >;
+
+	//Where the sheet is thick, in red on the colour map's coordinates: white lets light through, black a seam
+	Texture2D g_tThickness < Default( 1.0 ); UiGroup( "Transmission" ); Feature( F_TRANSMISSION ); >;
 }
 
 //Marker only: tells the editor this surface uses vertex tint (see CoreResources.TintsPerVertex)
@@ -106,6 +121,9 @@ struct V2F
 
 //Use the engine's world push block (full matrix plus tint); camera and lights live in the frame
 #define ENGINE_WORLD_PUSH 1
+
+//A thin sheet's light through it, shaded with every light's - see Surface.transmission
+#define SURFACE_TRANSMITS F_TRANSMISSION
 
 //The material, the frame and the lights, and where they are bound. One copy for the whole engine.
 #include "frame.slang"
@@ -415,6 +433,11 @@ Out Shade( V2F i, bool front )
 	surface.lightmap = i.lightmap;
 
 	surface.screen = i.position.xy;
+
+#if F_TRANSMISSION
+	surface.transmission = albedo.rgb * g_vTransmissionColour * ( g_flTransmission * SampleUv( g_tThickness, uv ).r );
+	surface.transmissionSpread = g_flTransmissionSpread;
+#endif
 
 	Shaded lit = ShadeSurface( surface );
 

@@ -172,6 +172,7 @@ internal static partial class CoreBakedLighting
 			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
 			frame[at + 19] = on.Band != 0 ? CoreRender.TextureIndex( on.Band ) : 0.0f;
+			frame[CoreSceneRenderer.BakedTexelsAt + 1] = data.StraightWays ? 1.0f : 0.0f;
 			any = true;
 		}
 
@@ -433,7 +434,7 @@ internal static partial class CoreBakedLighting
 				sheet.Rasterise( world, sheetSide );
 
 				//On the card where it can - the same bake, see BakeGpu - and on every core where it cannot.
-				if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
+				if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
 					sheet.Trace( world, samples, progress, stop );
 
 				progress.Begin( "Filtering", 1 );
@@ -475,7 +476,7 @@ internal static partial class CoreBakedLighting
 
 				if ( sheet is not null )
 				{
-					if ( !sheet.TraceOnCard( world, samples, denoise, progress, stop ) )
+					if ( !sheet.TraceOnCard( world, samples, progress, stop ) )
 						sheet.Trace( world, samples, progress, stop );
 
 					progress.Begin( "Filtering", 1 );
@@ -560,6 +561,7 @@ internal static partial class CoreBakedLighting
 		}
 
 		data.VolumeIndirect = true;
+		data.StraightWays = true;
 
 		if ( sheet is not null )
 		{

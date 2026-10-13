@@ -30,7 +30,7 @@ internal static class BakeGpu
 	private const int SkySide = 64;
 
 	private const int HeaderWords = 32;
-	private const int MaterialWords = 24;
+	private const int MaterialWords = 28;
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
@@ -53,7 +53,7 @@ internal static class BakeGpu
 	//Traces texels on the GPU into float4 sums; false means fall back to CPU. Blocks per step. Cache is the last pass's
 	//light over pi a texel of the sheet, four floats each, for a gathering mode to read; lights, its lit triangles
 	internal static bool Trace( BakeScene scene, Vec3[] position, Vec3[] normal, Vec3[] geometric, Vec3[] across, Vec3[] down,
-		System.Numerics.Vector4[] reach, List<int> texels, int samples, int mode, float[] cache, CacheLights lights, string stage,
+		System.Numerics.Vector4[] reach, int[] transmitter, List<int> texels, int samples, int mode, float[] cache, CacheLights lights, string stage,
 		BakeProgress progress, CancellationToken cancel, out float[] sums )
 	{
 		sums = null;
@@ -61,7 +61,7 @@ internal static class BakeGpu
 		if ( !Available || texels.Count == 0 ) return false;
 
 		//The texels, five float4s each: where, which way the shading and the face look, and its step across and down -
-		//with how far each way it may spread in the four w's (BakeSheet.reach)
+		//how far each way it may spread in four w's (BakeSheet.reach), and in the face's its transmitter's bits
 		var inputs = new float[texels.Count * 20];
 
 		for ( var i = 0; i < texels.Count; ++i )
@@ -77,6 +77,7 @@ internal static class BakeGpu
 
 			inputs[o + 3] = reach[at].X;
 			inputs[o + 7] = reach[at].Y;
+			inputs[o + 11] = BitConverter.Int32BitsToSingle( transmitter[at] );
 			inputs[o + 15] = reach[at].Z;
 			inputs[o + 19] = reach[at].W;
 		}
@@ -357,7 +358,7 @@ internal static class BakeGpu
 
 		foreach ( var material in scene.Materials )
 		{
-			foreach ( var picture in new[] { material.Colour, material.EmissionMap } )
+			foreach ( var picture in new[] { material.Colour, material.EmissionMap, material.RoughnessMap, material.MetalnessMap } )
 			{
 				if ( picture is null || pictureAt.ContainsKey( picture ) ) continue;
 
@@ -388,7 +389,9 @@ internal static class BakeGpu
 		var groupsAt = glowAt + ( scene.Emitters.Length > 0 ? triangles : 0 );
 		var atlasAt = groupsAt + ( grouped ? triangles : 0 );
 		var atlas = scene.AtlasSide > 0 && scene.Receivers.Count > 0;
-		var total = atlasAt + ( atlas ? vertices * 2 : 0 );
+		var mirrorsAt = atlasAt + ( atlas ? vertices * 2 : 0 );
+		var mirrorOfAt = mirrorsAt + ( scene.Mirrors.Length * 8 );
+		var total = mirrorOfAt + ( scene.Mirrors.Length > 0 ? triangles : 0 );
 
 		var w = new uint[total];
 
@@ -417,6 +420,23 @@ internal static class BakeGpu
 		w[22] = grouped ? (uint)groupsAt : 0u;
 		w[23] = atlas ? (uint)atlasAt : 0u;
 		w[24] = (uint)scene.AtlasSide;
+		w[25] = (uint)mirrorsAt;
+		w[26] = (uint)scene.Mirrors.Length;
+		w[27] = (uint)mirrorOfAt;
+
+		for ( var m = 0; m < scene.Mirrors.Length; ++m )
+		{
+			var mirror = scene.Mirrors[m];
+			var at = mirrorsAt + ( m * 8 );
+
+			Put( w, at, mirror.Normal );
+			w[at + 3] = F( mirror.Offset );
+			Put( w, at + 4, mirror.Reflectance );
+			w[at + 7] = mirror.Dielectric ? 1u : 0u;
+		}
+
+		if ( scene.Mirrors.Length > 0 )
+			for ( var t = 0; t < triangles; ++t ) w[mirrorOfAt + t] = (uint)scene.MirrorOf[t];
 
 		//Each vertex's spot on the sheet, for a gathering ray to read the last pass's light at; off it, negative
 		if ( atlas )
@@ -492,7 +512,7 @@ internal static class BakeGpu
 
 			Put( w, at, material.Tint );
 			w[at + 3] = F( material.Alpha );
-			w[at + 4] = F( material.Diffuse );
+			w[at + 4] = F( material.Metalness );
 			Put( w, at + 5, material.Emission );
 			w[at + 8] = F( material.Cutoff );
 
@@ -503,7 +523,12 @@ internal static class BakeGpu
 			if ( material.EmissionUsesAlbedo ) flags |= 8;
 			if ( material.Colour is not null ) flags |= 16;
 			if ( material.EmissionMap is not null ) flags |= 32;
+			if ( material.RoughnessMap is not null ) flags |= 64;
+			if ( material.MetalnessMap is not null ) flags |= 128;
 			w[at + 9] = flags;
+			w[at + 16] = F( material.Roughness );
+			w[at + 23] = F( material.Reflectance );
+			Put( w, at + 24, material.Transmits );
 
 			if ( material.Colour is { } colour )
 			{
@@ -517,6 +542,20 @@ internal static class BakeGpu
 				w[at + 13] = (uint)pictureAt[emission];
 				w[at + 14] = (uint)emission.Width;
 				w[at + 15] = (uint)emission.Height;
+			}
+
+			if ( material.RoughnessMap is { } rough )
+			{
+				w[at + 17] = (uint)pictureAt[rough];
+				w[at + 18] = (uint)rough.Width;
+				w[at + 19] = (uint)rough.Height;
+			}
+
+			if ( material.MetalnessMap is { } metal )
+			{
+				w[at + 20] = (uint)pictureAt[metal];
+				w[at + 21] = (uint)metal.Width;
+				w[at + 22] = (uint)metal.Height;
 			}
 		}
 

@@ -5,12 +5,25 @@ using Vec3 = System.Numerics.Vector3;
 
 namespace Rinten.Bake;
 
+//A gathering pass on the processor, as bake_trace.slang's Mode flags and its g_cache and g_lights - see BakeSheet.Trace
+internal sealed class BakeGather
+{
+	/// <summary>The pass's sampling - BakeGpu's Mode flags.</summary>
+	public int Mode;
+
+	/// <summary>The last pass's light over pi a texel of the sheet, four floats each.</summary>
+	public float[] Cache;
+
+	/// <summary>The last pass's lit triangles as lights; none in the first pass.</summary>
+	public CacheLights Lights;
+}
+
 //The last gather pass's lit triangles as lights the next one samples by power (bake_trace.slang's TowardsCache): a
 //lampshade's inside lit from a few centimetres is a sliver of the view that random rays find too seldom to agree on
 internal sealed class CacheLights
 {
-	//Floats a picked triangle takes: the triangle, power summed so far, a corner and two edges
-	private const int RecordFloats = 11;
+	/// <summary>Floats a picked triangle takes: the triangle, power summed so far, a corner and two edges.</summary>
+	public const int RecordFloats = 11;
 
 	/// <summary>How many triangles are lights.</summary>
 	public int Count { get; private init; }

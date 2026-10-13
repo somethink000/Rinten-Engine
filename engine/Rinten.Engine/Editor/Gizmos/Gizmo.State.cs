@@ -15,6 +15,8 @@ public static partial class Gizmo
 		public float LineThickness;
 		public bool CullBackfaces;
 		public bool CanInteract;
+		//Inside a control's fixed-scale scope: a handle, not an object's own hitbox
+		public bool IsHandle;
 
 		public Color Color;
 		internal Color32 Color32;

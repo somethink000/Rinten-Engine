@@ -56,6 +56,7 @@ public static partial class Gizmo
 			}
 
 			Active.builder.HoveredPath = path;
+			Active.builder.HoveredHandle = Active.scope.IsHandle;
 			Active.builder.HitDistance = distance;
 		}
 

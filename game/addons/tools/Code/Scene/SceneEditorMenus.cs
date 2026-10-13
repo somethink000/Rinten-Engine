@@ -184,7 +184,6 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Move To Grid" )]
-	[Shortcut( "gameObject.move-to-grid", "CTRL+B" )]
 	public static void SnapToGrid()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -229,68 +228,33 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down Local" )]
-	[Shortcut( "gameObject.align-down-local", "CTRL+KP_1" )]
-	public static void AlignToGroundLocal()
-	{
-		using var scope = SceneEditorSession.Scope();
-
-		if ( EditorScene.Selection.Count == 0 )
-			return;
-
-		var gos = EditorScene.Selection.OfType<GameObject>();
-		using ( SceneEditorSession.Current.UndoScope( "Align Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
-		{
-			foreach ( var go in gos )
-			{
-
-				var trace = SceneEditorSession.Current.Scene.Trace
-						.Ray( go.WorldPosition, go.WorldPosition + go.WorldRotation.Down * (254f) )
-						.Size( go.GetBounds().Size )
-						.WithoutTags( "trigger" )
-						.UseRenderMeshes( true )
-						.UsePhysicsWorld( false )
-						.Run();
-
-				if ( trace.Hit )
-				{
-					go.WorldPosition = trace.HitPosition;
-				}
-			}
-		}
-	}
+	public static void AlignToGroundLocal() => AlignDown( local: true );
 
 	[Menu( "Editor", "Scene/Transforms/Align Down World" )]
-	[Shortcut( "gameObject.align-down-world", "CTRL+KP_2" )]
-	public static void AlignToGround()
+	public static void AlignToGround() => AlignDown( local: false );
+
+	//Each object down its own or the world's down, until its bounds rest on a surface
+	private static void AlignDown( bool local )
 	{
 		using var scope = SceneEditorSession.Scope();
 
-		if ( EditorScene.Selection.Count == 0 )
+		var gos = EditorScene.Selection.OfType<GameObject>().ToArray();
+		if ( gos.Length == 0 )
 			return;
 
-		var gos = EditorScene.Selection.OfType<GameObject>();
 		using ( SceneEditorSession.Current.UndoScope( "Align Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
 		{
 			foreach ( var go in gos )
 			{
-				var trace = SceneEditorSession.Current.Scene.Trace
-					.Ray( go.WorldPosition, go.WorldPosition + Vector3.Down * (254f) )
-					.Size( go.GetBounds().Size )
-					.WithoutTags( "trigger" )
-					.UseRenderMeshes( true )
-					.UsePhysicsWorld( false )
-					.Run();
+				var snap = new SurfaceSnap( SceneEditorSession.Current.Scene, [go], local ? go.WorldRotation : Rotation.Identity );
 
-				if ( trace.Hit )
-				{
-					go.WorldPosition = trace.HitPosition;
-				}
+				if ( snap.Toward( SurfaceSnap.UpAxis, negative: true ) is Vector3 offset )
+					go.WorldPosition += offset;
 			}
 		}
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align To Closest Normal" )]
-	[Shortcut( "gameObject.align-to-closest-normal", "CTRL+KP_3" )]
 	public static void AlignToClosestNormal()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -304,7 +268,7 @@ public static class SceneEditorMenus
 			foreach ( var go in gos )
 			{
 				var trace = SceneEditorSession.Current.Scene.Trace
-					.Box( go.GetBounds().Extents, go.LocalPosition, go.LocalPosition + go.WorldRotation.Down * (254f) )
+					.Ray( go.WorldPosition, go.WorldPosition + go.WorldRotation.Down * 254f )
 					.WithoutTags( "trigger" )
 					.UseRenderMeshes( true )
 					.UsePhysicsWorld( false )
@@ -313,67 +277,6 @@ public static class SceneEditorMenus
 				if ( trace.Hit )
 				{
 					go.WorldRotation = Rotation.LookAt( trace.Normal, Vector3.Up ) * Rotation.From( 90, 0, 0 );
-				}
-			}
-		}
-	}
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Up" )]
-	[Shortcut( "gameObject.nudge-up", "ALT+UP" )]
-	public static void NudgeUp() => Nudge( Vector2.Up );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Down" )]
-	[Shortcut( "gameObject.nudge-down", "ALT+DOWN" )]
-	public static void NudgeDown() => Nudge( Vector2.Down );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Left" )]
-	[Shortcut( "gameObject.nudge-left", "ALT+LEFT" )]
-	public static void NudgeLeft() => Nudge( Vector2.Left );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Right" )]
-	[Shortcut( "gameObject.nudge-right", "ALT+RIGHT" )]
-	public static void NudgeRight() => Nudge( Vector2.Right );
-
-	internal static void DuplicateNudge( Vector2 direction ) => Nudge( direction, true );
-
-	private static void Nudge( Vector2 direction, bool duplicate = false )
-	{
-		using var scope = SceneEditorSession.Scope();
-
-		if ( EditorScene.Selection.Count == 0 )
-			return;
-
-		if ( !EditorScene.Selection.OfType<GameObject>().Any() )
-			return;
-
-		var lastSelectedViewportWidget = SceneViewPanel.Current?.LastSelectedViewport;
-		if ( !lastSelectedViewportWidget.IsValid() )
-			return;
-
-		var gos = EditorScene.Selection.OfType<GameObject>();
-		using ( duplicate
-			? SceneEditorSession.Current.UndoScope( "Duplicate Object(s)" ).WithGameObjectCreations().Push()
-			: SceneEditorSession.Current.UndoScope( "Nudge Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
-		{
-			if ( duplicate )
-			{
-				DuplicateInternal();
-				gos = EditorScene.Selection.OfType<GameObject>();
-			}
-
-			var gizmoInstance = lastSelectedViewportWidget.GizmoInstance;
-
-			var rotation = Rotation.Identity;
-			if ( !gizmoInstance.Settings.GlobalSpace )
-				rotation = EditorScene.Selection.OfType<GameObject>().FirstOrDefault().WorldRotation;
-
-			using ( gizmoInstance.Push() )
-			{
-				var delta = Gizmo.Nudge( rotation, direction );
-
-				foreach ( var go in gos )
-				{
-					go.WorldPosition -= delta;
 				}
 			}
 		}

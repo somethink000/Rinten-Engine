@@ -256,7 +256,7 @@ public partial class GameObject
 
 		if ( !SubtreeDrawsGizmos() )
 		{
-			//Nothing here drew, so nothing here has a handle to be picked by - see ObjectEditorTool, which asks.
+			//Nothing here drew, so nothing here has a handle to be picked by - see ObjectSelection, which asks.
 			HasGizmoHandle = false;
 			return;
 		}

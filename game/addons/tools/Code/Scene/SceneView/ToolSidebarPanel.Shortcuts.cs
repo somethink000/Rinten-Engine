@@ -27,7 +27,7 @@ partial class ToolSidebarPanel
 	[Shortcut( "tools.displacement-tool", "8", typeof( SceneViewPanel ), ShortcutType.Window )]
 	public void ActivateDisplacementMode() => Press( "tools.displacement-tool" );
 
-	//W E R T Y for move modes (Q is camera down); maps to object tool sub-tools too, see MeshMoveModes
+	//W E R T Y for move modes (Q is camera down) - see MeshMoveModes
 
 	[Shortcut( "tools.position-tool", "w", typeof( SceneViewPanel ), ShortcutType.Window )]
 	public void ActivatePositionMode() => Press( "tools.position-tool" );

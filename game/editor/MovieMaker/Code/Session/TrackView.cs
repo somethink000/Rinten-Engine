@@ -478,20 +478,24 @@ public sealed partial class TrackView : IComparable<TrackView>
 			return;
 		}
 
-		EditorToolManager.SetTool( nameof( ObjectEditorTool ) );
+		EditorToolManager.SetTool( nameof( Editor.MeshEditor.MeshTool ) );
+		EditorToolManager.SetSubTool( nameof( Editor.MeshEditor.ObjectSelection ) );
+
+		//The move mode is the mesh tool's own; one switched to next frame is not here yet to be set
+		if ( SceneViewPanel.Current?.Tools?.CurrentTool is not Editor.MeshEditor.MeshTool meshTool ) return;
 
 		switch ( property.Name )
 		{
 			case nameof( GameObject.LocalPosition ):
-				EditorToolManager.SetSubTool( nameof( PositionEditorTool ) );
+				meshTool.SetMoveMode<Editor.MeshEditor.PositionMode>();
 				break;
 
 			case nameof( GameObject.LocalRotation ):
-				EditorToolManager.SetSubTool( nameof( RotationEditorTool ) );
+				meshTool.SetMoveMode<Editor.MeshEditor.RotateMode>();
 				break;
 
 			case nameof( GameObject.LocalScale ):
-				EditorToolManager.SetSubTool( nameof( ScaleEditorTool ) );
+				meshTool.SetMoveMode<Editor.MeshEditor.ScaleMode>();
 				break;
 		}
 	}

@@ -9,6 +9,7 @@ public static partial class Gizmo
 	{
 		public ImmutableHashSet<string> SelectedPath;
 		public string HoveredPath;
+		public bool HoveredHandle;
 		public string PressedPath;
 
 		public Inputs Input;

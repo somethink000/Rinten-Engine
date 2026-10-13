@@ -59,9 +59,9 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			AddMenuOption( transform, "Center Origin", "filter_center_focus", "mesh.center-origin", true );
 			AddMenuOption( transform, "Align To View", "visibility", "gameObject.align-to-view", true );
 			transform.AddSeparator();
-			AddMenuOption( transform, "Align Down Local", "vertical_align_bottom", "mesh.align-down-local", true );
-			AddMenuOption( transform, "Align Down World", "vertical_align_bottom", "mesh.align-down-world", true );
-			AddMenuOption( transform, "Align To Closest Normal", "swap_vert", "mesh.align-to-closest-normal", true );
+			AddMenuOption( transform, "Align Down Local", "vertical_align_bottom", () => AlignDown( useLocalDown: true ), null, true );
+			AddMenuOption( transform, "Align Down World", "vertical_align_bottom", () => AlignDown( useLocalDown: false ), null, true );
+			AddMenuOption( transform, "Align To Closest Normal", "swap_vert", AlignToClosestNormal, null, true );
 			transform.AddSeparator();
 			AddMenuOption( transform, "Flip Horizontal", "swap_horiz", "mesh.flip-horizontal", true );
 			AddMenuOption( transform, "Flip Vertical", "swap_vert", "mesh.flip-vertical", true );
@@ -654,6 +654,13 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			SceneEditorMenus.AlignToGroundLocal();
 		else
 			SceneEditorMenus.AlignToGround();
+	}
+
+	public override SurfaceSnap CreateSurfaceSnap( Rotation basis )
+	{
+		//The drag first: a duplicating one makes the objects that move, and those are what the rays must pass through
+		StartDrag();
+		return new SurfaceSnap( Scene, _startPoints.Keys, basis );
 	}
 
 	public override void AlignToClosestNormal()

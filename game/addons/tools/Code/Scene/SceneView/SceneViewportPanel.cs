@@ -382,9 +382,10 @@ public partial class SceneViewportPanel : EditorPanel, IOrientationGizmoHost
 			if ( GizmoInstance.AdjustCameraSpeed( ActiveCamera ) )
 				timeSinceCameraSpeedChange = 0;
 
-			pointer.UpdateCameraBlocks( GizmoInstance.Input.IsHovered, PointerPosition );
+			pointer.UpdateCameraBlocks( GizmoInstance.Input.IsHovered, GizmoInstance.IsHandleHovered, PointerPosition );
 
 			bool shouldBlockOrbit = pointer.BlockCamera
+				|| pointer.HandleHasPress
 				|| (pointer.BlockForToolInput && GizmoInstance.Input.IsHovered)
 				|| gizmoInputUsed
 				|| Gizmo.Pressed.Any;

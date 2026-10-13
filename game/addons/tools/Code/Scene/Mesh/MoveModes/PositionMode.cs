@@ -1,6 +1,6 @@
 ﻿namespace Editor.MeshEditor;
 
-/// <summary>Move selected Mesh Elements.<br/> <br/> <b>Ctrl</b> - toggle snap to grid<br/> <b>Shift</b> - extrude selection</summary>
+/// <summary>Move selected Mesh Elements.<br/> <br/> <b>Ctrl</b> - toggle snap to grid<br/> <b>Shift</b> - extrude selection<br/> <b>Alt</b> - snap objects' edge to surfaces: an arrow slides into one, a plane sits on one along its normal, the center on the nearest</summary>
 [Title( "Move/Position" )]
 [Icon( "open_with" )]
 [Alias( "mesh.position.mode" )]
@@ -12,12 +12,20 @@ public sealed class PositionMode : MoveMode
 	private Rotation _basis;
 	private Vector3 _startPosition;
 
+	//Set while Alt is held: the snap, and the drag and offset from when Alt went down
+	private SurfaceSnap _surface;
+	private Vector3 _altMoveDelta;
+	private Vector3 _altOffset;
+	private Vector3 _lastOffset;
+
 	public override void OnBegin( SelectionTool tool )
 	{
 		_basis = tool.CalculateSelectionBasis();
 		_origin = tool.Pivot.Position;
 		_moveDelta = default;
 		_startPosition = tool.Pivot.Position;
+		_surface = null;
+		_lastOffset = default;
 	}
 
 	protected override void OnUpdate( SelectionTool tool )
@@ -86,6 +94,9 @@ public sealed class PositionMode : MoveMode
 			Gizmo.Hitbox.DepthBias = 0.01f;
 			Gizmo.Hitbox.CanInteract = CanUseGizmo;
 
+			var dragBefore = _moveDelta;
+			Vector3? offset = null;
+
 			if ( Gizmo.Control.Position( "position", Vector3.Zero, out var delta, _basis ) )
 			{
 				if ( _moveDelta == Vector3.Zero )
@@ -149,11 +160,37 @@ public sealed class PositionMode : MoveMode
 					moveDelta = snappedPosition;
 				}
 
-				moveDelta -= _origin;
+				offset = moveDelta - _origin;
+			}
 
+			var moved = offset.HasValue;
+			var pressed = Gizmo.Pressed.FullPath;
+			var alt = Gizmo.IsAltPressed && pressed is not null && pressed.StartsWith( $"{Gizmo.Path}/position/" );
+
+			if ( alt && _surface is null && tool.CreateSurfaceSnap( _basis ) is { } surface )
+			{
+				_surface = surface;
+				_altMoveDelta = dragBefore;
+				_altOffset = _lastOffset;
+			}
+
+			//Released, the selection stays where the snap put it and the drag goes on from there
+			if ( !alt && _surface is not null )
+			{
+				_surface = null;
+				_moveDelta = _lastOffset;
+			}
+
+			if ( _surface is not null )
+				offset = _surface.Offset( pressed, _altOffset, offset ?? _lastOffset, _moveDelta - _altMoveDelta );
+
+			//A press with Alt that has not moved anything yet is not an edit
+			if ( offset is Vector3 move && (moved || move != _lastOffset) )
+			{
 				tool.StartDrag();
-				tool.Translate( moveDelta );
+				tool.Translate( move );
 				tool.UpdateDrag();
+				_lastOffset = move;
 			}
 		}
 

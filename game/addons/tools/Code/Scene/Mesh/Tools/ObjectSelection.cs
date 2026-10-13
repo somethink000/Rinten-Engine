@@ -656,6 +656,11 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			SceneEditorMenus.AlignToGround();
 	}
 
+	public override SurfaceSnap CreateSurfaceSnap( Rotation basis )
+	{
+		return new SurfaceSnap( Scene, _startPoints.Count > 0 ? _startPoints.Keys : _objects, basis );
+	}
+
 	public override void AlignToClosestNormal()
 	{
 		SceneEditorMenus.AlignToClosestNormal();

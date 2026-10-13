@@ -175,6 +175,9 @@ public abstract class SelectionTool( MeshTool tool ) : EditorTool
 	{
 	}
 
+	/// <summary>A snap of the selection onto surfaces, taken where it stands now; null where the selection is not objects.</summary>
+	public virtual SurfaceSnap CreateSurfaceSnap( Rotation basis ) => null;
+
 	public override Panel CreateShortcutsPanel() => new SelectionToolShortcutsPanel( this );
 
 	//Stores the previous selection for each tool type so that re-entering the tool restores it.

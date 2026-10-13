@@ -32,8 +32,7 @@ class MoveModePanel : EditorPanel
 
 		if ( type.GetAttribute<AliasAttribute>() is AliasAttribute alias && !string.IsNullOrEmpty( alias.Value.FirstOrDefault() ) )
 		{
-			//A mode is aliased as what it is - "mesh.position.mode" - and the key is held against what presses it -
-			//"tools.position-tool". Asking here with the mode's own alias found nothing, so no button said its key.
+			//The key is held against what presses the mode ("tools.position-tool"), not the mode's own alias
 			var keys = MeshMoveModes.KeysFor( alias.Value.FirstOrDefault() );
 
 			if ( !string.IsNullOrEmpty( keys ) )

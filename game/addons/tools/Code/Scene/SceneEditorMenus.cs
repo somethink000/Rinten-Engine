@@ -314,67 +314,6 @@ public static class SceneEditorMenus
 		}
 	}
 
-	[Menu( "Editor", "Scene/Transforms/Nudge Up" )]
-	[Shortcut( "gameObject.nudge-up", "ALT+UP" )]
-	public static void NudgeUp() => Nudge( Vector2.Up );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Down" )]
-	[Shortcut( "gameObject.nudge-down", "ALT+DOWN" )]
-	public static void NudgeDown() => Nudge( Vector2.Down );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Left" )]
-	[Shortcut( "gameObject.nudge-left", "ALT+LEFT" )]
-	public static void NudgeLeft() => Nudge( Vector2.Left );
-
-	[Menu( "Editor", "Scene/Transforms/Nudge Right" )]
-	[Shortcut( "gameObject.nudge-right", "ALT+RIGHT" )]
-	public static void NudgeRight() => Nudge( Vector2.Right );
-
-	internal static void DuplicateNudge( Vector2 direction ) => Nudge( direction, true );
-
-	private static void Nudge( Vector2 direction, bool duplicate = false )
-	{
-		using var scope = SceneEditorSession.Scope();
-
-		if ( EditorScene.Selection.Count == 0 )
-			return;
-
-		if ( !EditorScene.Selection.OfType<GameObject>().Any() )
-			return;
-
-		var lastSelectedViewportWidget = SceneViewPanel.Current?.LastSelectedViewport;
-		if ( !lastSelectedViewportWidget.IsValid() )
-			return;
-
-		var gos = EditorScene.Selection.OfType<GameObject>();
-		using ( duplicate
-			? SceneEditorSession.Current.UndoScope( "Duplicate Object(s)" ).WithGameObjectCreations().Push()
-			: SceneEditorSession.Current.UndoScope( "Nudge Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
-		{
-			if ( duplicate )
-			{
-				DuplicateInternal();
-				gos = EditorScene.Selection.OfType<GameObject>();
-			}
-
-			var gizmoInstance = lastSelectedViewportWidget.GizmoInstance;
-
-			var rotation = Rotation.Identity;
-			if ( !gizmoInstance.Settings.GlobalSpace )
-				rotation = EditorScene.Selection.OfType<GameObject>().FirstOrDefault().WorldRotation;
-
-			using ( gizmoInstance.Push() )
-			{
-				var delta = Gizmo.Nudge( rotation, direction );
-
-				foreach ( var go in gos )
-				{
-					go.WorldPosition -= delta;
-				}
-			}
-		}
-	}
-
 	[Menu( "Editor", "Scene/Deselect All" )]
 	[Shortcut( "editor.clear-selection", "ESC" )]
 	public static void DeselectAll()

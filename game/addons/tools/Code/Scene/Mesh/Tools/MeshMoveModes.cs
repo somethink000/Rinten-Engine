@@ -1,6 +1,6 @@
 namespace Editor.MeshEditor;
 
-/// <summary>Move-mode column (position, rotate, resize...) and its W E R T Y keys, shared with object tools</summary>
+/// <summary>Move-mode column (position, rotate, resize...) and its W E R T Y keys</summary>
 public static class MeshMoveModes
 {
 	//Which key each mode alias is on, by the identifier the key is registered under.

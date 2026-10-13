@@ -278,6 +278,13 @@ struct Surface
 
 	//SV_Position.xy, for the screen-space occlusion the frame may have drawn.
 	float2 screen;
+
+#if SURFACE_TRANSMITS
+	//A leaf's or thin cloth's light through it from behind, its colour times its amount; and how tightly the glow of a
+	//light behind it gathers towards the eye. Only where the shader defines SURFACE_TRANSMITS
+	float3 transmission;
+	float transmissionSpread;
+#endif
 };
 
 //The colour, and how much of a mirror the surface is for the passes that come after and never saw it drawn.
@@ -563,6 +570,23 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float facing = dot( normal, l );
 		float nDotL = saturate( facing );
 
+#if SURFACE_TRANSMITS
+		//Through a leaf or thin cloth: its back to the light, and the glow of a light behind it towards the eye;
+		//a baked light's on a lightmapped surface is in the lightmap already - see BakeScene.Transmission
+		if ( attenuation > 0.0 && any( s.transmission > 0.0 ) && !( sheetLit && LightBaked( light ) ) && ( LightWithholds( light ) & 1u ) == 0u )
+		{
+			float behind = saturate( -dot( geometric, l ) );
+			float glow = pow( saturate( dot( -v, l ) ), s.transmissionSpread );
+			float through = ( behind * 0.5 ) + ( glow * ( 0.3 + ( 0.7 * behind ) ) );
+
+			if ( through > 0.0 )
+			{
+				float backShadow = light.colour.w < 0.5 ? SunShadow( s.world, -geometric, -geometric, true ) : LampShadow( s.world, -geometric, light, distance );
+				litDiffuse += s.transmission * light.colour.rgb * ( through * attenuation * backShadow );
+			}
+		}
+#endif
+
 		//How far past the terminator each colour still takes this light: wrapped diffuse,
 		//kept to the energy of a plain one. At nought scatter this is nDotL in all three.
 		float3 wrap = float3( 0.5, 0.2, 0.12 ) * scatter;
@@ -662,6 +686,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 	//A small bright highlight can exceed a half float; clamped so the picture and bloom get the most it can say
 	litSpecular = min( litSpecular, 32768.0.xxx );
+
+#if SURFACE_TRANSMITS
+	//And the sky behind it, a quarter of it; a lightmapped one has its back's light in the lightmap
+	if ( !sheetLit && HasSky() ) litDiffuse += s.transmission * SceneAmbient( SkyAmbient( -geometric ) * SkyAmbientScale() ) * 0.25;
+#endif
 
 	//What the corner of a room can see of the sky, if the frame worked it out. The picture is half the
 	//size of the window, which is why this reads by position rather than by anything the mesh carries.
@@ -832,7 +861,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 probed = ProbesPart( probes, s.world, away, roughness, skyLeft );
 	float3 lookAt = normalize( lerp( away, normal, roughness * roughness ) );
 	float3 mirroredSky = HasSky() ? SkyReflected( lookAt, roughness ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
+	float3 unscaled = probed + ( mirroredSky * skyLeft );
 	float3 around = ( probed * probeReach ) + ( mirroredSky * skyLeft * skyReach );
+
+	//How much of the environment reflection is left after both reaches - what SSR takes the place of
+	float reach = saturate( LightStrength( around ) / max( LightStrength( unscaled ), 1e-4 ) );
 
 	//A normal map can point the reflected ray back into the surface it left, and a floor
 	//does not reflect its own underside. Squared so it is a fade rather than an edge.
@@ -871,7 +904,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	o.colour = shaded;
 
 	//Mirror weight for the SSR pass: the exact environment weight used here, gone by half rough
-	float mirror = LightStrength( reflectance ) * skyReach;
+	float mirror = LightStrength( reflectance ) * reach;
 
 	o.mirror = mirror * saturate( 1.0 - ( roughness * 2.0 ) );
 

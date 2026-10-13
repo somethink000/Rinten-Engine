@@ -47,6 +47,7 @@ internal sealed class BakeSheet
 	private float[] owned;        //Distance from the texel's centre to its triangle, in texels; +inf where none
 	private int[] ownerOf;        //Receiver whose square it is in, -1 where none
 	private int[] isle;           //Island of the unwrap the texel lies on, numbered across the sheet; -1 where none
+	private int[] transmitter;    //One more than the material passing light through the texel, nought where none
 
 	//What each texel's surface reflects, for the denoiser to tell one material from another - see BakeDenoise
 	private Vec3[] albedo;
@@ -199,6 +200,7 @@ internal sealed class BakeSheet
 		owned = new float[count];
 		ownerOf = new int[count];
 		isle = new int[count];
+		transmitter = new int[count];
 
 		Array.Fill( owned, float.PositiveInfinity );
 		Array.Fill( ownerOf, -1 );
@@ -449,6 +451,7 @@ internal sealed class BakeSheet
 				geometric[at] = scene.Facing[t];
 				isle[at] = island;
 				albedo[at] = scene.AlbedoAt( t, wb, wc );
+				transmitter[at] = scene.Materials[scene.MaterialOf[t]].Transmits == Vec3.Zero ? 0 : scene.MaterialOf[t] + 1;
 				across[at] = perX;
 				down[at] = perY;
 			}
@@ -585,7 +588,7 @@ internal sealed class BakeSheet
 		//Whole paths with no bounce to gather, or where the world was laid out for another sheet than this one
 		if ( scene.Bounces <= 0 || scene.AtlasSide != Width )
 		{
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, 0, null, null,
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, samples, 0, null, null,
 				"Tracing the surfaces on the card", progress, cancel, out var whole ) ) return false;
 
 			Take( scene, texels, whole, samples );
@@ -606,7 +609,7 @@ internal sealed class BakeSheet
 			//Past the first, the cache's lit triangles are lights the gather aims at as well
 			var lights = pass == 0 ? null : CacheLights.Of( scene, cache, Width );
 
-			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, early, mode, cache, lights,
+			if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, early, mode, cache, lights,
 				$"Gathering bounce {pass + 1} of {scene.Bounces} on the card", progress, cancel, out var sums ) ) return false;
 
 			Take( scene, texels, sums, early );
@@ -623,7 +626,7 @@ internal sealed class BakeSheet
 			}
 		}
 
-		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, texels, samples, BakeGpu.ModeGather, cache,
+		if ( !BakeGpu.Trace( scene, position, normal, geometric, across, down, reach, transmitter, texels, samples, BakeGpu.ModeGather, cache,
 			CacheLights.Of( scene, cache, Width ), "Tracing the surfaces on the card", progress, cancel, out var last ) ) return false;
 
 		Take( scene, texels, last, samples );
@@ -795,9 +798,13 @@ internal sealed class BakeSheet
 				var lean = Vec3.Zero;
 				var lit = ( mode & BakeGpu.ModeNoDirect ) != 0 ? Vec3.Zero
 					: scene.Direct( p, n, g, ref random, ( mode & BakeGpu.ModeAllLights ) == 0, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
-				var luma = BakeMath.Luma( arriving + aimed );
 
-				sum += lit + arriving + aimed;
+				//And a leaf's back, through it: with the bounced light, which the denoiser smooths, and in no band
+				var through = transmitter[at] == 0 ? Vec3.Zero
+					: scene.Transmission( p, n, g, scene.Materials[transmitter[at] - 1].Transmits, mode, aiming, ref random );
+				var luma = BakeMath.Luma( arriving + aimed + through );
+
+				sum += lit + arriving + aimed + through;
 				straight += lit;
 				squares += luma * luma;
 

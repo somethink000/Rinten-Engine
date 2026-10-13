@@ -220,7 +220,7 @@ internal sealed class BakeSurfels
 			Span<int> found = stackalloc int[Across * Across];
 			var hits = 0;
 			var open = Vec3.Zero;
-			var escaped = 0;
+			var escaped = 0.0f;
 			var struck = 0;
 
 			//By the cosine, so each ray is worth the same share of what arrives
@@ -231,11 +231,13 @@ internal sealed class BakeSurfels
 
 				if ( !scene.Bvh.Nearest( from, direction, 1e6f, out var hit ) )
 				{
-					open += direction;
-					escaped++;
+					var sky = scene.Veiled ? Mean( scene.Transmittance( from, direction, 1e6f ) ) : 1.0f;
+					open += direction * sky;
+					escaped += sky;
 					continue;
 				}
 
+				if ( !Lets( scene, from, direction, hit, ref random ) ) continue;
 				if ( Vec3.Dot( direction, scene.Facing[hit.Triangle] ) <= 0.0f ) struck++;
 
 				var landed = Landed( scene, from, direction, hit );
@@ -246,7 +248,7 @@ internal sealed class BakeSurfels
 
 			var way = open.LengthSquared() > 1e-8f ? Vec3.Normalize( open ) : face;
 			Put( ( s * Floats ) + 9, way );
-			Data[( s * Floats ) + 12] = escaped / (float)( Across * Across ) * scene.SkyStrength;
+			Data[( s * Floats ) + 12] = escaped / ( Across * Across ) * scene.SkyStrength;
 
 			//The sun from each direction the octahedron holds, where it is over the surfel's plane
 			for ( var cell = 0; cell < SunSide * SunSide; ++cell )
@@ -256,7 +258,9 @@ internal sealed class BakeSurfels
 				var direction = BakeMath.FromOctahedron( ox, oy );
 
 				if ( Vec3.Dot( direction, face ) <= 0.0f ) continue;
-				if ( scene.Bvh.Blocked( BakeScene.Offset( at, face, direction ), direction, 1e5f ) ) continue;
+
+				//A bit a direction, so glass that holds back more than half the sun is a shadow
+				if ( Mean( scene.Transmittance( BakeScene.Offset( at, face, direction ), direction, 1e5f ) ) < 0.5f ) continue;
 
 				Sun[( s * SunBytes ) + ( cell >> 3 )] |= (byte)( 1 << ( cell & 7 ) );
 			}
@@ -323,6 +327,8 @@ internal sealed class BakeSurfels
 					continue;
 				}
 
+				if ( !Lets( scene, at, direction, hit, ref random ) ) continue;
+
 				var landed = Landed( scene, at, direction, hit );
 				if ( landed >= 0 ) found[hits++] = landed;
 			}
@@ -381,6 +387,7 @@ internal sealed class BakeSurfels
 				var direction = BakeMath.CosineAround( facing[index], ( ( k % Across ) + random.Float() ) / Across, ( ( k / Across ) + random.Float() ) / Across );
 
 				if ( !scene.Bvh.Nearest( at[index], direction, 1e6f, out var hit ) ) continue;
+				if ( !Lets( scene, at[index], direction, hit, ref random ) ) continue;
 				if ( Vec3.Dot( direction, scene.Facing[hit.Triangle] ) <= 0.0f ) struck++;
 
 				var landed = Landed( scene, at[index], direction, hit );
@@ -419,6 +426,12 @@ internal sealed class BakeSurfels
 			TexelSlot = grown;
 		}
 	}
+
+	//Whether a ray gets past the glass before what it hit, by chance as often as the glass lets light by
+	private static bool Lets( BakeScene scene, Vec3 from, Vec3 direction, in BakeHit hit, ref BakeRandom random )
+		=> !scene.Veiled || random.Float() < Mean( scene.Transmittance( from, direction, hit.Distance * 0.9999f ) );
+
+	private static float Mean( Vec3 v ) => ( v.X + v.Y + v.Z ) / 3.0f;
 
 	//The cluster of the surfel by where a ray landed, facing as the surface it landed on; -1 for a back or none near
 	private int Landed( BakeScene scene, Vec3 from, Vec3 direction, in BakeHit hit )

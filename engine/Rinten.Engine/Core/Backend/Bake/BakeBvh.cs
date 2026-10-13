@@ -55,7 +55,7 @@ internal sealed class BakeBvh
 	internal delegate bool Through( int triangle, float u, float v );
 
 	//How much of a ray gets by a world triangle it crosses, by whether it is solid all over - see BakeScene.Veil.
-	internal delegate float Veil( int triangle, float u, float v, bool tested );
+	internal delegate Vec3 Veil( int triangle, float u, float v, bool tested );
 
 	private Through passes;
 
@@ -384,18 +384,18 @@ internal sealed class BakeBvh
 	}
 
 	/// <summary>How much of a ray gets through to <paramref name="furthest"/>, triangle by triangle.</summary>
-	public float Transmittance( Vec3 origin, Vec3 direction, float furthest, Veil veil )
+	public Vec3 Transmittance( Vec3 origin, Vec3 direction, float furthest, Veil veil )
 	{
-		if ( source.Length == 0 ) return 1.0f;
+		if ( source.Length == 0 ) return Vec3.One;
 
 		var inverse = Inverse( direction );
 
 		Span<int> stack = stackalloc int[64];
 		var depth = 0;
 		var at = 0;
-		var through = 1.0f;
+		var through = Vec3.One;
 
-		if ( Enter( nodes[0], origin, inverse, furthest ) == float.MaxValue ) return 1.0f;
+		if ( Enter( nodes[0], origin, inverse, furthest ) == float.MaxValue ) return Vec3.One;
 
 		while ( true )
 		{
@@ -408,7 +408,7 @@ internal sealed class BakeBvh
 					if ( !Crosses( t, origin, direction, furthest, out _, out var u, out var v, out _ ) ) continue;
 
 					through *= veil( source[t], u, v, tested[t] );
-					if ( through <= 1e-4f ) return 0.0f;
+					if ( through.X <= 1e-4f && through.Y <= 1e-4f && through.Z <= 1e-4f ) return Vec3.Zero;
 				}
 			}
 			else
@@ -439,6 +439,58 @@ internal sealed class BakeBvh
 		}
 
 		return through;
+	}
+
+	/// <summary>Whether a ray crosses, however clear, a triangle <paramref name="which"/> picks by its world index.</summary>
+	public bool Touches( Vec3 origin, Vec3 direction, float furthest, Predicate<int> which )
+	{
+		if ( source.Length == 0 ) return false;
+
+		var inverse = Inverse( direction );
+
+		Span<int> stack = stackalloc int[64];
+		var depth = 0;
+		var at = 0;
+
+		if ( Enter( nodes[0], origin, inverse, furthest ) == float.MaxValue ) return false;
+
+		while ( true )
+		{
+			ref readonly var node = ref nodes[at];
+
+			if ( node.Count > 0 )
+			{
+				for ( var t = node.First; t < node.First + node.Count; ++t )
+					if ( which( source[t] ) && Crosses( t, origin, direction, furthest, out _, out _, out _, out _ ) ) return true;
+			}
+			else
+			{
+				var left = node.First;
+
+				var leftHit = Enter( nodes[left], origin, inverse, furthest ) != float.MaxValue;
+				var rightHit = Enter( nodes[left + 1], origin, inverse, furthest ) != float.MaxValue;
+
+				if ( leftHit )
+				{
+					if ( rightHit && depth < stack.Length ) stack[depth++] = left + 1;
+
+					at = left;
+					continue;
+				}
+
+				if ( rightHit )
+				{
+					at = left + 1;
+					continue;
+				}
+			}
+
+			if ( depth == 0 ) break;
+
+			at = stack[--depth];
+		}
+
+		return false;
 	}
 
 	/// <summary>The nearest thing along a ray, within <paramref name="furthest"/>.</summary>

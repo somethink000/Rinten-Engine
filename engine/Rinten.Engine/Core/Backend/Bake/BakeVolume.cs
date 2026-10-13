@@ -105,7 +105,7 @@ internal sealed class BakeVolume
 				var arriving = scene.Arriving( at, direction, glowing, ref random, out var behind, out var escaped );
 
 				if ( behind ) inside++;
-				if ( escaped ) open += new Vec4( direction, 1.0f );
+				if ( escaped ) open += new Vec4( direction, 1.0f ) * BakeScene.FirstVeil;
 
 				//And a glowing triangle straight from the point, as radiance over the sphere's chance of its direction
 				if ( glowing > 0.0f )

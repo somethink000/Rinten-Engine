@@ -172,6 +172,7 @@ internal static partial class CoreBakedLighting
 			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
 			frame[at + 19] = on.Band != 0 ? CoreRender.TextureIndex( on.Band ) : 0.0f;
+			frame[CoreSceneRenderer.BakedTexelsAt + 1] = data.StraightWays ? 1.0f : 0.0f;
 			any = true;
 		}
 
@@ -560,6 +561,7 @@ internal static partial class CoreBakedLighting
 		}
 
 		data.VolumeIndirect = true;
+		data.StraightWays = true;
 
 		if ( sheet is not null )
 		{

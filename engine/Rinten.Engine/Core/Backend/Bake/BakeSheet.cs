@@ -780,7 +780,7 @@ internal sealed class BakeSheet
 					continue;
 				}
 
-				if ( escaped ) open += new Vec4( direction, 1.0f );
+				if ( escaped ) open += new Vec4( direction, 1.0f ) * BakeScene.FirstVeil;
 
 				//And a lit spot of the cache aimed at by its power, weighed against the cosine ray's chance of that way
 				var aimed = Vec3.Zero;
@@ -801,8 +801,9 @@ internal sealed class BakeSheet
 				straight += lit;
 				squares += luma * luma;
 
-				way += lean + ( direction * BakeMath.Luma( arriving ) ) + ( towardsLit * BakeMath.Luma( aimed ) );
-				weight += BakeMath.Luma( lit ) + luma;
+				//The straight light's way alone, for the highlight - see bake_trace.slang's main
+				way += lean;
+				weight += BakeMath.Luma( lit );
 
 				bands[0] += ( direction * arriving.X ) + ( towardsLit * aimed.X );
 				bands[1] += ( direction * arriving.Y ) + ( towardsLit * aimed.Y );
@@ -1176,14 +1177,14 @@ internal sealed class BakeSheet
 			var way = towards[i];
 			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );
 
-			//How much light the unbent normal gets by the lean below - what it is divided back to
-			var n = normal[i];
-			var lean = n.LengthSquared() > 0.5f ? ( Vec3.Dot( n, way ) * 0.5f ) + 0.5f : 0.5f + ( way.Length() * 0.5f );
+			//The straight light's way and its share of the texel's light - what a highlight is made of (StraightWays)
+			var all = BakeMath.Luma( Vec3.Max( light[i] + direct[i], Vec3.Zero ) );
+			var straight = all > 1e-8f ? Math.Clamp( BakeMath.Luma( Vec3.Max( direct[i], Vec3.Zero ) ) / all, 0.0f, 1.0f ) : 0.0f;
 
 			Ways[( i * 4 ) + 0] = (Half)way.X;
 			Ways[( i * 4 ) + 1] = (Half)way.Y;
 			Ways[( i * 4 ) + 2] = (Half)way.Z;
-			Ways[( i * 4 ) + 3] = (Half)lean;
+			Ways[( i * 4 ) + 3] = (Half)straight;
 
 			var open = sky[i];
 			var openWay = new Vec3( open.X, open.Y, open.Z );

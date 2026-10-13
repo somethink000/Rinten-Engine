@@ -403,8 +403,9 @@ void ApplyDecals( inout Surface s )
 
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
 #ifndef PORTABLE
-//The baked light's highlight from the sheet's dominant way, as directional lightmaps give one: the share that came
-//one way, as a lamp from there, its lobe the wider the less the light agreed
+//The baked lamps' highlight from the sheet's dominant way, as directional lightmaps give one: the share that came one
+//way, as a lamp from there, its lobe the wider the less the light agreed. Only the straight light where the bake kept
+//it apart (StraightWays) - what bounced is in the probes' reflection, and counted twice it would shine twice
 float3 BakedHighlight( float2 lightmap, float3 normal, float3 v, float nDotV, float roughness, float3 f0 )
 {
 	//Both frame-uniform - see SkyTableAt.
@@ -417,6 +418,7 @@ float3 BakedHighlight( float2 lightmap, float3 normal, float3 v, float nDotV, fl
 	if ( nDotL <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
 	float3 light = g_textures[uint( g_frame[0].bakedMaps.x )].SampleLevel( lightmap, 0.0 ).rgb;
+	if ( g_frame[0].bakedTexels.y > 0.5 ) light *= saturate( way.w );
 
 	float3 h = normalize( l + v );
 	Rough rough = RoughFor( lerp( 1.0, roughness, saturate( strength ) ) );
@@ -736,8 +738,10 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//With a bake, its answer replaces the sky and AO guess rather than adding to it
 	float3 ambientSky = sky;
 
-	//How much of the sky the reflection sees, so indoor floors don't mirror the full sky
+	//How much of the sky the reflection sees, so indoor floors don't mirror the full sky; and how much of what probes
+	//saw reaches here, as UE normalises its captures by the bake - a dark corner reflects the room darkly
 	float skyReach = inGrid ? saturate( LightStrength( sky ) / max( LightStrength( openSky ), 1e-4 ) ) : 1.0;
+	float probeReach = skyReach;
 
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
@@ -763,6 +767,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 			skyReach = saturate( open.w );
 		}
 		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 	else if ( HasBakedVolume() )
 	{
@@ -781,6 +787,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 			skyReach = seen;
 		}
 		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 #else
 	//The portable frame's bake: no directions and no walls, the sky by the normal, the bounce from the volume
@@ -789,11 +797,13 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float4 baked = PortableSheet( s.lightmap );
 
 		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
-		skyReach = saturate( baked.a );
 		visible = 1.0;
 
 		if ( HasPortableVolume() && g_frame[0].portableBake.w > 0.5 )
 			ambientSky += PortableVolume( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), true ).rgb;
+
+		skyReach = saturate( baked.a );
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 	else if ( HasPortableVolume() )
 	{
@@ -801,9 +811,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float4 baked = PortableVolume( lifted, false );
 
 		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
-		skyReach = saturate( baked.a );
 
 		if ( g_frame[0].portableBake.w > 0.5 ) ambientSky += PortableVolume( lifted, true ).rgb;
+
+		skyReach = saturate( baked.a );
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 #endif
 
@@ -815,7 +827,12 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//Sky/probe reflection everywhere, not only in probe boxes, so metals aren't black outdoors
 	float3 away = reflect( -v, normal );
 
-	float3 around = EnvironmentAt( probes, s.world, normal, away, roughness ) * skyReach;
+	//The probes' part and the sky's under them, each by its own reach - EnvironmentAt adds them as one, for SSR
+	float skyLeft;
+	float3 probed = ProbesPart( probes, s.world, away, roughness, skyLeft );
+	float3 lookAt = normalize( lerp( away, normal, roughness * roughness ) );
+	float3 mirroredSky = HasSky() ? SkyReflected( lookAt, roughness ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
+	float3 around = ( probed * probeReach ) + ( mirroredSky * skyLeft * skyReach );
 
 	//A normal map can point the reflected ray back into the surface it left, and a floor
 	//does not reflect its own underside. Squared so it is a fade rather than an edge.

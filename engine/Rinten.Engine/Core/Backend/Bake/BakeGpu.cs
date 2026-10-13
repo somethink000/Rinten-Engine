@@ -357,7 +357,7 @@ internal static class BakeGpu
 
 		foreach ( var material in scene.Materials )
 		{
-			foreach ( var picture in new[] { material.Colour, material.EmissionMap } )
+			foreach ( var picture in new[] { material.Colour, material.EmissionMap, material.RoughnessMap, material.MetalnessMap } )
 			{
 				if ( picture is null || pictureAt.ContainsKey( picture ) ) continue;
 
@@ -492,7 +492,7 @@ internal static class BakeGpu
 
 			Put( w, at, material.Tint );
 			w[at + 3] = F( material.Alpha );
-			w[at + 4] = F( material.Diffuse );
+			w[at + 4] = F( material.Metalness );
 			Put( w, at + 5, material.Emission );
 			w[at + 8] = F( material.Cutoff );
 
@@ -503,7 +503,10 @@ internal static class BakeGpu
 			if ( material.EmissionUsesAlbedo ) flags |= 8;
 			if ( material.Colour is not null ) flags |= 16;
 			if ( material.EmissionMap is not null ) flags |= 32;
+			if ( material.RoughnessMap is not null ) flags |= 64;
+			if ( material.MetalnessMap is not null ) flags |= 128;
 			w[at + 9] = flags;
+			w[at + 16] = F( material.Roughness );
 
 			if ( material.Colour is { } colour )
 			{
@@ -517,6 +520,20 @@ internal static class BakeGpu
 				w[at + 13] = (uint)pictureAt[emission];
 				w[at + 14] = (uint)emission.Width;
 				w[at + 15] = (uint)emission.Height;
+			}
+
+			if ( material.RoughnessMap is { } rough )
+			{
+				w[at + 17] = (uint)pictureAt[rough];
+				w[at + 18] = (uint)rough.Width;
+				w[at + 19] = (uint)rough.Height;
+			}
+
+			if ( material.MetalnessMap is { } metal )
+			{
+				w[at + 20] = (uint)pictureAt[metal];
+				w[at + 21] = (uint)metal.Width;
+				w[at + 22] = (uint)metal.Height;
 			}
 		}
 

@@ -180,14 +180,17 @@ float4 Picture( uint at, uint width, uint height, float2 uv )
 	return lerp( lerp( a, b, tx ), lerp( c, d, tx ), ty );
 }
 
-//A material, as BakeGpu.Pack writes it: 0  tint xyz, alpha 4  diffuse, emission xyz 8  cutoff,
-//flags, colour picture's place, width 12  height, emission picture's place, width, height
+//A material, as BakeGpu.Pack writes it: 0  tint xyz, alpha 4  metalness, emission xyz 8  cutoff, flags, colour
+//picture's place, width 12  height, emission picture's place, width, height 16  roughness, its picture's place, width,
+//height 20  metalness picture's place, width, height
 static const uint FlagMasked = 1u;
 static const uint FlagTranslucent = 2u;
 static const uint FlagTwoSided = 4u;
 static const uint FlagGlowsFromAlbedo = 8u;
 static const uint FlagHasColour = 16u;
 static const uint FlagHasEmissionMap = 32u;
+static const uint FlagHasRoughnessMap = 64u;
+static const uint FlagHasMetalnessMap = 128u;
 
 float4 MaterialColour( uint m, float2 uv )
 {
@@ -296,11 +299,15 @@ float3 Inverse( float3 d )
 		1.0 / ( abs( d.z ) < least ? ( d.z < 0.0 ? -least : least ) : d.z ) );
 }
 
-bool Meets( uint t, float3 origin, float3 direction, float furthest, out float distance, out float u, out float v )
+//Whether a ray crosses a tree triangle, however clear it is; its world triangle and whether it is not solid all over
+bool Crosses( uint t, float3 origin, float3 direction, float furthest, out float distance, out float u, out float v, out uint source,
+	out bool tested )
 {
 	distance = 0.0;
 	u = 0.0;
 	v = 0.0;
+	source = 0u;
+	tested = false;
 
 	uint at = TreeAt() + ( t * 10 );
 
@@ -325,21 +332,44 @@ bool Meets( uint t, float3 origin, float3 direction, float furthest, out float d
 	if ( distance <= 0.0 || distance >= furthest ) return false;
 
 	uint word = Word( at + 9 );
-	uint source = word & 0x7FFFFFFFu;
-
-	if ( ( word & 0x80000000u ) != 0u && Through( source, u, v ) ) return false;
+	source = word & 0x7FFFFFFFu;
+	tested = ( word & 0x80000000u ) != 0u;
 
 	return true;
 }
 
-bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit )
+//How much of a ray gets by a triangle it crosses: none of a solid one, all or none of a cut-out where cut, and of
+//glass what its opacity leaves - as the frame blends what is behind it
+float Veil( uint t, float u, float v, bool tested )
+{
+	if ( !tested ) return 0.0;
+
+	uint word = Word( TriangleAt() + ( t * 4 ) );
+	uint m = word & 0x0FFFFFFFu;
+	uint at = MaterialsAt() + ( m * MaterialWords );
+
+	if ( ( word >> 28 ) == 2u ) return Through( t, u, v ) ? 1.0 : 0.0;
+	if ( ( Word( at + 9 ) & FlagTranslucent ) == 0u ) return 1.0;
+
+	float opacity = Float( at + 3 ) * MaterialColour( m, Uv( t, u, v ) ).w;
+	return saturate( 1.0 - opacity );
+}
+
+//The nearest solid thing along a ray, and in `veil` what the glass in front of it let by - the panes it crossed on the
+//way, kept as it walks so the bounce needs no second walk (the first four by distance, any more just multiplied)
+bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit, out float veil )
 {
 	hit.distance = 0.0;
 	hit.triangle = 0xFFFFFFFFu;
 	hit.u = 0.0;
 	hit.v = 0.0;
+	veil = 1.0;
 
 	if ( NodeCount() == 0u ) return false;
+
+	float paneAt[4];
+	float paneLets[4];
+	uint panes = 0u;
 
 	float3 inverse = Inverse( direction );
 	uint stack[48];
@@ -362,7 +392,29 @@ bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit )
 			for ( uint t = first; t < first + count; ++t )
 			{
 				float distance, u, v;
-				if ( !Meets( t, origin, direction, furthest, distance, u, v ) ) continue;
+				uint source;
+				bool tested;
+				if ( !Crosses( t, origin, direction, furthest, distance, u, v, source, tested ) ) continue;
+
+				//Cut away or clear, it is passed; glass is passed and kept for what it lets by
+				if ( tested )
+				{
+					float lets = Veil( source, u, v, true );
+					if ( lets >= 1.0 ) continue;
+
+					if ( lets > 0.0 )
+					{
+						if ( panes < 4u )
+						{
+							paneAt[panes] = distance;
+							paneLets[panes] = lets;
+							panes++;
+						}
+						else veil *= lets;
+
+						continue;
+					}
+				}
 
 				furthest = distance;
 				found = true;
@@ -398,19 +450,25 @@ bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit )
 		at = stack[--depth];
 	}
 
+	for ( uint p = 0u; p < panes; ++p )
+		if ( !found || paneAt[p] < hit.distance ) veil *= paneLets[p];
+
 	return found;
 }
 
-bool Blocked( float3 origin, float3 direction, float furthest )
+//How much of a ray gets through to `furthest`: what every pane it crosses lets by, nought at the first solid thing -
+//one walk for shadows and glass alike, which with no glass in the world is a plain test of whether anything is there
+float Transmittance( float3 origin, float3 direction, float furthest )
 {
-	if ( NodeCount() == 0u ) return false;
+	if ( NodeCount() == 0u ) return 1.0;
 
 	float3 inverse = Inverse( direction );
 	uint stack[48];
 	uint depth = 0;
 	uint at = 0;
+	float through = 1.0;
 
-	if ( Enter( 0, origin, inverse, furthest ) >= 3.0e38 ) return false;
+	if ( Enter( 0, origin, inverse, furthest ) >= 3.0e38 ) return 1.0;
 
 	for ( ;; )
 	{
@@ -423,7 +481,12 @@ bool Blocked( float3 origin, float3 direction, float furthest )
 			for ( uint t = first; t < first + count; ++t )
 			{
 				float distance, u, v;
-				if ( Meets( t, origin, direction, furthest, distance, u, v ) ) return true;
+				uint source;
+				bool tested;
+				if ( !Crosses( t, origin, direction, furthest, distance, u, v, source, tested ) ) continue;
+
+				through *= Veil( source, u, v, tested );
+				if ( through <= 1e-4 ) return 0.0;
 			}
 		}
 		else
@@ -451,7 +514,7 @@ bool Blocked( float3 origin, float3 direction, float furthest )
 		at = stack[--depth];
 	}
 
-	return false;
+	return through;
 }
 
 //---- the world as the rays see it - BakeScene ----------------------------------
@@ -464,6 +527,10 @@ struct Surface
 	float3 albedo;
 	float3 emission;
 	bool back;
+
+	//What it mirrors at square incidence - four per cent where it is not metal, its colour where it is - and how rough
+	float3 specular;
+	float roughness;
 };
 
 //What a material gives off at a point - BakeScene.GlowOf
@@ -511,7 +578,19 @@ Surface SurfaceOf( Hit hit, float3 origin, float3 direction )
 	float3 tint = Float3( TriangleAt() + ( t * 4 ) + 1 );
 
 	float3 albedo = texel.xyz * Float3( at ) * tint * vertex;
-	s.albedo = min( albedo * Float( at + 4 ) * AlbedoBoost(), float3( 0.95, 0.95, 0.95 ) );
+
+	//As complex.shader: each the number times its picture where there is one - see BakeMaterial.MetalnessAt
+	float metal = Float( at + 4 );
+	if ( ( flags & FlagHasMetalnessMap ) != 0u ) metal *= Picture( Word( at + 20 ), Word( at + 21 ), Word( at + 22 ), uv ).x;
+	metal = saturate( metal );
+
+	float rough = Float( at + 16 );
+	if ( ( flags & FlagHasRoughnessMap ) != 0u ) rough *= Picture( Word( at + 17 ), Word( at + 18 ), Word( at + 19 ), uv ).x;
+
+	//Metal keeps none of its light diffuse; what it and everything else mirrors is the specular colour - see Sheen
+	s.albedo = min( albedo * ( 1.0 - metal ) * AlbedoBoost(), float3( 0.95, 0.95, 0.95 ) );
+	s.specular = lerp( float3( 0.04, 0.04, 0.04 ), min( albedo, float3( 1.0, 1.0, 1.0 ) ), metal );
+	s.roughness = clamp( rough, 0.04, 1.0 );
 
 	s.emission = GlowsNow( t ) ? GlowOf( at, flags, uv, texel ) : float3( 0.0, 0.0, 0.0 );
 
@@ -703,13 +782,16 @@ float3 DirectOne( uint index, float3 position, float3 normal, float3 geometric, 
 
 	if ( dot( geometric, aim ) <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
+	//What glass between lets by - see Transmittance
+	float through = 1.0;
+
 	if ( ( Word( at + 15 ) & LightShadows ) != 0u )
 	{
-		float3 from = Offset( position, geometric, aim );
-		if ( Blocked( from, aim, distance - ( Lift * 2.0 ) ) ) return float3( 0.0, 0.0, 0.0 );
+		through = Transmittance( Offset( position, geometric, aim ), aim, distance - ( Lift * 2.0 ) );
+		if ( through <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 	}
 
-	return Float3( at + 5 ) * ( nDotL * attenuation / Pi );
+	return Float3( at + 5 ) * ( nDotL * attenuation * through / Pi );
 }
 
 float3 Direct( float3 position, float3 normal, float3 geometric, inout Random random, bool bakedOnly, inout float3 towards )
@@ -792,14 +874,15 @@ float3 TowardsGlow( float3 position, float3 normal, float3 geometric, bool onSur
 	if ( ( flags & FlagMasked ) != 0u && Through( t, u, v ) ) return float3( 0.0, 0.0, 0.0 );
 
 	float3 from = onSurface ? Offset( position, geometric, aim ) : position;
-	if ( Blocked( from, aim, ( distance * 0.999 ) - ( Lift * 2.0 ) ) ) return float3( 0.0, 0.0, 0.0 );
+	float through = Transmittance( from, aim, ( distance * 0.999 ) - ( Lift * 2.0 ) );
+	if ( through <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
 	float2 uv = Uv( t, u, v );
 	float4 texel = ( flags & FlagGlowsFromAlbedo ) != 0u ? MaterialColour( m, uv ) : float4( 1.0, 1.0, 1.0, 1.0 );
 
 	float density = Float( GlowAt() + t ) * distance * distance / cosine;
 
-	return GlowOf( at, flags, uv, texel ) * ( Weight( density, bounce ) / density );
+	return GlowOf( at, flags, uv, texel ) * ( through * Weight( density, bounce ) / density );
 }
 
 //Glowing triangles' direct light over pi on a surface, and its lean - BakeScene.GlowDirect
@@ -867,18 +950,85 @@ float3 TowardsCache( float3 position, float3 geometric, inout Random random, out
 	float3 cached;
 	if ( !Cached( hit, cached ) ) return float3( 0.0, 0.0, 0.0 );
 
-	if ( Blocked( Offset( position, geometric, aim ), aim, ( hit.distance * 0.999 ) - ( Lift * 2.0 ) ) ) return float3( 0.0, 0.0, 0.0 );
+	float through = Transmittance( Offset( position, geometric, aim ), aim, ( hit.distance * 0.999 ) - ( Lift * 2.0 ) );
+	if ( through <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
 	chance = CacheDensity( t ) * hit.distance * hit.distance / facing;
-	return s.albedo * cached;
+	return s.albedo * cached * through;
+}
+
+//The light a surface mirrors towards `towards`: one way picked on its GGX lobe, weighed by Fresnel and Smith, and
+//what the last pass left where that way lands - the bounce a black lacquer or a metal throws, which a lightmap that
+//knew only diffuse light gave none of. Taken by its share against the diffuse light's, and weighed back by it
+float3 Sheen( Surface s, float3 towards, inout Random random )
+{
+	float nDotV = dot( s.normal, towards );
+	if ( nDotV <= 1e-4 ) return float3( 0.0, 0.0, 0.0 );
+
+	//What it mirrors, a little more for the grazing Fresnel, against what it scatters: plaster seldom, metal always
+	float mirrored = Luma( s.specular ) + 0.02;
+	float taken = clamp( mirrored / ( mirrored + Luma( s.albedo ) ), 0.05, 1.0 );
+	if ( random.Next() >= taken ) return float3( 0.0, 0.0, 0.0 );
+
+	float alpha = max( s.roughness * s.roughness, 1e-3 );
+	float u = random.Next();
+	float v = random.Next();
+
+	float cosine = sqrt( ( 1.0 - v ) / ( 1.0 + ( ( ( alpha * alpha ) - 1.0 ) * v ) ) );
+	float sine = sqrt( max( 0.0, 1.0 - ( cosine * cosine ) ) );
+	float angle = 2.0 * Pi * u;
+
+	float3 right, up;
+	Basis( s.normal, right, up );
+	float3 between = normalize( ( right * ( sine * cos( angle ) ) ) + ( up * ( sine * sin( angle ) ) ) + ( s.normal * cosine ) );
+
+	float vDotH = dot( towards, between );
+	if ( vDotH <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
+
+	float3 l = ( 2.0 * vDotH * between ) - towards;
+	float nDotL = dot( s.normal, l );
+	if ( nDotL <= 0.0 || dot( l, s.geometric ) <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
+
+	//Schlick's Fresnel and Smith's shadowing over the half vector's own chance: the lobe's share that way
+	float k = alpha * 0.5;
+	float smith = ( nDotV / ( ( nDotV * ( 1.0 - k ) ) + k ) ) * ( nDotL / ( ( nDotL * ( 1.0 - k ) ) + k ) );
+	float3 fresnel = s.specular + ( ( 1.0 - s.specular ) * pow( 1.0 - vDotH, 5.0 ) );
+	float3 share = fresnel * ( smith * vDotH / max( nDotV * saturate( dot( s.normal, between ) ), 1e-4 ) ) / taken;
+
+	Hit hit;
+	float3 from = Offset( s.position, s.geometric, l );
+	float veil;
+	bool found = Nearest( from, l, 1e6, hit, veil );
+	share *= veil;
+	if ( !found ) return share * Environment( l );
+
+	Surface there = SurfaceOf( hit, from, l );
+	if ( there.back ) return float3( 0.0, 0.0, 0.0 );
+
+	float3 cached;
+	float3 leaving = there.emission;
+
+	if ( Cached( hit, cached ) ) leaving += there.albedo * cached;
+	else
+	{
+		float3 ignored = float3( 0.0, 0.0, 0.0 );
+		leaving += there.albedo * ( Direct( there.position, there.normal, there.geometric, random, false, ignored )
+			+ GlowDirect( there.position, there.normal, there.geometric, random, ignored ) );
+	}
+
+	return share * leaving;
 }
 
 //Density: the caller's chance per steradian of this direction when it also sampled a glow, else nought
 //Escaped: the ray left straight to the sky, which the frame lights by the kept visibility - BakeScene.Arriving
+//What glass the last Arriving's first ray crossed let by - the share of an escape that counts as sky seen
+static float g_firstVeil = 1.0;
+
 float3 Arriving( float3 origin, float3 direction, float density, inout Random random, out bool inside, out bool escaped )
 {
 	inside = false;
 	escaped = false;
+	g_firstVeil = 1.0;
 
 	float3 carried = float3( 1.0, 1.0, 1.0 );
 	float3 gathered = float3( 0.0, 0.0, 0.0 );
@@ -888,8 +1038,14 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 	for ( uint bounce = 0; ; ++bounce )
 	{
 		Hit hit;
+		float veil;
+		bool found = Nearest( origin, direction, 1e6, hit, veil );
 
-		if ( !Nearest( origin, direction, 1e6, hit ) )
+		//Glass on the way lets only its share by
+		carried *= veil;
+		if ( bounce == 0u ) g_firstVeil = veil;
+
+		if ( !found )
 		{
 			//The sky is the frame's for a texel's own escapes, unless a pass gathers it into the light it leaves
 			escaped = bounce == 0u && ( g_mode & ModeSky ) == 0u;
@@ -927,7 +1083,7 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 			float facing = abs( dot( direction, s.geometric ) );
 			float share = density > 0.0 && lit > 0.0 && facing > 1e-6 ? Weight( density, lit * hit.distance * hit.distance / facing ) : 1.0;
 
-			return gathered + ( carried * s.albedo * cached * share );
+			return gathered + ( carried * ( ( s.albedo * cached * share ) + Sheen( s, -direction, random ) ) );
 		}
 
 		float3 ignored = float3( 0.0, 0.0, 0.0 );
@@ -1025,7 +1181,7 @@ void main( uint3 id : SV_DispatchThreadID )
 			continue;
 		}
 
-		if ( escaped ) open += float4( direction, 1.0 );
+		if ( escaped ) open += float4( direction, 1.0 ) * g_firstVeil;
 
 		//And a lit spot of the cache aimed at, by its power, weighed against the cosine ray's chance of that way
 		float3 aimed = float3( 0.0, 0.0, 0.0 );
@@ -1047,7 +1203,8 @@ void main( uint3 id : SV_DispatchThreadID )
 		float luma = Luma( arriving + aimed );
 
 		sumSquares += float4( direct + arriving + aimed, luma * luma );
-		wayWeight += float4( lean + ( direction * Luma( arriving ) ) + ( towardsLit * Luma( aimed ) ), Luma( direct ) + luma );
+		//The straight light's way alone, for the highlight - the bounced light's is the probes' to reflect
+		wayWeight += float4( lean, Luma( direct ) );
 		insideSpare.yzw += direct;
 
 		bouncedR += ( direction * arriving.r ) + ( towardsLit * aimed.r );
@@ -1119,7 +1276,7 @@ void ProbeCs( uint3 id : SV_DispatchThreadID )
 		bool escaped;
 		float3 arriving = Arriving( at, direction, glowing, random, behind, escaped );
 
-		if ( escaped ) open += float4( direction, 1.0 );
+		if ( escaped ) open += float4( direction, 1.0 ) * g_firstVeil;
 
 		sum.xyz += arriving;
 		red.xyz += direction * arriving.x;

@@ -2551,6 +2551,28 @@ float3 ProbeDirection( int probe, float3 world, float3 away )
 	return normalize( ( world + ( away * distance ) ) - held.where.xyz );
 }
 
+//The probes' part of the reflection along `away`, and in skyLeft how much sky still shows under them - apart, so
+//each is scaled by what it stands for: the probes by the bake's light against theirs, the sky by how much sky is seen
+float3 ProbesPart( ProbeMix mix, float3 world, float3 away, float roughness, out float skyLeft )
+{
+	float3 seen = float3( 0.0, 0.0, 0.0 );
+	skyLeft = 1.0;
+
+	if ( mix.second >= 0 )
+	{
+		seen = lerp( seen, SampleProbe( mix.second, ProbeDirection( mix.second, world, away ), roughness ), mix.secondWeight );
+		skyLeft *= 1.0 - mix.secondWeight;
+	}
+
+	if ( mix.first >= 0 )
+	{
+		seen = lerp( seen, SampleProbe( mix.first, ProbeDirection( mix.first, world, away ), roughness ), mix.firstWeight );
+		skyLeft *= 1.0 - mix.firstWeight;
+	}
+
+	return seen;
+}
+
 //Environment reflection (probe or sky); shared by surfaces and SSR so both agree exactly
 float3 EnvironmentAt( ProbeMix probes, float3 world, float3 normal, float3 away, float roughness )
 {

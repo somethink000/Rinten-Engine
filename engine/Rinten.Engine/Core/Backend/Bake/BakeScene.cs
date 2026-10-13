@@ -170,8 +170,19 @@ internal sealed class BakeMaterial
 	public float Alpha = 1.0f;
 	public BakePicture Colour;
 
-	/// <summary>How much of the light arriving goes back out diffusely - metal keeps none.</summary>
-	public float Diffuse = 1.0f;
+	/// <summary>Metal by the number, times its map where it has one; nought where the material is no metal.</summary>
+	public float Metalness;
+	public BakePicture MetalnessMap;
+
+	/// <summary>Roughness by the number, times its map where it has one; one where roughness is off.</summary>
+	public float Roughness = 1.0f;
+	public BakePicture RoughnessMap;
+
+	/// <summary>Metal at a point of the surface, as complex.shader reads it.</summary>
+	public float MetalnessAt( System.Numerics.Vector2 uv ) => Math.Clamp( ( MetalnessMap?.Sample( uv.X, uv.Y ).X ?? 1.0f ) * Metalness, 0.0f, 1.0f );
+
+	/// <summary>Roughness at a point of the surface, as complex.shader reads it.</summary>
+	public float RoughnessAt( System.Numerics.Vector2 uv ) => Math.Clamp( ( RoughnessMap?.Sample( uv.X, uv.Y ).X ?? 1.0f ) * Roughness, 0.04f, 1.0f );
 
 	public Vec3 Emission;
 	public BakePicture EmissionMap;
@@ -216,7 +227,19 @@ internal sealed class BakeMaterial
 
 		made.Colour = Picture( material.GetTexture( "Color" ), true, pictures );
 		made.Cutoff = material.GetFloat( "AlphaCutoff", 0.5f );
-		made.Diffuse = 1.0f - Math.Clamp( material.GetFloat( "Metalness", 0.0f ), 0.0f, 1.0f );
+
+		//As complex.shader: the number times the picture, nought metal and fully rough where the feature is off
+		if ( CoreResources.Feature( material, "F_METALNESS" ) != 0 )
+		{
+			made.Metalness = Math.Clamp( material.GetFloat( "Metalness", 0.0f ), 0.0f, 1.0f );
+			made.MetalnessMap = Picture( material.GetTexture( "Metalness" ), false, pictures );
+		}
+
+		if ( CoreResources.Feature( material, "F_ROUGHNESS" ) != 0 )
+		{
+			made.Roughness = material.GetFloat( "Roughness", 0.5f );
+			made.RoughnessMap = Picture( material.GetTexture( "Roughness" ), false, pictures );
+		}
 
 		var strength = material.GetFloat( "EmissionStrength", 0.0f );
 
@@ -282,6 +305,10 @@ internal struct BakeSurface
 	public Vec3 Albedo;
 	public Vec3 Emission;
 	public bool Back;
+
+	/// <summary>What it mirrors square on: four per cent where it is not metal, its colour where it is.</summary>
+	public Vec3 Specular;
+	public float Roughness;
 }
 
 //Static triangles, materials, lights and sky for the bake; built on the main thread, then read-only
@@ -841,7 +868,7 @@ internal sealed class BakeScene
 		var uv = Interpolate( Uv0, t, u, v );
 		var texel = material.Colour?.Sample( uv.X, uv.Y ) ?? Vec4.One;
 
-		return new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t] * Interpolate( Colours, t, u, v ) * material.Diffuse;
+		return new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t] * Interpolate( Colours, t, u, v ) * ( 1.0f - material.MetalnessAt( uv ) );
 	}
 
 	internal float Area( int t )
@@ -862,6 +889,40 @@ internal sealed class BakeScene
 
 		return material.Masked ? 2 : 0;
 	}
+
+	/// <summary>Whether any triangle is see-through glass, which lets only part of a ray by.</summary>
+	public bool Veiled => veiled ??= Array.Exists( MaterialOf, m => Materials[m].Translucent );
+
+	private bool? veiled;
+
+	//How much of a ray gets by a triangle it crosses: none of a solid one, all or none of a cut-out where cut, and of
+	//glass what its opacity leaves - as the frame blends what is behind it; bake_trace.slang's Veil
+	private float Veil( int t, float u, float v, bool tested )
+	{
+		if ( !tested ) return 0.0f;
+
+		var material = Materials[MaterialOf[t]];
+		if ( clear.Contains( t ) || !material.Translucent ) return Through( t, u, v ) ? 1.0f : 0.0f;
+
+		var alpha = material.Alpha;
+
+		if ( material.Colour is { } picture )
+		{
+			var uv = Interpolate( Uv0, t, u, v );
+			alpha *= picture.Sample( uv.X, uv.Y ).W;
+		}
+
+		return Math.Clamp( 1.0f - alpha, 0.0f, 1.0f );
+	}
+
+	/// <summary>How much of a ray gets through to a distance; a plain yes or no where there is no glass.</summary>
+	public float Transmittance( Vec3 origin, Vec3 direction, float furthest )
+		=> Veiled ? Bvh.Transmittance( origin, direction, furthest, Veil ) : Bvh.Blocked( origin, direction, furthest ) ? 0.0f : 1.0f;
+
+	/// <summary>What glass this thread's last Arriving's first ray crossed let by: an escape's share of sky.</summary>
+	public static float FirstVeil => firstVeil;
+
+	[ThreadStatic] private static float firstVeil;
 
 	//Whether a ray passes a triangle that is not solid all over, at a point of it.
 	private bool Through( int t, float u, float v )
@@ -922,8 +983,12 @@ internal sealed class BakeScene
 
 		var albedo = new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t] * vertex;
 
-		//Never quite white: a fully reflective surface makes bounces that never end, and no paint does
-		s.Albedo = Vec3.Min( albedo * material.Diffuse * AlbedoBoost, new Vec3( 0.95f ) );
+		//Never quite white: a surface reflecting all bounces forever, and no paint does. Metal keeps none
+		//of it diffuse; what it and everything else mirrors is the specular colour - see Sheen
+		var metal = material.MetalnessAt( uv );
+		s.Albedo = Vec3.Min( albedo * ( 1.0f - metal ) * AlbedoBoost, new Vec3( 0.95f ) );
+		s.Specular = Vec3.Lerp( new Vec3( 0.04f ), Vec3.Min( albedo, Vec3.One ), metal );
+		s.Roughness = material.RoughnessAt( uv );
 
 		s.Emission = material.Glows && GroupOf[t] == Pass ? GlowOf( material, uv, texel ) : Vec3.Zero;
 
@@ -936,6 +1001,60 @@ internal sealed class BakeScene
 		var map = material.EmissionMap?.Sample( uv.X, uv.Y ) ?? Vec4.One;
 
 		return new Vec3( map.X, map.Y, map.Z ) * glow * material.Emission;
+	}
+
+	/// <summary>The light a surface mirrors towards a way, off its GGX lobe - bake_trace.slang's Sheen.</summary>
+	public Vec3 Sheen( in BakeSurface s, Vec3 towards, ref BakeRandom random )
+	{
+		var nDotV = Vec3.Dot( s.Normal, towards );
+		if ( nDotV <= 1e-4f ) return Vec3.Zero;
+
+		var mirrored = BakeMath.Luma( s.Specular ) + 0.02f;
+		var taken = Math.Clamp( mirrored / ( mirrored + BakeMath.Luma( s.Albedo ) ), 0.05f, 1.0f );
+		if ( random.Float() >= taken ) return Vec3.Zero;
+
+		var alpha = MathF.Max( s.Roughness * s.Roughness, 1e-3f );
+		var u = random.Float();
+		var v = random.Float();
+
+		var cosine = MathF.Sqrt( ( 1.0f - v ) / ( 1.0f + ( ( ( alpha * alpha ) - 1.0f ) * v ) ) );
+		var sine = MathF.Sqrt( MathF.Max( 0.0f, 1.0f - ( cosine * cosine ) ) );
+		var angle = 2.0f * BakeMath.Pi * u;
+
+		BakeMath.Basis( s.Normal, out var right, out var up );
+		var between = Vec3.Normalize( ( right * ( sine * MathF.Cos( angle ) ) ) + ( up * ( sine * MathF.Sin( angle ) ) ) + ( s.Normal * cosine ) );
+
+		var vDotH = Vec3.Dot( towards, between );
+		if ( vDotH <= 0.0f ) return Vec3.Zero;
+
+		var l = ( 2.0f * vDotH * between ) - towards;
+		var nDotL = Vec3.Dot( s.Normal, l );
+		if ( nDotL <= 0.0f || Vec3.Dot( l, s.Geometric ) <= 0.0f ) return Vec3.Zero;
+
+		var k = alpha * 0.5f;
+		var smith = ( nDotV / ( ( nDotV * ( 1.0f - k ) ) + k ) ) * ( nDotL / ( ( nDotL * ( 1.0f - k ) ) + k ) );
+		var fresnel = s.Specular + ( ( Vec3.One - s.Specular ) * MathF.Pow( 1.0f - vDotH, 5.0f ) );
+		var share = fresnel * ( smith * vDotH / MathF.Max( nDotV * Math.Clamp( Vec3.Dot( s.Normal, between ), 0.0f, 1.0f ), 1e-4f ) ) / taken;
+
+		var from = Offset( s.Position, s.Geometric, l );
+		var found = Bvh.Nearest( from, l, 1e6f, out var hit );
+		if ( Veiled ) share *= Transmittance( from, l, found ? hit.Distance * 0.9999f : 1e6f );
+		if ( !found ) return share * Environment( l );
+
+		var there = Surface( hit, from, l );
+		if ( there.Back ) return Vec3.Zero;
+
+		var leaving = there.Emission;
+
+		if ( Cached( hit, out var cached ) ) leaving += there.Albedo * cached;
+		else
+		{
+			var ignored = Vec3.Zero;
+			leaving += there.Albedo * ( Direct( there.Position, there.Normal, there.Geometric, ref random, false, ref ignored )
+				+ GlowDirect( there.Position, there.Normal, there.Geometric, ref random, ref ignored ) );
+		}
+
+		return share * leaving;
 	}
 
 	/// <summary>A world triangle's chance per square metre of being where a gather's light sample lands.</summary>
@@ -1030,10 +1149,11 @@ internal sealed class BakeScene
 		if ( s.Back || facing <= 1e-6f ) return Vec3.Zero;
 
 		if ( !Cached( hit, out var cached ) ) return Vec3.Zero;
-		if ( Bvh.Blocked( Offset( position, geometric, aim ), aim, ( hit.Distance * 0.999f ) - ( Lift * 2.0f ) ) ) return Vec3.Zero;
+		var through = Transmittance( Offset( position, geometric, aim ), aim, ( hit.Distance * 0.999f ) - ( Lift * 2.0f ) );
+		if ( through <= 0.0f ) return Vec3.Zero;
 
 		chance = CacheDensity( hit.Triangle ) * hit.Distance * hit.Distance / facing;
-		return s.Albedo * cached;
+		return s.Albedo * cached * through;
 	}
 
 	//Power heuristic: how much of a sample picked one way counts, against the chance the other way had of it
@@ -1085,14 +1205,15 @@ internal sealed class BakeScene
 		if ( material.Masked && Through( t, u, v ) ) return Vec3.Zero;
 
 		var from = onSurface ? Offset( position, geometric, aim ) : position;
-		if ( Bvh.Blocked( from, aim, ( distance * 0.999f ) - ( Lift * 2.0f ) ) ) return Vec3.Zero;
+		var through = Transmittance( from, aim, ( distance * 0.999f ) - ( Lift * 2.0f ) );
+		if ( through <= 0.0f ) return Vec3.Zero;
 
 		var uv = Interpolate( Uv0, t, u, v );
 		var texel = material.EmissionUsesAlbedo ? material.Colour?.Sample( uv.X, uv.Y ) ?? Vec4.One : Vec4.One;
 
 		var density = GlowDensity[t] * distance * distance / cosine;
 
-		return GlowOf( material, uv, texel ) * ( Weight( density, bounce ) / density );
+		return GlowOf( material, uv, texel ) * ( through * Weight( density, bounce ) / density );
 	}
 
 	/// <summary>Glowing triangles' direct light over pi on a surface, and its lean; added to Direct for a texel.</summary>
@@ -1229,14 +1350,16 @@ internal sealed class BakeScene
 			//Nothing arrives from under the surface's own plane, whatever the bent normal thinks.
 			if ( Vec3.Dot( geometric, aim ) <= 0.0f ) return Vec3.Zero;
 
+			//What glass between lets by - see Transmittance
+			var through = 1.0f;
+
 			if ( light.Shadows )
 			{
-				var from = Offset( position, geometric, aim );
-
-				if ( Bvh.Blocked( from, aim, distance - ( Lift * 2.0f ) ) ) return Vec3.Zero;
+				through = Transmittance( Offset( position, geometric, aim ), aim, distance - ( Lift * 2.0f ) );
+				if ( through <= 0.0f ) return Vec3.Zero;
 			}
 
-			return light.Colour * ( nDotL * attenuation / BakeMath.Pi );
+			return light.Colour * ( nDotL * attenuation * through / BakeMath.Pi );
 		}
 	}
 
@@ -1251,9 +1374,21 @@ internal sealed class BakeScene
 		var carried = Vec3.One;
 		var gathered = Vec3.Zero;
 
+		firstVeil = 1.0f;
+
 		for ( var bounce = 0; ; ++bounce )
 		{
-			if ( !Bvh.Nearest( origin, direction, 1e6f, out var hit ) )
+			var found = Bvh.Nearest( origin, direction, 1e6f, out var hit );
+
+			//Glass on the way lets only its share by - nothing to ask where the world has none
+			if ( Veiled )
+			{
+				var through = Transmittance( origin, direction, found ? hit.Distance * 0.9999f : 1e6f );
+				carried *= through;
+				if ( bounce == 0 ) firstVeil = through;
+			}
+
+			if ( !found )
 			{
 				//The sky is the frame's for a texel's own escapes, unless a pass gathers it into the light it leaves
 				escaped = bounce == 0 && ( Gathering is null || ( Gathering.Mode & BakeGpu.ModeSky ) == 0 );
@@ -1290,7 +1425,7 @@ internal sealed class BakeScene
 				var facing = MathF.Abs( Vec3.Dot( direction, s.Geometric ) );
 				var share = density > 0.0f && lit > 0.0f && facing > 1e-6f ? Weight( density, lit * hit.Distance * hit.Distance / facing ) : 1.0f;
 
-				return gathered + ( carried * s.Albedo * cached * share );
+				return gathered + ( carried * ( ( s.Albedo * cached * share ) + Sheen( s, -direction, ref random ) ) );
 			}
 
 			var ignored = Vec3.Zero;

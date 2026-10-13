@@ -8,7 +8,7 @@ namespace Rinten;
 /// <summary>A bake: atlas, directions, volume and each renderer's square, kept in the scene's binary half.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 9;
+	public override int Version => 10;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -72,6 +72,10 @@ public sealed class BakedLightingData : BlobData
 
 	/// <summary>Whether the volume holds only the baked lights' bounce, the frame drawing their direct light.</summary>
 	public bool VolumeIndirect { get; set; }
+
+	/// <summary>Whether Ways hold the straight light's way and its share of the texel's light, as a highlight wants -
+	/// before version 10 they held all of it, and its lean.</summary>
+	public bool StraightWays { get; set; }
 
 	/// <summary>The live bounce sheet's blocks across and down; nought where the bake has none.</summary>
 	public int BounceWidth { get; set; }
@@ -242,6 +246,9 @@ public sealed class BakedLightingData : BlobData
 		Packed( ref s, TexelLinks );
 		Packed( ref s, TexelWeights );
 
+		//Version 10: what the ways hold.
+		s.Write( StraightWays );
+
 		writer.Stream = s;
 	}
 
@@ -260,6 +267,8 @@ public sealed class BakedLightingData : BlobData
 				var s = reader.Stream;
 				VolumeIndirect = s.Read<bool>();
 				reader.Stream = s;
+
+				if ( fromVersion >= 9 ) ReadTexelLinks( ref reader );
 			}
 
 			return;
@@ -287,6 +296,19 @@ public sealed class BakedLightingData : BlobData
 
 		var s = reader.Stream;
 		VolumeIndirect = s.Read<bool>();
+		reader.Stream = s;
+
+		ReadTexelLinks( ref reader );
+
+		s = reader.Stream;
+		StraightWays = s.Read<bool>();
+		reader.Stream = s;
+	}
+
+	//What version 9 added: the live bounce's sheet links
+	private void ReadTexelLinks( ref Reader reader )
+	{
+		var s = reader.Stream;
 		BounceWidth = s.Read<int>();
 		BounceHeight = s.Read<int>();
 		TexelSlots = Unpacked<int>( ref s );

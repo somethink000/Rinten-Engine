@@ -20,9 +20,6 @@ partial class Gizmo
 		/// <summary>True if the current gizmo scope is pressed</summary>
 		public static bool This => Active is not null && Active.current.PressedPath == Path;
 
-		/// <summary>The full path of the pressed scope, or null.</summary>
-		public static string FullPath => Active?.current.PressedPath;
-
 		/// <summary>True if any object is currently pressed</summary>
 		public static bool Any => Active is not null && !string.IsNullOrEmpty( Active.current.PressedPath );
 

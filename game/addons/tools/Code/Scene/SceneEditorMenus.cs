@@ -228,60 +228,28 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down Local" )]
-	public static void AlignToGroundLocal()
-	{
-		using var scope = SceneEditorSession.Scope();
-
-		if ( EditorScene.Selection.Count == 0 )
-			return;
-
-		var gos = EditorScene.Selection.OfType<GameObject>();
-		using ( SceneEditorSession.Current.UndoScope( "Align Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
-		{
-			foreach ( var go in gos )
-			{
-
-				var trace = SceneEditorSession.Current.Scene.Trace
-						.Ray( go.WorldPosition, go.WorldPosition + go.WorldRotation.Down * (254f) )
-						.Size( go.GetBounds().Size )
-						.WithoutTags( "trigger" )
-						.UseRenderMeshes( true )
-						.UsePhysicsWorld( false )
-						.Run();
-
-				if ( trace.Hit )
-				{
-					go.WorldPosition = trace.HitPosition;
-				}
-			}
-		}
-	}
+	public static void AlignToGroundLocal() => AlignDown( local: true );
 
 	[Menu( "Editor", "Scene/Transforms/Align Down World" )]
-	public static void AlignToGround()
+	public static void AlignToGround() => AlignDown( local: false );
+
+	//Each object down its own or the world's down, until its bounds rest on a surface
+	private static void AlignDown( bool local )
 	{
 		using var scope = SceneEditorSession.Scope();
 
-		if ( EditorScene.Selection.Count == 0 )
+		var gos = EditorScene.Selection.OfType<GameObject>().ToArray();
+		if ( gos.Length == 0 )
 			return;
 
-		var gos = EditorScene.Selection.OfType<GameObject>();
 		using ( SceneEditorSession.Current.UndoScope( "Align Object(s)" ).WithGameObjectChanges( gos, GameObjectUndoFlags.Properties ).Push() )
 		{
 			foreach ( var go in gos )
 			{
-				var trace = SceneEditorSession.Current.Scene.Trace
-					.Ray( go.WorldPosition, go.WorldPosition + Vector3.Down * (254f) )
-					.Size( go.GetBounds().Size )
-					.WithoutTags( "trigger" )
-					.UseRenderMeshes( true )
-					.UsePhysicsWorld( false )
-					.Run();
+				var snap = new SurfaceSnap( SceneEditorSession.Current.Scene, [go], local ? go.WorldRotation : Rotation.Identity );
 
-				if ( trace.Hit )
-				{
-					go.WorldPosition = trace.HitPosition;
-				}
+				if ( snap.Toward( SurfaceSnap.UpAxis, negative: true ) is Vector3 offset )
+					go.WorldPosition += offset;
 			}
 		}
 	}
@@ -300,7 +268,7 @@ public static class SceneEditorMenus
 			foreach ( var go in gos )
 			{
 				var trace = SceneEditorSession.Current.Scene.Trace
-					.Box( go.GetBounds().Extents, go.LocalPosition, go.LocalPosition + go.WorldRotation.Down * (254f) )
+					.Ray( go.WorldPosition, go.WorldPosition + go.WorldRotation.Down * 254f )
 					.WithoutTags( "trigger" )
 					.UseRenderMeshes( true )
 					.UsePhysicsWorld( false )

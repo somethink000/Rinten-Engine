@@ -33,6 +33,9 @@ public static partial class Gizmo
 		Log.Info( $"which is {arrow / (2.0f * dist * MathF.Tan( vertical * 0.5f )) * 100.0f:n1}% of the view's height" );
 	}
 
+	/// <summary>A part of the Position control: an axis arrow, a plane square, or the middle handle.</summary>
+	public enum PositionPart { None, Arrow, Plane, Center }
+
 	/// <summary>Extendable helper to create common gizmos</summary>
 	public sealed partial class GizmoControls
 	{
@@ -169,6 +172,28 @@ public static partial class Gizmo
 			newPos = position + movement;
 
 			return true;
+		}
+
+		/// <summary>Which part of the Position control named so in this scope is pressed, and its axis (a plane's is its normal).</summary>
+		//Axes in the control's space: 0 x (Right), 1 y (Up), 2 z (Backward)
+		public PositionPart PressedPosition( string name, out int axis )
+		{
+			axis = -1;
+
+			var pressed = Active?.current.PressedPath;
+			if ( !GizmoHitbox.IsUnder( pressed, Join( Path, name ) ) ) return PositionPart.None;
+
+			switch ( pressed[(pressed.LastIndexOf( '/' ) + 1)..] )
+			{
+				case "x": axis = 0; return PositionPart.Arrow;
+				case "y": axis = 1; return PositionPart.Arrow;
+				case "z": axis = 2; return PositionPart.Arrow;
+				case "yz": axis = 0; return PositionPart.Plane;
+				case "xz": axis = 1; return PositionPart.Plane;
+				case "xy": axis = 2; return PositionPart.Plane;
+				case "drag-camera": return PositionPart.Center;
+				default: return PositionPart.None;
+			}
 		}
 
 		//The middle handle, drawn the size it actually is. It used to be a half-unit circle over a three-unit hitbox - a few pixels of

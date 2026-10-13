@@ -98,6 +98,7 @@ internal sealed class ViewportPointer
 		if ( leftDown && !leftWasDown ) HandleHasPress = gizmoHovered && handleHovered && modifiers.HasFlag( KeyboardModifiers.Alt );
 		if ( !leftDown ) HandleHasPress = false;
 		leftWasDown = leftDown;
+
 		var modifiersDown = modifiers.Contains( KeyboardModifiers.Shift ) || modifiers.HasFlag( KeyboardModifiers.Ctrl );
 
 		BlockCamera = !BlockCamera ? modifiersDown && !rightDown : modifiersDown;

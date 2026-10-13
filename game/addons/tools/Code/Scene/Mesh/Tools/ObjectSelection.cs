@@ -658,7 +658,9 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 
 	public override SurfaceSnap CreateSurfaceSnap( Rotation basis )
 	{
-		return new SurfaceSnap( Scene, _startPoints.Count > 0 ? _startPoints.Keys : _objects, basis );
+		//The drag first: a duplicating one makes the objects that move, and those are what the rays must pass through
+		StartDrag();
+		return new SurfaceSnap( Scene, _startPoints.Keys, basis );
 	}
 
 	public override void AlignToClosestNormal()

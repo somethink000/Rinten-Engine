@@ -1,6 +1,6 @@
 namespace Editor;
 
-/// <summary>Puts a selection's bounds against surfaces along a move handle's axes while Alt is held.</summary>
+/// <summary>Puts a selection's bounds against surfaces along a handle's axes.</summary>
 public sealed class SurfaceSnap
 {
 	//World units looked along each direction
@@ -11,6 +11,9 @@ public sealed class SurfaceSnap
 	const float Inset = 0.02f;
 
 	const int AllDirections = 0b111111;
+
+	/// <summary>The handle axis that is up: 0 x (Right), 1 y (Up), 2 z (Backward).</summary>
+	public const int UpAxis = 1;
 
 	readonly Scene scene;
 	readonly GameObject[] selection;
@@ -41,36 +44,23 @@ public sealed class SurfaceSnap
 		Array.Fill( distances, float.NaN );
 	}
 
-	/// <summary>Where the drag lands: an arrow slides from where the snap was taken until it meets a surface, a plane moves
-	/// freely and sits on the surface along its normal, the center moves freely onto the nearest surface.</summary>
-	public Vector3 Offset( string pressedPath, Vector3 taken, Vector3 free, Vector3 dragSinceTaken )
+	/// <summary>Where a drag on the given part of a Position control lands, the selection snapped onto surfaces.</summary>
+	//An arrow slides from where the snap was taken into a surface; a plane moves freely and sits on one along its normal;
+	//the center moves freely onto the nearest
+	public Vector3 Offset( Gizmo.PositionPart part, int axis, Vector3 taken, Vector3 free, Vector3 dragSinceTaken )
 	{
-		if ( selection.Length == 0 ) return free;
-
-		var handle = pressedPath?[(pressedPath.LastIndexOf( '/' ) + 1)..];
-
-		switch ( handle )
+		switch ( part )
 		{
-			case "x" or "y" or "z":
-				var local = dragSinceTaken * rotation.Inverse;
-				var axis = 0;
+			case Gizmo.PositionPart.Arrow:
+				var along = (dragSinceTaken * rotation.Inverse)[axis];
+				if ( along.AlmostEqual( 0.0f ) ) return taken;
 
-				for ( var i = 1; i < 3; i++ )
-				{
-					if ( MathF.Abs( local[i] ) > MathF.Abs( local[axis] ) ) axis = i;
-				}
+				return taken + (Toward( axis, along < 0 ) ?? Vector3.Zero);
 
-				if ( local[axis].AlmostEqual( 0.0f ) ) return taken;
-
-				return taken + (Nearest( Vector3.Zero, 1 << (axis * 2 + (local[axis] > 0 ? 0 : 1)) ) ?? Vector3.Zero);
-
-			//The square's normal is the axis it does not name: x = Right, y = Up, z = Backward
-			case "xy" or "xz" or "yz":
-				var normal = handle == "yz" ? 0 : handle == "xz" ? 1 : 2;
-
+			case Gizmo.PositionPart.Plane:
 				if ( planeSide < 0 )
 				{
-					Nearest( free - taken, 0b11 << (normal * 2), out planeSide );
+					Nearest( free - taken, 0b11 << (axis * 2), out planeSide );
 					if ( planeSide < 0 ) return free;
 				}
 
@@ -81,12 +71,17 @@ public sealed class SurfaceSnap
 		}
 	}
 
+	/// <summary>The move along one handle axis that puts the bounds on a surface, or null.</summary>
+	public Vector3? Toward( int axis, bool negative ) => Nearest( Vector3.Zero, 1 << (axis * 2 + (negative ? 1 : 0)) );
+
 	Vector3? Nearest( Vector3 shift, int mask ) => Nearest( shift, mask, out _ );
 
 	//The shortest move onto a surface among the directions in the mask, the bounds moved by shift; negative pushes out of one
 	Vector3? Nearest( Vector3 shift, int mask, out int side )
 	{
 		side = -1;
+
+		if ( selection.Length == 0 ) return null;
 
 		if ( shift != castShift )
 		{

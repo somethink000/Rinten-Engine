@@ -175,7 +175,7 @@ public abstract class SelectionTool( MeshTool tool ) : EditorTool
 	{
 	}
 
-	/// <summary>A snap of the selection onto surfaces, taken where it stands now; null where the selection is not objects.</summary>
+	/// <summary>Starts the drag and takes a snap of what it moves onto surfaces; null where the selection is not objects.</summary>
 	public virtual SurfaceSnap CreateSurfaceSnap( Rotation basis ) => null;
 
 	public override Panel CreateShortcutsPanel() => new SelectionToolShortcutsPanel( this );

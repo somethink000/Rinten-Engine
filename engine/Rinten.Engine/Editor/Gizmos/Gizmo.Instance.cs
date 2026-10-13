@@ -116,6 +116,9 @@ public static partial class Gizmo
 		/// <summary>The current control mode. This is generally implementation specific. We tend to use "mouse" and "firstperson".</summary>
 		public string ControlMode { get; set; }
 
+		/// <summary>The pointer was over a control's handle in the last frame drawn.</summary>
+		public bool IsHandleHovered => builder.HoveredHandle || current.HoveredHandle;
+
 		/// <summary>Some global settings accessible to the gizmos. Your implementation generally lets your users set up these things to their preference, and the gizmos should try to obey them.</summary>
 		public Gizmo.SceneSettings Settings { get; set; } = new SceneSettings();
 

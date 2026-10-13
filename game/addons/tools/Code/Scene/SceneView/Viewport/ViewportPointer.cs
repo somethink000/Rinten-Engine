@@ -18,6 +18,11 @@ internal sealed class ViewportPointer
 	/// <summary>Whether ALT+drag on a gizmo has taken the camera off the mouse.</summary>
 	public bool BlockForToolInput { get; private set; }
 
+	/// <summary>Whether the held left button went down on a handle with ALT held, so it drags the handle.</summary>
+	public bool HandleHasPress { get; private set; }
+
+	private bool leftWasDown;
+
 	/// <summary>Where the right button went down, which is where a paste lands.</summary>
 	public Vector2 PressPosition { get; set; }
 
@@ -82,11 +87,17 @@ internal sealed class ViewportPointer
 	}
 
 	/// <summary>Works out whether the camera may answer the mouse this frame.</summary>
-	public void UpdateCameraBlocks( bool gizmoHovered, Vector2 cursorInSurface )
+	public void UpdateCameraBlocks( bool gizmoHovered, bool handleHovered, Vector2 cursorInSurface )
 	{
 		//Block camera input when shift or ctrl was down first and right mouse pressed.
 		var rightDown = SceneEditorExtensions.IsPilotingCamera;
 		var modifiers = Application.KeyboardModifiers;
+
+		//Decided at the press only, so an orbit that sweeps over a handle keeps orbiting
+		var leftDown = Application.MouseButtons.HasFlag( MouseButtons.Left );
+		if ( leftDown && !leftWasDown ) HandleHasPress = gizmoHovered && handleHovered && modifiers.HasFlag( KeyboardModifiers.Alt );
+		if ( !leftDown ) HandleHasPress = false;
+		leftWasDown = leftDown;
 		var modifiersDown = modifiers.Contains( KeyboardModifiers.Shift ) || modifiers.HasFlag( KeyboardModifiers.Ctrl );
 
 		BlockCamera = !BlockCamera ? modifiersDown && !rightDown : modifiersDown;

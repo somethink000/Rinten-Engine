@@ -404,6 +404,7 @@ public static partial class Gizmo
 
 			var s = Scope( "WorldScale" );
 			Transform = Transform.WithScale( scale.Value );
+			Active.scope.IsHandle = true;
 			return s;
 		}
 

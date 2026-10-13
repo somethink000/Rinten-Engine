@@ -184,7 +184,6 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Move To Grid" )]
-	[Shortcut( "gameObject.move-to-grid", "CTRL+B" )]
 	public static void SnapToGrid()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -229,7 +228,6 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down Local" )]
-	[Shortcut( "gameObject.align-down-local", "CTRL+KP_1" )]
 	public static void AlignToGroundLocal()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -260,7 +258,6 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align Down World" )]
-	[Shortcut( "gameObject.align-down-world", "CTRL+KP_2" )]
 	public static void AlignToGround()
 	{
 		using var scope = SceneEditorSession.Scope();
@@ -290,7 +287,6 @@ public static class SceneEditorMenus
 	}
 
 	[Menu( "Editor", "Scene/Transforms/Align To Closest Normal" )]
-	[Shortcut( "gameObject.align-to-closest-normal", "CTRL+KP_3" )]
 	public static void AlignToClosestNormal()
 	{
 		using var scope = SceneEditorSession.Scope();

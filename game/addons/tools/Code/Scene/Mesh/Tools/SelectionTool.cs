@@ -284,14 +284,6 @@ file class SelectionToolShortcutsPanel( SelectionTool tool ) : EditorPanel
 	[Shortcut( "mesh.selection-rotate-duplicate-right", "ALT+SHIFT+RIGHT", typeof( SceneViewPanel ) )]
 	public void RotateDuplicateRight() => tool.NudgeRotation( Vector2.Right );
 
-	[Shortcut( "mesh.align-down-local", "CTRL+KP_1", typeof( SceneViewPanel ) )]
-	public void AlignDownLocal() => tool.AlignDown( useLocalDown: true );
-
-	[Shortcut( "mesh.align-down-world", "CTRL+KP_2", typeof( SceneViewPanel ) )]
-	public void AlignDownWorld() => tool.AlignDown( useLocalDown: false );
-
-	[Shortcut( "mesh.align-to-closest-normal", "CTRL+KP_3", typeof( SceneViewPanel ) )]
-	public void AlignToClosestNormal() => tool.AlignToClosestNormal();
 	[Shortcut( "mesh.toggle-selection-bounds", "/", typeof( SceneViewPanel ) )]
 	public void ToggleSelectionBounds() => tool.ShowSelectionBounds = !tool.ShowSelectionBounds;
 }
@@ -439,28 +431,15 @@ public abstract class SelectionTool<T>( MeshTool tool ) : SelectionTool( tool ) 
 			menu.AddSeparator();
 
 			var transforms = menu.AddMenu( "Transforms", "open_with" );
-			AddMenuOption( transforms, "Align Down Local", "vertical_align_bottom", "mesh.align-down-local", true );
-			AddMenuOption( transforms, "Align Down World", "vertical_align_bottom", "mesh.align-down-world", true );
-			AddMenuOption( transforms, "Align To Closest Normal", "swap_vert", "mesh.align-to-closest-normal", true );
+			AddMenuOption( transforms, "Align Down Local", "vertical_align_bottom", () => AlignDown( useLocalDown: true ), null, true );
+			AddMenuOption( transforms, "Align Down World", "vertical_align_bottom", () => AlignDown( useLocalDown: false ), null, true );
+			AddMenuOption( transforms, "Align To Closest Normal", "swap_vert", AlignToClosestNormal, null, true );
 		}
 
 		menu.AddSeparator();
 		menu.AddOption( "Lift Material", "colorize", () => LiftMaterialFromContextTrace( trace ), "mesh.lift-material" );
 	}
 
-	[Shortcut( "mesh.align-down-local", "CTRL+KP_1", typeof( SceneViewPanel ) )]
-	private void AlignDownLocal()
-	{
-		AlignDown( useLocalDown: true );
-	}
-
-	[Shortcut( "mesh.align-down-world", "CTRL+KP_2", typeof( SceneViewPanel ) )]
-	private void AlignDownWorld()
-	{
-		AlignDown( useLocalDown: false );
-	}
-
-	[Shortcut( "mesh.align-to-closest-normal", "CTRL+KP_3", typeof( SceneViewPanel ) )]
 	public override void AlignToClosestNormal()
 	{
 		if ( !_vertexSelection.Any() )

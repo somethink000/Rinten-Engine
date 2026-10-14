@@ -1,5 +1,6 @@
 @using System.Threading
 @using Rinten
+@using Rinten.Navigation
 @using Rinten.UI
 @using Editor.Inspectors
 @namespace Editor
@@ -47,9 +48,12 @@
 
 	BakedLighting Lighting => EditedScene.IsValid() ? EditedScene.Lighting : null;
 
-	bool Baked => Lighting is { HasBake: true } || Lighting?.Envmaps.Asset is { Data.Pictures.Count: > 0 };
+	NavMesh Navigation => EditedScene.IsValid() ? EditedScene.NavMesh : null;
 
-	bool NothingToBake => Lighting is not { } lighting || ( !lighting.Lightmaps.Bake && !lighting.Envmaps.Bake );
+	bool Baked => Lighting is { HasBake: true } || Lighting?.Envmaps.Asset is { Data.Pictures.Count: > 0 } || Navigation is { HasBake: true };
+
+	bool NothingToBake => Lighting is not { } lighting
+		|| ( !lighting.Lightmaps.Bake && !lighting.Envmaps.Bake && Navigation is not { IsEnabled: true } );
 
 	//No model or mesh in the scene is marked Static, so the lightmaps have nothing to work on
 	bool NothingStill => EditedScene is { } scene
@@ -69,7 +73,9 @@
 			var probes = lighting.Envmaps.Asset?.Data.Pictures.Count ?? 0;
 			var envmaps = probes > 0 ? $"{probes} envmap{( probes == 1 ? "" : "s" )}" : "no envmaps";
 
-			return $"{lightmap}, {envmaps}";
+			var navigation = Navigation is { HasBake: true } ? "navmesh" : "no navmesh";
+
+			return $"{lightmap}, {envmaps}, {navigation}";
 		}
 	}
 
@@ -88,7 +94,7 @@
 		return popup;
 	}
 
-	//A card each, as a component is one: its switch says whether Bake Scene bakes it
+	//A card each, as a component is one: its switch says whether Bake Scene bakes it - for the navmesh, whether the scene has one
 	protected override void OnAfterTreeRender( bool firstTime )
 	{
 		base.OnAfterTreeRender( firstTime );
@@ -100,11 +106,16 @@
 
 		if ( laid is null ) return;
 
-		Card( "Lightmaps", "wb_iridescent", laid.Lightmaps );
-		Card( "Envmaps", "panorama_photosphere", laid.Envmaps );
+		var scene = laid.Scene;
+
+		Card( "Lightmaps", "wb_iridescent", laid.Lightmaps, nameof( BakedLighting.LightmapSettings.Bake ) );
+		Card( "Envmaps", "panorama_photosphere", laid.Envmaps, nameof( BakedLighting.EnvmapSettings.Bake ) );
+
+		//A changed setting is a navmesh to build again
+		Card( "NavMesh", "directions_run", scene.NavMesh, nameof( NavMesh.IsEnabled ) ).OnPropertyChanged += _ => scene.NavMesh.SetDirty();
 	}
 
-	void Card( string title, string icon, object block )
+	SerializedObject Card( string title, string icon, object block, string toggle )
 	{
 		var so = Game.TypeLibrary.GetSerializedObject( block );
 		var scene = laid.Scene;
@@ -115,9 +126,11 @@
 			if ( scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
 		};
 
-		var card = Cards.AddChild( new InspectorCard( title, icon, so.GetProperty( nameof( BakedLighting.LightmapSettings.Bake ) ), $"bake.{title.ToLowerInvariant()}" ) );
-		card.Body.AddChild( new Editor.Inspectors.ControlSheet { Target = so } );
+		var card = Cards.AddChild( new InspectorCard( title, icon, so.GetProperty( toggle ), $"bake.{title.ToLowerInvariant()}" ) );
+		card.Body.AddChild( new Editor.Inspectors.ControlSheet { Target = so, PropertyFilter = x => x.Name != toggle } );
 		card.Refold();
+
+		return so;
 	}
 
 	//Async void as a click handler: everything it can throw is caught here
@@ -131,6 +144,9 @@
 		try
 		{
 			await target.Bake( baking.Token );
+
+			if ( !baking.IsCancellationRequested && target.Scene.NavMesh.IsEnabled )
+				await target.Scene.NavMesh.Bake( target.Scene, baking.Token );
 		}
 		catch ( OperationCanceledException )
 		{
@@ -150,5 +166,5 @@
 	void Cancel() => baking?.Cancel();
 
 	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data, Lighting?.Envmaps.Asset?.Data,
-		Lighting?.Lightmaps.Bake, Lighting?.Envmaps.Bake );
+		Lighting?.Lightmaps.Bake, Lighting?.Envmaps.Bake, Navigation?.IsEnabled, Navigation?.HasBake );
 }

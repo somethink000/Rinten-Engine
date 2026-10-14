@@ -1,33 +1,27 @@
 using Rinten.Navigation;
-using Editor.Inspectors;
 
 namespace Editor;
 
-/// <summary>Navigation settings</summary>
-[Title( "Navigation Settings" )]
-[Icon( "edit_note" )]
+//The navmesh's settings and its bake are in the scene's bake panel - see BuildPopup; here its mesh is shown and its custom bounds dragged
+/// <summary>Navigation bounds</summary>
+[Title( "Navigation Bounds" )]
+[Icon( "select_all" )]
 [Alias( "tools.navmesh-settings" )]
 [Group( "1" )]
 [Order( 0 )]
 public class NavTestSettings : EditorTool
 {
 	private bool _previousNavDrawState = false;
-	internal bool NavDrawStateChangedManually = false;
 
 	public override void OnEnabled()
 	{
 		_previousNavDrawState = Scene.NavMesh.DrawMesh;
 		Scene.NavMesh.DrawMesh = true;
-		NavDrawStateChangedManually = false;
 	}
 
 	public override void OnDisabled()
 	{
-		if ( !NavDrawStateChangedManually )
-		{
-			//Restore previous state if we didn't change it manually
-			Scene.NavMesh.DrawMesh = _previousNavDrawState;
-		}
+		Scene.NavMesh.DrawMesh = _previousNavDrawState;
 	}
 
 	public override void OnUpdate()
@@ -47,52 +41,6 @@ public class NavTestSettings : EditorTool
 				Scene.NavMesh.SetDirty();
 				SceneEditorSession.Active.HasUnsavedChanges = true;
 			}
-		}
-	}
-
-	public override Widget CreateToolSidebar()
-	{
-		return new NavigationSettingsWidget( this );
-	}
-
-	//Sidebar widget for navigation settings
-	private class NavigationSettingsWidget : ToolSidebarWidget
-	{
-		private readonly NavTestSettings Tool;
-
-		public NavigationSettingsWidget( NavTestSettings tool ) : base()
-		{
-			Tool = tool;
-
-			AddTitle( "Settings", "edit_note" );
-
-			var so = EditorTypeLibrary.GetSerializedObject( SceneEditorSession.Active.Scene.NavMesh );
-
-			//In a group, like every other tool's settings: bare, the sheet was names and fields lying straight on the picture of the scene.
-			var group = AddGroup( "Navigation Mesh" );
-
-			var control = new PanelControlSheetHost( this );
-			control.SetObject( so );
-			group.Add( control );
-
-			so.OnPropertyChanged = ( p ) =>
-			{
-				SceneEditorSession.Active.Scene.NavMesh.SetDirty();
-				SceneEditorSession.Active.HasUnsavedChanges = true;
-			};
-
-			Layout.AddSpacingCell( 8 );
-
-			Layout.Add( new Button( "Rebuild", "autorenew" )
-			{
-				Clicked = () => Tool.Scene.NavMesh.SetDirty()
-			} );
-			Layout.Add( new Button( "Bake", "download" )
-			{
-				Clicked = () => NavMesh.BakeNavMesh()
-			} );
-
-			Layout.AddStretchCell();
 		}
 	}
 }

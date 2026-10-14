@@ -112,17 +112,9 @@ class HeightFieldGenerator : IDisposable
 
 		int startV = inputGeoVerticesCount;
 
-		for ( int i = 0; i + 2 < triangulationIndexCache.Count; i += 3 )
-		{
-			//invert winding and increment by startV
-			var idx0 = triangulationIndexCache[i + 0];
-			var idx1 = triangulationIndexCache[i + 1];
-			var idx2 = triangulationIndexCache[i + 2];
-
-			inputGeoIndices[inputGeoIndicesCount++] = idx0 + startV;
-			inputGeoIndices[inputGeoIndicesCount++] = idx2 + startV;
-			inputGeoIndices[inputGeoIndicesCount++] = idx1 + startV;
-		}
+		//As the shape winds them: the world is Y-up already, so a floor's normal points up as InputFilter asks
+		for ( int i = 0; i < triangulationIndexCache.Count; i++ )
+			inputGeoIndices[inputGeoIndicesCount++] = triangulationIndexCache[i] + startV;
 
 		//Transform positions added to the vertex data
 		var bodyTransform = shape.Body.Transform;

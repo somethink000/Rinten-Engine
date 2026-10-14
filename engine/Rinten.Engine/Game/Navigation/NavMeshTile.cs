@@ -107,6 +107,18 @@ internal class NavMeshTile : IDisposable
 		}
 	}
 
+	//What a bake gave it, dropped, so it is built from the world again
+	internal void ForgetBake()
+	{
+		lock ( heightfieldGate )
+		{
+			if ( !IsBakedHeightField ) return;
+
+			ClearCompressedHeightField();
+			IsBakedHeightField = false;
+		}
+	}
+
 	internal void SetCompressedHeightField( byte[] compressedData )
 	{
 		lock ( heightfieldGate )

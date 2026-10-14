@@ -15,13 +15,9 @@ internal struct Config
 	{
 		var cfg = new Config();
 
-		cfg.CellSize = cellSize;
-		if ( cfg.CellSize < 2f )
-			cfg.CellSize = 2f;
-
-		cfg.CellHeight = cellHeight;
-		if ( cfg.CellHeight < 0.5f )
-			cfg.CellHeight = 0.5f;
+		//Metres: five centimetres across and a centimetre up at the finest
+		cfg.CellSize = MathF.Max( cellSize, 0.05f );
+		cfg.CellHeight = MathF.Max( cellHeight, 0.01f );
 
 		cfg.WalkableSlopeAngle = Math.Clamp( agentMaxSlope, 0.0f, 90.0f );
 
@@ -36,7 +32,8 @@ internal struct Config
 
 		cfg.MaxVertsPerPoly = (int)Constants.VERTS_PER_POLYGON;
 
-		cfg.MaxEdgeLen = (int)(256.0f / cfg.CellSize);
+		//Six and a half metres, in voxels
+		cfg.MaxEdgeLen = (int)(6.5f / cfg.CellSize);
 		cfg.MaxEdgeLen = Math.Max( cfg.MaxEdgeLen, 0 );
 
 		cfg.MaxSimplificationError = 2.0f;
@@ -68,12 +65,12 @@ internal struct Config
 		{
 			Log.Warning( $"Tile bounds {sizeX}x{sizeZ} should be square" );
 		}
-		if ( !MathX.AlmostEqual( sizeX.UnsignedMod( cellSize ), 0f, 0.1f ) && !MathX.AlmostEqual( sizeX.UnsignedMod( cellSize ), cellSize, 0.1f ) )
+		if ( !MathX.AlmostEqual( sizeX.UnsignedMod( cfg.CellSize ), 0f, 0.01f ) && !MathX.AlmostEqual( sizeX.UnsignedMod( cfg.CellSize ), cfg.CellSize, 0.01f ) )
 		{
 			Log.Warning( $"Tile bounds {sizeX}x{sizeZ} should be divisible by cell size {cfg.CellSize}" );
 		}
 
-		cfg.TileSizeXY = (int)(sizeX / cellSize + 0.5f);
+		cfg.TileSizeXY = (int)(sizeX / cfg.CellSize + 0.5f);
 
 		return cfg;
 	}

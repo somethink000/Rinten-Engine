@@ -246,6 +246,12 @@ internal class NavMeshTileCache : IDisposable
 		return false;
 	}
 
+	/// <summary>Every tile's heightfield built from the world again on its next build, not taken from a bake.</summary>
+	public void ForgetBake()
+	{
+		foreach ( var tile in tileCache.Values ) tile.ForgetBake();
+	}
+
 	public void Dispose()
 	{
 		foreach ( var (_, tile) in tileCache )

@@ -1,6 +1,7 @@
 @using System.Threading
 @using Rinten
 @using Rinten.UI
+@using Editor.Inspectors
 @namespace Editor
 @attribute [StyleSheet( "BuildPopup.razor.scss" )]
 @inherits Popup
@@ -12,27 +13,23 @@
 			<span class="heading">Lighting</span>
 		</div>
 
-		@if ( Settings is not null )
-		{
-			<Editor.Inspectors.ControlSheet Target="@settings" />
-		}
+		<div class="buttons">
+			@if ( baking is not null )
+			{
+				<div class="button wide" onclick="@Cancel"><i>close</i><label>Cancel</label></div>
+			}
+			else
+			{
+				<div class="button wide primary @( NothingToBake ? "disabled" : "" )" onclick="@Bake"><i>lightbulb</i><label>Bake Scene</label></div>
+			}
+		</div>
 
 		<div class="status">
 			<i class="@( baking is not null ? "busy" : Baked ? "done" : "" )">@( baking is not null ? "hourglass_top" : Baked ? "check_circle" : "radio_button_unchecked" )</i>
 			<label>@Status</label>
 		</div>
 
-		<div class="buttons">
-			@if ( baking is not null )
-			{
-				<div class="button" onclick="@Cancel"><i>close</i><label>Cancel</label></div>
-			}
-			else
-			{
-				<div class="button @( Lighting?.Lightmap is null ? "disabled" : "" )" onclick="@Clear"><i>link_off</i><label>Clear</label></div>
-				<div class="button primary" onclick="@Bake"><i>lightbulb</i><label>Bake Lighting</label></div>
-			}
-		</div>
+		<div class="cards" @ref="Cards"></div>
 	</div>
 </root>
 
@@ -41,8 +38,8 @@
 	/// <summary>The view whose scene this builds.</summary>
 	public SceneViewPanel SceneView { get; set; }
 
-	BakedLighting lighting;
-	SerializedObject settings;
+	Panel Cards;
+	BakedLighting laid;
 	CancellationTokenSource baking;
 
 	//The scene being edited, not a game played from it
@@ -50,28 +47,11 @@
 
 	BakedLighting Lighting => EditedScene.IsValid() ? EditedScene.Lighting : null;
 
-	//The bake's settings as rows; an edit leaves the scene to be saved
-	SerializedObject Settings
-	{
-		get
-		{
-			if ( Lighting is not { } now ) return null;
-			if ( ReferenceEquals( now, lighting ) ) return settings;
+	bool Baked => Lighting is { HasBake: true } || Lighting?.Envmaps.Asset is { Data.Pictures.Count: > 0 };
 
-			lighting = now;
-			settings = Game.TypeLibrary.GetSerializedObject( now );
-			settings.OnPropertyChanged += _ =>
-			{
-				if ( now.Scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
-			};
+	bool NothingToBake => Lighting is not { } lighting || ( !lighting.Lightmaps.Bake && !lighting.Envmaps.Bake );
 
-			return settings;
-		}
-	}
-
-	bool Baked => Lighting is { HasBake: true };
-
-	//No model or mesh in the scene is marked Static, so a bake has nothing to work on
+	//No model or mesh in the scene is marked Static, so the lightmaps have nothing to work on
 	bool NothingStill => EditedScene is { } scene
 		&& !scene.GetAllComponents<ModelRenderer>().Any( r => r.GameObject.IsStatic )
 		&& !scene.GetAllComponents<MeshComponent>().Any( m => m.GameObject.IsStatic );
@@ -81,18 +61,15 @@
 		get
 		{
 			if ( baking is not null ) return "Baking - progress is at the bottom of the editor";
-			if ( NothingStill ) return "Not baked - only objects marked Static are baked, and none are";
+			if ( Lighting is not { } lighting ) return "";
 
-			var into = Lighting?.Lightmap is { } lightmap
-				? System.IO.Path.GetFileName( lightmap.ResourcePath ?? "an unsaved lightmap" )
-				: $"a new {System.IO.Path.GetFileNameWithoutExtension( EditedScene?.Source?.ResourcePath ?? "scene" )}.lightmap beside the scene";
+			var lightmap = lighting.Data is { IsEmpty: false } data && data.HasSheet ? $"{data.SheetWidth}² lightmap"
+				: NothingStill ? "no lightmap - nothing is marked Static" : "no lightmap";
 
-			if ( Lighting?.Data is not { IsEmpty: false } data ) return $"Not baked - a bake goes into {into}";
+			var probes = lighting.Envmaps.Asset?.Data.Pictures.Count ?? 0;
+			var envmaps = probes > 0 ? $"{probes} envmap{( probes == 1 ? "" : "s" )}" : "no envmaps";
 
-			var sheet = data.HasSheet ? $"{data.SheetWidth}x{data.SheetHeight} atlas" : "no atlas";
-			var volume = data.HasVolume ? $"{data.VolumeX}x{data.VolumeY}x{data.VolumeZ} volume" : "no volume";
-
-			return $"Baked into {into}: {sheet}, {volume}";
+			return $"{lightmap}, {envmaps}";
 		}
 	}
 
@@ -111,10 +88,42 @@
 		return popup;
 	}
 
+	//A card each, as a component is one: its switch says whether Bake Scene bakes it
+	protected override void OnAfterTreeRender( bool firstTime )
+	{
+		base.OnAfterTreeRender( firstTime );
+
+		if ( Cards is null || ReferenceEquals( laid, Lighting ) ) return;
+
+		laid = Lighting;
+		Cards.DeleteChildren( true );
+
+		if ( laid is null ) return;
+
+		Card( "Lightmaps", "wb_iridescent", laid.Lightmaps );
+		Card( "Envmaps", "panorama_photosphere", laid.Envmaps );
+	}
+
+	void Card( string title, string icon, object block )
+	{
+		var so = Game.TypeLibrary.GetSerializedObject( block );
+		var scene = laid.Scene;
+
+		//An edit leaves the scene to be saved
+		so.OnPropertyChanged += _ =>
+		{
+			if ( scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
+		};
+
+		var card = Cards.AddChild( new InspectorCard( title, icon, so.GetProperty( nameof( BakedLighting.LightmapSettings.Bake ) ), $"bake.{title.ToLowerInvariant()}" ) );
+		card.Body.AddChild( new Editor.Inspectors.ControlSheet { Target = so } );
+		card.Refold();
+	}
+
 	//Async void as a click handler: everything it can throw is caught here
 	async void Bake()
 	{
-		if ( baking is not null || Lighting is not { } target ) return;
+		if ( baking is not null || NothingToBake || Lighting is not { } target ) return;
 
 		baking = new CancellationTokenSource();
 		StateHasChanged();
@@ -140,11 +149,6 @@
 
 	void Cancel() => baking?.Cancel();
 
-	void Clear()
-	{
-		if ( Lighting is { Lightmap: not null } target ) target.Clear();
-		StateHasChanged();
-	}
-
-	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Lightmap, Lighting?.Data );
+	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data, Lighting?.Envmaps.Asset?.Data,
+		Lighting?.Lightmaps.Bake, Lighting?.Envmaps.Bake );
 }

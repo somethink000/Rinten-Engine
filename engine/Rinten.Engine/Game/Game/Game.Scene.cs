@@ -74,8 +74,6 @@ public static partial class Game
 
 		if ( ActiveScene.IsLoading || LoadingScreen.IsVisible || Networking.IsConnecting )
 		{
-			ActiveScene.RenderEnvmaps();
-
 			//Make sure overlays are rendered even when we are loading
 			if ( ActiveScene.Camera is not null )
 			{

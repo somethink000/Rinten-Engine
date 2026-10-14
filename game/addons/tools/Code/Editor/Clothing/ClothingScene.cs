@@ -156,17 +156,6 @@ public class ClothingScene
 			light.Shadows = true;
 		}
 
-		//envmap
-		{
-			var go = Scene.Directory.FindByName( "envmap" )?.FirstOrDefault() ?? new GameObject( true, "envmap" );
-			var c = go.GetOrAddComponent<EnvmapProbe>();
-			c.WorldPosition = new Vector3( 0, 0, 0 );
-			c.Mode = EnvmapProbe.EnvmapProbeMode.CustomTexture;
-			c.Texture = Texture.Load( "textures/cubemaps/default2.tex" );
-			c.TintColor = Color.White * 0.4f;
-			c.Bounds = BBox.FromPositionAndSize( 0, 2540f );
-		}
-
 		//{
 		//var go = Scene.Directory.FindByName( "pointlight2" )?.FirstOrDefault() ?? new GameObject( true, "pointlight2" );
 		//var light = go.GetOrAddComponent<PointLight>();

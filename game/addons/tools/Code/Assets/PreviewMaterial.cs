@@ -50,6 +50,7 @@ class PreviewMaterial : AssetPreview
 			{
 				var go = Scene.Directory.FindByName( "envmap" )?.FirstOrDefault() ?? new GameObject( true, "envmap" );
 				var c = go.GetOrAddComponent<EnvmapProbe>();
+				c.Mode = EnvmapProbe.EnvmapProbeMode.Runtime;
 				c.WorldPosition = new Vector3( 0, 0, 0 );
 				c.TintColor = Color.White * 0.1f;
 				var sprite = PrimaryObject.AddComponent<ModelRenderer>();

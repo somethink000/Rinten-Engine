@@ -986,7 +986,7 @@ internal static class SBoxMaps
 			return new JsonArray( fog );
 		}
 
-		//Their cubemap entity as our envmap probe; it captures its own cubemap on load
+		//Their cubemap entity as our envmap probe, Baked: the scene's bake takes its picture
 		private static JsonArray Cubemap( SBoxMapElement properties )
 		{
 			var probe = new JsonObject

@@ -4,7 +4,8 @@ using System.Linq;
 
 namespace Rinten;
 
-//Envmap probes: six views folded into one octahedral picture, blurred bands stacked under it
+//Envmap probes: six views folded into one octahedral picture, blurred bands stacked under it. A baked probe's picture
+//comes from the scene's envmaps asset, a runtime probe's from its own captures
 internal static class CoreEnvmap
 {
 
@@ -21,75 +22,24 @@ internal static class CoreEnvmap
 	//How much light one of these can hold before it clips.
 	internal const float RgbmRange = 8.0f;
 
-	//What was captured for one probe.
+	//One probe's picture on the card.
 	private sealed class Held
 	{
 		public ulong Texture;
 		public int Index;
-		public Vector3 Where;
-		public int Bandwidth;
 
-		/// <summary>The sky and the sun it was captured under - see <see cref="Outdated"/>.</summary>
-		public Sky Sky;
+		/// <summary>The baked pixels it was made from; null for a runtime probe's capture.</summary>
+		public byte[] From;
 	}
 
-	//The sun and sky a probe was captured under, so a changed sky can trigger a recapture
-	internal readonly record struct Sky( bool Has, Vector3 Sun, Color SunColour, Color Tint, int Bake );
-
-	//The sky and the sun a scene is lit by now, as CoreSceneRenderer.SetSky reads them.
-	internal static Sky SkyOf( Scene scene )
-	{
-		if ( !scene.IsValid() ) return default;
-
-		var box = CoreSceneRenderer.FirstEnabled<SkyBox2D>( scene );
-		var sun = CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene );
-		var bake = scene.LightingIfAny is { Enabled: true } lighting ? lighting.Data?.Revision ?? 0 : 0;
-
-		return new Sky( box is not null || sun is not null,
-			sun is null ? default : -sun.WorldRotation.Forward.Normal,
-			sun?.EmittedColor ?? default,
-			box?.Tint ?? default,
-			bake );
-	}
-
-	//True when the sky changed enough since capture: sun a degree round, or 2% brighter or another colour
-	internal static bool Outdated( Scene scene, EnvmapProbe probe )
-	{
-		if ( probe is null || !probe.GameObject.IsValid() ) return false;
-		if ( !held.TryGetValue( probe.GameObject.Id, out var one ) ) return false;
-
-		lock ( folding )
-			if ( folding.ContainsKey( probe.GameObject.Id ) ) return false;
-
-		var now = SkyOf( scene );
-		var was = one.Sky;
-
-		if ( now.Has != was.Has ) return true;
-
-		//A new bake, or the bake turned off: the room the probe saw is lit differently
-		if ( now.Bake != was.Bake ) return true;
-		//Two scenes without a sun have no way to compare, and their dot of nought is not a turned sun
-		if ( now.Sun != was.Sun && now.Sun.Dot( was.Sun ) < 0.99985f ) return true;
-
-		static bool Apart( Color a, Color b )
-		{
-			var most = MathF.Max( MathF.Max( MathF.Max( a.r, a.g ), MathF.Max( a.b, b.r ) ), MathF.Max( b.g, b.b ) );
-			var limit = 0.02f * MathF.Max( most, 0.05f );
-
-			return MathF.Abs( a.r - b.r ) > limit || MathF.Abs( a.g - b.g ) > limit || MathF.Abs( a.b - b.b ) > limit;
-		}
-
-		return Apart( now.SunColour, was.SunColour ) || Apart( now.Tint, was.Tint );
-	}
-
-	//Folds running on workers, by probe: the fold, where the probe stood, and the sky it was drawn under.
-	private static readonly Dictionary<Guid, (System.Threading.Tasks.Task<Scratch> Fold, Vector3 Where, Sky Sky)> folding = new();
+	//Folds running on workers, by probe.
+	private static readonly Dictionary<Guid, System.Threading.Tasks.Task<Scratch>> folding = new();
 
 	//When the last capture was drawn - see MayCapture.
 	private static float capturedAt = -1.0f;
 
-	//Whether a probe may draw now: not in the same few ms as any probe's last capture, so a changed sky's
-	//captures spread over ticks instead of stalling one frame
+	//Whether a probe may draw now: not in the same few ms as any probe's last capture, so runtime probes take turns
+	//rather than stalling one frame together
 	internal static bool MayCapture => job is null && ( capturedAt < 0.0f || RealTime.Now - capturedAt > 0.03f || RealTime.Now < capturedAt );
 
 	//The folds that are done, onto the device - asked once a frame, see Write.
@@ -101,16 +51,16 @@ internal static class CoreEnvmap
 
 			done.Clear();
 
-			foreach ( var (id, one) in folding )
-				if ( one.Fold.IsCompleted ) done.Add( id );
+			foreach ( var (id, fold) in folding )
+				if ( fold.IsCompleted ) done.Add( id );
 
 			foreach ( var id in done )
 			{
-				var one = folding[id];
+				var fold = folding[id];
 				folding.Remove( id );
 
-				if ( one.Fold.IsCompletedSuccessfully ) Keep( id, one.Where, one.Sky, one.Fold.Result );
-				else Log.Warning( $"an envmap probe's fold failed: {one.Fold.Exception?.GetBaseException().Message}" );
+				if ( fold.IsCompletedSuccessfully ) Keep( id, fold.Result );
+				else Log.Warning( $"an envmap probe's fold failed: {fold.Exception?.GetBaseException().Message}" );
 			}
 		}
 	}
@@ -140,48 +90,71 @@ internal static class CoreEnvmap
 	//Whether anything has been captured at all.
 	internal static bool Any => held.Count > 0;
 
-	//Draws the world from one probe and keeps what it saw: six frames of its own, so never while one is open -
-	//reading a view waits for the device. Called from a tick and from the bake button
+	//Whether a probe can be drawn here: not in the portable frame, where no pixel samples it - see kProbesOn
+	private static bool CanDraw( Scene scene, EnvmapProbe probe )
+		=> scene.IsValid() && probe.IsValid() && probe.GameObject.IsValid() && CoreNative.Available && CoreRenderDevice.Initialize()
+			&& !CoreRenderDevice.PortableFrame && CoreSceneDrawer.EnsureResources();
+
+	//A runtime probe's capture: six frames of its own, so never while one is open - reading a view waits for the device.
+	//A face a tick, folded on a worker; or all of it now, for whoever waits on it
 	internal static bool Capture( Scene scene, EnvmapProbe probe, bool wait = false )
 	{
-		if ( !scene.IsValid() || probe is null || !probe.IsValid() || !probe.GameObject.IsValid() ) return false;
-		if ( !CoreNative.Available || !CoreRenderDevice.Initialize() ) return false;
+		if ( !CanDraw( scene, probe ) ) return false;
 
-	//And not in the portable frame, where no pixel samples it - see Write and kProbesOn in frame.slang
-		if ( CoreRenderDevice.PortableFrame ) return false;
-		if ( !CoreSceneDrawer.EnsureResources() ) return false;
-
-		var size = Math.Clamp( (int)probe.Resolution, 64, 512 );
-
-		job = new Job
-		{
-			Probe = probe,
-			Id = probe.GameObject.Id,
-			Size = size,
-			Work = Scratch.Take( size ),
-		};
+		job = Begin( probe );
 
 		if ( !wait ) return Step( scene, probe );
 
-		//Whoever asked waits for it - the load, the bake button: every face now, and the fold.
-		using ( Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Envmap: Six Draws" ) )
-		{
-			while ( job is not null && job.Next < 6 )
-				if ( !DrawFace( scene, job ) ) { job = null; return false; }
-		}
+		var done = Finish( scene );
+		if ( done is null ) return false;
 
-		var done = job;
-		job = null;
-
-		using ( Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Envmap: Fold" ) )
-			Keep( done.Id, done.Where, done.Sky, Fold( done.Work, done.Where ) );
+		Keep( done.Id, Fold( done.Work, done.Where ) );
 
 		lock ( folding ) folding.Remove( done.Id );
 
 		return true;
 	}
 
-	//A capture under way: the probe, faces drawn so far with their matrices, where it stood and its sky
+	/// <summary>A baked probe's picture, drawn and folded now for the scene's bake; null where it could not be.</summary>
+	internal static byte[] Take( Scene scene, EnvmapProbe probe )
+	{
+		if ( !CanDraw( scene, probe ) || job is not null ) return null;
+
+		job = Begin( probe );
+
+		var done = Finish( scene );
+		if ( done is null ) return null;
+
+		var work = Fold( done.Work, done.Where );
+		var pixels = (byte[])work.Picture.Clone();
+		Scratch.Give( work );
+
+		return pixels;
+	}
+
+	private static Job Begin( EnvmapProbe probe )
+	{
+		var size = Math.Clamp( (int)probe.Resolution, 64, 512 );
+
+		return new Job { Probe = probe, Id = probe.GameObject.Id, Size = size, Work = Scratch.Take( size ) };
+	}
+
+	//Every face of the capture under way now; the job, or null where a face failed
+	private static Job Finish( Scene scene )
+	{
+		using ( Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Envmap: Six Draws" ) )
+		{
+			while ( job is not null && job.Next < 6 )
+				if ( !DrawFace( scene, job ) ) { job = null; return null; }
+		}
+
+		var done = job;
+		job = null;
+
+		return done;
+	}
+
+	//A capture under way: the probe, faces drawn so far with their matrices, and where it stood
 	private sealed class Job
 	{
 		public EnvmapProbe Probe;
@@ -190,7 +163,6 @@ internal static class CoreEnvmap
 		public Scratch Work;
 		public int Next;
 		public Vector3 Where;
-		public Sky Sky;
 	}
 
 	//The capture under way, if one is - there is only ever one.
@@ -252,7 +224,7 @@ internal static class CoreEnvmap
 
 		var folded = System.Threading.Tasks.Task.Run( () => Fold( done.Work, done.Where ) );
 
-		lock ( folding ) folding[done.Id] = (folded, done.Where, done.Sky);
+		lock ( folding ) folding[done.Id] = folded;
 
 		return true;
 	}
@@ -263,12 +235,8 @@ internal static class CoreEnvmap
 		var probe = at.Probe;
 		var face = at.Next;
 
-			//Where the probe stands and what lights it, from its first face; a change mid-capture is caught next time
-		if ( face == 0 )
-		{
-			at.Where = probe.WorldPosition;
-			at.Sky = SkyOf( scene );
-		}
+		//Where the probe stands, from its first face; a move mid-capture is caught next time
+		if ( face == 0 ) at.Where = probe.WorldPosition;
 
 		var camera = Borrowed( scene, out var made, out var was );
 		if ( camera is null ) return false;
@@ -383,9 +351,10 @@ internal static class CoreEnvmap
 		//why - so the slots stay at nought and the scene's probes are not gone through. See RenderTier.
 		if ( CoreRenderDevice.PortableFrame ) return;
 
-		if ( !scene.IsValid() || held.Count == 0 ) return;
+		if ( !scene.IsValid() ) return;
 
-		var found = Chosen( scene, camera );
+		var baked = scene.LightingIfAny?.Envmaps.Asset?.Data;
+		var found = Chosen( scene, camera, baked );
 
 		var written = 0;
 
@@ -411,7 +380,7 @@ internal static class CoreEnvmap
 			frame[slot + 4] = mins.x;
 			frame[slot + 5] = mins.y;
 			frame[slot + 6] = mins.z;
-			frame[slot + 7] = probe.Projection == SceneCubemap.ProjectionMode.Box ? 1.0f : 0.0f;
+			frame[slot + 7] = probe.Projection == EnvmapProbe.ProjectionMode.Box ? 1.0f : 0.0f;
 
 			frame[slot + 8] = maxs.x;
 			frame[slot + 9] = maxs.y;
@@ -435,14 +404,16 @@ internal static class CoreEnvmap
 		frame[at + 3] = RgbmRange;
 	}
 
-	//Probes for the frame: highest priority, then nearest, up to MostProbes, without allocating
-	private static List<EnvmapProbe> Chosen( Scene scene, Vector3 camera )
+	//Probes for the frame: highest priority, then nearest, up to MostProbes, without allocating. A baked one is put
+	//on the card from the bake as it is first chosen, and again after a new bake
+	private static List<EnvmapProbe> Chosen( Scene scene, Vector3 camera, BakedEnvmapsData baked )
 	{
 		chosen.Clear();
 
 		foreach ( var probe in scene.GetAllComponents<EnvmapProbe>() )
 		{
 			if ( !probe.IsValid() || !probe.Enabled || !probe.GameObject.IsValid() ) continue;
+			if ( probe.Mode == EnvmapProbe.EnvmapProbeMode.Baked && !OnCard( probe, baked ) ) continue;
 			if ( !held.ContainsKey( probe.GameObject.Id ) ) continue;
 
 			var distance = ( probe.WorldPosition - camera ).LengthSquared;
@@ -458,6 +429,26 @@ internal static class CoreEnvmap
 		}
 
 		return chosen;
+	}
+
+	//Whether a baked probe's picture is on the card as the bake has it, putting it there where it is not
+	private static bool OnCard( EnvmapProbe probe, BakedEnvmapsData baked )
+	{
+		var id = probe.GameObject.Id;
+		var pixels = baked is { Side: Side, Bands: Bands } ? baked.PixelsOf( id ) : null;
+
+		if ( pixels is null || pixels.Length != Side * Side * Bands * 4 )
+		{
+			if ( held.TryGetValue( id, out var stale ) && stale.From is not null ) Forget( probe );
+			return false;
+		}
+
+		if ( held.TryGetValue( id, out var one ) && ReferenceEquals( one.From, pixels ) ) return true;
+
+		Upload( id, pixels );
+		held[id].From = pixels;
+
+		return true;
 	}
 
 	//Whether one probe goes ahead of another: higher priority, then nearer.
@@ -821,34 +812,26 @@ internal static class CoreEnvmap
 
 	//--------------------------------------------------------- keeping it
 
-	private static void Keep( Guid id, Vector3 where, Sky sky, Scratch work )
+	//A runtime capture onto the card, its scratch given back
+	private static void Keep( Guid id, Scratch work )
 	{
-		var picture = work.Picture;
+		Upload( id, work.Picture );
+		held[id].From = null;
+		Scratch.Give( work );
+	}
 
-		//Into the picture the probe already has, where it has one: the same shape every time, and a texture made
-		//and destroyed at each capture of a realtime probe was a slot in the table and an image to free as well.
+	//A picture onto the card: into the probe's texture where it has one - the same shape every time, so a runtime
+	//probe is not a new table slot at each capture - else a new one
+	private static void Upload( Guid id, byte[] picture )
+	{
 		if ( held.TryGetValue( id, out var was ) && was.Texture != 0 &&
-			CoreRenderDevice.UpdateTextureRgba( was.Texture, picture, Side, Side * Bands ) )
-		{
-			was.Where = where;
-			was.Sky = sky;
-			Scratch.Give( work );
-			return;
-		}
+			CoreRenderDevice.UpdateTextureRgba( was.Texture, picture, Side, Side * Bands ) ) return;
 
 		if ( was is not null && was.Texture != 0 )
 			CoreRenderDevice.DestroyTexture( was.Texture );
 
 		var texture = CoreRenderDevice.CreateTextureRgba( picture, Side, Side * Bands, srgb: false );
-		Scratch.Give( work );
 
-		held[id] = new Held
-		{
-			Texture = texture,
-			Index = texture == 0 ? 0 : (int)CoreRender.TextureIndex( texture ),
-			Where = where,
-			Bandwidth = Bands,
-			Sky = sky,
-		};
+		held[id] = new Held { Texture = texture, Index = texture == 0 ? 0 : (int)CoreRender.TextureIndex( texture ) };
 	}
 }

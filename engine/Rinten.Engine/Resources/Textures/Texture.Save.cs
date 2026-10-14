@@ -4,7 +4,7 @@ namespace Rinten;
 
 public partial class Texture
 {
-	//For cubemaps, this assumes the texture was rendered for use with inverted scale sampling (like EnvmapProbe's dynamic rendering). Face pairs are swapped and flipped to compensate so the saved texture can be sampled normally.
+	//For cubemaps, this assumes the texture was rendered for use with inverted scale sampling (with inverted scale). Face pairs are swapped and flipped to compensate so the saved texture can be sampled normally.
 	/// <summary>Creates a VTEX file from this texture.</summary>
 	public byte[] SaveToVtex( ImageFormat? formatOverride = null )
 	{

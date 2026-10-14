@@ -345,10 +345,10 @@ internal static partial class CoreBakedLighting
 
 		var world = new BakeScene
 		{
-			Bounces = Math.Clamp( bake.Bounces, 0, 16 ),
-			SkyStrength = MathF.Max( bake.SkyStrength, 0.0f ),
-			AlbedoBoost = MathF.Max( bake.BounceStrength, 0.0f ),
-			SunCosine = MathF.Cos( MathF.Max( bake.SunWidth, 0.0f ) * 0.5f * MathF.PI / 180.0f ),
+			Bounces = Math.Clamp( bake.Lightmaps.Bounces, 0, 16 ),
+			SkyStrength = MathF.Max( bake.Lightmaps.SkyStrength, 0.0f ),
+			AlbedoBoost = MathF.Max( bake.Lightmaps.BounceStrength, 0.0f ),
+			SunCosine = MathF.Cos( MathF.Max( bake.Lightmaps.SunWidth, 0.0f ) * 0.5f * MathF.PI / 180.0f ),
 		};
 
 		world.Gather( scene );
@@ -372,17 +372,17 @@ internal static partial class CoreBakedLighting
 		}
 
 		var sheetSide = 0;
-		var packed = world.Receivers.Count > 0 && BakeSheet.Pack( world, bake.TexelsPerMetre, Math.Clamp( bake.Resolution, 256, 8192 ), out sheetSide );
+		var packed = world.Receivers.Count > 0 && BakeSheet.Pack( world, bake.Lightmaps.TexelsPerMetre, Math.Clamp( bake.Lightmaps.Resolution, 256, 8192 ), out sheetSide );
 
 		if ( world.Receivers.Count == 0 )
 			Log.Info( "baked lighting: no still model has a second set of coordinates - everything reads the volume" );
 		else if ( !packed )
-			Log.Warning( $"baked lighting: {world.Receivers.Count} surfaces do not fit a {bake.Resolution} atlas at any density - only the volume is baked" );
+			Log.Warning( $"baked lighting: {world.Receivers.Count} surfaces do not fit a {bake.Lightmaps.Resolution} atlas at any density - only the volume is baked" );
 
-		var samples = bake.TexelSamples;
-		var volumeSamples = bake.VolumeSamples;
-		var denoise = MathF.Max( bake.Denoise, 0.0f );
-		var spacing = bake.VolumeSpacing;
+		var samples = bake.Lightmaps.TexelSamples;
+		var volumeSamples = bake.Lightmaps.VolumeSamples;
+		var denoise = MathF.Max( bake.Lightmaps.Denoise, 0.0f );
+		var spacing = bake.Lightmaps.VolumeSpacing;
 
 		var progress = new BakeProgress();
 		using var section = Application.Editor?.ProgressSection();

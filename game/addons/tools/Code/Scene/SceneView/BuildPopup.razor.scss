@@ -1,8 +1,8 @@
-//The build panel under the scene view's hammer: what can be built for the scene, and the button that builds it
+//The build panel under the scene view's hammer: the button that bakes the scene, then a card for each thing it bakes
 .build-popup
 {
-	width: 340px;
-	min-width: 340px;
+	width: 380px;
+	min-width: 380px;
 	transition: none;
 	transform: none;
 
@@ -63,6 +63,15 @@
 		> label { color: $ink-dim; font-size: $type-small; }
 	}
 
+	//Lightmaps and cubemaps, each a card as a component is - see InspectorCard
+	.cards
+	{
+		flex-direction: column;
+		flex-shrink: 0;
+		row-gap: 6px;
+		padding: 0px 8px;
+	}
+
 	.buttons
 	{
 		flex-direction: row;
@@ -87,6 +96,13 @@
 
 			&:hover { background-color: $slab-hover; }
 			&:active { background-color: $slab-down; }
+
+			&.wide
+			{
+				flex-grow: 1;
+				justify-content: center;
+				min-height: 28px;
+			}
 
 			&.primary { background-color: $accent-fill; color: $frame-gap; }
 			&.primary:hover { opacity: 0.9; }

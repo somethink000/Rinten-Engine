@@ -303,24 +303,6 @@ public partial class Scene : GameObject
 		}
 	}
 
-	internal void RenderEnvmaps()
-	{
-		//Can't render envmaps while already inside a render pass
-		if ( Graphics.IsActive )
-		{
-			if ( !Application.IsRetail ) Log.Error( "Attempted to render envmaps while inside a render pass!" );
-			return;
-		}
-
-		//We pre-render envmaps, we dont need to render them parallelly in a frame anymore, this can
-		//cause transform buffers and descriptor sets to balloon in complex scenes and cause crashes.
-		const int maxSimultaniousUpdates = 1;
-		foreach ( var envmap in GetAllComponents<EnvmapProbe>().Where( x => x.Dirty ).Take( maxSimultaniousUpdates ) )
-		{
-			envmap.RenderCubemap();
-		}
-	}
-
 	//Cache all enabled and disabled cameras in the scene. Registered/Deregistered in CameraComponent.OnAwake and OnDestroy.
 	internal HashSet<CameraComponent> Cameras { get; } = new HashSet<CameraComponent>();
 
@@ -333,8 +315,6 @@ public partial class Scene : GameObject
 		{
 			cc.InitializeRendering();
 		}
-
-		RenderEnvmaps();
 
 		if ( SceneWorld.IsValid() )
 		{

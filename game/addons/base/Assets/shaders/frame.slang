@@ -1219,20 +1219,23 @@ float SunShadow( float3 world, float3 normal )
 	return SunShadow( world, normal, normal );
 }
 
-//How much of a baked sun movers take from a surface that has it in its lightmap: where the still world lets
-//it through and a mover does not. Only the movers map is read where no mover covers the point
-float SunMovedShade( float3 world, float3 normal )
+//How much of a baked sun movers take from a surface that has it in its lightmap, in `moved`: where the still world
+//lets it through and a mover does not. Returns what reaches the point past both, from one tap of the still pages -
+//the highlight's shadow, which a lightmap has no direction for
+float SunBakedShade( float3 world, float3 normal, out float moved )
 {
+	moved = 0.0;
+
 #ifdef PORTABLE
 	return 0.0;
 #else
-	if ( !SunCasts() ) return 0.0;
+	if ( !SunCasts() ) return 1.0;
 
 	float2 tilt = SunTilt( normal );
 	float movers = SunMovers( world, normal, tilt, true, g_frame[0].sunPages.z, g_frame[0].sunPages.w );
-	if ( movers >= 1.0 ) return 0.0;
+	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * SunStill( world, normal, tilt, true );
 
-	return ( 1.0 - movers ) * SunStill( world, normal, tilt, true );
+	return SunStill( world, normal, tilt, false ) * movers;
 #endif
 }
 
@@ -1465,20 +1468,22 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 #endif
 }
 
-//How much of a baked lamp movers take from a surface that has it in its lightmap: where the still world lets it
-//through and a mover does not. Only the movers are read where none covers the point
-float LampMovedShade( float3 world, float3 normal, Light light, float distance )
+//How much of a baked lamp movers take from a surface that has it in its lightmap, in `moved`; returns what reaches
+//the point past the still world and the movers, from one tap - the highlight's shadow. See SunBakedShade
+float LampBakedShade( float3 world, float3 normal, Light light, float distance, out float moved )
 {
+	moved = 0.0;
+
 #ifdef PORTABLE
 	return 0.0;
 #else
 	LampTap t;
-	if ( !LampTapOf( world, normal, normal, light, distance, t ) ) return 0.0;
+	if ( !LampTapOf( world, normal, normal, light, distance, t ) ) return 1.0;
 
 	float movers = LampMovers( t, light );
-	if ( movers >= 1.0 ) return 0.0;
+	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * LampStill( t, light );
 
-	return ( 1.0 - movers ) * LampStill( t, light );
+	return ShadowSharp( uint( g_frame[0].sunMaps.w ), t.at, t.compare, t.slope ) * movers;
 #endif
 }
 
@@ -1649,13 +1654,11 @@ ProbeMix ProbesAt( float3 world )
 		float3 mins = probe.mins.xyz;
 		float3 maxs = probe.maxs.xyz;
 
-		if ( any( world < mins ) || any( world > maxs ) ) continue;
-
-		//How far inside the box it is, in the tightest of the three axes. A probe that
-		//stopped at its wall would show a hard line across the floor where two rooms meet.
+		//Whole inside the box and fading over the feather past it, as the gizmo draws it (Bounds.Grow): a box that fades
+		//inwards gives a floor lying on its face the sky's reflection, which a room does not see
 		float fade = max( probe.maxs.w, 0.0001 );
-		float3 near = min( world - mins, maxs - world );
-		float weight = saturate( min( near.x, min( near.y, near.z ) ) / fade );
+		float3 outside = max( max( mins - world, world - maxs ), 0.0 );
+		float weight = saturate( 1.0 - ( max( outside.x, max( outside.y, outside.z ) ) / fade ) );
 
 		//A probe without a picture (not captured, or failed) is no probe, not a dark room
 		if ( weight <= 0.0 || probe.where.w < 0.5 ) continue;
@@ -2045,33 +2048,25 @@ float3 SheetFacesLinear( uint picture, uint faces, float2 uv )
 	return total > 1e-5 ? sum / total : g_textures[picture].SampleLevel( uv, 0.0 ).rgb;
 }
 
-//Baked lightmap diffuse at a normal: the light as the face took it, and - where the bake kept its first band - leaning
-//by colour into where the normal turns from the face (L1 lightmaps), else by the one dominant way
+//Baked lightmap diffuse at a normal: the light as the face took it, leaning by colour into where the normal turns
+//from the face by the first band the bake kept (L1 lightmaps)
 float3 BakedSheet( float2 uv, float3 normal, float3 face )
 {
 	uint sheet = uint( g_frame[0].bakedMaps.x );
-	uint ways = uint( g_frame[0].bakedMaps.y );
 
 	//Frame-uniform - see SkyTableAt.
 	float3 light = SheetFaces( sheet, sheet, uv ).rgb;
 
 	uint band = uint( g_frame[0].bakedMore.w );
+	if ( band == 0u ) return light;
 
-	if ( band != 0u )
-	{
-		//Three runs, red, green, blue, each the band over its colour's light as a byte - see BakeSheet.EncodeBand
-		float3 red = ( g_textures[band].SampleLevel( float2( uv.x / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
-		float3 green = ( g_textures[band].SampleLevel( float2( ( uv.x + 1.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
-		float3 blue = ( g_textures[band].SampleLevel( float2( ( uv.x + 2.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+	//Three runs, red, green, blue, each the band over its colour's light as a byte - see BakeSheet.EncodeBand
+	float3 red = ( g_textures[band].SampleLevel( float2( uv.x / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+	float3 green = ( g_textures[band].SampleLevel( float2( ( uv.x + 1.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
+	float3 blue = ( g_textures[band].SampleLevel( float2( ( uv.x + 2.0 ) / 3.0, uv.y ), 0.0 ).xyz - 0.5 ) * 4.0;
 
-		float3 turned = normal - face;
-		return max( light * ( 1.0 + float3( dot( red, turned ), dot( green, turned ), dot( blue, turned ) ) ), 0.0 );
-	}
-
-	float4 way = g_textures[ways].SampleLevel( uv, 0.0 );
-	float lean = dot( normal, way.xyz ) * 0.5 + 0.5;
-
-	return light * ( lean / max( way.w, 0.25 ) );
+	float3 turned = normal - face;
+	return max( light * ( 1.0 + float3( dot( red, turned ), dot( green, turned ), dot( blue, turned ) ) ), 0.0 );
 }
 
 //One layer of the volume's three pictures at a lattice floor point: each colour's constant and lean

@@ -409,37 +409,6 @@ void ApplyDecals( inout Surface s )
 }
 
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
-#ifndef PORTABLE
-//The baked lamps' highlight from the sheet's dominant way, as directional lightmaps give one: the share that came one
-//way, as a lamp from there, its lobe the wider the less the light agreed. Only the straight light where the bake kept
-//it apart (StraightWays) - what bounced is in the probes' reflection, and counted twice it would shine twice
-float3 BakedHighlight( float2 lightmap, float3 normal, float3 v, float nDotV, float roughness, float3 f0 )
-{
-	//Both frame-uniform - see SkyTableAt.
-	float4 way = g_textures[uint( g_frame[0].bakedMaps.y )].SampleLevel( lightmap, 0.0 );
-	float strength = length( way.xyz );
-	if ( strength < 0.05 ) return float3( 0.0, 0.0, 0.0 );
-
-	float3 l = way.xyz / strength;
-	float nDotL = saturate( dot( normal, l ) );
-	if ( nDotL <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
-
-	float3 light = g_textures[uint( g_frame[0].bakedMaps.x )].SampleLevel( lightmap, 0.0 ).rgb;
-	if ( g_frame[0].bakedTexels.y > 0.5 ) light *= saturate( way.w );
-
-	float3 h = normalize( l + v );
-	Rough rough = RoughFor( lerp( 1.0, roughness, saturate( strength ) ) );
-
-	float3 specular = DistributionGGX( saturate( dot( normal, h ) ), rough )
-		* GeometrySmith( nDotV, nDotL, rough )
-		* FresnelSchlick( saturate( dot( v, h ) ), f0 )
-		/ max( 4.0 * nDotV * nDotL, 0.0001 );
-
-	//The sheet holds irradiance over pi; what came the one way is its strength's share, arriving at nDotL
-	return specular * light * ( 3.14159265 * saturate( strength ) );
-}
-#endif
-
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
 	//This pixel's turn of the soft shadows' taps - see ShadowFilter
@@ -505,11 +474,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 			if ( area.x <= 0.0 ) continue;
 
-			//A baked lamp on a lightmapped surface: only what movers take of it, taken away
+			//A baked lamp on a lightmapped surface: what movers take of its diffuse taken away, its highlight live
 			bool areaTaken = sheetLit && LightBaked( light );
-			float areaShadow = areaTaken ? LampMovedShade( s.world, geometric, light, distance ) : LampShadow( s.world, geometric, light, distance );
+			float areaShadow;
+			float areaSeen = areaTaken
+				? LampBakedShade( s.world, geometric, light, distance, areaShadow )
+				: LampShadow( s.world, geometric, light, distance );
 
-			if ( areaShadow <= 0.0 ) continue;
+			if ( !areaTaken ) areaShadow = areaSeen;
+			if ( areaShadow <= 0.0 && areaSeen <= 0.0 ) continue;
 
 			areaShadow *= areaTaken ? -1.0 : 1.0;
 			uint areaWithholds = LightWithholds( light );
@@ -518,7 +491,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 				litDiffuse += albedo * ( 1.0 - metalness ) / 3.14159265 * light.colour.rgb * ( area.x * areaShadow );
 
 			if ( ( areaWithholds & 2u ) == 0u )
-				litSpecular += light.colour.rgb * area.yzw * areaShadow;
+				litSpecular += light.colour.rgb * area.yzw * areaSeen;
 
 			continue;
 		}
@@ -597,12 +570,16 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float shadow;
 
 		//A baked light on a lightmapped surface is in its lightmap: what movers shade of it is taken away, as
-		//UE's stationary lights shadow movers over a lightmap - one map of movers read where nothing else is
+		//UE's stationary lights shadow movers over a lightmap, and its highlight is drawn live as theirs is - a
+		//lightmap's one averaged way per texel blurs every lamp's into one smear
 		bool taken = sheetLit && LightBaked( light );
+		float seen = 0.0;
 
 		if ( taken )
 		{
-			shadow = light.colour.w < 0.5 ? SunMovedShade( s.world, geometric ) : LampMovedShade( s.world, geometric, light, distance );
+			seen = light.colour.w < 0.5
+				? SunBakedShade( s.world, geometric, shadow )
+				: LampBakedShade( s.world, geometric, light, distance, shadow );
 		}
 		else if ( light.colour.w < 0.5 )
 		{
@@ -616,7 +593,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		}
 
 		//Shadow blocks only this light; lights add independently, so nothing gives it back
-		if ( shadow <= 0.0 ) continue;
+		if ( !taken ) seen = shadow;
+		if ( shadow <= 0.0 && seen <= 0.0 ) continue;
 
 		float sign = taken ? -1.0 : 1.0;
 
@@ -672,7 +650,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		if ( ( withholds & 2u ) != 0u ) specular = float3( 0.0, 0.0, 0.0 );
 
-		float3 reaching = light.colour.rgb * nDotL * attenuation * shadow * sign;
+		float3 reaching = light.colour.rgb * nDotL * attenuation * seen;
 
 		//A shadow's edge let through redder where light scatters under it.
 		float3 shade = scatter > 0.0
@@ -776,7 +754,6 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
 	{
 		ambientSky = BakedSheet( s.lightmap, normal, geometric ) + BakedGlows( s.lightmap, true, s.world );
-		lit += BakedHighlight( s.lightmap, normal, v, nDotV, roughness, lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness ) );
 		visible = 1.0;
 
 		//The bounce of the lights left out of the bake, as they are now: at the lightmap's detail where the bake linked

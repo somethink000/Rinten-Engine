@@ -22,9 +22,6 @@ internal sealed class BakeSheet
 	/// <summary>Four halves a texel: the light, and one where the texel is a surface's.</summary>
 	public Half[] Light;
 
-	/// <summary>Four halves a texel: which way the light came from, and how much it leans.</summary>
-	public Half[] Ways;
-
 	/// <summary>Four halves a texel: which way the sky is open xyz, how much is seen w - see SkyLit.</summary>
 	public Half[] Sky;
 
@@ -63,7 +60,6 @@ internal sealed class BakeSheet
 	//normal n is the light plus the band's dot with n less the face's (L1 lightmaps)
 	private Vec3[] bounceBand;
 	private Vec3[] straightBand;
-	private Vec3[] towards;
 	private float[] variance;
 	private bool[] valid;
 
@@ -633,7 +629,7 @@ internal sealed class BakeSheet
 		return true;
 	}
 
-	//A pass's sums into the texels' light, straight light, bands, ways, noise and sky
+	//A pass's sums into the texels' light, straight light, bands, noise and sky
 	private void Take( BakeScene scene, List<int> texels, float[] sums, int samples )
 	{
 		var count = Width * Height;
@@ -642,7 +638,6 @@ internal sealed class BakeSheet
 		direct = new Vec3[count];
 		bounceBand = new Vec3[count * 3];
 		straightBand = new Vec3[count * 3];
-		towards = new Vec3[count];
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
@@ -656,15 +651,13 @@ internal sealed class BakeSheet
 
 			var sum = new Vec3( sums[o], sums[o + 1], sums[o + 2] );
 			var squares = sums[o + 3];
-			var way = new Vec3( sums[o + 4], sums[o + 5], sums[o + 6] );
-			var weight = sums[o + 7];
-			var inside = (int)sums[o + 8];
-			var straight = new Vec3( sums[o + 9], sums[o + 10], sums[o + 11] );
+			var inside = (int)sums[o + 4];
+			var straight = new Vec3( sums[o + 5], sums[o + 6], sums[o + 7] );
 
-			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 16 + ( k * 4 )], sums[o + 17 + ( k * 4 )], sums[o + 18 + ( k * 4 )] );
+			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 12 + ( k * 4 )], sums[o + 13 + ( k * 4 )], sums[o + 14 + ( k * 4 )] );
 
-			End( at, sum, straight, squares, way, weight, inside, samples, bands );
-			sky[at] = SkyOf( new Vec4( sums[o + 12], sums[o + 13], sums[o + 14], sums[o + 15] ), Math.Max( samples - inside, 1 ), scene.SkyStrength );
+			End( at, sum, straight, squares, inside, samples, bands );
+			sky[at] = SkyOf( new Vec4( sums[o + 8], sums[o + 9], sums[o + 10], sums[o + 11] ), Math.Max( samples - inside, 1 ), scene.SkyStrength );
 		}
 	}
 
@@ -728,7 +721,6 @@ internal sealed class BakeSheet
 		direct = new Vec3[count];
 		bounceBand = new Vec3[count * 3];
 		straightBand = new Vec3[count * 3];
-		towards = new Vec3[count];
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
@@ -751,8 +743,6 @@ internal sealed class BakeSheet
 
 			var sum = Vec3.Zero;
 			var straight = Vec3.Zero;
-			var way = Vec3.Zero;
-			var weight = 0.0f;
 			var squares = 0.0f;
 			var inside = 0;
 			var open = Vec4.Zero;
@@ -808,10 +798,6 @@ internal sealed class BakeSheet
 				straight += lit;
 				squares += luma * luma;
 
-				//The straight light's way alone, for the highlight - see bake_trace.slang's main
-				way += lean;
-				weight += BakeMath.Luma( lit );
-
 				bands[0] += ( direction * arriving.X ) + ( towardsLit * aimed.X );
 				bands[1] += ( direction * arriving.Y ) + ( towardsLit * aimed.Y );
 				bands[2] += ( direction * arriving.Z ) + ( towardsLit * aimed.Z );
@@ -830,7 +816,7 @@ internal sealed class BakeSheet
 				}
 			}
 
-			End( at, sum, straight, squares, way, weight, inside, samples, bands );
+			End( at, sum, straight, squares, inside, samples, bands );
 			sky[at] = SkyOf( open, Math.Max( samples - inside, 1 ), scene.SkyStrength );
 
 			progress.Step();
@@ -839,7 +825,7 @@ internal sealed class BakeSheet
 
 	//A texel out of what its samples summed: the bounce apart from the straight light, how far the bounce's mean can be
 	//trusted (what the filter may smooth over), and whether enough of the texel was outside things to keep
-	private void End( int at, Vec3 sum, Vec3 straight, float squares, Vec3 way, float weight, int inside, int samples, ReadOnlySpan<Vec3> bands )
+	private void End( int at, Vec3 sum, Vec3 straight, float squares, int inside, int samples, ReadOnlySpan<Vec3> bands )
 	{
 		var kept = Math.Max( samples - inside, 1 );
 
@@ -851,7 +837,6 @@ internal sealed class BakeSheet
 
 		direct[at] = straight / kept;
 		light[at] = ( sum - straight ) / kept;
-		towards[at] = weight > 1e-8f ? way / weight : Vec3.Zero;
 
 		var meanLuma = BakeMath.Luma( light[at] );
 		variance[at] = MathF.Max( ( squares / kept ) - ( meanLuma * meanLuma ), 0.0f ) / kept;
@@ -907,18 +892,15 @@ internal sealed class BakeSheet
 		float[] kernel = [1.0f / 16.0f, 1.0f / 4.0f, 3.0f / 8.0f, 1.0f / 4.0f, 1.0f / 16.0f];
 
 		var from = light;
-		var fromWays = towards;
 		var fromVariance = variance;
 
 		for ( var pass = 0; pass < 4; ++pass )
 		{
 			var step = 1 << pass;
 			var to = new Vec3[count];
-			var toWays = new Vec3[count];
 			var toVariance = new float[count];
 
 			var src = from;
-			var srcWays = fromWays;
 			var srcVariance = fromVariance;
 
 			Parallel.For( 0, Height, y =>
@@ -930,7 +912,6 @@ internal sealed class BakeSheet
 					if ( !valid[at] || float.IsPositiveInfinity( owned[at] ) )
 					{
 						to[at] = src[at];
-						toWays[at] = srcWays[at];
 						toVariance[at] = srcVariance[at];
 						continue;
 					}
@@ -941,7 +922,6 @@ internal sealed class BakeSheet
 					var sigma = ( strength * MathF.Sqrt( srcVariance[at] ) ) + 1e-4f;
 
 					var sum = Vec3.Zero;
-					var ways = Vec3.Zero;
 					var noise = 0.0f;
 					var total = 0.0f;
 
@@ -973,7 +953,6 @@ internal sealed class BakeSheet
 							var w = kernel[dx + 2] * kernel[dy + 2] * facing * standing * alike;
 
 							sum += src[near] * w;
-							ways += srcWays[near] * w;
 							noise += srcVariance[near] * w * w;
 							total += w;
 						}
@@ -982,25 +961,21 @@ internal sealed class BakeSheet
 					if ( total > 1e-8f )
 					{
 						to[at] = sum / total;
-						toWays[at] = ways / total;
 						toVariance[at] = noise / ( total * total );
 					}
 					else
 					{
 						to[at] = src[at];
-						toWays[at] = srcWays[at];
 						toVariance[at] = srcVariance[at];
 					}
 				}
 			} );
 
 			from = to;
-			fromWays = toWays;
 			fromVariance = toVariance;
 		}
 
 		light = from;
-		towards = fromWays;
 		variance = fromVariance;
 	}
 
@@ -1016,7 +991,6 @@ internal sealed class BakeSheet
 
 			var part = new Vec3[w * h];
 			var partBands = new Vec3[w * h * 3];
-			var partWays = new Vec3[w * h];
 			var guide = new System.Numerics.Vector4[w * h];
 			var facing = new Vec3[w * h];
 			var spread = new float[w * h];
@@ -1030,13 +1004,12 @@ internal sealed class BakeSheet
 
 					part[i] = light[at];
 					for ( var c = 0; c < 3; ++c ) partBands[( i * 3 ) + c] = bounceBand[( at * 3 ) + c];
-					partWays[i] = towards[at];
 					guide[i] = new System.Numerics.Vector4( albedo[at], valid[at] && !pushed[at] ? 0.0f : 1.0f );
 					facing[i] = mine ? normal[at] : Vec3.Zero;
 					spread[i] = variance[at];
 				}
 
-			if ( !BakeDenoise.Run( part, partBands, partWays, guide, facing, spread, w, h, strength, CancellationToken.None ) ) return false;
+			if ( !BakeDenoise.Run( part, partBands, guide, facing, spread, w, h, strength, CancellationToken.None ) ) return false;
 
 			for ( var y = 0; y < h; ++y )
 			{
@@ -1048,7 +1021,6 @@ internal sealed class BakeSheet
 					var at = ( ( y0 + y ) * Width ) + x0 + x;
 					light[at] = part[i];
 					for ( var c = 0; c < 3; ++c ) bounceBand[( at * 3 ) + c] = partBands[( i * 3 ) + c];
-					towards[at] = partWays[i];
 				}
 			}
 		}
@@ -1080,7 +1052,6 @@ internal sealed class BakeSheet
 
 					var sum = Vec3.Zero;
 					var straight = Vec3.Zero;
-					var ways = Vec3.Zero;
 					var skies = Vec4.Zero;
 					bands.Clear();
 					var n = 0;
@@ -1128,7 +1099,6 @@ internal sealed class BakeSheet
 								bands[c] += bounceBand[( near * 3 ) + c];
 								bands[3 + c] += straightBand[( near * 3 ) + c];
 							}
-							ways += towards[near];
 							skies += sky[near];
 							n++;
 						}
@@ -1144,7 +1114,6 @@ internal sealed class BakeSheet
 						bounceBand[( at * 3 ) + c] = bands[c] / n;
 						straightBand[( at * 3 ) + c] = bands[3 + c] / n;
 					}
-					towards[at] = ways / n;
 					sky[at] = skies / n;
 
 					//Its normal from the same neighbours, for the directions below; its face for the next ring
@@ -1168,7 +1137,6 @@ internal sealed class BakeSheet
 		var count = Width * Height;
 
 		Light = new Half[count * 4];
-		Ways = new Half[count * 4];
 		Sky = new Half[count * 4];
 		EncodeBand();
 
@@ -1180,18 +1148,6 @@ internal sealed class BakeSheet
 			Light[( i * 4 ) + 1] = (Half)Math.Min( l.Y, 60000.0f );
 			Light[( i * 4 ) + 2] = (Half)Math.Min( l.Z, 60000.0f );
 			Light[( i * 4 ) + 3] = (Half)( ownerOf[i] < 0 ? 0.0f : isle[i] >= 0 ? IslandKey( isle[i] ) : FaceOf( geometric[i] ) );
-
-			var way = towards[i];
-			if ( way.LengthSquared() > 1.0f ) way = Vec3.Normalize( way );
-
-			//The straight light's way and its share of the texel's light - what a highlight is made of (StraightWays)
-			var all = BakeMath.Luma( Vec3.Max( light[i] + direct[i], Vec3.Zero ) );
-			var straight = all > 1e-8f ? Math.Clamp( BakeMath.Luma( Vec3.Max( direct[i], Vec3.Zero ) ) / all, 0.0f, 1.0f ) : 0.0f;
-
-			Ways[( i * 4 ) + 0] = (Half)way.X;
-			Ways[( i * 4 ) + 1] = (Half)way.Y;
-			Ways[( i * 4 ) + 2] = (Half)way.Z;
-			Ways[( i * 4 ) + 3] = (Half)straight;
 
 			var open = sky[i];
 			var openWay = new Vec3( open.X, open.Y, open.Z );

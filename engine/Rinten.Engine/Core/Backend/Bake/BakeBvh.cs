@@ -55,7 +55,7 @@ internal sealed class BakeBvh
 	internal delegate bool Through( int triangle, float u, float v );
 
 	//How much of a ray gets by a world triangle it crosses, by whether it is solid all over - see BakeScene.Veil.
-	internal delegate Vec3 Veil( int triangle, float u, float v, bool tested );
+	internal delegate Vec3 Veil( int triangle, float u, float v, bool tested, Vec3 direction );
 
 	private Through passes;
 
@@ -407,7 +407,7 @@ internal sealed class BakeBvh
 				{
 					if ( !Crosses( t, origin, direction, furthest, out _, out var u, out var v, out _ ) ) continue;
 
-					through *= veil( source[t], u, v, tested[t] );
+					through *= veil( source[t], u, v, tested[t], direction );
 					if ( through.X <= 1e-4f && through.Y <= 1e-4f && through.Z <= 1e-4f ) return Vec3.Zero;
 				}
 			}

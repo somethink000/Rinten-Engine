@@ -21,15 +21,15 @@ internal static class BakeDenoise
 	private const int Region = 64;
 
 	//Float4s smoothed alongside the light a texel - bake_denoise.slang's Extras
-	private const int Extras = 4;
+	private const int Extras = 3;
 
 	private static ulong pipeline;
 	private static int pipelineBuilt = -1;
 
 	//Denoises one square of light in place, width by height; albedo's w is one where a texel was inside something, a
 	//normal of nought marks a texel no surface owns, variance is each texel's mean's. False where the card would not
-	//Bands: the light's first band a colour, three a texel; ways: where it mostly came from, smoothed alike, not scaled
-	internal static bool Run( Vec3[] light, Vec3[] bands, Vec3[] ways, Vec4[] albedo, Vec3[] normal, float[] variance, int width,
+	//Bands: the light's first band a colour, three a texel, smoothed alike
+	internal static bool Run( Vec3[] light, Vec3[] bands, Vec4[] albedo, Vec3[] normal, float[] variance, int width,
 		int height, float strength, CancellationToken cancel )
 	{
 		var count = width * height;
@@ -53,10 +53,7 @@ internal static class BakeDenoise
 		var bandsIn = new Vec4[count * Extras];
 
 		for ( var i = 0; i < count; ++i )
-		{
-			for ( var c = 0; c < 3; ++c ) bandsIn[( i * Extras ) + c] = new Vec4( bands[( i * 3 ) + c] * scale, 0.0f );
-			bandsIn[( i * Extras ) + 3] = new Vec4( ways[i], 0.0f );
-		}
+			for ( var c = 0; c < Extras; ++c ) bandsIn[( i * Extras ) + c] = new Vec4( bands[( i * 3 ) + c] * scale, 0.0f );
 
 		var albedoIn = new Vec4[count];
 		var normalIn = new Vec4[count];
@@ -144,14 +141,11 @@ internal static class BakeDenoise
 
 				light[i] = new Vec3( back[i].X, back[i].Y, back[i].Z ) / scale;
 
-				for ( var c = 0; c < 3; ++c )
+				for ( var c = 0; c < Extras; ++c )
 				{
 					var b = bandsBack[( i * Extras ) + c];
 					bands[( i * 3 ) + c] = new Vec3( b.X, b.Y, b.Z ) / scale;
 				}
-
-				var way = bandsBack[( i * Extras ) + 3];
-				ways[i] = new Vec3( way.X, way.Y, way.Z );
 			}
 
 			return true;

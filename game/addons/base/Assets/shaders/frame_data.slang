@@ -53,7 +53,7 @@ struct FrameData
 	float4 fogShape;  //Distance exponent, height exponent, enabled, colour from the sky
 
 	//Baked lighting: lightmap sheet for static surfaces, probe volume for moving ones; zero = no bake
-	float4 bakedMaps;    //Sheet's table index x, its directions' y, its sky's z, one where there is a sheet w
+	float4 bakedMaps;    //Sheet's table index x, nought y, its sky's z, one where there is a sheet w
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
 	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
@@ -140,8 +140,7 @@ struct FrameData
 	//cascades and probes along x, y and z; each cascade's first cell xyz and step w - see GridLight
 	float4 grid[4];
 
-	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none; y one where
-	//the sheet's ways hold the straight light's way and share (BakedLightingData.StraightWays)
+	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none
 	float4 bakedTexels;
 
 	//The 2D lighting sprites and tiles that ask for it are lit by: the global 2D light times its intensity rgb, one w

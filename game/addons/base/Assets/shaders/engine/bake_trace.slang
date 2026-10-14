@@ -342,8 +342,9 @@ bool Crosses( uint t, float3 origin, float3 direction, float furthest, out float
 }
 
 //How much of a ray gets by a triangle it crosses, each colour: none of a solid one, all or none of a cut-out where
-//cut, and of glass what its opacity and mirror leave, tinted the more it holds back
-float3 Veil( uint t, float u, float v, bool tested )
+//cut, and of glass what its mirror leaves at this angle (Schlick's): the share its opacity lets by, tinted the more it
+//holds back, and half what it holds back, scattered on in its own colour - so a red pane throws red light
+float3 Veil( uint t, float u, float v, bool tested, float3 direction )
 {
 	if ( !tested ) return float3( 0.0, 0.0, 0.0 );
 
@@ -358,7 +359,12 @@ float3 Veil( uint t, float u, float v, bool tested )
 	float opacity = saturate( Float( at + 3 ) * texel.w );
 	float3 colour = saturate( texel.rgb * Float3( at ) * Float3( TriangleAt() + ( t * 4 ) + 1 ) );
 
-	return lerp( float3( 1.0, 1.0, 1.0 ), colour, opacity ) * ( ( 1.0 - opacity ) * ( 1.0 - Float( at + 23 ) ) );
+	float f0 = Float( at + 23 );
+	float cosine = saturate( abs( dot( direction, Float3( FacingAt() + ( t * 3 ) ) ) ) );
+	float mirrored = f0 + ( ( 1.0 - f0 ) * pow( 1.0 - cosine, 5.0 ) );
+	float3 lets = ( lerp( float3( 1.0, 1.0, 1.0 ), colour, opacity ) * ( 1.0 - opacity ) ) + ( colour * ( opacity * 0.5 ) );
+
+	return lets * ( 1.0 - mirrored );
 }
 
 //What a pane lets by, ten bits a colour in one word: four of them kept as float3s spilled out of registers
@@ -414,7 +420,7 @@ bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit, out 
 				//Cut away or clear, it is passed; glass is passed and kept for what it lets by
 				if ( tested )
 				{
-					float3 lets = Veil( source, u, v, true );
+					float3 lets = Veil( source, u, v, true, direction );
 					if ( all( lets >= 1.0 ) ) continue;
 
 					if ( any( lets > 0.0 ) )
@@ -500,7 +506,7 @@ float3 Transmittance( float3 origin, float3 direction, float furthest )
 				bool tested;
 				if ( !Crosses( t, origin, direction, furthest, distance, u, v, source, tested ) ) continue;
 
-				through *= Veil( source, u, v, tested );
+				through *= Veil( source, u, v, tested, direction );
 				if ( all( through <= 1e-4 ) ) return float3( 0.0, 0.0, 0.0 );
 			}
 		}
@@ -1271,16 +1277,15 @@ void main( uint3 id : SV_DispatchThreadID )
 	float4 across = g_texels[( texel * 5 ) + 3];
 	float4 down = g_texels[( texel * 5 ) + 4];
 
-	uint at = texel * 10u;
+	uint at = texel * 9u;
 
 	float4 sumSquares = g_sums[at + 0u];
-	float4 wayWeight = g_sums[at + 1u];
-	float4 insideSpare = g_sums[at + 2u];
-	float4 open = g_sums[at + 3u];
+	float4 insideSpare = g_sums[at + 1u];
+	float4 open = g_sums[at + 2u];
 
 	//The light's first band a colour, bounced then straight - see BakeSheet.Encode
-	float3 bouncedR = g_sums[at + 4u].xyz, bouncedG = g_sums[at + 5u].xyz, bouncedB = g_sums[at + 6u].xyz;
-	float3 straightR = g_sums[at + 7u].xyz, straightG = g_sums[at + 8u].xyz, straightB = g_sums[at + 9u].xyz;
+	float3 bouncedR = g_sums[at + 3u].xyz, bouncedG = g_sums[at + 4u].xyz, bouncedB = g_sums[at + 5u].xyz;
+	float3 straightR = g_sums[at + 6u].xyz, straightG = g_sums[at + 7u].xyz, straightB = g_sums[at + 8u].xyz;
 
 	for ( uint s = 0; s < g_samples; ++s )
 	{
@@ -1363,8 +1368,6 @@ void main( uint3 id : SV_DispatchThreadID )
 		float luma = Luma( arriving + aimed + through );
 
 		sumSquares += float4( direct + arriving + aimed + through, luma * luma );
-		//The straight light's way alone, for the highlight - the bounced light's is the probes' to reflect
-		wayWeight += float4( lean, Luma( direct ) );
 		insideSpare.yzw += direct;
 
 		bouncedR += ( direction * arriving.r ) + ( towardsLit * aimed.r );
@@ -1386,15 +1389,14 @@ void main( uint3 id : SV_DispatchThreadID )
 	}
 
 	g_sums[at + 0u] = sumSquares;
-	g_sums[at + 1u] = wayWeight;
-	g_sums[at + 2u] = insideSpare;
-	g_sums[at + 3u] = open;
-	g_sums[at + 4u] = float4( bouncedR, 0.0 );
-	g_sums[at + 5u] = float4( bouncedG, 0.0 );
-	g_sums[at + 6u] = float4( bouncedB, 0.0 );
-	g_sums[at + 7u] = float4( straightR, 0.0 );
-	g_sums[at + 8u] = float4( straightG, 0.0 );
-	g_sums[at + 9u] = float4( straightB, 0.0 );
+	g_sums[at + 1u] = insideSpare;
+	g_sums[at + 2u] = open;
+	g_sums[at + 3u] = float4( bouncedR, 0.0 );
+	g_sums[at + 4u] = float4( bouncedG, 0.0 );
+	g_sums[at + 5u] = float4( bouncedB, 0.0 );
+	g_sums[at + 6u] = float4( straightR, 0.0 );
+	g_sums[at + 7u] = float4( straightG, 0.0 );
+	g_sums[at + 8u] = float4( straightB, 0.0 );
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

@@ -513,10 +513,6 @@ internal static unsafe class CoreSceneRenderer
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
 
-			//A light in a bake whose volume has no direct light is still drawn, for movers and what has no lightmap; in
-			//an older bake it is all there and skipped - see CoreBakedLighting.Mixed
-			if ( BakedOn && !CoreBakedLighting.Mixed && CoreBakedLighting.InBake( light ) ) continue;
-
 			var reach = Reach( light, from );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
 		}

@@ -32,7 +32,7 @@
 
 [[vk::binding(3,0)]] RWStructuredBuffer<float4> g_out;
 
-//Four more of each texel smoothed by the same weights: its light's first band a colour, then the way it mostly came
+//Three more of each texel smoothed by the same weights: its light's first band a colour
 [[vk::binding(4,0)]] StructuredBuffer<float4> g_bands;
 [[vk::binding(5,0)]] RWStructuredBuffer<float4> g_bandsOut;
 
@@ -54,7 +54,7 @@ cbuffer Push
 };
 
 //The float4s of g_bands a texel has - see BakeDenoise.Run
-static const uint Extras = 4u;
+static const uint Extras = 3u;
 
 //Half the patch compared around each texel: 3 is a 7x7
 static const int HalfPatch = 3;

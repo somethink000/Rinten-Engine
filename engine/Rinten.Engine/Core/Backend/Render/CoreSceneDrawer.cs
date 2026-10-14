@@ -2314,18 +2314,15 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		//A baked sun is all in an older bake: no pages. A newer one keeps them for movers and what has no lightmap
-		var sunBaked = CoreSceneRenderer.BakedOn && !CoreBakedLighting.Mixed && sunLight is not null && CoreBakedLighting.InBake( sunLight );
-
 		if ( CoreRenderDevice.PortableFrame )
 		{
 			//One square of depth about the camera instead, and no lamp casts - see CorePortableSun.
-			portableSun.Plan( frame, sunCasts && !sunBaked && !overlayOnly, towards, sunLight?.ShadowDetail ?? 64.0f,
+			portableSun.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 64.0f,
 				position, forward, far );
 		}
 		else
 		{
-			sunPages.Plan( frame, sunCasts && !sunBaked && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
+			sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
 				Rinten.Rendering.DrawSettings.MeshLodPixels );
 
 			lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,

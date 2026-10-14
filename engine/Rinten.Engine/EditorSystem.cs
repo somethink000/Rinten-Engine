@@ -15,6 +15,10 @@ public abstract class EditorSystem
 
 	/// <summary>The main editor camera</summary>
 	public abstract CameraComponent Camera { get; }
+
+	/// <summary>Writes a resource to its asset at a path under a project's assets, making the asset where there is none.
+	/// Returns the resource's path, null where it could not be written.</summary>
+	public abstract string SaveResource( GameResource resource, string path );
 }
 
 public interface IProgressSection : IDisposable

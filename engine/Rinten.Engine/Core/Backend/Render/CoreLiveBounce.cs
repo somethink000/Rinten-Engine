@@ -110,7 +110,7 @@ internal sealed partial class CoreLiveBounce
 		for ( var c = 0; c < clusters; ++c )
 			if ( members[c] > 0 ) middle[c] /= members[c];
 
-		bounced = new HashSet<Guid>( data.Bounced );
+		bounced = new HashSet<Guid>( data.Baked );
 		low = new Vec3( data.VolumeOrigin.x, data.VolumeOrigin.y, data.VolumeOrigin.z );
 		high = low + ( new Vec3( data.VolumeX - 1, data.VolumeY - 1, data.VolumeZ - 1 ) * data.VolumeStep );
 	}

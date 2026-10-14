@@ -993,8 +993,8 @@ internal sealed class BakeScene
 	private bool? veiled;
 
 	//How much of a ray gets by a triangle it crosses, each colour: none of a solid one, all or none of a cut-out where
-	//cut, and of glass what its opacity and mirror leave, tinted the more it holds back; bake_trace.slang's Veil
-	private Vec3 Veil( int t, float u, float v, bool tested )
+	//cut, and of glass what its mirror leaves at this angle and its opacity lets by or scatters on; bake_trace.slang's Veil
+	private Vec3 Veil( int t, float u, float v, bool tested, Vec3 direction )
 	{
 		if ( !tested ) return Vec3.Zero;
 
@@ -1006,7 +1006,12 @@ internal sealed class BakeScene
 		var opacity = Math.Clamp( material.Alpha * texel.W, 0.0f, 1.0f );
 		var colour = Vec3.Clamp( new Vec3( texel.X, texel.Y, texel.Z ) * material.Tint * TintOf[t], Vec3.Zero, Vec3.One );
 
-		return Vec3.Lerp( Vec3.One, colour, opacity ) * ( ( 1.0f - opacity ) * ( 1.0f - material.Reflectance ) );
+		var f0 = material.Reflectance;
+		var cosine = Math.Clamp( MathF.Abs( Vec3.Dot( direction, Facing[t] ) ), 0.0f, 1.0f );
+		var mirrored = f0 + ( ( 1.0f - f0 ) * MathF.Pow( 1.0f - cosine, 5.0f ) );
+		var lets = ( Vec3.Lerp( Vec3.One, colour, opacity ) * ( 1.0f - opacity ) ) + ( colour * ( opacity * 0.5f ) );
+
+		return lets * ( 1.0f - mirrored );
 	}
 
 	/// <summary>How much of a ray gets through to a distance, each colour; yes or no where there is no glass.</summary>

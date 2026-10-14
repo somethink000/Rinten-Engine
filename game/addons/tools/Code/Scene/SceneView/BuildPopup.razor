@@ -29,7 +29,7 @@
 			}
 			else
 			{
-				<div class="button @( Baked ? "" : "disabled" )" onclick="@Clear"><i>delete</i><label>Clear</label></div>
+				<div class="button @( Lighting?.Lightmap is null ? "disabled" : "" )" onclick="@Clear"><i>link_off</i><label>Clear</label></div>
 				<div class="button primary" onclick="@Bake"><i>lightbulb</i><label>Bake Lighting</label></div>
 			}
 		</div>
@@ -81,13 +81,18 @@
 		get
 		{
 			if ( baking is not null ) return "Baking - progress is at the bottom of the editor";
-			if ( Lighting?.Data is not { IsEmpty: false } data )
-				return NothingStill ? "Not baked - only objects marked Static are baked, and none are" : "Not baked";
+			if ( NothingStill ) return "Not baked - only objects marked Static are baked, and none are";
+
+			var into = Lighting?.Lightmap is { } lightmap
+				? System.IO.Path.GetFileName( lightmap.ResourcePath ?? "an unsaved lightmap" )
+				: $"a new {System.IO.Path.GetFileNameWithoutExtension( EditedScene?.Source?.ResourcePath ?? "scene" )}.lightmap beside the scene";
+
+			if ( Lighting?.Data is not { IsEmpty: false } data ) return $"Not baked - a bake goes into {into}";
 
 			var sheet = data.HasSheet ? $"{data.SheetWidth}x{data.SheetHeight} atlas" : "no atlas";
 			var volume = data.HasVolume ? $"{data.VolumeX}x{data.VolumeY}x{data.VolumeZ} volume" : "no volume";
 
-			return $"Baked: {sheet}, {volume}";
+			return $"Baked into {into}: {sheet}, {volume}";
 		}
 	}
 
@@ -137,9 +142,9 @@
 
 	void Clear()
 	{
-		if ( Lighting is { HasBake: true } target ) target.Clear();
+		if ( Lighting is { Lightmap: not null } target ) target.Clear();
 		StateHasChanged();
 	}
 
-	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Data );
+	protected override int BuildHash() => HashCode.Combine( Lighting, baking is not null, Lighting?.Lightmap, Lighting?.Data );
 }

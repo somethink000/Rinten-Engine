@@ -12,16 +12,10 @@ internal static partial class CoreBakedLighting
 	private sealed class Held
 	{
 		public int Revision = -1;
-		public ulong Sheet, Ways, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls;
+		public ulong Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls;
 
-		/// <summary>The lights all in the bake, which the frame does not draw.</summary>
+		/// <summary>The lights in the bake, whose light a lightmapped surface already has - see InBake.</summary>
 		public readonly HashSet<Guid> Baked = new();
-
-		/// <summary>A first-version bake, which names no lights - see BakedLightingData.IsOld.</summary>
-		public bool Old;
-
-		/// <summary>The volume holds no direct light, so the frame draws the baked lights - see Mixed.</summary>
-		public bool Mixed;
 
 		/// <summary>Each glow layer's sheet and volume, and its group - see BakedGlow.</summary>
 		public readonly ulong[] GlowSheet = new ulong[BakedGlow.Groups], GlowVolume = new ulong[BakedGlow.Groups];
@@ -35,7 +29,7 @@ internal static partial class CoreBakedLighting
 
 		public void Release()
 		{
-			foreach ( var texture in new[] { Sheet, Ways, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls } )
+			foreach ( var texture in new[] { Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls } )
 				if ( texture != 0 ) CoreRenderDevice.DestroyTexture( texture );
 
 			for ( var i = 0; i < BakedGlow.Groups; ++i )
@@ -54,10 +48,8 @@ internal static partial class CoreBakedLighting
 			Array.Clear( GlowVolume );
 			Array.Clear( GlowGroup );
 
-			Sheet = Ways = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
+			Sheet = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
 			Baked.Clear();
-			Old = false;
-			Mixed = false;
 			Revision = -1;
 		}
 	}
@@ -73,11 +65,11 @@ internal static partial class CoreBakedLighting
 
 	//Tells every renderer the bake has a square for where it is. On the first frame that reads the bake rather than
 	//when it is loaded, as a mesh has no model until it has started
-	private static void Place( BakedLighting bake )
+	private static void Place( BakedLighting bake, BakedLightingData data )
 	{
-		bake.Placed = true;
+		bake.Placed = data;
 
-		if ( bake.Data is not { } data || !bake.Scene.IsValid() ) return;
+		if ( !bake.Scene.IsValid() ) return;
 
 		foreach ( var place in data.Places )
 		{
@@ -111,10 +103,10 @@ internal static partial class CoreBakedLighting
 
 		if ( held.Remove( bake, out var was ) ) was.Release();
 
-		if ( !bake.Placed ) return;
-		bake.Placed = false;
+		if ( bake.Placed is not { } data ) return;
+		bake.Placed = null;
 
-		if ( bake.Data is not { } data || !bake.Scene.IsValid() ) return;
+		if ( !bake.Scene.IsValid() ) return;
 
 		foreach ( var place in data.Places )
 		{
@@ -148,7 +140,12 @@ internal static partial class CoreBakedLighting
 		var bake = Of( scene );
 		if ( bake is null || bake.Data is not { } data ) return false;
 
-		if ( !bake.Placed ) Place( bake );
+		//A new bake into the lightmap, or another lightmap: off the old squares and onto the new
+		if ( !ReferenceEquals( bake.Placed, data ) )
+		{
+			Unplace( bake );
+			Place( bake, data );
+		}
 
 		if ( !held.TryGetValue( bake, out var on ) )
 		{
@@ -165,14 +162,12 @@ internal static partial class CoreBakedLighting
 
 		var any = false;
 
-		if ( on.Sheet != 0 && on.Ways != 0 )
+		if ( on.Sheet != 0 )
 		{
 			frame[at + 0] = CoreRender.TextureIndex( on.Sheet );
-			frame[at + 1] = CoreRender.TextureIndex( on.Ways );
 			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
 			frame[at + 19] = on.Band != 0 ? CoreRender.TextureIndex( on.Band ) : 0.0f;
-			frame[CoreSceneRenderer.BakedTexelsAt + 1] = data.StraightWays ? 1.0f : 0.0f;
 			any = true;
 		}
 
@@ -228,20 +223,15 @@ internal static partial class CoreBakedLighting
 	//What Write found for the frame being written, for InBake.
 	private static Held writing;
 
-	//The bake being written leaves its lights' direct light to the frame where there is no lightmap, and the
-	//lightmap loses only what movers shade - as UE's stationary lights
-	internal static bool Mixed => writing is { Mixed: true };
-
-	//Whether a light is all in the bake the frame being written reads, so the frame draws none of it; valid after Write
+	//Whether a light is in the bake the frame being written reads: a lightmapped surface has its light already and
+	//takes only what movers shade of it, as UE's stationary lights; valid after Write
 	internal static bool InBake( Light light )
-		=> writing is { Old: false } && light is { NotBaked: false } && writing.Baked.Contains( light.Id );
+		=> writing is not null && light is { NotBaked: false } && writing.Baked.Contains( light.Id );
 
 	private static void Upload( Held on, BakedLightingData data )
 	{
 		on.Release();
 		on.Revision = data.Revision;
-		on.Old = data.IsOld;
-		on.Mixed = data.VolumeIndirect;
 
 		foreach ( var light in data.Baked ) on.Baked.Add( light );
 
@@ -253,7 +243,6 @@ internal static partial class CoreBakedLighting
 		if ( data.HasSheet )
 		{
 			on.Sheet = CoreRenderDevice.CreateTextureHalf( data.Sheet, data.SheetWidth, data.SheetHeight );
-			on.Ways = CoreRenderDevice.CreateTextureHalf( data.Ways, data.SheetWidth, data.SheetHeight );
 		}
 
 		if ( data.HasVolume )
@@ -415,7 +404,7 @@ internal static partial class CoreBakedLighting
 		var surfels = new BakeSurfels();
 
 		//The main bake's results, kept as the glow groups' passes reuse the same sheet and lattice
-		Half[] sheetLight = null, sheetWays = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
+		Half[] sheetLight = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
 		byte[] sheetBand = null;
 		byte[] volumeWalls = null;
 		int bounceWidth = 0, bounceHeight = 0;
@@ -441,7 +430,7 @@ internal static partial class CoreBakedLighting
 				sheet.Denoise( world, denoise );
 				sheet.Dilate();
 				sheet.Encode();
-				( sheetLight, sheetWays, sheetSky, sheetBand ) = ( sheet.Light, sheet.Ways, sheet.Sky, sheet.Band );
+				( sheetLight, sheetSky, sheetBand ) = ( sheet.Light, sheet.Sky, sheet.Band );
 			}
 
 			volume.Lay( world.Bounds, spacing );
@@ -554,21 +543,13 @@ internal static partial class CoreBakedLighting
 			Glows = glows,
 		};
 
-		foreach ( var light in world.Lights )
-		{
-			data.Baked.Add( light.Id );
-			data.Bounced.Add( light.Id );
-		}
-
-		data.VolumeIndirect = true;
-		data.StraightWays = true;
+		foreach ( var light in world.Lights ) data.Baked.Add( light.Id );
 
 		if ( sheet is not null )
 		{
 			data.SheetWidth = sheet.Width;
 			data.SheetHeight = sheet.Height;
 			data.Sheet = sheetLight;
-			data.Ways = sheetWays;
 			data.SheetSky = sheetSky ?? [];
 			data.SheetBand = sheetBand ?? [];
 

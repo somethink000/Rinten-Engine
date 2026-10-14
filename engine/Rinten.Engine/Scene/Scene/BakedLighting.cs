@@ -4,8 +4,8 @@ using System.Threading.Tasks;
 
 namespace Rinten;
 
-//Kept with the scene itself and saved in its properties, as its navmesh is - see Scene.Lighting
-/// <summary>The scene's baked lighting: its settings and its last bake.</summary>
+//The settings are kept in the scene's properties, as its navmesh's are, and the bake in its own asset - see Scene.Lighting
+/// <summary>The scene's baked lighting: its settings and the lightmap it reads.</summary>
 [Expose]
 public sealed class BakedLighting
 {
@@ -69,9 +69,9 @@ public sealed class BakedLighting
 		}
 	} = true;
 
-	/// <summary>The last bake. Empty until somebody bakes.</summary>
-	[Property, Hide]
-	public BakedLightingData Data
+	/// <summary>The asset the bake is kept in and read from; a bake with none makes one beside the scene.</summary>
+	[Property, Order( -1 )]
+	public BakedLightmap Lightmap
 	{
 		get;
 		set
@@ -83,14 +83,19 @@ public sealed class BakedLighting
 		}
 	}
 
+	/// <summary>The bake the scene reads: its lightmap's, null where it has none.</summary>
+	[Hide]
+	public BakedLightingData Data => Lightmap?.Data;
+
 	/// <summary>Whether there is a bake to read, as against a wish for one.</summary>
 	[Hide]
 	public bool HasBake => Data is { IsEmpty: false };
 
-	//Whether the renderers have their atlas squares for this bake - see CoreBakedLighting.Place
-	internal bool Placed;
+	//The bake whose atlas squares the renderers hold - see CoreBakedLighting.Place
+	internal BakedLightingData Placed;
 
-	/// <summary>Traces the scene's light and keeps it, off the main thread, reporting progress.</summary>
+	/// <summary>Traces the scene's light into its lightmap, off the main thread, reporting progress. In the editor the
+	/// lightmap is written to its asset - one beside the scene, named after it, where it had none.</summary>
 	public async Task Bake( CancellationToken cancel = default )
 	{
 		if ( !Scene.IsValid() ) return;
@@ -99,20 +104,50 @@ public sealed class BakedLighting
 
 		if ( made is null ) return;
 
-		Data = made;
+		var lightmap = Lightmap ?? new BakedLightmap();
+		lightmap.Data = made;
 
-		if ( Scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
+		if ( Lightmap is null )
+		{
+			Lightmap = lightmap;
+			if ( Scene.Editor is { } session ) session.HasUnsavedChanges = true;
+		}
+
+		Keep( lightmap );
 	}
 
-	/// <summary>Throws the bake away: every light back in the frame, every surface back on the frame's sky.</summary>
+	//Into its own asset, or a new one beside the scene; a bake of a scene not being edited lives as long as the scene
+	private void Keep( BakedLightmap lightmap )
+	{
+		if ( Scene.Editor is null || Application.Editor is not { } editor ) return;
+
+		var path = lightmap.ResourcePath;
+
+		if ( string.IsNullOrEmpty( path ) )
+		{
+			if ( Scene.Source?.ResourcePath is not { Length: > 0 } scene )
+			{
+				Log.Warning( "baked lighting: the scene has no file yet, so the bake has nowhere to go - save the scene and bake again" );
+				return;
+			}
+
+			path = System.IO.Path.ChangeExtension( scene, "lightmap" );
+		}
+
+		if ( editor.SaveResource( lightmap, path ) is null )
+			Log.Warning( $"baked lighting: could not write {path}" );
+	}
+
+	/// <summary>Stops reading the bake: every light back in the frame, every surface back on the frame's sky. The
+	/// lightmap's asset is left as it is.</summary>
 	public void Clear()
 	{
-		Data = null;
+		Lightmap = null;
 
 		if ( Scene.Editor is { } editor ) editor.HasUnsavedChanges = true;
 	}
 
-	//Every property, the bake as a blob where one is being written - see BinaryConvert
+	//Every property, the lightmap by its path
 	internal JsonObject Serialize()
 	{
 		var json = new JsonObject();

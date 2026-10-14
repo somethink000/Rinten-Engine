@@ -34,9 +34,9 @@ internal static class BakeGpu
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
-	//Floats of sums a sheet texel hands back: light, lean, insides and straight light, the sky's escapes, and the bounced
-	//and the straight light's first band a colour, four each - see bake_trace.slang's main
-	internal const int SheetFloats = 40;
+	//Floats of sums a sheet texel hands back: light, insides and straight light, the sky's escapes, and the bounced and
+	//the straight light's first band a colour, four each - see bake_trace.slang's main
+	internal const int SheetFloats = 36;
 
 	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
 	internal const int ProbeFloats = 20;

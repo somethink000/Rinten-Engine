@@ -2676,8 +2676,9 @@ internal sealed partial class CoreSceneDrawer
 		//own picture opens over the real depth, keeping what was shaded, for everything drawn the classic way.
 		var offscreen = false;
 
-		//The 2D lighting's pictures, out of the sprites already queued, before the world's picture opens - see CoreLight2D
-		var light2d = !overlayOnly && !StereoPass &&
+		//The 2D lighting's pictures, out of the sprites already queued, before the world's picture opens - see CoreLight2D.
+		//Overlay-only views too: the editor's 2D views are, and their sprites are lit the same over the finished picture
+		var light2d = !StereoPass &&
 			CoreLight2D.Draw( scene, camera, frame, pixels.Width, pixels.Height );
 
 		CoreRenderDevice.ZoneBegin( "world opaque" );

@@ -89,7 +89,7 @@ internal static class CoreLight2D
 		CoreRenderDevice.ZoneBegin( "light 2d solve" );
 
 		//Where the passes cannot run, the light is not laid: sprites fall back to the global light alone
-		if ( !Solve( names, glow, light, system.GlobalLight, wide, tall ) )
+		if ( !Solve( names, glow, light, system.GlobalLight, system.Glows, system.Lights.Count > 0, wide, tall ) )
 		{
 			if ( said.Add( "solve" ) ) Log.Warning( $"the 2D light's passes did not run: {CoreRenderDevice.ShaderError}" );
 
@@ -117,9 +117,9 @@ internal static class CoreLight2D
 		frame[CoreSceneRenderer.Light2DSceneAt + 3] = light;
 	}
 
-	//The scene marched into the light: the jump flood, the cascades from the coarsest down, then the finest averaged
-	//with the 2D lights added
-	private static bool Solve( Names names, CorePasses.Named scene, CorePasses.Named light, Color sky, int wide, int tall )
+	//The scene marched into the light: the jump flood, the cascades from the coarsest down where anything glows, then
+	//the finest averaged with the 2D lights added
+	private static bool Solve( Names names, CorePasses.Named scene, CorePasses.Named light, Color sky, bool glows, bool lights, int wide, int tall )
 	{
 		var seed = SolvePipeline( "SeedCs" );
 		var jump = SolvePipeline( "JumpCs" );
@@ -128,32 +128,7 @@ internal static class CoreLight2D
 
 		if ( seed == 0 || jump == 0 || cascade == 0 || integrate == 0 ) return false;
 
-		//Enough cascades that the last one's stretch reaches across the whole picture
-		var diagonal = MathF.Sqrt( ( wide * (float)wide ) + ( tall * (float)tall ) );
-		var count = 1;
-
-		while ( count < 10 && Interval0 * ( ( 1 << ( 2 * count ) ) - 1 ) / 3.0f < diagonal ) count++;
-
-		//A cascade's probes times the side of each one's block of rays, the widest of them all
-		var cascadeWide = 0;
-		var cascadeTall = 0;
-
-		for ( var n = 0; n < count; n++ )
-		{
-			cascadeWide = Math.Max( cascadeWide, ( ( wide + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
-			cascadeTall = Math.Max( cascadeTall, ( ( tall + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
-		}
-
-		var seedsA = CorePasses.Acquire( names.SeedsA, CoreRender.PictureKind.Full, wide, tall, 1 );
-		var seedsB = CorePasses.Acquire( names.SeedsB, CoreRender.PictureKind.Full, wide, tall, 1 );
-		var cascadeA = CorePasses.Acquire( names.CascadeA, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
-		var cascadeB = CorePasses.Acquire( names.CascadeB, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
-
-		if ( seedsA is null || seedsB is null || cascadeA is null || cascadeB is null ) return false;
-
-		CorePasses.Close();
-
-		Span<float> push = stackalloc float[12];
+		Span<float> push = stackalloc float[16];
 
 		push[0] = wide;
 		push[1] = tall;
@@ -163,12 +138,27 @@ internal static class CoreLight2D
 		push[10] = sky.b;
 		push[11] = Interval0;
 
-		//The flood: every blocker its own seed, then strides halving down to one
+		//Only the global light: flat, nothing to march
+		if ( !glows && !lights ) return Run( integrate, light, push, wide, tall );
+
+		var seedsA = CorePasses.Acquire( names.SeedsA, CoreRender.PictureKind.Full, wide, tall, 1 );
+		var seedsB = CorePasses.Acquire( names.SeedsB, CoreRender.PictureKind.Full, wide, tall, 1 );
+
+		if ( seedsA is null || seedsB is null ) return false;
+
+		CorePasses.Close();
+
+		//The flood: every blocker its own seed, then strides halving down to one. From no further than FloodStride, which
+		//is all a ray needs to know: a texel it gives no blocker is that far from one at least, and strides that far
+		var stride = Math.Min( HighestBit( Math.Max( wide, tall ) ), FloodStride );
+
+		push[12] = stride;
+
 		if ( !Run( seed, seedsA, push, wide, tall ) ) return false;
 
 		var (read, write) = ( seedsA, seedsB );
 
-		for ( var stride = HighestBit( Math.Max( wide, tall ) ); stride >= 1; stride /= 2 )
+		for ( ; stride >= 1; stride /= 2 )
 		{
 			push[2] = stride;
 			push[7] = read.Index;
@@ -180,27 +170,73 @@ internal static class CoreLight2D
 
 		push[6] = read.Index;
 
-		//The cascades, the coarsest first, each merging the one above it out of the other picture
-		var (above, into) = ( cascadeA, cascadeB );
-
-		push[3] = count;
-
-		for ( var n = count - 1; n >= 0; n-- )
+		//The cascades carry only what glows - the lights are added straight and the global light is flat - so where
+		//nothing glows they are not run at all, and are half the cost of the whole
+		if ( glows )
 		{
-			push[2] = n;
-			push[7] = n == count - 1 ? 0 : above.Index;
+			var count = CascadeCount( wide, tall );
+			var (cascadeWide, cascadeTall) = CascadeSize( wide, tall, count );
 
-			var probesWide = ( wide + ( 1 << n ) - 1 ) >> n;
-			var probesTall = ( tall + ( 1 << n ) - 1 ) >> n;
+			var cascadeA = CorePasses.Acquire( names.CascadeA, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
+			var cascadeB = CorePasses.Acquire( names.CascadeB, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
 
-			if ( !Run( cascade, into, push, probesWide * ( 2 << n ), probesTall * ( 2 << n ) ) ) return false;
+			if ( cascadeA is null || cascadeB is null ) return false;
 
-			( above, into ) = ( into, above );
+			CorePasses.Close();
+
+			//The coarsest first, each merging the one above it out of the other picture
+			var (above, into) = ( cascadeA, cascadeB );
+
+			push[3] = count;
+
+			for ( var n = count - 1; n >= 0; n-- )
+			{
+				push[2] = n;
+				push[7] = n == count - 1 ? 0 : above.Index;
+
+				var probesWide = ( wide + ( 1 << n ) - 1 ) >> n;
+				var probesTall = ( tall + ( 1 << n ) - 1 ) >> n;
+
+				if ( !Run( cascade, into, push, probesWide * ( 2 << n ), probesTall * ( 2 << n ) ) ) return false;
+
+				( above, into ) = ( into, above );
+			}
+
+			push[7] = above.Index;
+			push[13] = 1.0f;
 		}
 
-		push[7] = above.Index;
-
 		return Run( integrate, light, push, wide, tall );
+	}
+
+	//How far the flood reaches, in the scene's pixels: past it a ray strides this far at a time through empty space.
+	//Further cost a pass a doubling over the whole picture for strides nothing near a blocker could take anyway
+	private const int FloodStride = 64;
+
+	//Enough cascades that the last one's stretch reaches across the whole picture
+	private static int CascadeCount( int wide, int tall )
+	{
+		var diagonal = MathF.Sqrt( ( wide * (float)wide ) + ( tall * (float)tall ) );
+		var count = 1;
+
+		while ( count < 10 && Interval0 * ( ( 1 << ( 2 * count ) ) - 1 ) / 3.0f < diagonal ) count++;
+
+		return count;
+	}
+
+	//A cascade's probes times the side of each one's block of rays, the widest of them all
+	private static (int Wide, int Tall) CascadeSize( int wide, int tall, int count )
+	{
+		var cascadeWide = 0;
+		var cascadeTall = 0;
+
+		for ( var n = 0; n < count; n++ )
+		{
+			cascadeWide = Math.Max( cascadeWide, ( ( wide + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
+			cascadeTall = Math.Max( cascadeTall, ( ( tall + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
+		}
+
+		return (cascadeWide, cascadeTall);
 	}
 
 	//The largest power of two no greater than this - the flood's first stride, at least half the picture's side

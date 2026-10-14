@@ -671,6 +671,7 @@ internal static unsafe class CoreSceneRenderer
 
 		block[Light2DInfoAt + 0] = lights.Count;
 		block[Light2DInfoAt + 1] = system.Settings.SelfShadow ? 1.0f : 0.0f;
+		block[Light2DInfoAt + 2] = system.Settings.PenetrationDepth;
 
 		for ( var i = 0; i < lights.Count; i++ )
 		{

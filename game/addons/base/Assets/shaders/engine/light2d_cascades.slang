@@ -20,6 +20,10 @@ cbuffer Push
 
 	//The global light rgb, the first cascade's stretch w
 	float4 g_sky;
+
+	//How far the flood reaches x - a texel it gave no blocker has none nearer; one where anything glows and the
+	//cascades ran y
+	float4 g_extra;
 };
 
 #include "frame.slang"
@@ -103,8 +107,8 @@ static const int MostShadowSteps = 256;
 static const float LeastStrideShare = 48.0;
 static const float LeastShadowStrideShare = 192.0;
 
-//How far a ray from inside a blocker may go to get out of it when occluders shadow themselves: the lit edge
-static const float FaceDepth = 1.5;
+//How far into a blocker the light of its lit face goes at least, in pixels, however little Penetration Depth asks for
+static const float LeastPenetration = 1.5;
 
 //Whether occluders shadow themselves - see Lighting2D.SelfShadow
 bool SelfShadow() { return g_frame[0].light2dInfo.y > 0.5; }
@@ -113,7 +117,7 @@ bool SelfShadow() { return g_frame[0].light2dInfo.y > 0.5; }
 float Clearance( int2 at, float2 position )
 {
 	float2 seed = Read( g_pictures.z, at ).xy;
-	if ( seed.x < 0.0 ) return 1.0e6;
+	if ( seed.x < 0.0 ) return g_extra.x;
 
 	return length( seed - position ) - 0.71;
 }
@@ -252,25 +256,27 @@ float2 PixelOf( float3 world )
 float Nearest( int2 at, float2 position )
 {
 	float2 seed = Read( g_pictures.z, at ).xy;
-	if ( seed.x < 0.0 ) return 1.0e6;
+	if ( seed.x < 0.0 ) return g_extra.x;
 
 	return length( seed - position ) - 0.5;
 }
 
 //How much of a light reaches here past the blockers: a march to it, softened by how close the ray passes a blocker
 //against how big the light looks from there. A ray from inside a blocker - where occluders shadow themselves - walks
-//to the lit edge first, and the softening is measured from where it came out, ignoring the first pixel: right beside
-//the surface it left, that surface is not in its way
-float Shadow( float2 from, float2 light, float distance, float source, bool solid )
+//out of it, the light fading the deeper in it started until none is left at the penetration depth; the softening is
+//measured from where it came out, ignoring the first pixel: right beside the surface it left, that surface is not in
+//its way
+float Shadow( float2 from, float2 light, float distance, float source, bool solid, float penetration )
 {
 	float2 toward = ( light - from ) / max( distance, 1e-4 );
-	float allowance = SelfShadow() ? FaceDepth : 1.0e6;
 
 	bool leaving = solid;
 	float lit = 1.0;
+	float depth = 1.0;
 	float t = 0.0;
 	float outside = 0.0;
 	float least = max( 1.0, distance / LeastShadowStrideShare );
+	float through = max( 0.5, penetration / 32.0 );
 
 	for ( int steps = 0; steps < MostShadowSteps && t < distance - 0.5; steps++ )
 	{
@@ -281,9 +287,9 @@ float Shadow( float2 from, float2 light, float distance, float source, bool soli
 
 		if ( Solid( at ) )
 		{
-			if ( leaving && t < allowance )
+			if ( leaving && t < penetration )
 			{
-				t += SelfShadow() ? 0.5 : least;
+				t += through;
 				continue;
 			}
 
@@ -294,6 +300,7 @@ float Shadow( float2 from, float2 light, float distance, float source, bool soli
 		{
 			leaving = false;
 			outside = t;
+			depth = 1.0 - smoothstep( penetration * 0.5, penetration, t );
 		}
 
 		float along = t - outside;
@@ -304,7 +311,7 @@ float Shadow( float2 from, float2 light, float distance, float source, bool soli
 		t += max( Clearance( at, position ), least );
 	}
 
-	return smoothstep( 0.0, 1.0, saturate( lit ) );
+	return smoothstep( 0.0, 1.0, saturate( lit ) ) * depth;
 }
 
 //Every 2D light's share here - see lights2d in frame_data.slang
@@ -348,7 +355,8 @@ float3 Lights( float2 here, bool solid )
 		//A blocker that does not shadow itself is shadowed by no blocker: terrain does not shadow terrain - two
 		//blocks of tiles are two blockers to a march, and the step below one was left in the other's shadow. Its
 		//shadow falls on what is not a blocker: the background, the characters standing in it
-		float shadow = solid && !SelfShadow() ? 1.0 : Shadow( here, light, distance, max( colour.w * unit, 0.5 ), solid );
+		float penetration = max( g_frame[0].light2dInfo.z * unit, LeastPenetration );
+		float shadow = solid && !SelfShadow() ? 1.0 : Shadow( here, light, distance, max( colour.w * unit, 0.5 ), solid, penetration );
 
 		sum += colour.rgb * fade * shadow;
 	}
@@ -367,10 +375,11 @@ void IntegrateCs( uint3 id : SV_DispatchThreadID )
 	bool solid = Solid( at );
 
 	//The global light is flat ambient, the same everywhere and blocked by nothing - a level walled in all round
-	//got none of it as light from beyond the walls, and its shadows were black. The cascades carry what glows
+	//got none of it as light from beyond the walls, and its shadows were black. The cascades carry what glows,
+	//and did not run where nothing does
 	float3 gathered = g_sky.rgb;
 
-	if ( !solid || SelfShadow() )
+	if ( g_extra.y > 0.5 && ( !solid || SelfShadow() ) )
 	{
 		for ( int y = 0; y < 2; y++ )
 			for ( int x = 0; x < 2; x++ )

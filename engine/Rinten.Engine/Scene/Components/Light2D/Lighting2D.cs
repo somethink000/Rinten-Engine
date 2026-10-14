@@ -34,6 +34,13 @@ public class Lighting2D : Component, Component.ExecuteInEditor
 	public bool SelfShadow { get; set; }
 
 	/// <summary>
+	/// How far light goes into an occluder past its lit surface, in world units, fading out on the way. Nought
+	/// lights only the surface's edge; a tile's width lights the whole of a tile facing the light.
+	/// </summary>
+	[Property, Range( 0.0f, 4.0f ), ShowIf( nameof( SelfShadow ), true )]
+	public float PenetrationDepth { get; set; } = 0.25f;
+
+	/// <summary>
 	/// How big the picture the light is worked out in is, against the screen.
 	/// Smaller is cheaper and blurrier.
 	/// </summary>

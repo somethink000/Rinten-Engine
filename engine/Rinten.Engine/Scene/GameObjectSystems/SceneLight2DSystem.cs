@@ -15,7 +15,7 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 	public const int MostLights = 32;
 
 	/// <summary>How the 2D lighting is worked out - a <see cref="Lighting2D"/>'s, or the defaults.</summary>
-	public readonly record struct Options( bool SelfShadow, float ResolutionScale, float Margin, Lighting2D.DebugView Debug );
+	public readonly record struct Options( bool SelfShadow, float PenetrationDepth, float ResolutionScale, float Margin, Lighting2D.DebugView Debug );
 
 	/// <summary>
 	/// One 2D light, as the renderer lights with it.
@@ -38,7 +38,10 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 	/// <summary>The settings it is worked out with.</summary>
 	public Options Settings { get; private set; } = Defaults;
 
-	static readonly Options Defaults = new( false, 0.5f, 0.15f, Lighting2D.DebugView.None );
+	static readonly Options Defaults = new( false, 0.25f, 0.5f, 0.15f, Lighting2D.DebugView.None );
+
+	/// <summary>Whether any sprite glows into the 2D lighting - see <see cref="SpriteRenderer.Emission2D"/>. Nothing to march where none does.</summary>
+	public bool Glows { get; private set; }
 
 	/// <summary>Every <see cref="GlobalLight2D"/>, added together, already multiplied by its intensity.</summary>
 	public Color GlobalLight { get; private set; }
@@ -70,7 +73,7 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 		}
 
 		Settings = settings is null ? Defaults
-			: new Options( settings.SelfShadow, settings.ResolutionScale, settings.Margin, settings.Debug );
+			: new Options( settings.SelfShadow, MathF.Max( settings.PenetrationDepth, 0.0f ), settings.ResolutionScale, settings.Margin, settings.Debug );
 
 		var global = Color.Black;
 		var anyGlobal = false;
@@ -92,7 +95,17 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 			found.Add( light );
 		}
 
-		Active = anyGlobal || found.Count > 0;
+		Glows = false;
+
+		foreach ( var sprite in Scene.GetAllComponents<SpriteRenderer>() )
+		{
+			if ( !sprite.IsValid() || !sprite.Enabled || sprite.Emission2D <= 0.0f ) continue;
+
+			Glows = true;
+			break;
+		}
+
+		Active = anyGlobal || found.Count > 0 || Glows;
 
 		//The nearest first, so a scene with more lights than a frame carries keeps the ones on screen
 		if ( found.Count > MostLights && Scene.Camera.IsValid() )

@@ -152,7 +152,8 @@ struct FrameData
 	//scene's table index y and the light's w - nought where this view drew none; spare z
 	float4 light2dScene;
 
-	//How many 2D lights there are x, one in y where occluders shadow themselves; spare zw - see CoreSceneRenderer.SetLight2D
+	//How many 2D lights there are x, one in y where occluders shadow themselves, how far light goes into them in world
+	//units z; spare w - see CoreSceneRenderer.SetLight2D
 	float4 light2dInfo;
 
 	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is

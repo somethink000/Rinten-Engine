@@ -68,7 +68,8 @@ internal static class CoreEnvmap
 
 		//A new bake, or the bake turned off: the room the probe saw is lit differently
 		if ( now.Bake != was.Bake ) return true;
-		if ( now.Sun.Dot( was.Sun ) < 0.99985f ) return true;
+		//Two scenes without a sun have no way to compare, and their dot of nought is not a turned sun
+		if ( now.Sun != was.Sun && now.Sun.Dot( was.Sun ) < 0.99985f ) return true;
 
 		static bool Apart( Color a, Color b )
 		{

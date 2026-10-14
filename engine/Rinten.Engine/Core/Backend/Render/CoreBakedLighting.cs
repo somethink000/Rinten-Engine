@@ -372,15 +372,15 @@ internal static partial class CoreBakedLighting
 		}
 
 		var sheetSide = 0;
-		var packed = world.Receivers.Count > 0 && BakeSheet.Pack( world, bake.TexelsPerMetre, Math.Clamp( bake.MaxResolution, 256, 8192 ), out sheetSide );
+		var packed = world.Receivers.Count > 0 && BakeSheet.Pack( world, bake.TexelsPerMetre, Math.Clamp( bake.Resolution, 256, 8192 ), out sheetSide );
 
 		if ( world.Receivers.Count == 0 )
 			Log.Info( "baked lighting: no still model has a second set of coordinates - everything reads the volume" );
 		else if ( !packed )
-			Log.Warning( $"baked lighting: {world.Receivers.Count} surfaces do not fit a {bake.MaxResolution} atlas at any density - only the volume is baked" );
+			Log.Warning( $"baked lighting: {world.Receivers.Count} surfaces do not fit a {bake.Resolution} atlas at any density - only the volume is baked" );
 
-		var samples = Math.Clamp( bake.Samples, 1, 65536 );
-		var volumeSamples = Math.Clamp( bake.VolumeSamples, 16, 65536 );
+		var samples = bake.TexelSamples;
+		var volumeSamples = bake.VolumeSamples;
 		var denoise = MathF.Max( bake.Denoise, 0.0f );
 		var spacing = bake.VolumeSpacing;
 

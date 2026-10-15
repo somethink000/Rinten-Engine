@@ -54,7 +54,7 @@ public static class AssetTreeSections
 	public static IReadOnlyList<Entry> For( TreeBrowserOptions options )
 		=> All.Where( x => Has( x.Section, options ) ).ToList();
 
-	/// <summary>The one to fall back to when the saved section is not there any more.</summary>
+	/// <summary>The one to fall back to when the wanted section is not there.</summary>
 	public const AssetTreeSection Default = AssetTreeSection.Assets;
 
 	/// <summary>Whether a section has anything behind it in this project.</summary>
@@ -72,10 +72,10 @@ public static class AssetTreeSections
 		_ => true
 	};
 
-	/// <summary>The saved section, or the default where it names one this project has not got.</summary>
-	public static AssetTreeSection Restore( string saved, TreeBrowserOptions options )
+	/// <summary>The wanted section, or the default where this project has not got it.</summary>
+	public static AssetTreeSection Resolve( AssetTreeSection? wanted, TreeBrowserOptions options )
 	{
-		if ( System.Enum.TryParse<AssetTreeSection>( saved, out var section ) && Has( section, options ) )
+		if ( wanted is { } section && Has( section, options ) )
 			return section;
 
 		//Recent is the one section that is there whatever the project holds, so it is what is left when even the assets folder is missing.

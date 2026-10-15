@@ -37,9 +37,6 @@ public sealed class TreeBrowserOptions : IAssetFilter
 	/// <summary>Mounted games get their own tree section.</summary>
 	public bool EnableMounts { get; init; } = true;
 
-	/// <summary>Base of every cookie this browser writes, or null to key off the instance id.</summary>
-	public string CookiePrefix { get; init; }
-
 	/// <summary>What a double click on an asset does.</summary>
 	public IAssetActivationPolicy Activation { get; init; } = OpenInEditorActivation.Instance;
 
@@ -52,6 +49,4 @@ public sealed class TreeBrowserOptions : IAssetFilter
 
 		return asset is not null && FilterAssetTypes.Contains( asset.AssetType );
 	}
-
-	public string ResolveCookiePrefix( string instanceId ) => CookiePrefix ?? $"TreeAssetBrowser.{instanceId}";
 }

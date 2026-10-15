@@ -97,6 +97,10 @@
 		}
 	}
 
+	//The folder or browse location on show, if either
+	public string Folder => currentFolder;
+	public AssetBrowser.Location Location => currentLocation;
+
 	//Assets selected in the grid, in grid order.
 	public IReadOnlyList<Asset> GetSelectedAssets() => canvas.IsValid() ? canvas.GetSelectedAssets() : [];
 
@@ -218,6 +222,9 @@
 
 		Reload();
 		StateHasChanged();
+
+		if ( !options.IsPickerMode )
+			AssetBrowserPlace.MoveTo( currentFolder );
 	}
 
 	static string FullPathOf( string folderPath )
@@ -253,6 +260,9 @@
 
 		Reload();
 		StateHasChanged();
+
+		if ( !options.IsPickerMode )
+			AssetBrowserPlace.MoveTo( location );
 	}
 
 	static string FormatLocation( AssetBrowser.Location location )

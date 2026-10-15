@@ -5,7 +5,7 @@
 @implements AssetSystem.IEventListener
 
 <root class="asset-browser-panel">
-	<AssetTreePanel @ref="tree" class="tree" PanelId="@PanelId" Options="@Options" Filter="@Filter" />
+	<AssetTreePanel @ref="tree" class="tree" Options="@Options" Filter="@Filter" />
 	<div class="chrome">
 		@if ( ShowExpandAll )
 		{
@@ -30,8 +30,6 @@
 @code
 {
 	public Panel Root => this;
-
-	public string PanelId { get; set; }
 
 	//Mode this panel runs in; handed to the tree it hosts.
 	public TreeBrowserOptions Options { get; set; } = TreeBrowserOptions.Dock;
@@ -166,6 +164,9 @@
 			pendingReveal = null;
 	}
 
+	//Picks a folder another browser moved to - see AssetBrowserPlace
+	public void Follow( string folder ) => Tree?.FollowFolder( folder );
+
 	void ExpandAll() => Tree?.ExpandAll();
 
 	void CollapseAll() => Tree?.CollapseAll();
@@ -174,7 +175,7 @@
 	public override void Tick()
 	{
 		base.Tick();
-		Tree?.TickSharedState();
+		Tree?.SyncSharedExpandState();
 		ApplyPendingReveal();
 	}
 

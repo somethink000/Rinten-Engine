@@ -10,44 +10,28 @@ namespace Editor.TreeBrowser;
 [Dock( "Editor", "Asset Browser", "folder_open", DockArea.Bottom )]
 public partial class TreeAssetBrowser : TreeBrowserWidget
 {
-	internal const string AllBrowserIdsCookieKey = "TreeAssetBrowser.AllInstanceIds";
-
-	static int _nextInstanceId;
-	static readonly HashSet<string> _usedInstanceIds = new();
 	static readonly List<TreeAssetBrowser> _open = new();
 
 	public static event Action<Asset> AssetHighlighted;
 
 	internal static void RaiseAssetHighlighted( Asset asset ) => AssetHighlighted?.Invoke( asset );
 
-	public TreeAssetBrowser( Widget parent ) : this( parent, null ) { }
+	public TreeAssetBrowser( Widget parent ) : this( parent, false ) { }
 
-	public TreeAssetBrowser( Widget parent, string id = null ) : base( parent, id ?? ClaimOrCreateInstanceId(), TreeBrowserOptions.Dock )
+	/// <summary>A browser with the tree and a grid, or the tree alone inside an editor's own window.</summary>
+	public TreeAssetBrowser( Widget parent, bool treeOnly ) : base( parent, TreeBrowserOptions.Dock )
 	{
-		_usedInstanceIds.Add( InstanceId );
-
-		BuildPanels( id );
+		if ( treeOnly )
+			Root.AddTreePanel();
+		else
+			Root.CreateDefaultPanels();
 
 		_open.Add( this );
 	}
 
-	//Whatever the user left open, or the default tree plus grid.
-	void BuildPanels( string id )
-	{
-		if ( Root.RestoreBrowserState() )
-			return;
-
-		if ( id is not null )
-			Root.AddTreePanel( saveState: false );
-		else
-			Root.CreateDefaultPanels();
-	}
-
 	public override void OnDestroyed()
 	{
-		var instanceId = InstanceId;
 		base.OnDestroyed();
-		_usedInstanceIds.Remove( instanceId );
 		_open.Remove( this );
 	}
 
@@ -124,33 +108,4 @@ public partial class TreeAssetBrowser : TreeBrowserWidget
 				panel.Reveal( path );
 		}
 	}
-
-	static string ClaimOrCreateInstanceId()
-	{
-		var savedIds = ProjectCookie.Get<List<string>>( AllBrowserIdsCookieKey, new List<string>() );
-
-		foreach ( var savedId in savedIds )
-		{
-			if ( !_usedInstanceIds.Contains( savedId ) )
-				return savedId;
-		}
-
-		string newId;
-		do
-		{
-			newId = $"Browser_{_nextInstanceId++}";
-		} while ( _usedInstanceIds.Contains( newId ) || savedIds.Contains( newId ) );
-
-		return newId;
-	}
-}
-
-[Serializable]
-internal class BrowserState
-{
-	public int LayoutVersion { get; set; }
-	public bool IsTabMode { get; set; }
-	public int ActiveTabIndex { get; set; }
-	public List<string> PanelTypes { get; set; } = new();
-	public List<float> PanelWidths { get; set; } = new();
 }

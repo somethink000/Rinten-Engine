@@ -21,13 +21,10 @@ public class TreeBrowserWidget : PanelWidget
 	public Action<string> OnFileSelected;
 	public Action<string> OnFolderSelected;
 
-	/// <summary>Which saved layout this browser reads and writes.</summary>
-	public string InstanceId => Root.InstanceId;
-
 	/// <summary>The tree and grid panels currently open.</summary>
 	public IEnumerable<IBrowserPanel> Panels => Root.Panels;
 
-	protected TreeBrowserWidget( Widget parent, string instanceId, TreeBrowserOptions options ) : base( parent )
+	protected TreeBrowserWidget( Widget parent, TreeBrowserOptions options ) : base( parent )
 	{
 		Options = options ?? TreeBrowserOptions.Dock;
 
@@ -37,7 +34,6 @@ public class TreeBrowserWidget : PanelWidget
 		Root = new TreeAssetBrowserPanel
 		{
 			Host = this,
-			InstanceId = instanceId,
 			Options = Options,
 			OnAssetSelected = asset => OnAssetSelected?.Invoke( asset ),
 			OnAssetHighlighted = asset => OnAssetHighlighted?.Invoke( asset ),
@@ -51,12 +47,6 @@ public class TreeBrowserWidget : PanelWidget
 
 		WindowTitle = "Asset Browser";
 		MinimumSize = new Vector2( 200, 160 );
-	}
-
-	public override void OnDestroyed()
-	{
-		Root.SaveBrowserState();
-		base.OnDestroyed();
 	}
 
 	public void NavigateToFile( string path ) => Root.NavigateToFile( path );
@@ -80,5 +70,6 @@ public class TreeBrowserWidget : PanelWidget
 	{
 		Root.EnsurePanelsMounted();
 		Root.SyncLayoutToggle();
+		Root.FollowPlace();
 	}
 }

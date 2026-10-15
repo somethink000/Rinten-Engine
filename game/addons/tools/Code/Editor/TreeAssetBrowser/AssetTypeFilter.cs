@@ -13,24 +13,10 @@ public sealed class AssetTypeFilter : IAssetFilter
 	/// <summary>The types of one category, and how many of each the project holds.</summary>
 	public readonly record struct Group( string Name, IReadOnlyList<Entry> Entries );
 
-	readonly string cookieKey;
 	readonly HashSet<string> extensions = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>Raised when the chosen set changes, so views can reload.</summary>
 	public event Action Changed;
-
-	AssetTypeFilter( string cookieKey ) => this.cookieKey = cookieKey;
-
-	/// <summary>Reads the set this browser was last left with.</summary>
-	public static AssetTypeFilter Load( string cookieKey )
-	{
-		var filter = new AssetTypeFilter( cookieKey );
-
-		foreach ( var extension in ProjectCookie.Get<List<string>>( cookieKey, [] ) )
-			filter.extensions.Add( extension );
-
-		return filter;
-	}
 
 	//Listing every registered type buries a game's own resources among dozens of engine formats that nothing in the project uses.
 	/// <summary>The types worth offering, by category: only ones the project has files of.</summary>
@@ -77,7 +63,7 @@ public sealed class AssetTypeFilter : IAssetFilter
 		if ( !extensions.Remove( type.FileExtension ) )
 			extensions.Add( type.FileExtension );
 
-		Save();
+		Changed?.Invoke();
 	}
 
 	/// <summary>How many of a category's types are on.</summary>
@@ -88,7 +74,7 @@ public sealed class AssetTypeFilter : IAssetFilter
 		if ( extensions.Count == 0 ) return;
 
 		extensions.Clear();
-		Save();
+		Changed?.Invoke();
 	}
 
 	/// <summary>The chosen types by name, for the line beside the filter button.</summary>
@@ -98,10 +84,4 @@ public sealed class AssetTypeFilter : IAssetFilter
 
 	/// <summary>What the toolbar button says it is doing right now.</summary>
 	public string Describe() => IsActive ? $"Showing {string.Join( ", ", Names )}" : "Filter by Type";
-
-	void Save()
-	{
-		ProjectCookie.Set( cookieKey, extensions.ToList() );
-		Changed?.Invoke();
-	}
 }

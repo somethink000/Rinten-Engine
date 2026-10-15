@@ -11,8 +11,8 @@ public sealed partial class ModelEditorWindow
 	{
 		BuildWorkspace();
 
-		//The editor's own asset browser, under a name of its own so its panels are not the main window's.
-		var assets = new TreeAssetBrowser( this, id: "ModelEditor" )
+		//The editor's own asset browser, the tree alone; it stays on the same folder as every other browser
+		var assets = new TreeAssetBrowser( this, treeOnly: true )
 		{
 			Name = "Assets",
 			WindowTitle = "Assets",

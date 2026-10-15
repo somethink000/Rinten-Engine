@@ -88,18 +88,14 @@ public static class AssetContextMenuHelper
         }
     }
 
-    //The one event every asset menu option hangs off - the open section, Create Material/Texture/Decal/Sound Event/Model,
-    //tags, recompile - so that an addon adding an option gets it here too rather than only in the old browser.
+    //Every asset menu option hangs off this one event, so an addon's options show here too
     private static void RunAssetContextMenu(Menu menu, List<AssetEntry> entries)
     {
         EditorEvent.Run("asset.contextmenu", new AssetContextMenu
         {
             SelectedList = entries,
             ScreenPosition = global::Editor.Application.CursorPosition,
-            Menu = menu,
-
-            //Nothing here is a row in that list; the handlers that need one leave their options out.
-            AssetList = null
+            Menu = menu
         });
     }
 

@@ -47,7 +47,7 @@ public static class CreateAsset
 			}
 
 			folder.CreateSubdirectory( name );
-			EditorEvent.Run( "assetsystem.newfolder" );
+			TreeAssetBrowser.RefreshOpen();
 		} ) );
 
 		parent.AddSeparator();

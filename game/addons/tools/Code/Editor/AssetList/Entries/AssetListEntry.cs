@@ -10,22 +10,6 @@ public interface IAssetListEntry
 		return "";
 	}
 
-	//Events
-	public bool OnClicked( AssetList list )
-	{
-		return false;
-	}
-
-	public bool OnDoubleClicked( AssetList list )
-	{
-		return false;
-	}
-
-	public bool OnRightClicked( AssetList list )
-	{
-		return false;
-	}
-
 	//Scroll culling events
 	public virtual void OnScrollEnter()
 	{

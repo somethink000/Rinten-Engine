@@ -7,18 +7,19 @@ namespace Rinten;
 //Pages are double-buffered so rebakes don't blank shadows; planned before the frame block uploads
 internal sealed class CoreSunPages : IDisposable
 {
-	//Texels per level (2048, finest level reaches ~4 m) and per page; a level is Grid by Grid pages
-	internal const int Side = 2048;
-	internal const int PageTexels = 32;
-	internal const int Grid = Side / PageTexels;
+	//A level is Grid by Grid pages; the full frame's pages are 32 texels (2048 a level, the finest reaching ~4 m),
+	//the portable frame's 16 - a quarter of the memory, each level half as far, at the same texels a metre
+	internal const int Grid = 64;
+	private static int PageTexels => CoreRenderDevice.PortableFrame ? 16 : 32;
+	private static int Side => Grid * PageTexels;
 
 	//Max levels (~4 m to ~1 km at default detail); only those reaching the far plane are made
 	internal const int MostLevels = 9;
 
-	//Readable distance from the eye in pages; must match SunShadow in frame.slang or taps wrap the torus
-	internal const float ReachPages = ( Grid / 2 ) - 1.0f - ( 4.0f / PageTexels );
+	//Readable distance from the eye in pages; must match SunReachPages in frame.slang or taps wrap the torus
+	private static float ReachPages => ( Grid / 2 ) - 1.0f - ( 4.0f / PageTexels );
 
-	//The map of what moves: texels across, how far from the eye what moves still casts, and the least square it is fitted to, in metres.
+	//The movers' map: texels across, how far from the eye movers still cast, and its least square, in metres
 	internal const int MoverSide = 1024;
 	internal const float MoverReach = 64.0f;
 	internal const float MoverLeast = 2.0f;
@@ -32,14 +33,14 @@ internal sealed class CoreSunPages : IDisposable
 
 	private readonly CoreCasters casters;
 
-	//The pages twice over, and which of the two the bakes draw into - see Restart - and the map of what moves. See VkTextures.ShadowMapCreate.
+	//The pages twice over and which the bakes draw into (see Restart), and the movers' map - see VkTextures.ShadowMapCreate
 	private readonly ulong[] maps = new ulong[2];
 	private int drawn;
 	private ulong movers;
 	private int levels;
 
-	//How far the sun turns before its pages are baked again, as the cosine of the angle: a tenth of a degree, a few centimetres
-	//at the tip of a shadow twenty metres long. A sun that stops is baked where it stopped, however little it moved.
+	//The sun's turn, as a cosine, before its pages bake again: a tenth of a degree, a few centimetres at the tip of a
+	//twenty-metre shadow. A sun that stops is baked where it stopped, however little it moved.
 	private static readonly float TurnCosine = MathF.Cos( 0.1f * MathF.PI / 180.0f );
 
 	//Last sun direction and when it turned, by clock not frame, to tell a stopped sun from a turning one
@@ -49,7 +50,7 @@ internal sealed class CoreSunPages : IDisposable
 	//How long the sun holds still before it counts as stopped, in seconds.
 	private const double StoppedAfter = 0.25;
 
-	//What the pixels read while the pages are baked again from nothing: the other map, as it stood when the bakes left it - see Restart.
+	//What the pixels read while the pages bake again from nothing: the other map as the bakes left it - see Restart
 	private struct Shown
 	{
 		public bool Valid;
@@ -92,8 +93,8 @@ internal sealed class CoreSunPages : IDisposable
 	//Where each level's region starts, in its own tiles.
 	private readonly int[] fromX = new int[MostLevels];
 
-	//Whether a level's slots have changed since its region was last found whole, and where that region was then - see Plan. A level
-	//whose region has not moved and whose slots nobody has touched is still whole, and its slots need not be walked to say so.
+	//Whether a level's slots changed since its region was last found whole, and where that region was - see Plan. An
+	//unmoved region with untouched slots is still whole, and its slots need not be walked to say so.
 	private readonly bool[] levelTouched = new bool[MostLevels];
 	private readonly bool[] levelWhole = new bool[MostLevels];
 	private readonly int[] wholeFromX = new int[MostLevels];
@@ -103,7 +104,7 @@ internal sealed class CoreSunPages : IDisposable
 	//Spheres whose pages have to be baked again - from what the casters said changed, applied on the next plan.
 	private readonly List<System.Numerics.Vector4> dirty = new();
 
-	//The still world's footprints in the sun's frame, for a bake's count of what can land in it - radius below nought where a slot is not part of it.
+	//The still world's footprints in the sun's frame, for a bake's count of what lands in it; radius < 0 where unused
 	private float[] footX = [], footY = [], footR = [];
 
 	//One bake: a rectangle of a level's tiles and where in the layer its slots are.
@@ -218,9 +219,9 @@ internal sealed class CoreSunPages : IDisposable
 		rebaking = true;
 	}
 
-	//Decides this frame's bakes and writes what a pixel needs into the frame block. Before the block goes up; the casters are the last frame's.
-	internal void Plan( float[] frame, bool sunCasts, Vector3 towardsSun, float density, Vector3 eye, float far, float lodPixels,
-		bool stillWorld = true )
+	//Decides this frame's bakes and writes what a pixel needs into the frame block before it goes up;
+	//the casters are last frame's
+	internal void Plan( float[] frame, bool sunCasts, Vector3 towardsSun, float density, Vector3 eye, float far, float lodPixels )
 	{
 		bakes.Clear();
 		plannedCount = 0;
@@ -244,7 +245,7 @@ internal sealed class CoreSunPages : IDisposable
 			pageWorld = asked;
 		}
 
-		//As many levels as reach the far plane, and a map with that many layers - a new count is a new pair of maps, and nothing of the old to show.
+		//As many levels as reach the far plane, and a map with that many layers - a new count is a new pair of maps
 		var reachFirst = pageWorld * ReachPages;
 		var wantLevels = Math.Clamp( (int)MathF.Ceiling( MathF.Log2( MathF.Max( far, reachFirst ) / reachFirst ) ) + 1, 1, MostLevels );
 
@@ -258,19 +259,10 @@ internal sealed class CoreSunPages : IDisposable
 			ForgetAll();
 		}
 
-		//The second map is made the first time a restart turns to it - and neither where nothing will read the pages: they are a level's worth of memory each.
-		if ( !stillWorld && maps[0] != 0 )
-		{
-			CoreRenderDevice.DestroyShadowMap( maps[0] );
-			CoreRenderDevice.DestroyShadowMap( maps[1] );
-			maps[0] = maps[1] = 0;
-			shown.Valid = false;
-			ForgetAll();
-		}
+		//The second map is made the first time a restart turns to it.
+		if ( maps[drawn] == 0 ) maps[drawn] = CoreRenderDevice.CreateShadowMap( Side, levels, readDepth: true );
 
-		if ( stillWorld && maps[drawn] == 0 ) maps[drawn] = CoreRenderDevice.CreateShadowMap( Side, levels, readDepth: true );
-
-		if ( stillWorld && maps[drawn] == 0 )
+		if ( maps[drawn] == 0 )
 		{
 			casts = false;
 			hand.Clear();
@@ -343,7 +335,7 @@ internal sealed class CoreSunPages : IDisposable
 		var total = 0L;
 		validMask = 0;
 
-		for ( var level = stillWorld ? levels - 1 : -1; level >= 0; level-- )
+		for ( var level = levels - 1; level >= 0; level-- )
 		{
 			var page = PageOf( level );
 			fromX[level] = (int)MathF.Floor( eyeSun.x / page ) - ( Grid / 2 );
@@ -369,15 +361,8 @@ internal sealed class CoreSunPages : IDisposable
 			wholeFromY[level] = fromY[level];
 		}
 
-		//A rebake is over on the frame its last level is taken: the pixels turn from the map that was kept for them to this one, whole.
+		//A rebake ends on the frame its last level is taken: the pixels turn from the kept map to this one, whole
 		if ( rebaking && validMask == ( 1u << levels ) - 1u ) rebaking = false;
-
-		//With no pages there is no rebake to finish, and nothing kept to show meanwhile: what moves is all this sun draws.
-		if ( !stillWorld )
-		{
-			rebaking = false;
-			shown.Valid = false;
-		}
 
 		//Bakes first, then the movers map, in the order Draw walks them, or the view lists get mismatched
 		for ( var i = 0; i < bakes.Count; i++ )
@@ -396,8 +381,8 @@ internal sealed class CoreSunPages : IDisposable
 	private static readonly bool debug = Environment.GetEnvironmentVariable( "RINTEN_MESH_DEBUG" ) == "1";
 	private int debugFrame;
 
-	//What the casters come to, for the trace: how many there are, how many hold still and have a footprint, and their triangles - the number the
-	//lights' run of indices is sized by. Under RINTEN_SUN_TRACE, which also logs every frame that bakes rather than one in a hundred and twenty.
+	//The casters for the trace: how many, how many still with a footprint, and their triangles, which size the lights'
+	//run of indices. Under RINTEN_SUN_TRACE, which also logs every frame that bakes rather than one in 120.
 	private string TraceCasters()
 	{
 		if ( !traceBakes ) return "";
@@ -654,7 +639,7 @@ internal sealed class CoreSunPages : IDisposable
 			in basis, zLow, zHigh, casters: 1, texelsPerMetre: PageTexels / page, lodPixels );
 	}
 
-	//A view from the sun over a square of its frame: x and y across the square to the viewport's edges, z along the light over the depth given.
+	//A view from the sun over a square of its frame: xy across the square to the viewport's edges, z along the light
 	private static CoreMeshRender.ViewSetup LightView( float x0, float y0, float x1, float y1,
 		in System.Numerics.Matrix4x4 basis, float zLow, float zHigh, int casters, float texelsPerMetre, float lodPixels )
 	{
@@ -765,15 +750,15 @@ internal sealed class CoreSunPages : IDisposable
 		spanHigh = MathF.Max( spanHigh, along + sphere.W );
 	}
 
-	//Draws this frame's bakes and the map of what moves, from the lists the cull made for the views this added. After the bin pass, which fills the
-	//lights' lists into their run of the index buffer beside the camera's bins - see CoreMeshRender.Bin - and before the materials, which read the maps.
+	//Draws this frame's bakes and the movers' map from the cull's lists for the views this added. After the bin pass
+	//fills the lights' lists (CoreMeshRender.Bin), before the materials, which read the maps.
 	internal void Draw( CoreMeshRender mesh, int firstView, CoreMeshRender.LooseView loose )
 	{
 		if ( plannedCount == 0 ) return;
 
 		var clusters = mesh is not null && mesh.Ready;
 
-		//Nothing to draw with, no bakes - and the slots marked baked are given back, or they would be read as holding a shadow nobody drew.
+		//Nothing to draw with, no bakes - and slots marked baked are given back, or they would read as a shadow nobody drew
 		if ( !clusters && loose is null )
 		{
 			foreach ( var bake in bakes ) Unbake( bake );
@@ -803,7 +788,7 @@ internal sealed class CoreSunPages : IDisposable
 			CoreRenderDevice.ShadowArea( bake.SlotX * PageTexels, bake.SlotY * PageTexels,
 				bake.Width * PageTexels, bake.Height * PageTexels, clear: true );
 
-			//The view's clusters and its classic draws - planned in this order, the bakes first and the map of what moves after them.
+			//The view's clusters and its classic draws - in planned order, the bakes first and the movers' map after them
 			if ( clusters ) mesh.DrawView( firstView + i );
 			loose?.Invoke( in planned[i] );
 
@@ -855,11 +840,23 @@ internal sealed class CoreSunPages : IDisposable
 		var high = reading ? shown.ZHigh : zHigh;
 		var eyeThere = reading ? shown.Eye : eyeSun;
 
+		var read = reading ? shown.Map : drawn;
+
+		//The portable frame binds the three maps where its set has room and reads them by that place - see ShadowCompare
+		var portable = CoreRenderDevice.PortableFrame;
+
+		if ( portable )
+		{
+			CoreRenderDevice.PortableShadowMap( 0, maps[0] );
+			CoreRenderDevice.PortableShadowMap( 1, maps[1] );
+			CoreRenderDevice.PortableShadowMap( 2, movers );
+		}
+
 		CoreSceneRenderer.SetSunPages( frame, reading ? shown.Basis : basis,
 			reading ? shown.PageWorld : pageWorld, levels, low, high > low ? 1.0f / ( high - low ) : 0.0f,
 			eyeThere.x, eyeThere.y, casts ? ( reading ? shown.Mask : validMask ) : 0u, casts,
-			CoreRenderDevice.ShadowMapIndex( maps[reading ? shown.Map : drawn] ), CoreRenderDevice.ShadowMapIndex( movers ),
-			CoreRenderDevice.ShadowMapIndex( maps[reading ? shown.Map : drawn], depth: true ), CoreRenderDevice.ShadowMapIndex( movers, depth: true ),
+			portable ? (uint)read : CoreRenderDevice.ShadowMapIndex( maps[read] ), portable ? 2u : CoreRenderDevice.ShadowMapIndex( movers ),
+			portable ? 0u : CoreRenderDevice.ShadowMapIndex( maps[read], depth: true ), portable ? 0u : CoreRenderDevice.ShadowMapIndex( movers, depth: true ),
 			moverCorner.X, moverCorner.Y, casts && moverViews > 0 ? moverWide : 0.0f );
 	}
 

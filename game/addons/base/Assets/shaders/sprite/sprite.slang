@@ -299,7 +299,41 @@ V2F MainVs( uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID )
 	o.eyeId = ViewOfThisVertex();
 #endif
 
+#ifdef LIGHT2D_SCENE
+	//Into the 2D light's pictures, which are the screen grown by a margin: the screen shrunk inside them - see CoreLight2D
+	o.position.xy *= g_frame[0].light2dScene.x;
+#endif
+
 	return o;
+}
+
+//The bit of a sprite's Lighting that asks for the scene's 2D lighting, above the 3D lit byte and below the
+//tint's exponent - SpriteData.Lit2D
+static const uint Lit2DFlag = 1u << 8;
+
+//What the scene's 2D lighting makes of a sprite or tile here, as a multiplier on its colour: one where the
+//scene has no 2D lighting, so a lit sprite in a scene nobody has lit is drawn unlit. The radiance cascades' light
+//where this view worked it out (CoreLight2D), read through the view and shrunk into its margin; the global light
+//alone where it did not - a perspective view, the portable frame
+float3 Light2DAt( float3 world )
+{
+	float4 light2d = g_frame[0].light2d;
+
+	if ( light2d.w < 0.5 ) return float3( 1.0, 1.0, 1.0 );
+
+	float4 pictures = g_frame[0].light2dScene;
+
+#ifndef PORTABLE
+	if ( pictures.w > 0.0 )
+	{
+		float4 clip = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
+		float2 uv = ( ( clip.xy / clip.w ) * pictures.x * 0.5 ) + 0.5;
+
+		return g_textures[uint( pictures.w )].SampleLevel( uv, 0.0 ).rgb;
+	}
+#endif
+
+	return light2d.rgb;
 }
 
 //Wrapped lighting for sprites (back lights still count), no shadows

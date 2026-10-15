@@ -31,39 +31,10 @@ internal sealed unsafe partial class ModelBuilder
 		public float PlacedX, PlacedY;
 	}
 
-	//Union-find over triangles, so connected ones end up in one island.
-	private sealed class Groups
-	{
-		private uint[] parent = Array.Empty<uint>();
+	//Triangles past which an import keeps no sheet of its own - see GenerateLightmapUv
+	private const int MostLightmapTriangles = 65536;
 
-		public void Reset( int count )
-		{
-			if ( parent.Length < count ) parent = new uint[count];
-
-			for ( var i = 0; i < count; ++i ) parent[i] = (uint)i;
-		}
-
-		public uint Find( uint of )
-		{
-			while ( parent[of] != of )
-			{
-				parent[of] = parent[parent[of]];
-				of = parent[of];
-			}
-
-			return of;
-		}
-
-		public void Join( uint a, uint b )
-		{
-			a = Find( a );
-			b = Find( b );
-
-			if ( a != b ) parent[b] = a;
-		}
-	}
-
-	//Normal dot threshold for joining triangles into one island (about 48 degrees)
+	//Normal dot for a triangle to join an island (about 48 degrees): to its neighbour and to the mean
 	private const float SameWay = 0.66f;
 
 	//The same direction at unit length, or +Z where there was none.
@@ -82,6 +53,13 @@ internal sealed unsafe partial class ModelBuilder
 			( a.x * b.y ) - ( a.y * b.x ) );
 
 	private static float DotOf( Vector3 a, Vector3 b ) => ( a.x * b.x ) + ( a.y * b.y ) + ( a.z * b.z );
+
+	//A face's normal times its area, never quite nought so a sliver still points somewhere
+	private static Vector3 Weighted( Face face )
+	{
+		var area = MathF.Max( face.Area, 1e-12f );
+		return new Vector3( face.Normal.x * area, face.Normal.y * area, face.Normal.z * area );
+	}
 
 	//A pair of vertices, in the order that makes an edge the same edge from either triangle.
 	private static ulong EdgeKey( uint a, uint b )
@@ -122,8 +100,8 @@ internal sealed unsafe partial class ModelBuilder
 		up = Normalised( CrossOf( normal, right ) );
 	}
 
-	//Shelf packing, tallest first, into a square of the given side. The same shape as the atlas packer one level up - see
-	//CoreLightmap.Pack - and for the same reason: it is the packing that can be written down in twenty lines and read in five.
+	//Shelf packing, tallest first, into a square of the given side - the same shape as CoreLightmap.Pack one level up,
+	//as it is the packing that can be written in twenty lines and read in five
 	private static bool Fits( List<Island> islands, List<uint> order, float side, float padding )
 	{
 		var x = 0.0f;
@@ -175,7 +153,7 @@ internal sealed unsafe partial class ModelBuilder
 		var count = vertices.Count;
 		if ( count == 0 ) return false;
 
-		//Hashes rather than the keys themselves: this is a ratio against a factor of two, and a collision here or there cannot move it.
+		//Hashes rather than the keys: this is a ratio against a factor of two, and a collision cannot move it
 		var whole = new HashSet<int>( count );
 		var without = new HashSet<int>( count );
 
@@ -197,6 +175,9 @@ internal sealed unsafe partial class ModelBuilder
 	{
 		if ( vertices.Count == 0 || indices.Count == 0 ) return 0;
 
+		//A dense mesh - foliage, terrain - is lit from the volume, as UE advises: its split corners would cost every frame
+		if ( overwrite == 0 && indices.Count / 3 > MostLightmapTriangles ) return 0;
+
 		//Skip skinned or morphed models: they are not lightmapped and morphs index vertices by number
 		if ( bones.Count > 0 || morphs.Count > 0 ) return 0;
 
@@ -216,18 +197,21 @@ internal sealed unsafe partial class ModelBuilder
 
 		for ( var m = 0; m < meshes.Count; m++ ) ranges[m] = ( meshes[m].FirstVertex, meshes[m].VertexCount );
 
-		var groups = new Groups();
 		var edges = new Dictionary<ulong, uint>( EdgeHash.Instance );
 		var byRoot = new Dictionary<uint, uint>();
 		var order = new List<uint>();
 		var made = new Dictionary<ulong, uint>( EdgeHash.Instance );
 		var places = new Dictionary<(float, float, float), uint>();
 		var placeOf = Array.Empty<uint>();
+		var near = new List<List<uint>>();
+		var chartOf = new List<int>();
+		var bySize = new List<uint>();
+		var waiting = new Queue<uint>();
 
 		var flatIndices = CollectionsMarshal.AsSpan( indices );
 
-		//One sheet for the whole model, not one a mesh. An instance has one place in the atlas - see BakedLighting - so two meshes of a model that
-		//each filled a square of their own would be baked over each other. The islands of every mesh are found first and packed together after.
+		//One sheet for the whole model: an instance has one place in the atlas (BakedLighting), so meshes that each filled
+		//a square of their own would be baked over each other. Every mesh's islands are found first, then packed together.
 		var facesOf = new List<Face>[meshes.Count];
 		var islands = new List<Island>();
 
@@ -245,8 +229,8 @@ internal sealed unsafe partial class ModelBuilder
 			if ( firstIndex + mesh.IndexCount > indices.Count ) continue;
 			if ( firstVertex + mesh.VertexCount > vertices.Count ) continue;
 
-			//------------------------------------------------ the triangles One entry a triangle of the mesh, in the mesh's order, so that a face's place in
-			//the list is its place in the index buffer. A triangle that cannot be unwrapped stays in the list with no island and keeps the indices it had.
+			//The triangles, one entry each in the mesh's order, so a face's place in the list is its place in the indices;
+			//one that cannot be unwrapped stays with no island and keeps its indices
 			var faces = new List<Face>( (int)( mesh.IndexCount / 3 ) );
 			facesOf[m] = faces;
 
@@ -293,7 +277,11 @@ internal sealed unsafe partial class ModelBuilder
 				placeOf[v] = place;
 			}
 
-			groups.Reset( faces.Count );
+			for ( var f = 0; f < faces.Count; ++f )
+			{
+				if ( f < near.Count ) near[f].Clear();
+				else near.Add( new List<uint>() );
+			}
 
 			edges.Clear();
 			edges.EnsureCapacity( faces.Count * 3 );
@@ -321,7 +309,47 @@ internal sealed unsafe partial class ModelBuilder
 						continue;
 					}
 
-					if ( DotOf( faces[(int)found].Normal, face.Normal ) >= SameWay ) groups.Join( found, at );
+					near[(int)found].Add( at );
+					near[(int)at].Add( found );
+				}
+			}
+
+			//Each island grows from its biggest face while a neighbour leans within the cone round the island's mean;
+			//neighbour to neighbour alone, a smooth pillow's front and back would join and flatten onto each other
+			chartOf.Clear();
+			bySize.Clear();
+
+			for ( var at = 0u; at < faces.Count; ++at )
+			{
+				chartOf.Add( -1 );
+				if ( faces[(int)at].Island >= 0 ) bySize.Add( at );
+			}
+
+			bySize.Sort( ( a, b ) => faces[(int)b].Area.CompareTo( faces[(int)a].Area ) );
+
+			foreach ( var seed in bySize )
+			{
+				if ( chartOf[(int)seed] >= 0 ) continue;
+
+				chartOf[(int)seed] = (int)seed;
+				var sum = Weighted( faces[(int)seed] );
+				waiting.Enqueue( seed );
+
+				while ( waiting.TryDequeue( out var at ) )
+				{
+					foreach ( var next in near[(int)at] )
+					{
+						var face = faces[(int)next];
+						if ( chartOf[(int)next] >= 0 || face.Island < 0 ) continue;
+
+						if ( DotOf( faces[(int)at].Normal, face.Normal ) < SameWay ) continue;
+						if ( DotOf( Normalised( sum ), face.Normal ) < SameWay ) continue;
+
+						chartOf[(int)next] = (int)seed;
+						var add = Weighted( face );
+						sum = new Vector3( sum.x + add.x, sum.y + add.y, sum.z + add.z );
+						waiting.Enqueue( next );
+					}
 				}
 			}
 
@@ -335,7 +363,7 @@ internal sealed unsafe partial class ModelBuilder
 
 				if ( face.Island < 0 ) continue;
 
-				var root = groups.Find( at );
+				var root = (uint)chartOf[(int)at];
 
 				if ( !byRoot.TryGetValue( root, out var which ) )
 				{
@@ -417,8 +445,10 @@ internal sealed unsafe partial class ModelBuilder
 			widest = MathF.Max( widest, MathF.Max( island.SizeX, island.SizeY ) );
 		}
 
-		//Padding between islands scaled to island size, not sheet size, so packing can still succeed
-		var padding = MathF.Sqrt( area / islands.Count ) * 0.02f;
+		//Padding scaled to island size, so packing succeeds - and a 48th of the side where islands are few, so a square
+		//the bake gives 96 texels has two between them for its filters; less as they multiply
+		var least = MathF.Sqrt( area / islands.Count ) * 0.02f;
+		var padding = least;
 
 		var padded = 0.0f;
 
@@ -427,12 +457,13 @@ internal sealed unsafe partial class ModelBuilder
 
 		var side = MathF.Max( MathF.Sqrt( padded ) * 1.3f, ( widest + ( padding * 2.0f ) ) * 1.05f );
 
-		//Grown until they fit rather than solved for: the shelf packer wastes an amount nobody can predict, and ten tries of a cheap
-		//function beat one try of an expensive one. With the gap fixed the area to fit is fixed too, so growing the side gets there.
+		//Grown until they fit rather than solved for: the shelf packer wastes an unpredictable amount, and ten cheap tries
+		//beat one expensive one. With the gap fixed the area to fit is too, so growing the side gets there.
 		var packed = false;
 
 		for ( var attempt = 0; attempt < 16 && !packed; ++attempt )
 		{
+			padding = MathF.Max( least, side / MathF.Max( 48.0f, 6.0f * MathF.Sqrt( islands.Count ) ) );
 			packed = Fits( islands, order, side, padding );
 
 			if ( !packed ) side *= 1.25f;
@@ -493,10 +524,10 @@ internal sealed unsafe partial class ModelBuilder
 				{
 					var local = corners[corner];
 
-					//A triangle that named a vertex the mesh has not got keeps the first one, as nothing can be read for it either way.
+					//A triangle naming a vertex the mesh lacks keeps the first one: nothing can be read for it either way
 					if ( local >= mesh.VertexCount ) local = 0;
 
-					//A triangle with no island shares the vertices nobody moved: the island half of the key is one no island has.
+					//A triangle with no island shares the unmoved vertices: its island half of the key is one no island has
 					var key = ( (ulong)(uint)face.Island << 32 ) | local;
 
 					if ( !made.TryGetValue( key, out var found ) )

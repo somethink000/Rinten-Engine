@@ -53,6 +53,10 @@ Out MainPs( V2F i )
 
 	texel *= tint;
 
+	//Lit by the scene's 2D lighting, where the layer asks to be - see TileMapLayer.Lit2D
+	if ( ( tile.Lighting & Lit2DFlag ) != 0 )
+		texel.rgb *= Light2DAt( i.world );
+
 #ifdef DEPTH_ONLY
 	Out nothing = (Out)0;
 	return nothing;

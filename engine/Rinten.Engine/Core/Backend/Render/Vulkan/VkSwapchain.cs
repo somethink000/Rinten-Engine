@@ -20,6 +20,12 @@ internal static unsafe partial class VkSwapchain
 	//Window-independent viewport pictures; a swapchain has one, and so does a view that never presents
 	internal sealed class Pictures
 	{
+		/// <summary>The picture the world's pass draws into instead of the screen, kept across frames - see VkFrame.WorldAside.</summary>
+		public ulong Aside;
+
+		/// <summary>Whether the world's pass goes into it now, and whether it has been cleared this frame.</summary>
+		public bool AsideOn, AsideBegun;
+
 		/// <summary>How many pictures deep the depth is: one, or one for each of a headset's eyes where a view draws them at once - see ViewCreate. Said before the pictures are made and kept across a remake.</summary>
 		public uint Layers = 1;
 
@@ -244,6 +250,9 @@ internal static unsafe partial class VkSwapchain
 
 		/// <summary>True between ScreenInterrupt and ScreenResume, so only world draws use the world rectangle</summary>
 		public bool WorldOnScreen;
+
+		/// <summary>Whether the world being drawn has surfaces to shade, which an adaptive rate map is worth reading the picture for</summary>
+		public bool WorldShades = true;
 
 		/// <summary>Depth pre-pass writes the screen depth at the world offset, skipping a copy; see DepthGoesToScreen</summary>
 		public bool DepthOnScreen;
@@ -852,6 +861,10 @@ internal static unsafe partial class VkSwapchain
 		DropHandle( p.VelocityHandle, deferred );
 		DropHandle( p.PostHandle, deferred );
 		DropHandle( p.DepthHandle, deferred );
+
+		//Back to the pool, which lets it go once nothing of its size is asked for
+		if ( p.Aside != 0 ) VkPictures.Release( p.Aside );
+		p.Aside = 0;
 
 		for ( var i = 0; i < 2; ++i )
 		{
@@ -1635,6 +1648,7 @@ internal static unsafe partial class VkSwapchain
 		one.WorldY = 0;
 		one.LiftPending = false;
 		one.WorldOnScreen = false;
+		one.WorldShades = true;
 		one.DepthOnScreen = false;
 		one.WantsVsync = true;
 		one.DisplayStalled = false;

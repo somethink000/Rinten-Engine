@@ -38,10 +38,10 @@ internal static unsafe partial class VkDevice
 		}
 		catch
 		{
-			//Swallowed on purpose: an exception unwinding into a driver frame takes the process down, which for the error-reporting path would be a fine irony.
+			//Swallowed: an exception unwinding into a driver frame takes the process down
 		}
 
-		//False means carry on. Returning true aborts the call that produced the message, which is a debugging tool and not something to do by default.
+		//False carries on; true aborts the call that produced the message, a debugging tool only
 		return false;
 	}
 
@@ -225,7 +225,7 @@ internal static unsafe partial class VkDevice
 
 		if ( wanted ) layers[layerCount++] = names.Add( "VK_LAYER_KHRONOS_validation" );
 
-		//Mesa's Anti-Lag, which is installed as a layer that stays off unless it is asked for - see CoreLatency. By name, where the setting is on.
+		//Mesa's Anti-Lag, a layer that stays off unless asked for - see CoreLatency; by name, where the setting is on
 		if ( CoreLatency.WantsMesaLayer && HasLayer( CoreLatency.MesaLayer ) )
 			layers[layerCount++] = names.Add( CoreLatency.MesaLayer );
 
@@ -291,7 +291,7 @@ internal static unsafe partial class VkDevice
 
 		instance = made;
 
-		//What volkLoadInstance did: every lookup from here on goes through the instance rather than through the loader's terminator.
+		//As volkLoadInstance: every lookup from here goes through the instance, not the loader's terminator
 		loader.OnInstance( instance.Handle );
 		vk.CurrentInstance = instance;
 		validation = wanted;
@@ -350,7 +350,7 @@ internal static unsafe partial class VkDevice
 
 		var dialects = Dialects();
 
-		//The card the headset is on, where there is a headset: the runtime can only composite from that one, however good another is.
+		//The headset's card, where there is one: its runtime can only composite from that card
 		var headsetCard = CoreXr.Hooked ? CoreXr.PhysicalDevice( instance.Handle ) : 0;
 
 		fixed ( PhysicalDevice* into = candidates )
@@ -368,11 +368,11 @@ internal static unsafe partial class VkDevice
 
 				var score = Score( candidate );
 
-				//A device that cannot draw is no use however good it looks - and neither is one that cannot do what CreateDevice is about to
-				//ask of it. On a laptop both kinds are usually present, and picking by type alone lands on whichever the driver listed first.
+				//A device that cannot draw, or cannot do what CreateDevice asks, is no use however good it looks;
+				//picking by type alone lands on whichever a laptop's driver listed first
 				var family = FindGraphicsFamily( candidate );
 
-				//The best way this one can be spoken to, and what it lacked for the ways before it - which is what a rejection is worth saying about.
+				//The best way this one can be spoken to, and what it lacked for the better ones - what a rejection says
 				VkDialect speaks = null;
 				var missing = family == uint.MaxValue ? "a queue that can draw" : null;
 
@@ -469,7 +469,7 @@ internal static unsafe partial class VkDevice
 				( dialect is VkModern || name != CoreLatency.ReflexExtension ),
 			chosen.VendorID ).ToArray();
 
-		//What the dialect itself needs is its own to say, and what it chains on stays alive until the device is made - see VkDialect.ChainFeatures.
+		//The dialect says what it needs; what it chains stays alive until the device is made - see ChainFeatures
 		var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2 };
 
 		dialect.ChainFeatures( physicalDevice, &features );
@@ -480,6 +480,10 @@ internal static unsafe partial class VkDevice
 
 		CoreLatency.ChainFeatures( &features );
 
+		//And hardware rays, optional, where the card has all they need - see VkRays.
+		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
+		VkRays.ChainFeatures( &features );
+
 		//Asked about rather than demanded, which is why none of these is in a dialect's Missing: ground seen
 		//at a glancing angle is a smear without the first, and that is a worse picture rather than no picture.
 		PhysicalDeviceFeatures supported;
@@ -488,8 +492,8 @@ internal static unsafe partial class VkDevice
 		anisotropy = supported.SamplerAnisotropy;
 		features.Features.SamplerAnisotropy = anisotropy;
 
-		//The same treatment for block compressed textures: without it an imported texture is unpacked to four bytes a pixel on the way in,
-		//which is a bigger picture in memory rather than no picture. The formats themselves are checked further down, once the device exists.
+		//The same for block-compressed textures: without it they unpack to four bytes a pixel on the way in;
+		//the formats are checked once the device exists
 		features.Features.TextureCompressionBC = supported.TextureCompressionBC;
 
 		//And what a phone has instead - ASTC, ETC2 - which a build's KTX2 pictures are
@@ -517,8 +521,8 @@ internal static unsafe partial class VkDevice
 		multiDraw = supported.MultiDrawIndirect;
 		features.Features.MultiDrawIndirect = multiDraw;
 
-		//And indices as wide as a word. The cluster raster packs a visible entry and a vertex of its cluster into one index; without this the
-		//index stops at 2^24 and the frame's visible clusters at 131072 - see CoreMeshRender.Begin, which sizes the lists to fit either way.
+		//And word-wide indices: the cluster raster packs an entry and a vertex into one index; without them it stops
+		//at 2^24 and visible clusters at 131072 - see CoreMeshRender.Begin, which sizes for either
 		fullIndex = supported.FullDrawIndexUint32;
 		features.Features.FullDrawIndexUint32 = fullIndex;
 
@@ -532,8 +536,8 @@ internal static unsafe partial class VkDevice
 		features.Features.ShaderStorageImageWriteWithoutFormat = storageWithoutFormat;
 		features.Features.ShaderStorageImageReadWithoutFormat = storageWithoutFormat;
 
-		//And the geometry stage's capability, which SPIR-V asks of a pixel stage that reads which primitive it is - the cluster raster's does. No
-		//geometry shader is ever made; without the feature that read is undefined, and the validation layer names every pipeline that makes it.
+		//And the geometry capability SPIR-V asks of a pixel stage reading its primitive, as the cluster raster's does;
+		//no geometry shader is made, but without it that read is undefined
 		features.Features.GeometryShader = supported.GeometryShader;
 
 		//Pipeline statistics queries, only when a run asked for them (see VkDevice.StatsZone)
@@ -543,7 +547,7 @@ internal static unsafe partial class VkDevice
 		if ( StatsZone is not null && !statsQueries )
 			Log.Warning( $"RINTEN_ZONE_STATS asked for '{StatsZone}' and this device has no pipeline statistics" );
 
-		var deviceExtensions = stackalloc byte*[24];
+		var deviceExtensions = stackalloc byte*[32];
 		var extensionCount = 0u;
 
 		//Mesh stages, where the device has them - asked about, and the indexed draw stands in without.
@@ -580,7 +584,7 @@ internal static unsafe partial class VkDevice
 			features.PNext = &meshFeatures;
 		}
 
-		//Presenting is an extension even now. Asked for unconditionally: a device that cannot present is a compute device, and this engine draws.
+		//Presenting is an extension, asked for always: a device that cannot present is a compute device
 		deviceExtensions[extensionCount++] = names.Add( KhrSwapchain.ExtensionName );
 
 		//Memory budget extension: the driver's view of our usage, which is what decides allocation failures
@@ -589,6 +593,8 @@ internal static unsafe partial class VkDevice
 		if ( memoryBudget ) deviceExtensions[extensionCount++] = names.Add( "VK_EXT_memory_budget" );
 
 		if ( VkFovea.Extension is { } fovea ) deviceExtensions[extensionCount++] = names.Add( fovea );
+
+		foreach ( var ray in VkRays.Wanted ) deviceExtensions[extensionCount++] = names.Add( ray );
 
 		//NGX's extensions for DLSS where present; skip the buffer-address ext on 1.2 (it's core there)
 		foreach ( var latency in latencyExtensions )
@@ -638,6 +644,7 @@ internal static unsafe partial class VkDevice
 		dialect.FeaturesDone();
 		VkFovea.FeaturesDone();
 		CoreLatency.FeaturesDone();
+		VkRays.FeaturesDone();
 
 		if ( opened != Result.Success )
 		{
@@ -658,6 +665,7 @@ internal static unsafe partial class VkDevice
 		vk.CurrentDevice = device;
 
 		CoreLatency.DeviceMade();
+		VkRays.DeviceMade();
 
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
 
@@ -667,8 +675,8 @@ internal static unsafe partial class VkDevice
 		vk.GetDeviceQueue( device, graphicsFamily, 0, &got );
 		graphicsQueue = got;
 
-		//Asked for once: every allocation wants the memory types, and the profiler wants to know what a timestamp tick is worth. A queue
-		//that reports no valid timestamp bits cannot time anything, and the period staying zero is how the profiler knows to say so.
+		//Asked once: allocations want the memory types, the profiler a timestamp tick's worth; a queue without valid
+		//timestamp bits leaves the period at nought, which tells the profiler it cannot time
 		PhysicalDeviceMemoryProperties memory;
 		vk.GetPhysicalDeviceMemoryProperties( physicalDevice, &memory );
 		memoryProperties = memory;
@@ -704,8 +712,8 @@ internal static unsafe partial class VkDevice
 			? ( properties.Limits.MaxDrawIndirectCount > 0 ? properties.Limits.MaxDrawIndirectCount : 1 )
 			: 1;
 
-		//Whether a reduced-resolution world is possible at all. Asked rather than assumed: BLIT_SRC and BLIT_DST are optional
-		//for depth formats, and a driver that lacks them would take the blit as undefined behaviour rather than refuse it.
+		//Whether a reduced-resolution world is possible: blit source and destination are optional for depth formats,
+		//and a driver without them would not refuse the blit, just do something undefined
 		FormatProperties depthFormat;
 		vk.GetPhysicalDeviceFormatProperties( physicalDevice, DepthFormat, &depthFormat );
 
@@ -713,8 +721,8 @@ internal static unsafe partial class VkDevice
 
 		depthBlit = ( depthFormat.OptimalTilingFeatures & NeedsBlit ) == NeedsBlit;
 
-		//And whether imported textures may keep their blocks. The feature covers the family; the formats are asked about
-		//one by one because a feature says the device knows them and a format property says this device can sample this one.
+		//And whether imported textures keep their blocks: the feature covers the family, each format is asked alone,
+		//since only a format property says this device can sample it
 		const FormatFeatureFlags NeedsSampling =
 			FormatFeatureFlags.SampledImageBit | FormatFeatureFlags.SampledImageFilterLinearBit;
 
@@ -746,10 +754,10 @@ internal static unsafe partial class VkDevice
 		astc = has.TextureCompressionAstcLdr && Samples( Format.Astc4x4UnormBlock ) && Samples( Format.Astc4x4SrgbBlock );
 		etc2 = has.TextureCompressionEtc2 && Samples( Format.Etc2R8G8B8A8UnormBlock ) && Samples( Format.Etc2R8G8B8A8SrgbBlock );
 
-		//And what the three formats are actually attached and sampled as. The spec makes all three mandatory for these uses, so this should never fire -
-		//which is the point: if it ever does, the machine says which format it would not have, instead of failing somewhere further in with nothing to go on.
+		//What the three formats are attached and sampled as; mandatory by the spec, so this names the format
+		//if a machine ever lacks one rather than failing later with nothing to go on
 		if ( !RequireFormat( DepthFormat, FormatFeatureFlags.DepthStencilAttachmentBit | FormatFeatureFlags.SampledImageBit, "depth" ) ) return false;
-		//The pictures between the world and the window, which the portable frame has none of - see RenderTier - and so asks nothing of.
+		//The pictures between the world and the window, which the portable frame has none of - see RenderTier
 		if ( Tier == RenderTier.Portable ) return MakePipelineCache();
 
 		if ( !RequireFormat( SceneFormat, FormatFeatureFlags.ColorAttachmentBit | FormatFeatureFlags.SampledImageBit, "the frame's pictures" ) ) return false;
@@ -889,7 +897,7 @@ internal static unsafe partial class VkDevice
 	//The sky's table of colour by elevation and sun angle - see TargetSkyTable.
 	private static bool CreateSkyTable()
 	{
-		//Cleared once before anything draws it - see VkFrame.ClearSkyTableOnce - which a picture may only be that says it is a transfer's target.
+		//Cleared once before anything draws it (VkFrame.ClearSkyTableOnce), so it must be a transfer's target
 		if ( !CreatePicture( SceneFormat, ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
 			ImageAspectFlags.ColorBit, out skyTableImage, out skyTableMemory, out skyTableView, "sky table", SkyTableSide ) )
 			return false;
@@ -921,8 +929,8 @@ internal static unsafe partial class VkDevice
 	//Bindless texture table setup; without descriptor indexing every index reads slot zero
 	private static void MakeBindless()
 	{
-		//As many as the device will take, up to what is asked for. The update-after-bind limits are the ones that matter here, and
-		//they are separate from the ordinary ones - a driver may allow a million of these and only a few thousand bound the old way.
+		//As many as the device takes, up to what is asked: the update-after-bind limits, separate from the ordinary
+		//ones - a driver may allow a million of these and a few thousand bound the old way
 		var indexing = new PhysicalDeviceDescriptorIndexingProperties
 		{
 			SType = StructureType.PhysicalDeviceDescriptorIndexingProperties,
@@ -950,7 +958,7 @@ internal static unsafe partial class VkDevice
 			allowed = indexing.MaxPerStageDescriptorUpdateAfterBindSampledImages;
 		}
 
-		//Below the floor the shaders clamp to, the table is not worth having: every index they guard would land inside it anyway.
+		//Below the floor the shaders clamp to, the table is not worth having
 		if ( allowed < BindlessSlotsLeast ) return;
 
 		bindlessSlots = allowed;
@@ -984,7 +992,7 @@ internal static unsafe partial class VkDevice
 			DescriptorType = DescriptorType.CombinedImageSampler,
 			DescriptorCount = bindlessSlots,
 
-			//And compute: a pass over the frame reads its pictures by index the way a full-screen draw does - see VkFrame.PassDispatch.
+			//And compute: a pass over the frame reads its pictures by index as a full-screen draw does
 			StageFlags = DrawStages | ShaderStageFlags.ComputeBit,
 		};
 
@@ -1113,7 +1121,7 @@ internal static unsafe partial class VkDevice
 			AnisotropyEnable = false,
 			MaxAnisotropy = 1.0f,
 
-			//And the two the post passes read with. Clamped, because a tap off the edge of the screen should find the edge and not the far side of it.
+			//And the two the post passes read with: clamped, so a tap off the screen finds its edge
 			AddressModeU = SamplerAddressMode.ClampToEdge,
 			AddressModeV = SamplerAddressMode.ClampToEdge,
 			AddressModeW = SamplerAddressMode.ClampToEdge,
@@ -1125,7 +1133,7 @@ internal static unsafe partial class VkDevice
 
 		clampSampler = made;
 
-		//Depth is never averaged: halfway between a near surface and a far one is a distance where nothing is, and occlusion built on it haloes.
+		//Depth is never averaged: halfway between near and far is where nothing is, and occlusion on it haloes
 		samplerInfo.MagFilter = Filter.Nearest;
 		samplerInfo.MinFilter = Filter.Nearest;
 		samplerInfo.MipmapMode = SamplerMipmapMode.Nearest;
@@ -1134,7 +1142,7 @@ internal static unsafe partial class VkDevice
 
 		pointSampler = made;
 
-		//And the one every shadow map is read with - see shadowSampler: four texels compared and weighed, wrapped rather than clamped.
+		//And the one every shadow map is read with: four texels compared and weighed, wrapped rather than clamped
 		var compareInfo = new SamplerCreateInfo
 		{
 			SType = StructureType.SamplerCreateInfo,
@@ -1159,17 +1167,6 @@ internal static unsafe partial class VkDevice
 		if ( vk.CreateSampler( device, &compareInfo, null, &made ) != Result.Success ) return false;
 
 		shadowDepthSampler = made;
-
-		//And the portable frame's, texel by texel: a phone's driver need not filter a depth format at all, and the shader spreads its own taps.
-		compareInfo.CompareEnable = true;
-		compareInfo.MagFilter = Filter.Nearest;
-		compareInfo.MinFilter = Filter.Nearest;
-		compareInfo.AddressModeU = SamplerAddressMode.ClampToEdge;
-		compareInfo.AddressModeV = SamplerAddressMode.ClampToEdge;
-
-		if ( vk.CreateSampler( device, &compareInfo, null, &made ) != Result.Success ) return false;
-
-		portableShadowSampler = made;
 
 		//Set 0, a material: four images then the numbers.
 		{
@@ -1234,7 +1231,7 @@ internal static unsafe partial class VkDevice
 			pyramidSetLayout = layout;
 		}
 
-		//And the set a fold of a picture's chain runs through: two levels to read and the levels it stores into - see VkFrame.FoldChain.
+		//The set a fold of a picture's chain runs through: two levels to read and those it stores into
 		{
 			var bindings = stackalloc DescriptorSetLayoutBinding[2 + (int)FoldLevelsAtOnce];
 
@@ -1259,7 +1256,7 @@ internal static unsafe partial class VkDevice
 			foldSetLayout = layout;
 		}
 
-		//And the set a compute pass over the frame's pictures stores through: the levels, then the buffers - see VkFrame.PassDispatch.
+		//The set a compute pass over the frame's pictures stores through: levels, then buffers
 		{
 			var count = PassImages + PassBuffers;
 			var bindings = stackalloc DescriptorSetLayoutBinding[(int)count];
@@ -1333,9 +1330,9 @@ internal static unsafe partial class VkDevice
 
 		//Set 1: the bones of this draw, and the camera and lights of this frame.
 		{
-			var frameBindings = stackalloc DescriptorSetLayoutBinding[6];
+			var frameBindings = stackalloc DescriptorSetLayoutBinding[12];
 
-			//Read by a pixel too where the slot holds a run of sprites rather than a pose - the portable frame's sprites, see sprite_ps.shader.
+			//Read by a pixel too where the slot holds a run of sprites - the portable frame's, see sprite_ps.shader
 			frameBindings[0].Binding = 0;
 			frameBindings[0].DescriptorType = DescriptorType.StorageBufferDynamic;
 			frameBindings[0].DescriptorCount = 1;
@@ -1361,22 +1358,40 @@ internal static unsafe partial class VkDevice
 			frameBindings[3].DescriptorCount = 1;
 			frameBindings[3].StageFlags = DrawStages | ShaderStageFlags.ComputeBit;
 
-			//And in the portable frame the sun's one map, which has no table to be read out of there - see portableSunMap.
+			//And in the portable frame the sun's pages, which have no table to be read out of there - see PortableShadowMap.
 			frameBindings[4].Binding = 2;
 			frameBindings[4].DescriptorType = DescriptorType.CombinedImageSampler;
 			frameBindings[4].DescriptorCount = 1;
 			frameBindings[4].StageFlags = ShaderStageFlags.FragmentBit;
 
-			//And its sky's table, for the same reason - see CoreSkyTable, and g_skyTable in frame.slang, which is the one thing that reads it.
+			//And its sky's table, for the same reason - read only by g_skyTable in frame.slang
 			frameBindings[5].Binding = 5;
 			frameBindings[5].DescriptorType = DescriptorType.CombinedImageSampler;
 			frameBindings[5].DescriptorCount = 1;
 			frameBindings[5].StageFlags = ShaderStageFlags.FragmentBit;
 
+			//And its bake's sheet and volume - see g_bakedSheet in frame.slang and CoreBakedLighting.Portable
+			for ( var i = 6; i < 8; ++i )
+			{
+				frameBindings[i].Binding = (uint)( i + 2 );
+				frameBindings[i].DescriptorType = DescriptorType.CombinedImageSampler;
+				frameBindings[i].DescriptorCount = 1;
+				frameBindings[i].StageFlags = ShaderStageFlags.FragmentBit;
+			}
+
+			//And the other shadow maps beside the sun's pages in 2: its other pages, its movers', the lamps' and theirs - see g_portablePages in frame.slang
+			for ( var i = 8; i < 12; ++i )
+			{
+				frameBindings[i].Binding = (uint)( i + 2 );
+				frameBindings[i].DescriptorType = DescriptorType.CombinedImageSampler;
+				frameBindings[i].DescriptorCount = 1;
+				frameBindings[i].StageFlags = ShaderStageFlags.FragmentBit;
+			}
+
 			var boneLayoutInfo = new DescriptorSetLayoutCreateInfo
 			{
 				SType = StructureType.DescriptorSetLayoutCreateInfo,
-				BindingCount = Tier == RenderTier.Portable ? 6u : 4u,
+				BindingCount = Tier == RenderTier.Portable ? 12u : 4u,
 				PBindings = frameBindings,
 			};
 
@@ -1438,26 +1453,29 @@ internal static unsafe partial class VkDevice
 	//Destroys whatever was made, in the reverse order. Safe on a half-built device, which is when init calls it.
 	private static void Destroy()
 	{
-		//The swapchain holds images from the device and a surface from the instance, so it goes before either of them. Pipelines only
-		//hold the device, so they go anywhere before it - here, after the swapchain has already waited for the GPU to finish with them.
+		//The swapchain holds device images and an instance surface, so it goes before both; pipelines hold only
+		//the device and go after the swapchain has waited for the GPU
 		VkSwapchain.DestroyEverySwapchain();
 
 		//The graveyard next, while the device and the descriptor pool are both still here to destroy its
 		//contents with. The wait is explicit because a headless run may have had no swapchain to wait through.
 		if ( device.Handle != 0 ) VkSubmitter.DeviceWaitIdle();
 
-		//The headset's session before the device it was made on - its swapchain images are the device's, and so are the eyes' views.
+		//The headset's session before its device - its swapchain images and the eyes' views are the device's
 		CoreXr.Shutdown();
 
-		//The portable frame's sun map is the device's own, not a drawer's - into the graveyard with everything else before it is drained.
-		if ( portableSunMap != 0 ) VkTextures.ShadowMapDestroy( portableSunMap );
-		portableSunMap = 0;
+		//The portable frame's sun map is the device's own: into the graveyard before it is drained
+		if ( portableNoShadow != 0 ) VkTextures.ShadowMapDestroy( portableNoShadow );
+		portableNoShadow = 0;
+		Array.Clear( portableShadows );
+
+		VkRays.Destroy();
 
 		DrainGraveyard();
 
 		VkPipelines.DestroyPipelines();
 
-		//And whatever the dialect kept to draw them in - after the pipelines made against it and before the device it was made on.
+		//And what the dialect kept to draw them in - after the pipelines made against it, before its device
 		dialect?.Release();
 
 		//After the pipelines, which were baked through it.
@@ -1499,9 +1517,7 @@ internal static unsafe partial class VkDevice
 		if ( pointSampler.Handle != 0 ) vk.DestroySampler( device, pointSampler, null );
 		if ( shadowSampler.Handle != 0 ) vk.DestroySampler( device, shadowSampler, null );
 		shadowSampler = default;
-		if ( portableShadowSampler.Handle != 0 ) vk.DestroySampler( device, portableShadowSampler, null );
-		portableShadowSampler = default;
-		portableSunMap = 0;
+		portableNoShadow = 0;
 
 		if ( shadowDepthSampler.Handle != 0 ) vk.DestroySampler( device, shadowDepthSampler, null );
 		shadowDepthSampler = default;
@@ -1644,7 +1660,22 @@ internal static unsafe partial class VkDevice
 			//and a device on it would be spoken to in 1.1's words whatever the instance said - see VkDialect.
 			instanceApi = speaks.Minor >= 3 ? Vk.Version13 : speaks.Minor == 2 ? Vk.Version12 : Vk.Version11;
 
-			if ( !CreateInstance( enableValidation ) || !PickPhysicalDevice() || !CreateDevice() )
+			//RADV traces rays in shaders on a card without the hardware (RDNA1), asked before its instance: a second one
+			var picked = CreateInstance( enableValidation ) && PickPhysicalDevice();
+
+			if ( picked && VkRays.AskEmulation( physicalDevice ) )
+			{
+				if ( messenger.Handle != 0 && extDebugUtils is not null ) extDebugUtils.DestroyDebugUtilsMessenger( instance, messenger, null );
+				vk.DestroyInstance( instance, null );
+
+				instance = default;
+				messenger = default;
+				physicalDevice = default;
+
+				picked = CreateInstance( enableValidation ) && PickPhysicalDevice();
+			}
+
+			if ( !picked || !CreateDevice() )
 			{
 				//Whichever of the three gave up has already said so in infoText.
 				Destroy();
@@ -1713,8 +1744,8 @@ internal static unsafe partial class VkDevice
 			if ( into is null || count <= 0 ) return 0;
 			if ( !isReady ) return 0;
 
-			//What the driver says, if it will say. VK_EXT_memory_budget answers per heap, and only the heaps the device
-			//itself owns are the ones that run out - host memory the device can see is the machine's problem, not the card's.
+			//What the driver says, if it will: VK_EXT_memory_budget answers per heap, and only the device's own heaps
+			//run out - host memory it can see is the machine's problem
 			long driverUsed = 0;
 			long driverBudget = 0;
 			long heapSize = 0;
@@ -1869,7 +1900,7 @@ internal static unsafe partial class VkDevice
 	{
 		lock ( renderLock )
 		{
-			//A limit below a block is not a limit, it is a texture that cannot exist: four is one block of a compressed format.
+			//A limit below a block is a texture that cannot exist: four is one compressed block
 			if ( maxEdge < 0 ) maxEdge = 0;
 			if ( maxEdge > 0 && maxEdge < 4 ) maxEdge = 4;
 
@@ -1903,7 +1934,7 @@ internal static unsafe partial class VkDevice
 		lock ( renderLock ) return drawIndirectCount ? 1 : 0;
 	}
 
-	//A little arena of NUL-terminated UTF-8, for the name arrays Vulkan's create-infos want. Freed when the call that made it returns.
+	//An arena of NUL-terminated UTF-8 for the name arrays Vulkan wants; freed when its call returns
 	private readonly ref struct Utf8Names
 	{
 		private readonly byte** slots;

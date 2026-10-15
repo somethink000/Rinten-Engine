@@ -266,7 +266,7 @@ internal static unsafe class CoreRender
 		=> web
 			? BrowserPipelines.Create( vertexSpirv, vertexSize, vertexEntry,
 				pixelSpirv, pixelSize, pixelEntry, vertexLayout, depthTest, topology, blend,
-				depthWrite, cullBack, depthOnly, target, specialize )
+				depthWrite, cullBack, depthOnly, target, specialize, pictureFormat )
 			: VkPipelines.Create( vertexSpirv, vertexSize, vertexEntry,
 				pixelSpirv, pixelSize, pixelEntry, vertexLayout, depthTest, topology, blend,
 				depthWrite, cullBack, depthOnly, target, fillLines, specialize, pictureFormat );
@@ -366,27 +366,37 @@ internal static unsafe class CoreRender
 	//Whether this device draws the sky table from the sky shader; WebGPU can't bind and attach at once
 	internal static bool DrawsSkyTable => !web;
 
-	//-- the frame's pictures - see VkPictures. The browser has none yet. --------
+	//-- the frame's pictures - see VkPictures; the browser's are one level, drawn into without depth --------
 
+	//The portable frame has no compute to store into a picture, so it is never handed one to store into
 	internal static ulong PictureAcquire( int kind, int width, int height, int levels, int storage )
-		=> Portable ? 0 : VkPictures.Acquire( kind, width, height, levels, storage != 0 );
+		=> Portable && storage != 0 ? 0
+			: web ? BrowserSwapchain.PictureAcquire( kind, width, height, levels )
+			: VkPictures.Acquire( kind, width, height, levels, storage != 0 );
 
 	internal static void PictureRelease( ulong picture )
 	{
-		if ( !Portable ) VkPictures.Release( picture );
+		if ( web ) BrowserSwapchain.PictureRelease( picture );
+		else VkPictures.Release( picture );
 	}
 
 	internal static int PictureShape( ulong picture, out int width, out int height, out int levels, out int format )
 	{
 		width = height = levels = format = 0;
-		return Portable ? 0 : VkPictures.Shape( picture, out width, out height, out levels, out format );
+		return web ? BrowserSwapchain.PictureShape( picture, out width, out height, out levels, out format )
+			: VkPictures.Shape( picture, out width, out height, out levels, out format );
 	}
 
 	internal static ulong PictureTexture( ulong picture )
-		=> Portable ? 0 : VkPictures.TextureOf( picture );
+		=> web ? BrowserSwapchain.PictureTexture( picture ) : VkPictures.TextureOf( picture );
 
 	internal static int PictureBegin( ulong picture, int level, float r, float g, float b, float a, int clear, int depth )
-		=> Portable ? 0 : VkFrame.PictureBegin( picture, level, r, g, b, a, clear, depth );
+		=> web ? BrowserSwapchain.PictureBegin( picture, level, r, g, b, a, clear, depth )
+			: VkFrame.PictureBegin( picture, level, r, g, b, a, clear, depth );
+
+	//The world's pass into a picture of the screen's own format and size, or back onto the screen - its texture and size, or nought
+	internal static ulong WorldAside( int on, out int width, out int height )
+		=> web ? BrowserSwapchain.WorldAside( on, out width, out height ) : VkFrame.WorldAside( on, out width, out height );
 
 	internal static int PictureChain( ulong picture, ulong fold )
 		=> Portable ? 0 : VkFrame.PictureChain( picture, fold );
@@ -408,13 +418,21 @@ internal static unsafe class CoreRender
 		else VkFrame.TargetEnd();
 	}
 
-	//A drawer's shadow map - see VkTextures.ShadowMapCreate. None on the web.
+	//A drawer's shadow map - see VkTextures.ShadowMapCreate and BrowserSwapchain.ShadowMapCreate.
 	internal static ulong ShadowMapCreate( int side, int layers, bool readDepth )
-		=> Portable ? 0 : VkTextures.ShadowMapCreate( side, layers, readDepth );
+		=> web ? BrowserSwapchain.ShadowMapCreate( side, layers ) : VkTextures.ShadowMapCreate( side, layers, readDepth );
 
 	internal static void ShadowMapDestroy( ulong map )
 	{
-		if ( !Portable ) VkTextures.ShadowMapDestroy( map );
+		if ( web ) BrowserSwapchain.ShadowMapDestroy( map );
+		else VkTextures.ShadowMapDestroy( map );
+	}
+
+	//The portable frame's shadow maps, which its frame set binds in their own places - see CoreRenderDevice.PortableShadowMap
+	internal static void PortableShadowMap( int slot, ulong map )
+	{
+		if ( web ) BrowserSwapchain.PortableShadowMap( slot, map );
+		else VkDevice.PortableShadowMap( slot, map );
 	}
 
 	internal static uint ShadowMapIndex( ulong map, bool depth )
@@ -427,26 +445,20 @@ internal static unsafe class CoreRender
 	//Narrows the open shadow area's draws, clearing first where asked - see VkFrame.ShadowScissor
 	internal static void ShadowScissor( int x, int y, int width, int height, int clear )
 	{
-		if ( !web ) VkFrame.ShadowScissor( x, y, width, height, clear );
+		if ( web ) BrowserSwapchain.ShadowScissor( x, y, width, height, clear );
+		else VkFrame.ShadowScissor( x, y, width, height, clear );
 	}
 
-	//The browser's map is cleared whole as it opens, and drawn whole.
 	internal static void ShadowArea( int x, int y, int width, int height, int clear )
 	{
-		if ( !web ) VkFrame.ShadowArea( x, y, width, height, clear );
+		if ( web ) BrowserSwapchain.ShadowArea( x, y, width, height, clear );
+		else VkFrame.ShadowArea( x, y, width, height, clear );
 	}
 
-	//The portable frame's one sun map - see CorePortableSun; nought in the full frame, which has pages
-	internal static ulong PortableSunMap()
-		=> !Portable ? 0 : web ? BrowserSwapchain.PortableSunMap() : VkDevice.portableSunMap;
 
 	//Draws left out so far because their pipeline was not ready yet - a page's are baked by the browser
 	//off the frame; a desktop's never wait. Only ever grows: compare it before and after a pass.
 	internal static long DrawsWaiting => web ? BrowserSwapchain.DrawsWaiting : 0;
-
-	//Texels across it.
-	internal static int PortableSunSide
-		=> web ? BrowserSwapchain.PortableSunSide : VkDevice.PortableSunSide;
 
 	internal static int DepthReadable()
 		=> Portable ? 0 : VkFrame.DepthReadable();
@@ -469,6 +481,11 @@ internal static unsafe class CoreRender
 
 	internal static int ScreenResume()
 		=> Portable ? 0 : VkFrame.ScreenResume();
+
+	internal static void WorldShades( int surfaces )
+	{
+		if ( !Portable ) VkFrame.WorldShades( surfaces != 0 );
+	}
 
 	//The near end of the depth range the next draws are squeezed into - see VkFrame.SetDepthCeiling.
 	internal static void SetDepthCeiling( float ceiling )

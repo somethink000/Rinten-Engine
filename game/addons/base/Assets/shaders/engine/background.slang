@@ -33,5 +33,10 @@ V2F MainVs( uint id : SV_VertexID )
 [shader("fragment")]
 float4 MainPs( V2F i ) : SV_Target
 {
-	return float4( EngineTonemap( g_colour.rgb * g_finish.x, g_finish.y ), 1.0 );
+	float3 exposed = max( g_colour.rgb * g_finish.x, 0.0 );
+
+	//Kept past white for the glow's compose, as FinishToScreen keeps it in frame.slang
+	if ( g_finish.y < -0.5 ) return float4( exposed / ( 1.0 + exposed ), 1.0 );
+
+	return float4( EngineTonemap( exposed, g_finish.y ), 1.0 );
 }

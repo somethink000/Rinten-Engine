@@ -40,8 +40,7 @@ float GeometrySmith( float nDotV, float nDotL, Rough r )
 	return v * l;
 }
 
-//x to the fifth, as four multiplies rather than a log and an exp. This is Schlick's exponent
-//and it is on the per-light path, where a pow is three instructions doing the work of one.
+//Fifth power as four multiplies: Schlick's exponent on the per-light path, where pow costs three instructions
 float Fifth( float x )
 {
 	float square = x * x;
@@ -65,6 +64,185 @@ float3 EnvBrdf( float3 f0, float roughness, float nDotV )
 
 	return ( f0 * ( ( a004 * -1.04 ) + r.z ) ) + ( ( a004 * 1.04 ) + r.w );
 }
+
+#ifndef PORTABLE
+//A lamp's shape, its direction.w - see PointLight.AreaShape
+static const float AreaRectangle = 1.0;
+static const float AreaDisc = 2.0;
+static const float AreaTube = 3.0;
+
+//A disc drawn as the octagon of its area: the corners' radius over the disc's
+static const float AreaOctagon = 1.0539;
+
+//Edge integral of a clamped cosine between unit corners, z of its vector form (Hill and Heitz 2017's fit)
+float AreaEdge( float3 a, float3 b )
+{
+	float x = dot( a, b );
+	float y = abs( x );
+	float p = 0.8543985 + ( ( 0.4965155 + ( 0.0145206 * y ) ) * y );
+	float q = 3.4175940 + ( ( 4.1616724 + y ) * y );
+	float t = p / q;
+	float thetaOverSin = x > 0.0 ? t : ( 0.5 * rsqrt( max( 1.0 - ( x * x ), 1e-7 ) ) ) - t;
+
+	return ( ( a.x * b.y ) - ( a.y * b.x ) ) * thetaOverSin;
+}
+
+//A clamped cosine's share of a polygon's solid angle times two pi, after the 2x2 inverse ( x y ; z w ) over x and z,
+//clipped at the horizon on the way round (Sutherland-Hodgman), either winding
+float AreaPolygon( float3 corners[8], uint count, float4 inverse )
+{
+	float sum = 0.0;
+	float3 first = float3( 0.0, 0.0, 1.0 );
+	float3 last = first;
+	bool any = false;
+
+	float3 from = corners[count - 1u];
+	from = float3( ( inverse.x * from.x ) + ( inverse.y * from.z ), from.y, ( inverse.z * from.x ) + ( inverse.w * from.z ) );
+
+	[unroll]
+	for ( uint i = 0u; i < 8u; ++i )
+	{
+		if ( i >= count ) break;
+
+		float3 to = corners[i];
+		to = float3( ( inverse.x * to.x ) + ( inverse.y * to.z ), to.y, ( inverse.z * to.x ) + ( inverse.w * to.z ) );
+
+		//Where the edge crosses the horizon, then the corner itself if it is above
+		if ( ( from.z >= 0.0 ) != ( to.z >= 0.0 ) )
+		{
+			float3 cut = normalize( from + ( ( to - from ) * ( from.z / ( from.z - to.z ) ) ) );
+
+			if ( any ) sum += AreaEdge( last, cut );
+			else first = cut;
+
+			last = cut;
+			any = true;
+		}
+
+		if ( to.z >= 0.0 )
+		{
+			float3 corner = normalize( to );
+
+			if ( any ) sum += AreaEdge( last, corner );
+			else first = corner;
+
+			last = corner;
+			any = true;
+		}
+
+		from = to;
+	}
+
+	if ( any ) sum += AreaEdge( last, first );
+
+	return abs( sum );
+}
+
+//What an area lamp does to a point: diffuse irradiance over its colour x, and its highlight's radiance over its colour yzw
+//LTC (Heitz et al. 2016) with CoreAreaLights' tables; the lamp's falloff kept as the ratio of its own to the inverse square
+float4 AreaLamp( Light light, float3 world, float3 normal, float3 v, float nDotV, float roughness, float3 f0, float distance )
+{
+	float3 forward = light.direction.xyz;
+	float3 centre = light.position.xyz;
+	float shape = light.direction.w;
+	float halfWidth = light.cone.x;
+	float halfHeight = light.shape.z;
+
+	float3 r0;
+	float3 u0;
+	LampAxes( forward, r0, u0 );
+
+	float turn = light.shape.w;
+	float3 right = ( r0 * cos( turn ) ) + ( u0 * sin( turn ) );
+	float3 up = cross( forward, right );
+
+	float3 corners[8];
+	uint count = 4u;
+	float area;
+
+	if ( shape == AreaTube )
+	{
+		//A cylinder seen side on: the panel through its axis facing the point, as wide as the tube
+		float3 across = cross( right, world - centre );
+		float side = length( across );
+		across = side > 1e-5 ? across / side : up;
+
+		corners[0] = centre - ( right * halfWidth ) - ( across * halfHeight );
+		corners[1] = centre + ( right * halfWidth ) - ( across * halfHeight );
+		corners[2] = centre + ( right * halfWidth ) + ( across * halfHeight );
+		corners[3] = centre - ( right * halfWidth ) + ( across * halfHeight );
+		area = 4.0 * halfWidth * halfHeight;
+	}
+	else
+	{
+		//Rectangles and discs give light only forward
+		if ( dot( world - centre, forward ) <= 0.0 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+		if ( shape == AreaDisc )
+		{
+			float reach = halfWidth * AreaOctagon;
+
+			[unroll]
+			for ( uint k = 0u; k < 8u; ++k )
+			{
+				float angle = float( k ) * 0.78539816;
+				corners[k] = centre + ( ( ( right * cos( angle ) ) + ( up * sin( angle ) ) ) * reach );
+			}
+
+			count = 8u;
+			area = 3.14159265 * halfWidth * halfWidth;
+		}
+		else
+		{
+			corners[0] = centre - ( right * halfWidth ) - ( up * halfHeight );
+			corners[1] = centre + ( right * halfWidth ) - ( up * halfHeight );
+			corners[2] = centre + ( right * halfWidth ) + ( up * halfHeight );
+			corners[3] = centre - ( right * halfWidth ) + ( up * halfHeight );
+			area = 4.0 * halfWidth * halfHeight;
+		}
+	}
+
+	if ( area <= 1e-8 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+	//The surface's frame: along the view across it, then about the normal
+	float3 t1 = v - ( normal * dot( v, normal ) );
+	float t1Length = length( t1 );
+	t1 = t1Length > 1e-4 ? t1 / t1Length : ( abs( normal.y ) < 0.9 ? normalize( cross( float3( 0.0, 1.0, 0.0 ), normal ) ) : float3( 1.0, 0.0, 0.0 ) );
+	float3 t2 = cross( normal, t1 );
+
+	[unroll]
+	for ( uint c = 0u; c < 8u; ++c )
+	{
+		if ( c >= count ) break;
+
+		float3 d = corners[c] - world;
+		corners[c] = float3( dot( d, t1 ), dot( d, t2 ), dot( d, normal ) );
+	}
+
+	float diffuse = AreaPolygon( corners, count, float4( 1.0, 0.0, 0.0, 1.0 ) );
+	if ( diffuse <= 0.0 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+	float2 uv = ( float2( roughness, sqrt( 1.0 - saturate( nDotV ) ) ) * ( 63.0 / 64.0 ) ) + ( 0.5 / 64.0 );
+
+	//Frame-uniform - see SkyTableAt.
+	float4 inverse = g_textures[uint( g_frame[0].area.x )].SampleLevel( uv, 0.0 );
+	float2 scale = g_textures[uint( g_frame[0].area.y )].SampleLevel( uv, 0.0 ).xy;
+
+	float specular = AreaPolygon( corners, count, inverse );
+
+	//The lamp's own falloff over the inverse square, held where the shape is near enough to be seen as a shape
+	float reach = distance / max( light.position.w, 0.0001 );
+	float window = saturate( 1.0 - ( reach * reach * reach * reach ) );
+	float square = max( distance * distance, 0.25 * area );
+	float ratio = window * window * ( light.shape.x == 1.0 ? 1.0 : pow( square, 1.0 - light.shape.x ) );
+
+	//Radiance is colour over area; a polygon's integral over two pi is its share of the clamped cosine
+	float perColour = ratio / area;
+	float3 fresnel = ( f0 * scale.x ) + ( ( 1.0 - f0 ) * scale.y );
+
+	return float4( diffuse * 0.5 * perColour, fresnel * ( specular * 0.15915494 * perColour ) );
+}
+#endif
 
 //Everything the shading needs to know about a pixel, whoever worked it out.
 struct Surface
@@ -100,6 +278,13 @@ struct Surface
 
 	//SV_Position.xy, for the screen-space occlusion the frame may have drawn.
 	float2 screen;
+
+#if SURFACE_TRANSMITS
+	//A leaf's or thin cloth's light through it from behind, its colour times its amount; and how tightly the glow of a
+	//light behind it gathers towards the eye. Only where the shader defines SURFACE_TRANSMITS
+	float3 transmission;
+	float transmissionSpread;
+#endif
 };
 
 //The colour, and how much of a mirror the surface is for the passes that come after and never saw it drawn.
@@ -166,8 +351,8 @@ void ApplyDecals( inout Surface s )
 			float3 eyeBox = float3( dot( toEye, d.axisX ), -dot( toEye, d.axisY ), dot( toEye, d.axisZ ) );
 			eyeBox *= rsqrt( max( dot( eyeBox, eyeBox ), 1e-8 ) );
 
-			//Half the height either side of the middle, so the picture as a whole stays where it was
-			//put; the floor under the divide stops a grazing angle sending it off across the box.
+			//Half the height either side of the middle, so the picture stays centred; the floor under the divide
+			//stops a grazing angle sending it across the box
 			float2 offset = eyeBox.xy * ( height - 0.5 ) * d.parallax / max( eyeBox.z, 0.35 );
 			uv += offset;
 
@@ -226,6 +411,9 @@ void ApplyDecals( inout Surface s )
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
+	//This pixel's turn of the soft shadows' taps - see ShadowFilter
+	ShadowTurnAt( s.screen );
+
 	//The decals first, where the frame has any: what they paint is what the lights see - see ApplyDecals.
 	if ( kDecalsOn != 0 ) ApplyDecals( s );
 
@@ -257,6 +445,9 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//With one light at most per pixel this is no loop: a trip count of one drops the back edge - see kManyLights
 	if ( kManyLights == 0 ) count = min( count, 1 );
 
+	//A surface with its own lightmap has the baked lights in it already - see LightBaked
+	bool sheetLit = HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0;
+
 	for ( int index = 0; index < count; ++index )
 	{
 		uint which = LightHere( walk, uint( index ) );
@@ -268,6 +459,43 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		//Out here for the shadow too: a lamp map texel's world size depends on the receiver's distance
 		float distance = 0.0;
+
+#ifndef PORTABLE
+		//A point with a shape (AreaLamp): its own diffuse and highlight, the shadow of its centre
+		if ( kAreaOn != 0 && light.colour.w > 0.5 && light.colour.w < 1.5 && light.direction.w > 0.5 )
+		{
+			LightLamp( which, light );
+
+			distance = length( light.position.xyz - s.world );
+			if ( distance > light.position.w ) continue;
+
+			float3 areaF0 = lerp( float3( 0.04, 0.04, 0.04 ), albedo, metalness );
+			float4 area = AreaLamp( light, s.world, normal, v, nDotV, roughness, areaF0, distance );
+
+			if ( area.x <= 0.0 ) continue;
+
+			//A baked lamp on a lightmapped surface: what movers take of its diffuse taken away, its highlight live
+			bool areaTaken = sheetLit && LightBaked( light );
+			float areaShadow;
+			float areaSeen = areaTaken
+				? LampBakedShade( s.world, geometric, light, distance, areaShadow )
+				: LampShadow( s.world, geometric, light, distance );
+
+			if ( !areaTaken ) areaShadow = areaSeen;
+			if ( areaShadow <= 0.0 && areaSeen <= 0.0 ) continue;
+
+			areaShadow *= areaTaken ? -1.0 : 1.0;
+			uint areaWithholds = LightWithholds( light );
+
+			if ( ( areaWithholds & 1u ) == 0u )
+				litDiffuse += albedo * ( 1.0 - metalness ) / 3.14159265 * light.colour.rgb * ( area.x * areaShadow );
+
+			if ( ( areaWithholds & 2u ) == 0u )
+				litSpecular += light.colour.rgb * area.yzw * areaSeen;
+
+			continue;
+		}
+#endif
 
 		if ( light.colour.w < 0.5 )
 		{
@@ -320,29 +548,66 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float3 wrap = float3( 0.5, 0.2, 0.12 ) * scatter;
 		float3 lit = saturate( ( facing + wrap ) / ( 1.0 + wrap ) );
 
+		//A baked light on a lightmapped surface is in its lightmap: what movers shade of it is taken away, as
+		//UE's stationary lights shadow movers over a lightmap, and its highlight is drawn live as theirs is - a
+		//lightmap's one averaged way per texel blurs every lamp's into one smear
+		bool taken = sheetLit && LightBaked( light );
+
+#if SURFACE_TRANSMITS
+		//Through a leaf or thin cloth: its back to the light, and the glow of a light behind it towards the eye;
+		//a baked light's on a lightmapped surface is in the lightmap already - see BakeScene.Transmission
+		float through = 0.0;
+
+		if ( attenuation > 0.0 && !taken && any( s.transmission > 0.0 ) && ( LightWithholds( light ) & 1u ) == 0u )
+		{
+			float behind = saturate( -dot( geometric, l ) );
+			float glow = pow( saturate( dot( -v, l ) ), s.transmissionSpread );
+			through = ( behind * 0.5 ) + ( glow * ( 0.3 + ( 0.7 * behind ) ) );
+		}
+
+		if ( ( lit.r <= 0.0 && through <= 0.0 ) || attenuation <= 0.0 ) continue;
+#else
 		if ( lit.r <= 0.0 || attenuation <= 0.0 ) continue;
+#endif
 
 		float shadow;
+		float seen = 0.0;
 
-		//Where the bake holds this light's static shadow (Light.Baked); its maps then hold only movers
-		int channel = LightMaskChannel( light );
+#if SURFACE_TRANSMITS
+		//Stepped off the side the light is on, so a sheet lit from behind is not shadowed by itself; one tap serves
+		//the light on its face and the light through it
+		float3 side = dot( geometric, l ) >= 0.0 ? geometric : -geometric;
+#else
+		float3 side = geometric;
+#endif
 
-		if ( light.colour.w < 0.5 )
+		if ( taken )
 		{
-			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow; not the pages
-			//where the mask has the static answer
-			shadow = SunShadow( s.world, geometric, geometric, true, channel < 0 );
-			shadow = BakedShadow( shadow, s.world, geometric, s.lightmap, channel );
+			seen = light.colour.w < 0.5
+				? SunBakedShade( s.world, geometric, shadow )
+				: LampBakedShade( s.world, geometric, light, distance, shadow );
+		}
+		else if ( light.colour.w < 0.5 )
+		{
+			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow
+			shadow = SunShadow( s.world, side, side, true );
 		}
 		else
 		{
 			//Out of the lamp's faces, where it casts - see LampShadow.
-			shadow = LampShadow( s.world, geometric, light, distance );
-			shadow = BakedShadow( shadow, s.world, geometric, s.lightmap, channel );
+			shadow = LampShadow( s.world, side, light, distance );
 		}
 
+#if SURFACE_TRANSMITS
+		if ( through > 0.0 ) litDiffuse += s.transmission * light.colour.rgb * ( through * attenuation * shadow );
+		if ( lit.r <= 0.0 ) continue;
+#endif
+
 		//Shadow blocks only this light; lights add independently, so nothing gives it back
-		if ( shadow <= 0.0 ) continue;
+		if ( !taken ) seen = shadow;
+		if ( shadow <= 0.0 && seen <= 0.0 ) continue;
+
+		float sign = taken ? -1.0 : 1.0;
 
 		//What the light is kept out of - see Light.Contribution.
 		uint withholds = LightWithholds( light );
@@ -396,20 +661,25 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		if ( ( withholds & 2u ) != 0u ) specular = float3( 0.0, 0.0, 0.0 );
 
-		float3 reaching = light.colour.rgb * nDotL * attenuation * shadow;
+		float3 reaching = light.colour.rgb * nDotL * attenuation * seen;
 
 		//A shadow's edge let through redder where light scatters under it.
 		float3 shade = scatter > 0.0
 			? pow( float3( shadow, shadow, shadow ), float3( 1.0, 1.0, 1.0 ) - ( float3( 0.6, 0.25, 0.1 ) * scatter ) )
 			: float3( shadow, shadow, shadow );
 
-		litDiffuse += diffuse * light.colour.rgb * lit * attenuation * shade;
+		litDiffuse += diffuse * light.colour.rgb * lit * attenuation * shade * sign;
 
 		litSpecular += specular * reaching;
 	}
 
 	//A small bright highlight can exceed a half float; clamped so the picture and bloom get the most it can say
 	litSpecular = min( litSpecular, 32768.0.xxx );
+
+#if SURFACE_TRANSMITS
+	//And the sky behind it, a quarter of it; a lightmapped one has its back's light in the lightmap
+	if ( !sheetLit && HasSky() ) litDiffuse += s.transmission * SceneAmbient( SkyAmbient( -geometric ) * SkyAmbientScale() ) * 0.25;
+#endif
 
 	//What the corner of a room can see of the sky, if the frame worked it out. The picture is half the
 	//size of the window, which is why this reads by position rather than by anything the mesh carries.
@@ -435,6 +705,29 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	}
 #endif
 
+	//The light the occlusion's horizons hide, out of last frame's picture: where it is, the occluded share of the
+	//ambient is replaced by it, the bake's included - see IndirectPs in ambient_occlusion.shader
+	float3 screenLight = float3( 0.0, 0.0, 0.0 );
+	float screenVisible = visible;
+	bool screenLit = false;
+
+#ifndef PORTABLE
+	if ( g_frame[0].screenLight.x > 0.5 && g_frame[0].settings.y > 0.0 )
+	{
+		//Frame-uniform - see SkyTableAt.
+		float4 gathered = g_textures[uint( g_frame[0].screenLight.x )].SampleLevel( s.screen / g_frame[0].settings.yz, 0.0 );
+		screenLight = gathered.rgb;
+		screenLit = true;
+
+		//Traced: the share of the rays that got out is what sees the sky and the bake, in place of the horizons' guess
+		if ( g_frame[0].screenLight.y > 0.5 )
+		{
+			visible = saturate( gathered.a );
+			screenVisible = visible;
+		}
+	}
+#endif
+
 	float3 lit = litDiffuse + litSpecular;
 
 	//Lit by the sky table where there is a sky, so a wall facing it takes its colour; none without one
@@ -449,36 +742,121 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//And the scene's own ambient light over both, as much as it asks - see SceneAmbient.
 	sky = SceneAmbient( sky );
 
+	//With no bake, the probe grid's light where it reaches: the sky as it gets in and every bounce, in place of the
+	//sky alone - its sky has the scene's ambient in it already (BakeSky)
+	float3 openSky = sky;
+	bool inGrid = false;
+
+#ifndef PORTABLE
+	float3 gridded;
+	inGrid = HasGrid() && GridLight( s.world, skyward, geometric, gridded );
+	if ( inGrid ) sky = gridded;
+#endif
+
 	//With a bake, its answer replaces the sky and AO guess rather than adding to it
 	float3 ambientSky = sky;
 
-	//Sky visibility from the bake ratio, so indoor floors don't mirror the full sky
-	float skyReach = 1.0;
+	//How much of the sky the reflection sees, so indoor floors don't mirror the full sky; and how much of what probes
+	//saw reaches here, as UE normalises its captures by the bake - a dark corner reflects the room darkly
+	float skyReach = inGrid ? saturate( LightStrength( sky ) / max( LightStrength( openSky ), 1e-4 ) ) : 1.0;
+	float probeReach = skyReach;
 
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
 	{
-		ambientSky = BakedSheet( s.lightmap, normal );
+		//Frame-uniform - see SkyTableAt.
+		SheetSpot spot = SheetSpotAt( uint( g_frame[0].bakedMaps.x ), s.lightmap );
+
+		ambientSky = BakedSheet( spot, normal, geometric ) + BakedGlowSheets( spot );
 		visible = 1.0;
 
-		skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+		//The bounce of the lights left out of the bake, as they are now: at the lightmap's detail where the bake linked
+		//its texels (CoreLiveBounce.Sheet), else from the volume a step off the surface
+		if ( HasBakedBounce() )
+			ambientSky += g_frame[0].bakedTexels.x > 0.5
+				? SheetFacesLinear( uint( g_frame[0].bakedTexels.x ), uint( g_frame[0].bakedMaps.x ), s.lightmap )
+				: BakedBounceSmooth( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), geometric, normal );
+
+		if ( HasBakedSky() && g_frame[0].bakedMaps.z > 0.5 )
+		{
+			//The sky now, from where the texel sees it, as much as it sees - right at any hour without a new bake
+			float4 open = BakedSkySheet( spot );
+			float3 way = dot( open.xyz, open.xyz ) > 1e-4 ? normalize( open.xyz ) : normal;
+
+			ambientSky += SkyLit( way ) * open.w;
+			skyReach = saturate( open.w );
+		}
+		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 	else if ( HasBakedVolume() )
 	{
 		//A step off the surface, so a floor reads the room above it rather than the lattice's layer below.
-		ambientSky = BakedVolume( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), normal );
+		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
+		float3 spot = BakedVolumeSpot( lifted, geometric );
 
-		skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+		ambientSky = BakedVolume( spot, normal ) + BakedGlowVolumes( spot );
+		if ( HasBakedBounce() ) ambientSky += BakedBounce( spot, normal );
+
+		if ( HasBakedSky() )
+		{
+			float seen = BakedSkyVolume( spot, normal );
+
+			ambientSky += SkyLit( normal ) * seen;
+			skyReach = seen;
+		}
+		else skyReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+	}
+#else
+	//The portable frame's bake: no directions and no walls, the sky by the normal, the bounce from the volume
+	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
+	{
+		float4 baked = PortableSheet( s.lightmap );
+
+		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
+		visible = 1.0;
+
+		if ( HasPortableVolume() && g_frame[0].portableBake.w > 0.5 )
+			ambientSky += PortableVolume( s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) ), true ).rgb;
+
+		skyReach = saturate( baked.a );
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
+	}
+	else if ( HasPortableVolume() )
+	{
+		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
+		float4 baked = PortableVolume( lifted, false );
+
+		ambientSky = baked.rgb + ( SkyLit( normal ) * baked.a );
+
+		if ( g_frame[0].portableBake.w > 0.5 ) ambientSky += PortableVolume( lifted, true ).rgb;
+
+		skyReach = saturate( baked.a );
+		probeReach = saturate( LightStrength( ambientSky ) / max( LightStrength( sky ), 1e-4 ) );
 	}
 #endif
 
 	//Metal has no diffuse to light: what it does with the sky is reflect it, which is what the rest of this does.
-	float3 ambient = albedo * ambientSky * ( 1.0 - metalness ) * occlusion * visible;
+	if ( screenLit ) visible = screenVisible;
+
+	float3 ambient = albedo * ( ( ambientSky * visible ) + screenLight ) * ( 1.0 - metalness ) * occlusion;
 
 	//Sky/probe reflection everywhere, not only in probe boxes, so metals aren't black outdoors
 	float3 away = reflect( -v, normal );
 
-	float3 around = EnvironmentAt( probes, s.world, normal, away, roughness ) * skyReach;
+	//The probes' part and the sky's under them, each by its own reach - EnvironmentAt adds them as one, for SSR
+	float skyLeft;
+	float3 probed = ProbesPart( probes, s.world, away, roughness, skyLeft );
+	float3 lookAt = normalize( lerp( away, normal, roughness * roughness ) );
+	float3 mirroredSky = HasSky() ? SkyReflected( lookAt, roughness ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
+	float3 unscaled = probed + ( mirroredSky * skyLeft );
+	float3 around = ( probed * probeReach ) + ( mirroredSky * skyLeft * skyReach );
+
+	//How much of the environment reflection is left after both reaches - what SSR takes the place of
+	float reach = saturate( LightStrength( around ) / max( LightStrength( unscaled ), 1e-4 ) );
 
 	//A normal map can point the reflected ray back into the surface it left, and a floor
 	//does not reflect its own underside. Squared so it is a fade rather than an edge.
@@ -496,7 +874,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 reflectance = EnvBrdf( mirrorColour, roughness, nDotV ) * occlusion * seen * horizon;
 	float3 reflected = around * reflectance;
 
-	float3 shaded = lit + ambient + reflected + s.emission;
+	//Movers' shadows taken from a lightmap never take more than it holds
+	float3 shaded = max( lit + ambient, 0.0 ) + reflected + s.emission;
 
 	//Fog over everything, after emission so a lamp in fog is dimmed rather than floating in front of the haze
 	shaded = ApplyFog( shaded, s.world, EYE_FRAME( camera ).xyz, s.screen );
@@ -516,7 +895,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	o.colour = shaded;
 
 	//Mirror weight for the SSR pass: the exact environment weight used here, gone by half rough
-	float mirror = LightStrength( reflectance ) * skyReach;
+	float mirror = LightStrength( reflectance ) * reach;
 
 	o.mirror = mirror * saturate( 1.0 - ( roughness * 2.0 ) );
 

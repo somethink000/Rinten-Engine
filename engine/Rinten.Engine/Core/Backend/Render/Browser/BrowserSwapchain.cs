@@ -18,7 +18,7 @@ internal static unsafe class BrowserSwapchain
 		public string Format;
 		public ulong Adopted;
 
-		/// <summary>How many layers, which is two for the pictures of a view that draws both of a headset's eyes in one pass and one for every other picture.</summary>
+		/// <summary>Layers: two for a view drawing both headset eyes in one pass, one for every other picture.</summary>
 		public int Layers;
 
 		/// <summary>One, or four for a picture only drawn into and resolved - see Viewport.Samples.</summary>
@@ -52,7 +52,7 @@ internal static unsafe class BrowserSwapchain
 		return true;
 	}
 
-	//What one frame in flight writes into. Two of them per viewport, so the frame the browser is still drawing is not the frame being filled.
+	//What one frame in flight writes into; two a viewport, so the frame the browser draws is not the one filled
 	private sealed class FrameScratch
 	{
 		public int Frame;
@@ -64,13 +64,16 @@ internal static unsafe class BrowserSwapchain
 		public int BonesUsed;
 		public byte[] FrameHost;
 
-		/// <summary>The sun map's view the group was made with - see FrameGroup.</summary>
-		public int GroupSun;
+		/// <summary>The shadow maps' views the group was made with, by slot - see FrameGroup.</summary>
+		public readonly int[] GroupShadows = new int[5];
 
-		/// <summary>The second eye's frame block, where both eyes are drawn at once - see BrowserDevice.SecondFrameBinding. Made with the rest of the scratch and left holding the first eye's copy until somebody writes it.</summary>
+		/// <summary>The bake's sheet and volume views the group holds - see FrameGroup.</summary>
+		public int GroupSheet, GroupVolume;
+
+		/// <summary>The second eye's frame block (SecondFrameBinding); holds the first eye's copy until written.</summary>
 		public int Second;
 
-		/// <summary>A second frame block and a group reading it, for the draws into the sun's map: the light's view where the camera's was - see FramePut. The group holds the stand-in map, not the one being drawn into.</summary>
+		/// <summary>A frame block and group for draws into the sun's map, the light's view in the camera's place.</summary>
 		public int Aside;
 		public int AsideGroup;
 	}
@@ -101,11 +104,15 @@ internal static unsafe class BrowserSwapchain
 		public Picture Screen;
 		public ulong ScreenHandle;
 
-		/// <summary>How many samples the world's pass draws with, which is one for every view and <see cref="WantedSamples"/> for the canvas. Where it is more than one, <see cref="Depth"/> is multisampled too and the world draws into <see cref="Multisampled"/>, which the pass resolves into <see cref="Screen"/> as it closes.</summary>
+		/// <summary>The screen's format and size, which the world's pass draws into while AsideWorldOn.</summary>
+		public Picture AsideWorld;
+		public bool AsideWorldOn, AsideWorldBegun;
+
+		/// <summary>Samples the world's pass draws with: one for views, WantedSamples for the canvas.</summary>
 		public int Samples = 1;
 		public Picture Multisampled;
 
-		/// <summary>The samples of the pass being recorded, which is what picks a pipeline's bake - see BrowserPipelines.Get.</summary>
+		/// <summary>Samples of the pass being recorded, which picks a pipeline's bake.</summary>
 		public int PassSamples = 1;
 
 		public readonly FrameScratch[] Scratch =
@@ -128,7 +135,7 @@ internal static unsafe class BrowserSwapchain
 		public int BoundPushSet;
 		public int BoundPushOffset = -1;
 
-		/// <summary>The push constants written last this frame, and the slot they went to: a draw carrying the same bytes reads that slot instead of filling another. Every batch of an interface sheet carries the one matrix - a write and a slot a batch for nothing. -1 where nothing has been written this frame.</summary>
+		/// <summary>The push bytes last written and their slot, for a draw with the same; -1 for none.</summary>
 		public readonly byte[] LastPush = new byte[BrowserDevice.PushConstantSize];
 		public int LastPushOffset = -1;
 
@@ -144,11 +151,13 @@ internal static unsafe class BrowserSwapchain
 
 	private static Viewport Current => active;
 
-	//Draws left out so far because their pipeline was still being baked - see DrawCommon. Only ever grows; a caller compares it before and after.
+	//Draws left out because their pipeline was still baking - see DrawCommon; only grows, callers compare
 	internal static long DrawsWaiting;
 
 	private static void EndPass()
 	{
+		drawingShadow = null;
+
 		if ( Current.Pass == 0 ) return;
 
 		BrowserNative.EndPass( Current.Pass );
@@ -161,7 +170,7 @@ internal static unsafe class BrowserSwapchain
 		view = 0;
 	}
 
-	//Lets a canvas texture go. Forgotten rather than destroyed: it is the page's, handed out anew each frame and presented by the browser itself.
+	//Lets a canvas texture go: forgotten, not destroyed - the page hands out a new one each frame
 	private static void DropCanvasTexture( ref int image, ref int view )
 	{
 		DropView( ref view );
@@ -216,23 +225,30 @@ internal static unsafe class BrowserSwapchain
 		if ( scratch.Frame == 0 || scratch.Bones == 0 || scratch.Dynamic == 0
 			|| scratch.Aside == 0 || scratch.Second == 0 ) return false;
 
-		scratch.GroupSun = BrowserDevice.shadowView;
-		scratch.BonesGroup = MakeBonesGroup( scratch, scratch.Frame, BrowserDevice.shadowView );
-		scratch.AsideGroup = MakeBonesGroup( scratch, scratch.Aside, BrowserDevice.shadowView );
+		Array.Fill( scratch.GroupShadows, BrowserDevice.shadowView );
+		scratch.GroupSheet = scratch.GroupVolume = BrowserDevice.noBakeView;
+		scratch.BonesGroup = MakeBonesGroup( scratch, scratch.Frame, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
+		scratch.AsideGroup = MakeBonesGroup( scratch, scratch.Aside, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
 		return scratch.BonesGroup != 0 && scratch.AsideGroup != 0;
 	}
 
-	private static int MakeBonesGroup( FrameScratch scratch, int frame, int sun )
+	private static int MakeBonesGroup( FrameScratch scratch, int frame, ReadOnlySpan<int> shadows, int sheet, int volume )
 		=> BrowserDevice.MakeBindGroup( BrowserDevice.boneSetLayout,
 			BrowserDevice.Bind.Buffer( 0, scratch.Bones, BrowserDevice.BoneBlockSize ),
 			BrowserDevice.Bind.Buffer( 1, frame, BrowserDevice.FrameBlockSize ),
-			BrowserDevice.Bind.View( 2, sun ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[0], shadows[0] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[1], shadows[1] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[2], shadows[2] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[3], shadows[3] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[4], shadows[4] ),
 			BrowserDevice.Bind.Sampler( BrowserDevice.ShadowSamplerBinding, BrowserDevice.shadowSampler ),
 			BrowserDevice.Bind.Sampler( BrowserDevice.FilterSamplerBinding, BrowserDevice.clampSampler ),
 			BrowserDevice.Bind.View( 5, BrowserDevice.skyTableView ),
+			BrowserDevice.Bind.View( BrowserDevice.BakedSheetBinding, sheet ),
+			BrowserDevice.Bind.View( BrowserDevice.BakedVolumeBinding, volume ),
 
-			//The second eye's, which only a pass drawing both ever reads. Bound always so that one layout serves both kinds of pass; it holds this frame's
-			//own block until SetupSecondEye writes the other eye's over it, so a shader that read it by mistake would see a whole frame and not rubbish.
+			//The second eye's block, read only by a pass drawing both; bound always so one layout serves both kinds,
+			//holding this frame's own block until SetupSecondEye writes the other eye's
 			BrowserDevice.Bind.Buffer( BrowserDevice.SecondFrameBinding,
 				scratch.Second != 0 ? scratch.Second : frame, BrowserDevice.FrameBlockSize ) );
 
@@ -257,7 +273,8 @@ internal static unsafe class BrowserSwapchain
 			scratch.AsideGroup = 0;
 			scratch.Aside = 0;
 			scratch.Second = 0;
-			scratch.GroupSun = 0;
+			Array.Clear( scratch.GroupShadows );
+			scratch.GroupSheet = scratch.GroupVolume = 0;
 			scratch.DynamicUsed = 0;
 			scratch.PushUsed = 0;
 			scratch.BonesUsed = 0;
@@ -314,6 +331,7 @@ internal static unsafe class BrowserSwapchain
 		DropPicture( ref viewport.SceneNormal );
 		DropPicture( ref viewport.Screen );
 		DropPicture( ref viewport.Multisampled );
+		DropPicture( ref viewport.AsideWorld );
 		viewport.ScreenHandle = 0;
 	}
 
@@ -430,8 +448,8 @@ internal static unsafe class BrowserSwapchain
 		for ( var i = 0; i < passCount; i++ )
 			if ( passShapes[i] == shape ) return i;
 
-		//Full. Everything is forgotten on both sides rather than one entry being picked to throw away: the table only fills when the
-		//views themselves have been remade - a resize, a device lost - and the handful in use then are described again on their next pass.
+		//Full: everything is forgotten on both sides. It only fills when the views were remade - a resize, a lost
+		//device - and those in use are described again on their next pass
 		if ( passCount == passShapes.Length )
 		{
 			BrowserNative.ForgetPasses();
@@ -509,13 +527,13 @@ internal static unsafe class BrowserSwapchain
 		return Current.Pass != 0;
 	}
 
-	//The pass a draw with nowhere else to go lands in: the canvas picture and the depth beside it, cleared, opened on the first draw of a frame.
+	//The pass a draw with nowhere else to go lands in: the canvas and its depth, cleared on a frame's first draw
 	private static bool EnsureWorldPass()
 	{
 		if ( Current.Pass != 0 ) return true;
 		if ( Current.Encoder == 0 ) return false;
 
-		//Opened again after a pass of another kind - the sun's map - it keeps what the world drew before it rather than clearing it away.
+		//Opened again after the sun's map, it keeps what the world drew rather than clearing it
 		var first = !Current.WorldBegun;
 
 		Current.WorldBegun = true;
@@ -524,12 +542,22 @@ internal static unsafe class BrowserSwapchain
 		var colour = Current.Screen.View;
 		if ( colour == 0 ) colour = Current.CurrentColorView;
 
+		//Or the picture the world is drawn aside into, cleared the first time this frame whatever the screen had
+		var clearColour = first;
+
+		if ( Current.AsideWorldOn )
+		{
+			colour = Current.AsideWorld.View;
+			clearColour = !Current.AsideWorldBegun;
+			Current.AsideWorldBegun = true;
+		}
+
 		//Drawn into the samples and averaged into the screen's picture - see Viewport.Samples.
 		if ( Current.Multisampled.View != 0 )
-			return BeginPass( Current.Multisampled.View, 0, Current.Depth.View, Current.Clear, first, first,
+			return BeginPass( Current.Multisampled.View, 0, Current.Depth.View, Current.Clear, clearColour, first,
 				colour, Current.Multisampled.Samples );
 
-		return BeginPass( colour, 0, Current.Depth.View, Current.Clear, first, first );
+		return BeginPass( colour, 0, Current.Depth.View, Current.Clear, clearColour, first );
 	}
 
 	private static void Submit()
@@ -600,7 +628,7 @@ internal static unsafe class BrowserSwapchain
 		var set = BrowserBuffers.ObjectSetGet( geometry, data );
 		if ( set == 0 || Current.Pass == 0 ) return;
 
-		//A pulled draw's own vertices, which is not what the last draw left at group two - so what is remembered there stops being true.
+		//A pulled draw's own vertices, not what the last draw left at group two, so that memory stops being true
 		BrowserNative.SetBindGroup( Current.Pass, 2, set, -1 );
 		Current.BoundObjectGroup = set;
 	}
@@ -624,7 +652,7 @@ internal static unsafe class BrowserSwapchain
 
 		if ( Current.LastPushOffset >= 0 && slot.SequenceEqual( Current.LastPush ) )
 		{
-			//The bytes the last draw wrote, still in their slot: nothing is written over within a frame, so this draw reads them where they are.
+			//The last draw's bytes, still in their slot: nothing is overwritten within a frame, so this draw reads them
 			offset = Current.LastPushOffset;
 		}
 		else
@@ -679,7 +707,7 @@ internal static unsafe class BrowserSwapchain
 		if ( baked == 0 )
 		{
 			//Not drawn because the browser has not finished it yet - which a pass whose result is kept
-			//has to know, or it keeps a picture missing the draw for good. See CorePortableSun.Draw.
+			//has to know, or it keeps a picture missing the draw for good.
 			if ( BrowserPipelines.Baking( pipeline, Current.PassSamples ) ) DrawsWaiting++;
 			return 0;
 		}
@@ -714,34 +742,49 @@ internal static unsafe class BrowserSwapchain
 		return 1;
 	}
 
-	//The frame's group, made again when the sun's map it holds is not the one there is now - the stand-in until the portable frame first asks for a map.
+	//The frame's group, made again when the sun's maps or the bake's pictures it holds are not the ones there are now -
+	//the stand-ins until the portable frame first asks for maps, and while there is no bake
 	private static int FrameGroup( FrameScratch scratch )
 	{
-		var sun = sunMap.View != 0 ? sunMap.View : BrowserDevice.shadowView;
-		if ( scratch.GroupSun == sun ) return scratch.BonesGroup;
+		Span<int> shadows = stackalloc int[5];
+		var same = true;
 
-		var made = MakeBonesGroup( scratch, scratch.Frame, sun );
+		for ( var i = 0; i < shadows.Length; i++ )
+		{
+			shadows[i] = ShadowViewOr( portableMaps[i] );
+			same &= scratch.GroupShadows[i] == shadows[i];
+		}
+
+		var sheet = ViewOr( CoreBakedLighting.PortableSheet );
+		var volume = ViewOr( CoreBakedLighting.PortableVolume );
+
+		if ( same && scratch.GroupSheet == sheet && scratch.GroupVolume == volume ) return scratch.BonesGroup;
+
+		var made = MakeBonesGroup( scratch, scratch.Frame, shadows, sheet, volume );
 		if ( made == 0 ) return scratch.BonesGroup;
 
 		if ( scratch.BonesGroup != 0 ) BrowserNative.Release( scratch.BonesGroup );
 
 		scratch.BonesGroup = made;
-		scratch.GroupSun = sun;
+		shadows.CopyTo( scratch.GroupShadows );
+		scratch.GroupSheet = sheet;
+		scratch.GroupVolume = volume;
 		return made;
+	}
+
+	private static int ShadowViewOr( ulong map )
+		=> map != 0 && shadowMaps.TryGetValue( map, out var found ) ? found.Whole : BrowserDevice.shadowView;
+
+	private static int ViewOr( ulong texture )
+	{
+		var view = texture != 0 ? BrowserTextures.ViewOf( texture ) : 0;
+		return view != 0 ? view : BrowserDevice.noBakeView;
 	}
 
 	//-- the portable frame's sun ----------------------------------------------------------
 
-	//Texels across the sun's map - see CorePortableSun.
-	internal const int PortableSunSide = 2048;
-
-	//The one sun map, the device's own and in every frame group - the same shape as VkDevice.portableSunMap,
-	//for the same reason: the portable frame has no table of pictures to find a drawer's own in by number.
-	private static Picture sunMap;
-	private static ulong sunMapHandle;
-
-	//The portable frame's sky table onto the device - see CoreSkyTable, which works it out, and g_skyTable in frame.slang, which
-	//reads it. The picture is the device's own and is already in every frame group, so a send is the write and nothing else.
+	//The portable frame's sky table onto the device (CoreSkyTable, g_skyTable); the picture is already in
+	//every frame group, so a send is only the write
 	internal static void SendSkyTable( byte* texels, int side )
 	{
 		if ( !BrowserDevice.Ready || BrowserDevice.skyTableImage == 0 ) return;
@@ -751,30 +794,257 @@ internal static unsafe class BrowserSwapchain
 			new Span<byte>( texels, side * side * 8 ) );
 	}
 
-	internal static ulong PortableSunMap()
+	//A drawer's shadow map - see CoreSunPages: its layers read as one array, and each drawn into through its own view
+	private sealed class ShadowMap
 	{
-		if ( sunMapHandle != 0 ) return sunMapHandle;
-		if ( !BrowserDevice.Ready ) return 0;
-
-		if ( !MakePicture( ref sunMap, PortableSunSide, PortableSunSide, BrowserDevice.FormatDepth32,
-				BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding, BrowserDevice.AspectDepth ) )
-			return 0;
-
-		sunMapHandle = nextHandle++;
-		return sunMapHandle;
+		public int Image, Whole, Side;
+		public int[] Layers = [];
 	}
 
-	//Begins drawing into the sun's map, cleared - the whole of it, every time.
+	private static readonly Dictionary<ulong, ShadowMap> shadowMaps = new();
+
+	//The shadow maps the portable frame binds, by slot - see CoreRenderDevice.PortableShadowMap
+	private static readonly ulong[] portableMaps = new ulong[5];
+
+	//The one being drawn into and its side, for ShadowArea's rectangles.
+	private static ShadowMap drawingShadow;
+
+	internal static ulong ShadowMapCreate( int side, int layers )
+	{
+		if ( !BrowserDevice.Ready || side < 1 || layers < 1 ) return 0;
+
+		var made = new ShadowMap { Side = side, Layers = new int[layers] };
+
+		made.Image = BrowserDevice.MakeTexture( side, side, BrowserDevice.FormatDepth32,
+			BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding | BrowserDevice.TextureUse.Layered, 1, layers );
+
+		if ( made.Image != 0 )
+		{
+			made.Whole = BrowserNative.CreateView( made.Image, BrowserDevice.FormatDepth32, BrowserDevice.AspectDepth, 0, 0, 0, "2d-array" );
+
+			for ( var layer = 0; layer < layers; layer++ )
+				made.Layers[layer] = BrowserNative.CreateView( made.Image, BrowserDevice.FormatDepth32, BrowserDevice.AspectDepth, 0, 0, layer, "2d" );
+		}
+
+		if ( made.Image == 0 || made.Whole == 0 || made.Layers.Contains( 0 ) )
+		{
+			DropShadowMap( made );
+			return 0;
+		}
+
+		var handle = nextHandle++;
+		shadowMaps[handle] = made;
+		return handle;
+	}
+
+	internal static void ShadowMapDestroy( ulong handle )
+	{
+		if ( !shadowMaps.Remove( handle, out var found ) ) return;
+
+		if ( ReferenceEquals( drawingShadow, found ) ) drawingShadow = null;
+		DropShadowMap( found );
+	}
+
+	private static void DropShadowMap( ShadowMap map )
+	{
+		foreach ( var view in map.Layers ) if ( view != 0 ) BrowserNative.Release( view );
+		if ( map.Whole != 0 ) BrowserNative.Release( map.Whole );
+		if ( map.Image != 0 ) BrowserNative.Release( map.Image );
+	}
+
+	internal static void PortableShadowMap( int slot, ulong map )
+	{
+		if ( slot >= 0 && slot < portableMaps.Length ) portableMaps[slot] = map;
+	}
+
+	//Begins drawing one layer of a shadow map, kept - a bake clears only its own rectangle, see ShadowArea
 	internal static int ShadowBegin( ulong handle, int layer )
 	{
-		if ( !Current.Recording || handle == 0 || handle != sunMapHandle || layer != 0 ) return 0;
+		if ( !Current.Recording || !shadowMaps.TryGetValue( handle, out var map ) || layer < 0 || layer >= map.Layers.Length ) return 0;
 
 		Span<float> none = [0, 0, 0, 0];
-		return BeginPass( 0, 0, sunMap.View, none, false, true ) ? 1 : 0;
+		if ( !BeginPass( 0, 0, map.Layers[layer], none, false, false ) ) return 0;
+
+		drawingShadow = map;
+		return 1;
 	}
 
-	//A second frame block, which the draws read once FrameUse says so - see VkFrame.FrameBlockPut. One a frame: a page writes
-	//a buffer before anything the frame recorded runs, so a second would be the first over again for every draw that read it.
+	//Narrows the open shadow layer's next draws to a rectangle, cleared to the far plane where asked - see CoreLampMaps.Into
+	internal static void ShadowScissor( int x, int y, int width, int height, int clear )
+	{
+		if ( !Current.Recording || Current.Pass == 0 || drawingShadow is not { } map ) return;
+
+		var left = Math.Clamp( x, 0, map.Side );
+		var top = Math.Clamp( y, 0, map.Side );
+		var right = Math.Clamp( x + width, left, map.Side );
+		var bottom = Math.Clamp( y + height, top, map.Side );
+
+		if ( right <= left || bottom <= top ) return;
+
+		BrowserNative.SetScissorRect( Current.Pass, left, top, right - left, bottom - top );
+
+		if ( clear != 0 ) ClearShadow();
+	}
+
+	//The depth under the scissor back to the far plane; a draw of its own on WebGPU, past which the pass's pipeline and groups are said again
+	private static void ClearShadow()
+	{
+		BrowserNative.ClearDepth( Current.Pass );
+		Current.BoundPipeline = 0;
+		Current.BoundTexture = 0;
+		ForgetBindings();
+	}
+
+	//Where in the open shadow layer the next draws land, and the rectangle cleared to the far plane first where asked
+	internal static void ShadowArea( int x, int y, int width, int height, int clear )
+	{
+		if ( !Current.Recording || Current.Pass == 0 || drawingShadow is not { } map ) return;
+
+		var left = Math.Clamp( x, 0, map.Side );
+		var top = Math.Clamp( y, 0, map.Side );
+		var right = Math.Clamp( x + width, left, map.Side );
+		var bottom = Math.Clamp( y + height, top, map.Side );
+
+		if ( right <= left || bottom <= top ) return;
+
+		BrowserNative.SetViewport( Current.Pass, left, top, right - left, bottom - top, 0.0f, 1.0f );
+		BrowserNative.SetScissorRect( Current.Pass, left, top, right - left, bottom - top );
+
+		if ( clear != 0 ) ClearShadow();
+	}
+
+	//A second frame block the draws read once FrameUse says so - see VkFrame.FrameBlockPut. One a frame: a page
+	//writes a buffer before anything recorded runs, so a second would be the first again
+	//-- the frame's pictures: one level each, drawn into without depth - see CoreRender.PictureAcquire ----------------
+
+	private sealed class HeldPicture
+	{
+		public Picture Picture;
+		public bool Held;
+	}
+
+	private static readonly Dictionary<ulong, HeldPicture> pictures = new();
+
+	//Given back and kept for the next request of their shape; past this many the oldest goes
+	private static readonly List<ulong> givenBack = new();
+	private const int KeptBack = 12;
+
+	//Formats as PictureShape says them - what BrowserPipelines bakes a pipeline for the picture in
+	internal const int PictureHalves = 1, PictureBytes = 2;
+
+	internal static string PictureFormatName( int format ) => format == PictureBytes ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+
+	internal static ulong PictureAcquire( int kind, int width, int height, int levels )
+	{
+		if ( !BrowserDevice.Ready || width < 1 || height < 1 || levels != 1 ) return 0;
+
+		var format = kind == (int)CoreRender.PictureKind.Colour ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+
+		foreach ( var id in givenBack )
+		{
+			var one = pictures[id];
+			if ( one.Picture.Format != format || one.Picture.Width != width || one.Picture.Height != height ) continue;
+
+			givenBack.Remove( id );
+			one.Held = true;
+			return id;
+		}
+
+		var made = new HeldPicture { Held = true };
+
+		if ( !MakePicture( ref made.Picture, width, height, format,
+				BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding ) )
+		{
+			DropPicture( ref made.Picture );
+			return 0;
+		}
+
+		made.Picture.Adopted = BrowserTextures.Adopt( made.Picture.View );
+
+		var handle = nextHandle++;
+		pictures[handle] = made;
+		return handle;
+	}
+
+	internal static void PictureRelease( ulong picture )
+	{
+		if ( !pictures.TryGetValue( picture, out var one ) || !one.Held ) return;
+
+		one.Held = false;
+		givenBack.Add( picture );
+
+		if ( givenBack.Count <= KeptBack ) return;
+
+		var oldest = givenBack[0];
+		givenBack.RemoveAt( 0 );
+
+		if ( pictures.Remove( oldest, out var gone ) ) DropPicture( ref gone.Picture );
+	}
+
+	internal static int PictureShape( ulong picture, out int width, out int height, out int levels, out int format )
+	{
+		width = height = levels = format = 0;
+		if ( !pictures.TryGetValue( picture, out var one ) ) return 0;
+
+		width = one.Picture.Width;
+		height = one.Picture.Height;
+		levels = 1;
+		format = one.Picture.Format == BrowserDevice.FormatRgba8 ? PictureBytes : PictureHalves;
+		return 1;
+	}
+
+	internal static ulong PictureTexture( ulong picture ) => pictures.TryGetValue( picture, out var one ) ? one.Picture.Adopted : 0;
+
+	//Its one level as what the next draws fill, until TargetEnd; no depth here, and a discard is a clear
+	internal static int PictureBegin( ulong picture, int level, float r, float g, float b, float a, int clear, int depth )
+	{
+		if ( !Current.Recording || level != 0 || depth != 0 || !pictures.TryGetValue( picture, out var one ) ) return 0;
+
+		Span<float> colour = [r, g, b, a];
+		if ( !BeginPass( one.Picture.View, 0, 0, colour, clear != 0, false ) ) return 0;
+
+		Current.CurrentTarget = BrowserDevice.Target.Picture;
+		return 1;
+	}
+
+	//The world's pass into a picture of the screen's format, so its pipelines draw there unchanged - that picture's
+	//texture; or, turned off, the pass closed so the next draw opens the screen's again, keeping what it had
+	internal static ulong WorldAside( int on, out int width, out int height )
+	{
+		width = height = 0;
+		if ( !Current.Recording || Current.Screen.Layers > 1 ) return 0;
+
+		if ( on == 0 )
+		{
+			if ( !Current.AsideWorldOn ) return 0;
+
+			EndPass();
+			Current.AsideWorldOn = false;
+			return 0;
+		}
+
+		var aside = Current.AsideWorld;
+
+		if ( aside.View == 0 || aside.Width != Current.Width || aside.Height != Current.Height )
+		{
+			if ( !MakePicture( ref Current.AsideWorld, Current.Width, Current.Height, BrowserDevice.ScreenFormat,
+					BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding ) )
+			{
+				DropPicture( ref Current.AsideWorld );
+				return 0;
+			}
+
+			Current.AsideWorld.Adopted = BrowserTextures.Adopt( Current.AsideWorld.View );
+		}
+
+		EndPass();
+		Current.AsideWorldOn = true;
+
+		width = Current.Width;
+		height = Current.Height;
+		return Current.AsideWorld.Adopted;
+	}
+
 	internal static ulong FramePut( float* data, int floatCount )
 	{
 		if ( !Current.Recording || data is null || floatCount <= 0 ) return 0;
@@ -802,8 +1072,9 @@ internal static unsafe class BrowserSwapchain
 		foreach ( var pair in swapchains ) DropViewport( pair.Value );
 		foreach ( var pair in views ) DropViewport( pair.Value );
 
-		DropPicture( ref sunMap );
-		sunMapHandle = 0;
+		foreach ( var pair in shadowMaps ) DropShadowMap( pair.Value );
+		shadowMaps.Clear();
+		Array.Clear( portableMaps );
 
 		swapchains.Clear();
 		views.Clear();
@@ -862,8 +1133,8 @@ internal static unsafe class BrowserSwapchain
 		return handle;
 	}
 
-	//What the canvas's world is drawn with: the player's anti-aliasing setting (RenderSettings.AntiAliasQuality, which writes DrawSettings.Msaa),
-	//none by default. Any multisampling is four samples - the one count WebGPU promises besides one; WebGL2 is given as many as it has up to that.
+	//The canvas's anti-aliasing (RenderSettings.AntiAliasQuality → DrawSettings.Msaa), none by default; four samples,
+	//the one count WebGPU promises besides one, or WebGL2's most up to that
 	private static int WantedSamples => Rinten.Rendering.DrawSettings.Msaa >= 2 ? 4 : 1;
 
 	//Matches sbc_window_kind: the browser's canvas.
@@ -944,6 +1215,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Encoder = BrowserNative.CreateCommandEncoder();
 		viewport.Recording = true;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		viewport.UsingAside = false;
 		viewport.CurrentTarget = BrowserDevice.Target.Screen;
 		viewport.Clear[0] = r;
@@ -981,7 +1253,7 @@ internal static unsafe class BrowserSwapchain
 
 		var bytes = Math.Min( floatCount * sizeof( float ), BrowserDevice.FrameBlockSize );
 
-		//Into the same host array: it is only a staging copy, and the first eye's block has already been sent from it by FrameSetup.
+		//Into the same host array: a staging copy, and FrameSetup has already sent the first eye's block from it
 		new ReadOnlySpan<byte>( data, bytes ).CopyTo( scratch.FrameHost );
 		BrowserNative.WriteBuffer( scratch.Second, 0, scratch.FrameHost );
 		return 1;
@@ -1026,7 +1298,7 @@ internal static unsafe class BrowserSwapchain
 
 	internal static void TargetEnd() => EndPass();
 
-	//Ends the pass so the depth it wrote can be read, which on this backend is all being readable takes: there is no barrier to put in.
+	//Ends the pass so the depth it wrote can be read; this backend needs no barrier for that
 	internal static int DepthReadable()
 	{
 		EndPass();
@@ -1066,7 +1338,7 @@ internal static unsafe class BrowserSwapchain
 
 	internal static ulong FrameCount( ulong handle ) => Find( handle )?.Presented ?? 0;
 
-	//What a frame cost, as far as a page can say: nothing about the GPU, which a browser does not report, and what the renderer knows it is holding.
+	//What a frame cost, as far as a page can say: nothing of the GPU, and what the renderer holds
 	internal static int ProfileStats( ulong viewport, float* outValues, int count )
 	{
 		if ( outValues is null || count <= 0 ) return 0;
@@ -1091,7 +1363,7 @@ internal static unsafe class BrowserSwapchain
 	{
 		if ( !BrowserDevice.Ready || width <= 0 || height <= 0 || layers < 1 || layers > 2 ) return 0;
 
-		//Asked for two and the browser cannot: told no, rather than drawing one eye's picture into both and calling it stereo.
+		//Asked for two and the browser cannot: told no, rather than one eye's picture drawn into both
 		if ( layers > 1 && BrowserNative.XrStereo() == 0 ) return 0;
 
 		var made = new Viewport { Width = width, Height = height };
@@ -1149,6 +1421,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Clear[2] = b;
 		viewport.Clear[3] = a;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		return 1;
 	}
 
@@ -1175,6 +1448,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Encoder = BrowserNative.CreateCommandEncoder();
 		viewport.Recording = true;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		viewport.Clear[0] = r;
 		viewport.Clear[1] = g;
 		viewport.Clear[2] = b;
@@ -1208,7 +1482,7 @@ internal static unsafe class BrowserSwapchain
 	internal static ulong ViewTexture( ulong handle )
 		=> views.TryGetValue( handle, out var viewport ) ? viewport.ScreenHandle : 0;
 
-	//Reading a picture back is a promise in a page and cannot answer inside a frame at all, so nothing is read and the caller is told nothing was.
+	//A readback is a promise in a page and cannot answer inside a frame: nothing is read, and the caller is told
 	internal static int ViewRead( ulong handle, byte* outPixels, int capacity ) => 0;
 
 	internal static int ViewReadLayered( ulong handle, byte* outPixels, int capacity ) => 0;
@@ -1313,7 +1587,7 @@ internal static unsafe class BrowserSwapchain
 		return 1;
 	}
 
-	//A run of copies of one mesh, drawn once: the copies' own numbers in the ring slot the frame's group is bound at - see instanced_surface.slang.
+	//A run of copies of one mesh, drawn once: their numbers in the ring slot the frame's group is bound at
 	internal static int DrawIndexedInstancedBlock( ulong pipeline, ulong vertexBuffer, ulong indexBuffer,
 		int indexCount, int instanceCount, uint block, int firstIndex, int firstVertex,
 		ulong texture, byte* pushData, int pushSize )

@@ -194,7 +194,8 @@ public abstract partial class PanelComponent : Component, IPanelComponent, Compo
 }
 
 //A panel where we control the tree build.
-file class CustomBuildPanel : Panel
+//Named, not file-local: a web export keeps reflection metadata only for named types, and the tick reads its overrides by it
+internal sealed class CustomBuildPanel : Panel
 {
 	PanelComponent component;
 	Action<RenderTreeBuilder> treeBuilder;

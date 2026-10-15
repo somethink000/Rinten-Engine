@@ -30,13 +30,13 @@ internal sealed class CoreSceneTables
 		/// <summary>How many times the instance has been put somewhere else - what tells a shadow page baked with it where it used to stand from one baked where it stands now, even when the sphere came out the same. See CoreCasters.</summary>
 		public uint MoveCount;
 
-		/// <summary>One while this instance is moving, nought once it has held still long enough - which of the shadow maps it is drawn into: the ones drawn again every frame, not the pages of the still world. See CoreCasters and Takes in the cull.</summary>
+		/// <summary>One while moving, nought once still a while: whether it goes in the maps drawn every frame.</summary>
 		public uint Moving;
 
 		/// <summary>What its clusters' error is multiplied by in every view's cut - see ModelRenderer.LodBias.</summary>
 		public float LodScale;
 
-		/// <summary>Which of the project's level-of-detail groups scales that error with distance: its row plus one, nought for none - see Rendering.LodGroups.</summary>
+		/// <summary>The level-of-detail group scaling its error with distance: row plus one, nought for none.</summary>
 		public uint LodGroup;
 	}
 
@@ -63,7 +63,7 @@ internal sealed class CoreSceneTables
 		/// <summary>Whether it said it is here for a moment - see SceneObjectFlags.NeverStill.</summary>
 		public bool NeverStill;
 
-		/// <summary>Stands for nothing in the scene: a model at a place, handed over once and never asked about again - see <see cref="AddStatic"/>.</summary>
+		/// <summary>Stands for nothing in the scene: a model at a place, handed over once - see AddStatic.</summary>
 		public bool Static;
 		public Transform StaticTransform;
 		public bool StaticShadows;
@@ -93,7 +93,7 @@ internal sealed class CoreSceneTables
 		public int MaterialFirst;
 		public int MaterialCount;
 
-		/// <summary>Max finest-level triangles per camera list (one-sided, two-sided, cut-out); sizes the cull's runs</summary>
+		/// <summary>Most finest-level triangles per camera list (one-sided, two-sided, cut-out).</summary>
 		public int OneSided, TwoSided, CutOut;
 
 		/// <summary>And the triangles of its parts that move their own vertices, kept apart from the three above.</summary>
@@ -114,10 +114,10 @@ internal sealed class CoreSceneTables
 		/// <summary>Whether the resolve got as far as reading a bag of numbers - see <see cref="Says"/>.</summary>
 		public bool SaysKnown;
 
-		/// <summary>Where each of those numbers goes, found once with the declarations - see CoreShaderParams.PlanOf.</summary>
+		/// <summary>Where each of those numbers goes - see CoreShaderParams.PlanOf.</summary>
 		public CoreShaderParams.DrawPlan SaysPlan;
 
-		/// <summary>Whether it is drawn the classic way - posed, morphed, pulled, or with a shader the raster cannot take - rather than from its clusters.</summary>
+		/// <summary>Whether it is drawn the classic way - posed, morphed, pulled - rather than from clusters.</summary>
 		public bool Loose;
 
 		public bool Skinned;
@@ -126,27 +126,27 @@ internal sealed class CoreSceneTables
 		/// <summary>Which sync of the scene's renderers last saw this one - see SyncRenderers.</summary>
 		public int SeenBy;
 
-		/// <summary>Whether anything is driving this one's blend shapes - a model with shapes nobody set draws as its base shape.</summary>
+		/// <summary>Whether anything drives its blend shapes; with none set it draws its base shape.</summary>
 		public bool Morphed;
 
-		/// <summary>A skinned or shaped thing drawn through its clusters: the card poses its vertices into a range of the pool each frame.</summary>
+		/// <summary>A skinned or shaped thing through its clusters: its vertices posed into the pool each frame.</summary>
 		public bool Posed;
 		public long PosedAt = -1;
 		public int PosedCount;
 		public long PaletteAt = -1;
 		public int PaletteCount;
 
-		/// <summary>Where its blend shapes are summed on the card, a range of <see cref="ShapeSums"/> a vertex long - -1 where nothing drives its shapes.</summary>
+		/// <summary>Where its blend shapes are summed, a vertex long range of ShapeSums; -1 for none.</summary>
 		public long ShapesAt = -1;
 		public int ShapesCount;
 
-		/// <summary>This frame's weights, kept so asking for them every frame makes nothing - read by CoreMeshRender.Skin, which dispatches a shape for each that is not nought.</summary>
+		/// <summary>This frame's weights, kept so asking makes nothing - read by CoreMeshRender.Skin.</summary>
 		public float[] ShapeWeights;
 
 		/// <summary>A hash of the bone matrices and the blend shape weights this one was last posed with.</summary>
 		public ulong PoseHash;
 
-		/// <summary>What its range of the pool was last posed with: the pose's hash, the range, and the pool's generation. Posed again only when one of them moved - see CoreMeshRender.Skin.</summary>
+		/// <summary>What its pool range was last posed with: hash, range, pool generation - see Skin.</summary>
 		public ulong SkinnedHash;
 		public long SkinnedAt = -1;
 		public int SkinnedGeneration = -1;
@@ -236,7 +236,7 @@ internal sealed class CoreSceneTables
 	internal static long ObjectsResolved;
 	internal static long Syncs;
 
-	//The slots whose model has blend shapes in it - the only ones worth asking whether anything is driving them. See the poll in Sync.
+	//The slots whose model has blend shapes - the only ones worth asking about; see the poll in Sync
 	private readonly List<int> morphable = new();
 
 	//Slots posed each frame, so PoseAll needn't walk the whole table; compacted as it walks
@@ -314,9 +314,21 @@ internal sealed class CoreSceneTables
 	internal ref InstanceRecord RecordAt( int index ) => ref records[index];
 
 	//Brings the tables up to date with the scene.
+	/// <summary>Whether the scene has a bake, so all that is not static casts as moving - see CoreCasters.</summary>
+	internal bool Movable { get; private set; }
+
 	internal void Sync( Scene scene )
 	{
 		var rebuiltAll = false;
+
+		//A bake came or went: every record's flags say again what of it moves
+		var baked = CoreBakedLighting.Baked( scene );
+
+		if ( baked != Movable )
+		{
+			Movable = baked;
+			rebuiltAll = true;
+		}
 
 		//Collect moved renderers once per loop turn: CullMoved is drained, so later drawers would see stops
 		var turn = EngineLoop.LoopFrames;
@@ -325,7 +337,7 @@ internal sealed class CoreSceneTables
 		{
 			syncedAt = turn;
 
-			//Before Moved is emptied: what it holds is last turn's movers, and telling them apart from this turn's is the whole of ClearMoving.
+			//Before Moved is emptied: it holds last turn's movers, which ClearMoving tells from this turn's
 			ClearMoving();
 
 			Moved.Clear();
@@ -341,7 +353,7 @@ internal sealed class CoreSceneTables
 			resources = CoreResources.Generation;
 			pictures = CoreResources.PictureGeneration;
 			paths = Rinten.Rendering.DrawSettings.PathGeneration;
-			rebuiltAll = !picturesOnly;
+			rebuiltAll = rebuiltAll || !picturesOnly;
 		}
 
 		if ( lodGroups != Rinten.Rendering.LodGroups.Generation )
@@ -361,8 +373,8 @@ internal sealed class CoreSceneTables
 
 		var world = scene.SceneWorld;
 
-		//On the membership count rather than on the version. The version counts every touch of every object in the world, so a scene with particles in it
-		//has a different one every frame and this walked all six thousand objects each time to find the same six thousand - see SceneWorld.Membership.
+		//On the membership count, not the version: particles change the version every frame, and this walked
+		//every object each time to find the same ones - see SceneWorld.Membership
 		if ( world is not null && world.Membership != worldMembership )
 		{
 			worldMembership = world.Membership;
@@ -371,7 +383,7 @@ internal sealed class CoreSceneTables
 
 		CoreRenderDevice.ZoneEnd();
 
-		//The ones that moved say so through the renderer's list, which is everybody's: an entry of another scene is put back.
+		//The ones that moved say so through the renderer's list, which is everybody's: another scene's go back
 		var moved = ModelRenderer.CullMoved;
 		var kept = 0;
 
@@ -463,8 +475,8 @@ internal sealed class CoreSceneTables
 				AskInParallel();
 			}
 
-			//And the one thing a renderer cannot say for itself: whether anything has begun or stopped driving its blend shapes. Nothing sets those
-			//through the renderer, so there is nowhere to put the telling - but a model that has shapes at all is rare, and only those are asked.
+			//And what a renderer cannot say itself: whether its blend shapes began or stopped being driven;
+			//only models with shapes, which are rare, are asked
 			var shaped = 0;
 
 			for ( var i = 0; i < morphable.Count; i++ )
@@ -619,7 +631,7 @@ internal sealed class CoreSceneTables
 			Give( slot );
 		}
 
-		//The flat list the frame walks. Built here because here is the only place the membership changes, and this runs when it does.
+		//The flat list the frame walks, built here as the only place membership changes
 		objectSlots.Clear();
 
 		foreach ( var (_, slot) in byObject ) objectSlots.Add( slot );
@@ -710,7 +722,7 @@ internal sealed class CoreSceneTables
 
 	private void AskInParallel()
 	{
-		//Kept delegates. Three of them made afresh each frame, plus the closure they would shut the list into, is four allocations a frame for nothing.
+		//Kept delegates: making three and their closure each frame is four allocations for nothing
 		if ( askOne is null )
 		{
 			takeMarks = () =>
@@ -724,8 +736,8 @@ internal sealed class CoreSceneTables
 				}
 			};
 
-			//A run at a time, not a slot at a time. The pool calls this once per index otherwise, and an entry is a reference: a worker walking
-			//a contiguous run of slots reads the table the way it is laid out, where one walking every eighth slot reads a cache line for each.
+			//A run at a time, not a slot at a time: a worker walking contiguous slots reads the table as laid out,
+			//where one walking every eighth reads a cache line each
 			askOne = ( c, _, marks ) =>
 			{
 				var slots = askingSlots;
@@ -956,7 +968,7 @@ internal sealed class CoreSceneTables
 
 			if ( entry.Morphed != DrivesMorphs( entry ) ) return Since.Changed;
 
-			//A renderer that moved says so through CullMoved, which Sync has already walked - there is nothing to tell from its fields.
+			//A renderer that moved says so through CullMoved, which Sync has walked
 			return Since.Nothing;
 		}
 
@@ -1068,8 +1080,8 @@ internal sealed class CoreSceneTables
 		{
 			model = found.RenderingEnabled ? found.Model : null;
 			transform = found.Transform;
-			//The colour, with the alpha forced whole: a hand-placed object's tint is a colouring, and letting its alpha through would make
-			//the instance translucent - off the cluster path, a draw of its own, thousands of them in a scene with particles. See ColorTint.
+			//The colour with alpha forced whole: a tint is a colouring, and its alpha would make the instance
+			//translucent - off the cluster path, a draw of its own; see ColorTint
 			tint = found.ColorTint.WithAlpha( 1.0f );
 			groups = found.MeshGroupMask;
 			meshIndex = found.MeshIndex;
@@ -1160,8 +1172,8 @@ internal sealed class CoreSceneTables
 				overCombo = CoreResources.LiveCombo( over );
 				overPath = over.ResourcePath;
 
-				//An override replaces the material, so it replaces its tint as well. It used to take the pictures and the shader and leave the tint of the material
-				//it had replaced - so an override drew in the colour of whatever the model happened to wear, and one whose whole content is a flat colour drew white.
+				//An override replaces the material, so its tint too - otherwise a flat-coloured override would draw
+				//in whatever the model wore, or white
 				overTint = CoreResources.LiveTint( over );
 			}
 		}
@@ -1170,10 +1182,10 @@ internal sealed class CoreSceneTables
 		//driven face is posed on the card and drawn out of its clusters like everything else.
 		var animating = entry.Skinned && mesh.IsSkinned;
 
-		//A skinned thing goes through the clusters where it can: the card poses its vertices each frame and the finest clusters draw from those.
+		//A skinned thing goes through the clusters where it can: its vertices are posed each frame
 		entry.Morphed = DrivesMorphs( entry );
 
-		//Put on the short list of things worth asking about their shapes, once. Taken off again by the poll itself when the model stops having any.
+		//On the short list of things worth asking about shapes, once; the poll takes it off when it has none
 		if ( ( entry.Renderer is not null || entry.Object is not null ) && mesh.MorphCount > 0 && !morphable.Contains( slot ) )
 			morphable.Add( slot );
 
@@ -1202,7 +1214,7 @@ internal sealed class CoreSceneTables
 			if ( posedRadius > 0.0f ) { centre = posedCentre; radius = posedRadius; }
 		}
 
-		//A layer drawn after the world is drawn the classic way, out of the frame's queue for it: the cull's camera never takes it.
+		//A layer drawn after the world goes the classic way, from the frame's queue; the cull never takes it
 		var loose = !Rinten.Rendering.DrawSettings.Clusters || ( animating && !posedNow ) ||
 			mesh.MeshSlot < 0 || mesh.Pulled || ( entry.Morphed && !posedNow ) || ownAttributes ||
 			entry.Layer != DrawLayer.Game;
@@ -1270,8 +1282,8 @@ internal sealed class CoreSceneTables
 				continue;
 			}
 
-			//Into the list the cull will put this part's clusters in - the same rule it asks, alpha before two-sided. See CullCluster. A part that moves its own
-			//vertices is counted apart: it takes an entry in one of those lists like any other, and writes nothing into the run of indices they are sized by.
+			//Into the list the cull puts this part's clusters in - alpha before two-sided, see CullCluster; a part
+			//moving its own vertices is counted apart and writes nothing into the runs those size
 			var triangles = part.IndexCount / 3;
 			if ( CoreSceneRenderer.MovesVertices( drawn.Shader, drawn.Combo ) ) moving += triangles;
 			else if ( drawn.Masked ) cutOut += triangles;
@@ -1318,11 +1330,13 @@ internal sealed class CoreSceneTables
 		if ( renderType == ModelRenderer.ShadowRenderType.Off ) flags |= CoreMeshShaders.InstanceNoShadow;
 		if ( renderType == ModelRenderer.ShadowRenderType.ShadowsOnly ) flags |= CoreMeshShaders.InstanceShadowOnly;
 		if ( square ) flags |= CoreMeshShaders.InstanceSquare;
-		if ( entry.NeverStill ) flags |= CoreMeshShaders.InstanceNeverStill;
+		//With a bake, what is not static is never still: the bake holds only the static, so it casts into the movers' maps
+		if ( entry.NeverStill || ( Movable && entry.Renderer is { } baked && baked.GameObject is { IsStatic: false } ) )
+			flags |= CoreMeshShaders.InstanceNeverStill;
 
-		//Its place in the baked atlas, which is what a surface reads g_object as - see ModelRenderer.LightmapRect. Only a renderer can
-		//have one: the bake finds what it lights by its component. What an object said about itself goes in the said numbers below.
-		var numbers = entry.Renderer is { } lit ? lit.LightmapRect : default;
+		//Its place in the baked atlas, read as g_object: a renderer's (ModelRenderer.LightmapRect), else its object's
+		//(a MeshComponent's and its cells'); an object's own numbers go in the said ones below
+		var numbers = entry.Renderer is { } lit ? lit.LightmapRect : entry.Object?.LightmapRect ?? default;
 
 		Span<float> said = stackalloc float[CoreShaderParams.DrawSlots * 4];
 		said.Clear();
@@ -1347,11 +1361,16 @@ internal sealed class CoreSceneTables
 				entry.SaysPlan = CoreShaderParams.PlanOf( says );
 			}
 		}
+		else if ( count > 0 && CoreResources.Declared( overShader ?? mesh.Meshes[0].Shader ) is { } declared && CoreShaderParams.AnyAttribute( declared ) )
+		{
+			//Nothing sets them, so they are what the shader declares: nought would be a particle's emission off, drawing it black
+			CoreShaderParams.PlanOf( declared ).Defaults.AsSpan( 0, said.Length ).CopyTo( said );
+		}
 
 		var previous = record.World;
 		if ( previous == default ) previous = world;
 
-		//Resolved again is moved, as far as a shadow page baked with it goes - its shape may be another one in the same sphere. See CoreCasters.
+		//Resolved again counts as moved for a shadow page baked with it - its shape may differ; see CoreCasters
 		var moves = record.MoveCount + 1;
 
 		record = new InstanceRecord
@@ -1456,8 +1475,8 @@ internal sealed class CoreSceneTables
 		record.Sphere = new System.Numerics.Vector4( centre.x, centre.y, centre.z, entry.Mesh.BoundRadius * maxScale );
 		record.MoveCount++;
 
-		//Moving, and it stays said until it has held still a while - see ClearMoving, which the next turn's gather calls first. A thing in motion is
-		//never baked into a shadow page; it is drawn into the maps drawn every frame instead, and the pages it left are baked again. See CoreCasters.
+		//Moving until it has held still a while (ClearMoving): it goes into the maps drawn every frame, never
+		//a page, and the pages it left are baked again - see CoreCasters
 		record.Moving = 1;
 
 		if ( entry.Posed ) PosedSphere( slot );
@@ -1594,7 +1613,7 @@ internal sealed class CoreSceneTables
 	//one-sided, two-sided, cut out. What the lists' runs of the index buffer are sized by; see Entry.OneSided.
 	internal long KindTriangles( int kind ) => kind >= 0 && kind < 3 ? Math.Max( 0L, kindTriangles[kind] ) : 0L;
 
-	//And the triangles of the parts that move, which are in those lists but not in their runs - what the bins' run needs on top of them.
+	//And the moving parts' triangles, in those lists but not their runs - what the bins' run needs on top
 	internal long MovingTriangles => Math.Max( 0L, movingTriangles );
 
 	//Keeps a posed entry's pool and palette ranges for bones and/or shapes, freeing what's not needed
@@ -1618,7 +1637,7 @@ internal sealed class CoreSceneTables
 		//skin pass has to pose into it whether or not the skeleton did anything - see Entry.PoseHash.
 		if ( entry.PosedAt < 0 ) { entry.PosedAt = CoreGeometryPool.Vertices.Take( count ); entry.PosedCount = count; entry.PoseHash = 0; }
 
-		//A new range holds whatever was in it, so whatever was posed into the old one says nothing about this one - see Entry.PoseHash.
+		//A new range holds whatever was in it, so the old one's pose says nothing - see Entry.PoseHash
 		if ( bones > 0 && entry.PaletteAt < 0 )
 		{
 			entry.PaletteAt = Palettes.Take( bones );
@@ -1682,7 +1701,7 @@ internal sealed class CoreSceneTables
 	//Hashes pose words to tell a moved pose from a still one (see Entry.PoseHash)
 	private static ulong PoseHashOf( ReadOnlySpan<ulong> words )
 	{
-		//FNV-1a's shape, over words rather than bytes. Nought is the "nothing posed yet" answer, so a hash that lands there is nudged off it.
+		//FNV-1a over words; nought means nothing posed, so a hash landing there is nudged off
 		var hash = 14695981039346656037ul;
 
 		for ( var i = 0; i < words.Length; i++ )
@@ -1760,8 +1779,8 @@ internal sealed class CoreSceneTables
 	private long changeLogStart;
 	private const int ChangeLogMost = 1 << 16;
 
-	//The slots that changed since a reader's place in the log, into the list, and the place moved on to the end. False where the reader cannot be
-	//told - its first time, or it fell out of the back of the log, or the whole table was written again - and should look at every slot instead.
+	//The slots changed since a reader's place, and the place moved on; false where it cannot be told - first
+	//time, fell out of the log, or a whole rewrite - and should look at every slot
 	internal bool ChangesSince( ref long seen, List<int> into )
 	{
 		into.Clear();
@@ -1936,25 +1955,25 @@ internal static class CoreMaterialTable
 		public float Cutoff;
 		public bool Loose;
 
-		/// <summary>Material tint (its Tint and any flat colour slot); part of the key, as tints make materials distinct</summary>
+		/// <summary>Material tint, its Tint and any flat colour slot; part of the key.</summary>
 		public Color Tint = Color.White;
 
 		public uint ColourSlot;
 
-		/// <summary>The picture <see cref="ColourSlot"/> is the number of - looked up again when streaming moves it, see Renumber.</summary>
+		/// <summary>The picture ColourSlot numbers, looked up again when streaming moves it - see Renumber.</summary>
 		public ulong ColourPicture;
 
 		public ulong ShadePipeline;
 		public bool AskedToShade;
 
-		/// <summary>The pass that writes this surface's depth and nothing else, for a material that moves its own vertices - see CoreMeshRender.DrawMoverDepth and Stage.ClusterDepthPixel. Nought for a surface that stands still: the engine's own pre-pass covers those, out of one pipeline for the whole world.</summary>
+		/// <summary>The depth-only pass for a material moving its own vertices; nought for still surfaces.</summary>
 		public ulong DepthPipeline;
 		public bool AskedToDepth;
 
 		/// <summary>Whether it has already been said that this surface has no depth build - said once.</summary>
 		public bool SaidNoDepth;
 
-		/// <summary>Whether the shading pass above was baked with the mover pre-pass on - it decides whether that pass writes depth, so a surface that gains or loses its depth build has to bake the other one. See DrawMoverDepth.</summary>
+		/// <summary>Whether the shading pass was baked with the mover pre-pass, which decides if it writes depth.</summary>
 		public bool ShadePrepass;
 
 		/// <summary>Whether its cluster pass was baked writing its own depth - see CoreMeshRender.DrawMaterials.</summary>
@@ -1964,16 +1983,16 @@ internal static class CoreMaterialTable
 		public bool ShadeFarCarries;
 
 
-		/// <summary>Whether the baked pair targets the finished window or the world picture; true matches the default</summary>
+		/// <summary>Whether the pair targets the finished window or the world picture; true is the default.</summary>
 		public bool ShadeFinishes = true;
 
 		/// <summary>Specialization constants the baked pair carries; -1 means nothing baked yet</summary>
 		public int ShadeSpecialize = -1;
 
-		/// <summary>And which run of point effects that pass carries, folded into the finishing pass - null for none. See CorePointChain.ScreenText.</summary>
+		/// <summary>Which run of point effects the finishing pass carries; null for none.</summary>
 		public string ShadeChain;
 
-		/// <summary>The same pass baked for the far calls of this material's clusters - see kFarShading and CoreMeshRender.DrawMaterials, which draws the run as spans and gives every span past the first this one. Nought for a shader that leaves nothing out there - see CoreResources.ShadesFar.</summary>
+		/// <summary>The pass baked for its clusters' far calls (kFarShading); nought for none.</summary>
 		public ulong ShadeFarPipeline;
 
 		public string Path;
@@ -1984,13 +2003,13 @@ internal static class CoreMaterialTable
 		/// <summary>What it was found by, so releasing it can take it out of the map.</summary>
 		public Key Key;
 
-		/// <summary>Whether the surface moves its own vertices - see CoreResources.MovesVertices. Its clusters are cut and binned like any other's; what differs is that nothing pre-passes them and its own pass writes the depth it shades - see CoreMeshRender.DrawMaterials.</summary>
+		/// <summary>Whether it moves its own vertices: not pre-passed, its own pass writes the depth it shades.</summary>
 		public bool Moves;
 
-		/// <summary>The pictures it wears - colour, normal, third, emission, nought for none - for CoreTextureStreaming.</summary>
+		/// <summary>The pictures it wears - colour, normal, third, emission - for CoreTextureStreaming.</summary>
 		public readonly ulong[] Pictures = new ulong[4];
 
-		/// <summary>The most metres one unit of a part's first coordinates covers, of the parts that wear it - what its pictures' levels are wanted by at a distance; nought where it could not be told. See CoreTextureStreaming.</summary>
+		/// <summary>Most metres a unit of its parts' first coordinates covers, for streaming; nought if untold.</summary>
 		public float MetresPerUv;
 
 		public uint Flags =>
@@ -2029,7 +2048,7 @@ internal static class CoreMaterialTable
 
 	internal static Info At( int index ) => index >= 0 && index < materials.Count ? materials[index] : null;
 
-	//The material a part is drawn with, added if it is new. A part not shown is drawn by nothing - loose, which the raster skips.
+	//The material a part draws with, added if new; a part not shown draws nothing - loose, which the raster skips
 	internal static int Index( in CoreSceneRenderer.MeshDraw part, bool shows )
 	{
 		var loose = !shows || !CoreResources.Shades( part.Shader );
@@ -2069,7 +2088,7 @@ internal static class CoreMaterialTable
 
 		if ( info.Masked )
 		{
-			//The live material's own picture first: one made in code has no file to read it out of - see CoreResources.LiveColour.
+			//The live material's own picture first: one made in code has no file - see CoreResources.LiveColour
 			var colour = CoreResources.LiveColour( part.Texture );
 			if ( colour == 0 ) colour = CoreResources.ColourTexture( part.Material );
 			info.ColourPicture = colour;
@@ -2154,7 +2173,7 @@ internal static class CoreMaterialTable
 	{
 		var changed = false;
 
-		//By index: a picture made whole out of turn renumbers from whichever thread asked for it - see CoreTextureStreaming.KeepWhole.
+		//By index: a picture made whole out of turn renumbers from whichever thread asked - see KeepWhole
 		for ( var i = 0; i < materials.Count; i++ )
 		{
 			var one = i < materials.Count ? materials[i] : null;

@@ -5,43 +5,43 @@
 
 struct Light
 {
-	float4 position;  //xyz, range w (unused on the sun)
-	float4 colour;    //rgb already multiplied by brightness, kind w (0 sun, 1 point, 2 spot)
-	float4 direction; //xyz, cosine of the inner cone w
-	float4 cone;      //outer cosine x, how wide the source is y, spare zw
-	float4 shape;     //falloff power x, faces reading the lamps' movers map y (a bit each), spare zw
+	float4 position;  //Position xyz, range w (unused on the sun)
+	float4 colour;    //Colour rgb times brightness, kind w (0 sun, 1 point, 2 spot)
+	float4 direction; //Direction xyz, inner cone cosine w - a point's shape (AreaShape)
+	float4 cone;      //Outer cosine x (a point's half width), source width y, spare zw
+	float4 shape;     //Falloff power x, faces reading movers y (a bit each), half height z, turn w
 };
 
 //Envmap probe: an octahedral 2D picture of all directions with blurred mips stacked below
 struct Probe
 {
-	float4 where; //xyz where it stands, w which picture in the table
-	float4 mins;  //xyz the near corner of its box, w one if the box is projected
-	float4 maxs;  //xyz the far corner, w how far from the edge it fades out
-	float4 tint;  //rgb, strength a
+	float4 where; //Position xyz, picture in the table w
+	float4 mins;  //Near box corner xyz, w one if the box is projected
+	float4 maxs;  //Far box corner xyz, w how far from the edge it fades
+	float4 tint;  //Colour rgb, strength a
 };
 
 struct FogVolume
 {
-	float4 centre;   //xyz where it stands, strength w
-	float4 extents;  //xyz half its size along its own axes, how its edge fades w
-	float4 rotation; //the quaternion that turns its own axes into the world's
-	float4 colour;   //rgb what it scatters, spare a
+	float4 centre;   //Position xyz, strength w
+	float4 extents;  //Half size along its own axes xyz, edge fade w
+	float4 rotation; //Quaternion turning its own axes into the world's
+	float4 colour;   //Colour rgb it scatters, spare a
 };
 
 struct FrameData
 {
 	row_major float4x4 worldToClip;
-	float4 camera; //xyz where the eye is, light count w
+	float4 camera; //Eye position xyz, light count w
 	Light lights[16];
-	float4 settings; //occlusion strength, window width, window height, the sky table's index in the picture table
+	float4 settings; //Occlusion strength, window width, window height, sky table's picture index
 	row_major float4x4 clipToWorld;
 	float4 zenith;
 	float4 horizon;
 	float4 ground;
-	float4 sunDirection; //xyz, enabled w
-	float4 sunColour;    //rgb, disc cosine a
-	float4 viewInfo;     //debug view x, occlusion picture index y, depth picture index z, texture LOD bias w
+	float4 sunDirection; //Direction xyz, enabled w
+	float4 sunColour;    //Colour rgb, disc cosine a
+	float4 viewInfo;     //Debug view x, occlusion picture y, depth picture z, texture LOD bias w
 
 	//Last frame's view, which a pixel is reprojected through
 	row_major float4x4 previousWorldToClip;
@@ -49,28 +49,27 @@ struct FrameData
 	//Gradient fog: rgb and the most of the view it may take, the distances and heights it runs between,
 	//and both falloff exponents. fogShape.z below one is off
 	float4 fogColour;
-	float4 fogRange;  //start distance, end distance, start height, end height
-	float4 fogShape;  //distance exponent, height exponent, enabled, colour from the sky
+	float4 fogRange;  //Start distance, end distance, start height, end height
+	float4 fogShape;  //Distance exponent, height exponent, enabled, colour from the sky
 
 	//Baked lighting: lightmap sheet for static surfaces, probe volume for moving ones; zero = no bake
-	float4 bakedMaps;    //sheet's table index x, its directions' y, spare z, one where there is a sheet w
-	float4 bakedVolume;  //the three pictures' places xyz, one where there is a volume w
-	float4 volumeOrigin; //xyz where the lattice's first point stands, w one over the step between points
-	float4 volumeCount;  //how many points along x, y and z, spare w
-	float4 bakedMask;    //sheet mask's index x, volume's y, one if the sheet has one z, one if any mask w
-	float4 bakedSun;     //which channel of the mask holds the sun's shadow, plus one - nought for none x, spare yzw
-	float4 bakedSpare[4];
+	float4 bakedMaps;    //Sheet's table index x, nought y, its sky's z, one where there is a sheet w
+	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
+	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
+	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
+	float4 bakedMore;    //Walls' picture x, live bounce colour y and lean z, the sheet's first band w (nought for none)
+	float4 bakedGlow[4]; //Glow layers: sheet's index x, volume's y, group brightness z (BakedGlow); nought for none
 
-	//probeInfo.x is how many of the four probes are filled; nothing after it matters when zero
-	float4 probeInfo; //how many, how wide one picture is, how many bands, RGBM range
+	//How many of the four probes are filled is x; nothing after it matters when zero
+	float4 probeInfo; //Count, one picture's width, bands, RGBM range
 	Probe probes[4];
 
 	//Two clocks: wall time always runs; scene time pauses and scales with the scene
-	float4 time; //seconds since the engine started, the frame's delta, the scene's own seconds, spare
+	float4 time; //Seconds since start, frame delta, scene seconds, spare
 
 	//The sun's light after the air it crosses, and how far into night; both depend only on the sun's height,
 	//so CoreSceneRenderer.SetSky works them out once a frame
-	float4 sunLight; //rgb what is left of the sun's own light, a how far into night
+	float4 sunLight; //What is left of the sun's light rgb, how far into night a
 
 	//Clip to world ray without the camera position, used by SkyRay; all zero means use clipToWorld
 	row_major float4x4 rayToWorld;
@@ -88,7 +87,7 @@ struct FrameData
 
 	//Exposure, for every pass taking the frame's light to the screen's, and the tonemap curve for a pass
 	//finishing the picture itself - see TARGET_SCREEN in frame.slang
-	float4 finish; //exposure x, curve y, start of the world shading's point-effect run in effects z, spare w
+	float4 finish; //Exposure x, curve y, first point effect of the world shading in effects z, spare w
 
 	//The numbers of the point effects laid over this frame - see CorePointChain. Each chain
 	//of them reads its own run, from the slot its push block names; nothing else reads these.
@@ -118,6 +117,47 @@ struct FrameData
 	//The sky's light from its capture (CoreSkyLight): reflection levels' table index x and their count y, the
 	//irradiance picture's index z, nought where none; the ambient factor w, nought for a quarter
 	float4 skyLight;
+
+	//Area lamps' LTC tables by table index: inverse matrix x, magnitude and Fresnel y - see CoreAreaLights
+	float4 area;
+
+	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; spare yzw
+	float4 shadow;
+
+	//The portable frame's bake (CoreBakedLighting.Portable): the sheet's light half wide x and high y, nought for none,
+	//the volume's layers to a row of tiles z, one where its bounce half is filled w
+	float4 portableBake;
+
+	//The screen's indirect light picture by table index x, nought for none - see AmbientOcclusion; one in y where rays
+	//traced it, its a then the share of them that got out (ray_light.shader); spare zw
+	float4 screenLight;
+
+	//The scene's ray structure's address in 24-bit parts xy and its top 16 bits w, its instances' colours picture z;
+	//nought for none
+	float4 rays;
+
+	//The probe grid of a scene with no bake (CoreProbeGrid): its four pictures' table indices, nought for none; the
+	//cascades and probes along x, y and z; each cascade's first cell xyz and step w - see GridLight
+	float4 grid[4];
+
+	//The live bounce at the lightmap's detail (CoreLiveBounce.Sheet): its table index x, nought for none
+	float4 bakedTexels;
+
+	//The 2D lighting sprites and tiles that ask for it are lit by: the global 2D light times its intensity rgb, one w
+	//where the scene has 2D lighting at all - nought, and a lit sprite is drawn unlit. See Light2DAt in sprite.slang
+	float4 light2d;
+
+	//The 2D light's pictures (CoreLight2D): how much the screen is shrunk inside them to leave their margin x, the
+	//scene's table index y and the light's w - nought where this view drew none; spare z
+	float4 light2dScene;
+
+	//How many 2D lights there are x, one in y where occluders shadow themselves, how far light goes into them in world
+	//units z; spare w - see CoreSceneRenderer.SetLight2D
+	float4 light2dInfo;
+
+	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is
+	//w; which way a spot points on the plane xy, half its cone z (pi shines every way), how much of its edge fades w
+	float4 lights2d[96];
 };
 
 #ifdef WEBGL

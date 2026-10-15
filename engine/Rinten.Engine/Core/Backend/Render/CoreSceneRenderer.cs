@@ -358,8 +358,8 @@ internal static unsafe class CoreSceneRenderer
 	//Set for the session when some drawn shader turns out to lack a two-view build
 	internal static bool StereoIncomplete { get; private set; }
 
-	//A two-view program that was built and then refused where it runs - the browser would not
-	//link it. Latches StereoIncomplete the same way a missing build does, and says why once.
+	//A two-view program built and then refused where it runs, as when the browser will not link it
+	//Latches StereoIncomplete like a missing build, and says why once
 	internal static void StereoRefused( string why )
 	{
 		if ( StereoIncomplete ) return;
@@ -386,7 +386,7 @@ internal static unsafe class CoreSceneRenderer
 	private static long sharedFrame = -1;
 
 	//Whether this is one of a headset's eyes. True for exactly the span the eyes are drawn in, so a camera drawing
-	//into a texture builds its own - the same scoping CorePortableSun shares its square by, and for the same reason.
+	//into a texture builds its own.
 	private static bool Sharing => CoreRender.SharingViews && Rinten.VR.VRSystem.IsRendering;
 	private static readonly List<(Light Light, SceneLight Loose, float Reach)> lightScratch = new();
 	private static readonly List<Light> lightsScratch = new();
@@ -452,8 +452,7 @@ internal static unsafe class CoreSceneRenderer
 		const int floatsPerLight = CoreLights.LightFloats;
 		const int lightsAt = LightsAt;
 
-		//Scratch, not fresh: a frame's block is read straight into the device and
-		//never kept, and a frame allocating one was a frame the collector had to visit.
+		//Scratch, not fresh: the block goes straight to the device and is never kept, so a frame allocates none
 		var block = sceneScratch;
 		System.Array.Clear( block );
 
@@ -464,11 +463,14 @@ internal static unsafe class CoreSceneRenderer
 		//Scene time while playing, so pause and time scale apply; wall clock in the editor
 		block[TimeAt + 2] = scene.IsValid() && !scene.IsEditor ? (float)scene.TimeNow : RealTime.Now;
 
+		block[ShadowFilterAt] = Math.Clamp( ShadowFilterQuality, 0, 2 );
+
 		if ( !scene.IsValid() )
 		{
 			LightsInFrame = 0;
 			block[19] = 0;
 			BakedOn = CoreBakedLighting.Write( block, null );
+			AreaOn = false;
 			return;
 		}
 
@@ -479,6 +481,10 @@ internal static unsafe class CoreSceneRenderer
 
 		CoreRenderDevice.ZoneBegin( "block ambient" );
 		SetAmbient( block, scene );
+		CoreRenderDevice.ZoneEnd();
+
+		CoreRenderDevice.ZoneBegin( "block light 2d" );
+		SetLight2D( block, scene );
 		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "block fog" );
@@ -506,9 +512,6 @@ internal static unsafe class CoreSceneRenderer
 		foreach ( var light in scene.GetAllComponents<Light>() )
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
-
-			//Skip lights fully baked into the scene (Light.BakedWhole); shadow-only baked lights stay
-			if ( BakedOn && CoreBakedLighting.ChannelOf( light ) == CoreBakedLighting.BakedWhole ) continue;
 
 			var reach = Reach( light, from );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
@@ -554,6 +557,8 @@ internal static unsafe class CoreSceneRenderer
 		LightsInFrame = lights.Count;
 		block[19] = Math.Min( lights.Count, MaxLights );
 
+		var shaped = false;
+
 		for ( var i = 0; i < lights.Count; i++ )
 		{
 			var at = i * floatsPerLight;
@@ -565,13 +570,9 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 4] = source.Colour.r;
 			LightBlock[at + 5] = source.Colour.g;
 			LightBlock[at + 6] = source.Colour.b;
-			//Kind; in its fraction what the light is withheld from (LightWithholds); in its hundredths the baked mask
-			//channel plus one, nought for none - see LightMaskChannel
-			var channel = BakedOn && lights[i] is { } baked ? CoreBakedLighting.ChannelOf( baked ) : CoreBakedLighting.NotBaked;
-			LightBlock[at + 7] = source.Kind + ( source.Withholds * 0.1f ) + ( channel >= 0 ? ( channel + 1 ) * 0.01f : 0.0f );
-
-			//And the sun's, for what lights by the sun without walking the lights - see SunMaskChannel.
-			if ( source.Kind == 0 && channel >= 0 ) block[BakedAt + 20] = channel + 1;
+			//Kind; in its fraction, in twentieths, twice what it is withheld from and one where it is baked - see LightCode
+			var baked = lights[i] is { } inBake && BakedOn && CoreBakedLighting.InBake( inBake );
+			LightBlock[at + 7] = source.Kind + ( ( ( source.Withholds * 2 ) + ( baked ? 1 : 0 ) ) * 0.05f );
 
 			LightBlock[at + 8] = source.Forward.x;
 			LightBlock[at + 9] = source.Forward.y;
@@ -600,11 +601,25 @@ internal static unsafe class CoreSceneRenderer
 				LightBlock[at + 3] = EffectiveRange( source.Radius, source.Colour, source.Falloff );
 			}
 
+			LightBlock[at + 11] = 0.0f;
+			LightBlock[at + 12] = 0.0f;
+			LightBlock[at + 18] = 0.0f;
+			LightBlock[at + 19] = 0.0f;
+
 			if ( source.Kind == 2 )
 			{
 				//Cones in half-angle degrees; the shader compares cosines, the same test without trigonometry
 				LightBlock[at + 11] = MathF.Cos( source.ConeInner.DegreeToRadian() );
 				LightBlock[at + 12] = MathF.Cos( source.ConeOuter.DegreeToRadian() );
+			}
+			else if ( source.Kind == 1 && source.Shape != 0 )
+			{
+				//Its shape where a spot keeps its cones - see AreaLamp
+				LightBlock[at + 11] = source.Shape;
+				LightBlock[at + 12] = source.HalfWidth;
+				LightBlock[at + 18] = source.HalfHeight;
+				LightBlock[at + 19] = source.Turn;
+				shaped = true;
 			}
 
 			//And into the block where it fits: the browser has no buffer and reads lights from there
@@ -612,17 +627,27 @@ internal static unsafe class CoreSceneRenderer
 				LightBlock.AsSpan( at, floatsPerLight ).CopyTo( block.AsSpan( lightsAt + ( i * floatsPerLight ), floatsPerLight ) );
 		}
 
+		//The tables only where a lamp has a shape: without them it lights as the point it stands on
+		AreaOn = shaped && CoreAreaLights.Write( block );
+
 		CoreRenderDevice.ZoneEnd();
 	}
 
-	//Which channel of the baked mask holds a light's shadow of the still world, out of its
-	//record's kind word - -1 where none does. The C# twin of LightMaskChannel in frame.slang.
-	internal static int MaskChannelOf( float kindWord )
+	//Where each lamp's faces are in the lamps' maps, as CoreLampMaps.Plan wrote them into the records after the block took its copy -
+	//into the block's copy too, which is where the portable frame reads its lights
+	internal static void LampFacesIntoBlock( float[] block )
 	{
-		var fraction = kindWord - MathF.Floor( kindWord );
-		var hundredths = (int)MathF.Round( fraction * 100.0f );
+		var count = Math.Min( LightsInFrame, MaxLights );
 
-		return ( hundredths % 10 ) - 1;
+		for ( var i = 0; i < count; i++ )
+		{
+			var from = i * CoreLights.LightFloats;
+			var into = LightsAt + from;
+
+			block[into + 14] = LightBlock[from + 14];
+			block[into + 15] = LightBlock[from + 15];
+			block[into + 17] = LightBlock[from + 17];
+		}
 	}
 
 	//The flat ambient light the scene's components ask for - see AmbientAt.
@@ -634,6 +659,53 @@ internal static unsafe class CoreSceneRenderer
 		block[AmbientAt + 1] = ambient.g;
 		block[AmbientAt + 2] = ambient.b;
 		block[AmbientAt + 3] = Math.Clamp( ambient.a, 0.0f, 1.0f );
+	}
+
+	//The scene's 2D lighting - see Light2DAt here and in sprite.slang, and Lights2DAt. Off in a scene with no 2D light,
+	//so a sprite lit in 2D is drawn unlit rather than black in a scene nobody has lit. Gathered here, once a frame,
+	//rather than in the scene's update, which an editor scene that is not playing does not run
+	internal static void SetLight2D( float[] block, Scene scene )
+	{
+		var system = scene.GetSystem<SceneLight2DSystem>();
+		if ( system is null ) return;
+
+		system.Gather();
+
+		if ( !system.Active ) return;
+
+		var global = system.GlobalLight;
+
+		block[Light2DAt + 0] = global.r;
+		block[Light2DAt + 1] = global.g;
+		block[Light2DAt + 2] = global.b;
+		block[Light2DAt + 3] = 1.0f;
+
+		var lights = system.Lights;
+
+		block[Light2DInfoAt + 0] = lights.Count;
+		block[Light2DInfoAt + 1] = system.Settings.SelfShadow ? 1.0f : 0.0f;
+		block[Light2DInfoAt + 2] = system.Settings.PenetrationDepth;
+
+		for ( var i = 0; i < lights.Count; i++ )
+		{
+			var light = lights[i];
+			var at = Lights2DAt + ( i * Light2DFloats );
+
+			block[at + 0] = light.Position.x;
+			block[at + 1] = light.Position.y;
+			block[at + 2] = light.Position.z;
+			block[at + 3] = light.Range;
+
+			block[at + 4] = light.Radiance.r;
+			block[at + 5] = light.Radiance.g;
+			block[at + 6] = light.Radiance.b;
+			block[at + 7] = light.SourceSize;
+
+			block[at + 8] = light.Direction.x;
+			block[at + 9] = light.Direction.y;
+			block[at + 10] = light.HalfAngle;
+			block[at + 11] = light.Softness;
+		}
 	}
 
 	//Writes the scene's gradient fog into the frame block, read off the scene world
@@ -768,7 +840,7 @@ internal static unsafe class CoreSceneRenderer
 	internal const int BakedAt = FogAt + 12;
 
 	//Envmap probes: a header (count, size, roughness bands, RGBM scale) then four probes
-	internal const int ProbesAt = BakedAt + 40;
+	internal const int ProbesAt = BakedAt + 36;
 
 	//Time: wall clock, frame delta and scene clock, so all passes of a frame animate in sync
 	internal const int TimeAt = ProbesAt + 4 + ( CoreEnvmap.MostProbes * 16 );
@@ -820,7 +892,45 @@ internal static unsafe class CoreSceneRenderer
 	//The sky's light from its capture, and the ambient factor - see CoreSkyLight.Lay and LayPanorama.
 	internal const int SkyLightAt = PanoramaLightAt + 4;
 
-	internal const int FrameFloats = SkyLightAt + 4;
+	//The area lamps' LTC tables - see CoreAreaLights.
+	internal const int AreaAt = SkyLightAt + 4;
+
+	//How shadow edges are filtered - see ShadowFilterQuality.
+	internal const int ShadowFilterAt = AreaAt + 4;
+
+	//The portable frame's bake - see CoreBakedLighting.Portable.
+	internal const int PortableBakeAt = ShadowFilterAt + 4;
+
+	//The screen's indirect light - see LayScreenLight.
+	internal const int ScreenLightAt = PortableBakeAt + 4;
+
+	//The scene's ray structure and its records' picture - see CoreRays.Lay.
+	internal const int RaysAt = ScreenLightAt + 4;
+
+	//The probe grid of a scene with no bake: its pictures, counts and cascades - see CoreProbeGrid.Lay.
+	internal const int GridAt = RaysAt + 4;
+
+	//The live bounce at the lightmap's detail: its sheet's table index - see CoreLiveBounce.Sheet.
+	internal const int BakedTexelsAt = GridAt + 16;
+
+	//The global 2D light, and whether the scene is lit in 2D at all - see SetLight2D.
+	internal const int Light2DAt = BakedTexelsAt + 4;
+
+	//How the 2D light's pictures are drawn and where they are - see CoreLight2D.Lay.
+	internal const int Light2DSceneAt = Light2DAt + 4;
+
+	//How many 2D lights the block carries and how occluders are lit - see SetLight2D.
+	internal const int Light2DInfoAt = Light2DSceneAt + 4;
+
+	//The 2D lights themselves, three float4s each - see lights2d in frame_data.slang.
+	internal const int Lights2DAt = Light2DInfoAt + 4;
+	internal const int Light2DFloats = 12;
+
+	internal const int FrameFloats = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
+
+	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
+		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]
+	internal static int ShadowFilterQuality { get; set; } = 2;
 
 	//The exposure a block was written with - see SetFinish
 	internal static float ExposureOf( float[] frame )
@@ -876,33 +986,6 @@ internal static unsafe class CoreSceneRenderer
 		frame[MoverZoneAt + 3] = 0.0f;
 
 		MoversOn = moverSide > 0.0f;
-	}
-
-	//Writes the portable frame's single sun shadow map into the pages' slots; zero width means no map
-	internal static void SetPortableSun( float[] frame, System.Numerics.Matrix4x4 worldToClip, float side, int texels, float zScale )
-	{
-		if ( frame is null || frame.Length < FrameFloats ) return;
-
-		var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes( frame.AsSpan() );
-		System.Runtime.InteropServices.MemoryMarshal.Write( bytes[( SunToPagesAt * 4 )..], in worldToClip );
-
-		frame[SunPagesAt + 0] = side;
-		frame[SunPagesAt + 1] = texels;
-		frame[SunPagesAt + 2] = 0.0f;
-		frame[SunPagesAt + 3] = zScale;
-
-		frame[SunEyeAt + 0] = 0.0f;
-		frame[SunEyeAt + 1] = 0.0f;
-		frame[SunEyeAt + 2] = 0.0f;
-		frame[SunEyeAt + 3] = side > 0.0f ? 1.0f : 0.0f;
-
-		for ( var i = 0; i < 4; i++ )
-		{
-			frame[SunMapsAt + i] = 0.0f;
-			frame[MoverZoneAt + i] = 0.0f;
-		}
-
-		MoversOn = false;
 	}
 
 	//Lamp faces' table indices, compared and as depth, and the movers map's the same - see CoreLampMaps,
@@ -975,6 +1058,9 @@ internal static unsafe class CoreSceneRenderer
 
 		frame[ShadowAt + 1] = 0.0f;
 
+		//Laid again after the pre-pass by whichever pass drew them
+		Array.Clear( frame, ScreenLightAt, 8 );
+
 		OcclusionOn = false;
 		SkyTableOn = skyTable != 0;
 	}
@@ -989,6 +1075,15 @@ internal static unsafe class CoreSceneRenderer
 		frame[ShadowAt + 1] = picture;
 
 		OcclusionOn = frame[SettingsAt + 1] > 0.0f;
+	}
+
+	//The indirect light the occlusion pass gathered off the screen, by table index - see AmbientOcclusion
+	internal static void LayScreenLight( float[] frame, int picture, bool traced = false )
+	{
+		if ( frame is null || frame.Length < FrameFloats || picture <= 0 ) return;
+
+		frame[ScreenLightAt] = picture;
+		frame[ScreenLightAt + 1] = traced ? 1.0f : 0.0f;
 	}
 
 	//The sheet of air this view drew, by its place in the picture table, with the shape the
@@ -1345,12 +1440,12 @@ internal static unsafe class CoreSceneRenderer
 		var c2 = new System.Numerics.Vector4( vp.M13, vp.M23, vp.M33, vp.M43 );
 		var c3 = new System.Numerics.Vector4( vp.M14, vp.M24, vp.M34, vp.M44 );
 
-		planes[0] = Unit( c3 + c0 ); //left
-		planes[1] = Unit( c3 - c0 ); //right
-		planes[2] = Unit( c3 + c1 ); //bottom
-		planes[3] = Unit( c3 - c1 ); //top
-		planes[4] = Unit( c2 );      //near, with depth in [0..1]
-		planes[5] = Unit( c3 - c2 ); //far
+		planes[0] = Unit( c3 + c0 ); //Left
+		planes[1] = Unit( c3 - c0 ); //Right
+		planes[2] = Unit( c3 + c1 ); //Bottom
+		planes[3] = Unit( c3 - c1 ); //Top
+		planes[4] = Unit( c2 );      //Near, with depth in [0..1]
+		planes[5] = Unit( c3 - c2 ); //Far
 	}
 
 	//Normalises a plane once so sphere tests skip square roots; zero normals are left alone
@@ -1440,7 +1535,8 @@ internal static unsafe class CoreSceneRenderer
 
 	//A light as the frame block holds it, from a Light component or a scene light
 	private readonly record struct LightSource( int Kind, Vector3 Position, Vector3 Forward, Color Colour,
-		float Radius, float Falloff, float SourceRadius, float ConeInner, float ConeOuter, int Withholds = 0 )
+		float Radius, float Falloff, float SourceRadius, float ConeInner, float ConeOuter, int Withholds = 0,
+		int Shape = 0, float HalfWidth = 0.0f, float HalfHeight = 0.0f, float Turn = 0.0f )
 	{
 		//What a light component is kept out of: one for the diffuse, two for the highlight - see Light.Contribution.
 		private static int WithheldBy( Light light )
@@ -1452,11 +1548,35 @@ internal static unsafe class CoreSceneRenderer
 		{
 			SpotLight spot => new( 2, spot.WorldPosition, spot.WorldRotation.Forward.Normal, spot.EmittedColor,
 				spot.Radius, spot.Falloff, MathF.Max( spot.SourceRadius, 0.0f ), spot.ConeInner, spot.ConeOuter, WithheldBy( spot ) ),
+			PointLight { AreaShape: not PointLight.AreaShapes.Point } point => Shaped( point ),
 			PointLight point => new( 1, point.WorldPosition, point.WorldRotation.Forward.Normal, point.EmittedColor,
 				point.Radius, point.Falloff, MathF.Max( point.SourceRadius, 0.0f ), 0, 0, WithheldBy( point ) ),
 			_ => new( 0, light.WorldPosition, light.WorldRotation.Forward.Normal, light.EmittedColor,
 				0, light.Falloff, MathF.Max( light.SourceRadius, 0.0f ), 0, 0, WithheldBy( light ) ),
 		};
+
+		//A point with a shape: its half extents, and its width's turn about forward from LampAxes' right - see AreaLamp
+		private static LightSource Shaped( PointLight point )
+		{
+			var rotation = point.WorldRotation;
+			var forward = rotation.Forward.Normal;
+			var size = point.AreaSize;
+
+			var ( right0, up0, _ ) = CoreSunPages.LightAxes( forward );
+			var right = rotation.Right.Normal;
+			var turn = MathF.Atan2( right.Dot( up0 ), right.Dot( right0 ) );
+
+			var tube = point.AreaShape == PointLight.AreaShapes.Tube;
+			var halfWidth = MathF.Max( size.x * 0.5f, 0.001f );
+			var halfHeight = tube ? MathF.Max( point.SourceRadius, 0.005f )
+				: point.AreaShape == PointLight.AreaShapes.Disc ? halfWidth : MathF.Max( size.y * 0.5f, 0.001f );
+
+			//Its shadow as soft as the shape is wide
+			var width = MathF.Max( point.SourceRadius, tube ? halfHeight : MathF.Max( halfWidth, halfHeight ) );
+
+			return new( 1, point.WorldPosition, forward, point.EmittedColor, point.Radius, point.Falloff, width, 0, 0, WithheldBy( point ),
+				(int)point.AreaShape, halfWidth, halfHeight, turn );
+		}
 
 		/// <summary>A scene light's colour is its brightness; it casts no shadow, so it has no width.</summary>
 		public static LightSource Of( SceneLight light ) => light switch
@@ -1494,6 +1614,16 @@ internal static unsafe class CoreSceneRenderer
 	internal static bool PanoramaOn { get; private set; }
 
 	internal const int PanoramaFold = CoreResources.ShaderFoldsEnd;
+
+	//Whether a lamp in the block has a shape - see kAreaOn, constant 19
+	internal static bool AreaOn { get; private set; }
+
+	internal const int AreaFold = PanoramaFold + 1;
+
+	//Whether the frame can carry the probe grid: rays on and no bake to read instead - see kProbeGridOn, constant 20
+	internal static bool ProbeGridOn => CoreRays.On && !BakedOn;
+
+	internal const int ProbeGridFold = AreaFold + 1;
 
 	//Whether the frame drew itself a sky table - see kSkyTableOn.
 	internal static bool SkyTableOn { get; private set; }
@@ -1541,7 +1671,9 @@ internal static unsafe class CoreSceneRenderer
 			| ( CoreLights.Decals > 0 ? 512 : 0 )
 			| ( BakedOn ? 1024 : 0 )
 			| ( FogVolumes && !FogSheetLaid ? 16384 : 0 )
-			| ( PanoramaOn ? 1 << PanoramaFold : 0 );
+			| ( PanoramaOn ? 1 << PanoramaFold : 0 )
+			| ( AreaOn ? 1 << AreaFold : 0 )
+			| ( ProbeGridOn ? 1 << ProbeGridFold : 0 );
 
 	//Sky pass specialization: the world bits, the frame's sky bits, and the sky material's Fold() ids
 	internal static int SkySpecialize( CoreMaterial sky = null )
@@ -1582,7 +1714,8 @@ internal static unsafe class CoreSceneRenderer
 	//Whether the pipeline MakePipeline just could not make is only still compiling - see PipelineFor.
 	private static bool chainWaiting;
 
-	//Logs at powers of two when a shader accumulates many combo builds, each a compile mid-frame
+	//Says once a session when a shader passes MostBuilds, each a compile mid-frame; a material's features times the
+	//frame's targets reach a few dozen as a matter of course, and a reload of the shaders counts them all again
 	private static void Baked( PipelineKind kind, int live )
 	{
 		var name = string.IsNullOrWhiteSpace( kind.Shader ) ? StandardShader : kind.Shader;
@@ -1593,12 +1726,15 @@ internal static unsafe class CoreSceneRenderer
 
 		builds[name] = now;
 
-		//Powers of two from sixteen up, so an ordinary shader with a handful of builds never says anything.
-		if ( now < 16 || ( now & ( now - 1 ) ) != 0 ) return;
+		if ( now < MostBuilds || !toldBuilds.Add( name ) ) return;
 
-		Log.Warning( $"{name} is on {now} builds ({live} pipelines live) - " +
+		Log.Info( $"{name} is on {now} builds ({live} pipelines live) - many combos compile mid-frame; " +
 			$"the latest is combo {kind.Combo ?? "none"}" );
 	}
+
+	//Builds of one shader past which a build-up is worth a line, and the shaders already told of
+	private const int MostBuilds = 64;
+	private static readonly HashSet<string> toldBuilds = new( StringComparer.Ordinal );
 
 	//How many builds of each shader have been baked. Cleared with the caches.
 	private static readonly Dictionary<string, int> builds = new( StringComparer.Ordinal );
@@ -1726,7 +1862,7 @@ internal static unsafe class CoreSceneRenderer
 				Log.Warning( $"{kind.Shader} did not load - drawing with {StandardShader} instead: {WhyNot( kind.Shader )}" );
 			stages = CoreResources.Shader( StandardShader );
 
-			//Now drawn by the standard surface, so mark it for the cluster path (CoreResources.StandsIn)
+			//Drawn by the standard surface, so marked for the cluster path (CoreResources.StandsIn)
 			CoreResources.StandsIn( kind.Shader );
 		}
 

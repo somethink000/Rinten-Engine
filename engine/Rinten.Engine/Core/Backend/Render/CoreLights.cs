@@ -9,8 +9,8 @@ internal static class CoreLights
 	//How many lights one frame may carry.
 	internal const int MostLights = 128;
 
-	//Floats one light takes - five float4s, as frame.slang has it. The fifth is the shape of the falloff, and it is a whole float4 for one number
-	//because a buffer of float4s is what the shader reads: four floats a light more, across a hundred and twenty-eight of them, is two kilobytes a frame.
+	//Floats a light takes: five float4s, as frame.slang has it; the fifth holds only the falloff's shape, as the shader
+	//reads float4s - two kilobytes a frame across 128 lights
 	internal const int LightFloats = 20;
 
 	//What the buffer says about itself before the lights.
@@ -65,8 +65,8 @@ internal static class CoreLights
 		return cullPipeline != 0;
 	}
 
-	//Sends the frame's lights and builds the grid over them. Called inside the frame, after the block is set up and before anything shades.
-	//grid says whether to build the cells at all: a bake has no screen to cut up and a flat view no depth to slice, and both read every light.
+	//Sends the frame's lights and builds the grid over them, in the frame after the block is set up, before shading.
+	//grid: whether to build cells - a bake has no screen and a flat view no depth to slice; both read every light
 	internal static bool Frame( ReadOnlySpan<float> lights, int count, (int Width, int Height) pixels,
 		in System.Numerics.Matrix4x4 worldToView, float projX, float projY, float near, float far, bool grid )
 	{
@@ -75,9 +75,19 @@ internal static class CoreLights
 		Lamps = 0;
 		Decals = 0;
 
-		if ( !CoreNative.Available || CoreRenderDevice.PortableFrame ) return false;
-
 		count = Math.Max( 0, Math.Min( count, lights.Length / LightFloats ) );
+
+		//The portable frame reads its sixteen from the block, but its pipelines still take kLampsOn and kManyLights
+		if ( CoreRenderDevice.PortableFrame )
+		{
+			Count = Math.Min( count, CoreSceneRenderer.MaxLights );
+			for ( var i = 0; i < Count; i++ )
+				if ( lights[( i * LightFloats ) + 7] >= 0.5f ) Lamps++;
+
+			return false;
+		}
+
+		if ( !CoreNative.Available ) return false;
 
 		//No grid where a cell could not narrow anything: with no more lights than a cell holds, every cell would name
 		//all of them and the cull would be paid for nothing. Which is every scene that has a sun and a lamp or two.
@@ -152,7 +162,7 @@ internal static class CoreLights
 		Count = count;
 		Decals = decalCount;
 
-		//The kind is the w of the second float4 - nought is the sun, anything else is a lamp, which is the test frame.slang makes of it.
+		//The kind is the w of the second float4: nought the sun, anything else a lamp - frame.slang's test
 		for ( var i = 0; i < count; i++ )
 			if ( lights[( i * LightFloats ) + 7] >= 0.5f ) Lamps++;
 

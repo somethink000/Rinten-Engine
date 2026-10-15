@@ -34,6 +34,8 @@
 !*.scss
 !*.tt
 !*.trie
+# Area-light LTC tables, embedded by Rinten.Engine.csproj - see CoreAreaLights
+!/engine/Rinten.Engine/Core/Backend/Render/ltc.bin
 
 # Native core sources (engine/Core and its vendored dependencies)
 !*.c

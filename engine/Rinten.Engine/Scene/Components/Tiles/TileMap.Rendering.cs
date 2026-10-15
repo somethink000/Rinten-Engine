@@ -211,7 +211,8 @@ public sealed partial class TileMap
 				TintColor = bright
 					? new Color32( rgbe.r, rgbe.g, rgbe.b, (byte)( alpha * 255.0f ) ).RawInt
 					: SpriteBatchSceneObject.SpriteData.PackColor( new Color( Math.Clamp( tint.r, 0.0f, 1.0f ), Math.Clamp( tint.g, 0.0f, 1.0f ), Math.Clamp( tint.b, 0.0f, 1.0f ), alpha ) ),
-				Lighting = bright ? (uint)rgbe.a << 16 : 0,
+				Lighting = ( bright ? (uint)rgbe.a << 16 : 0 ) | ( layer.Lit2D ? SpriteBatchSceneObject.SpriteData.Lit2D : 0 )
+					| ( layer.Occluder2D ? SpriteBatchSceneObject.SpriteData.Occluder2D : 0 ),
 				RenderFlags = (int)flags,
 				BillboardMode = (uint)SpriteRenderer.BillboardMode.None,
 				FogStrengthCutout = cutout,

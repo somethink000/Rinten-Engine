@@ -183,7 +183,11 @@
 	//--- textures ---------------------------------------------------------------
 
 	//Layers match WebGL2's signature (unused without multiview); multisample count is 4
+	//The engine's bit, not WebGPU's, for a texture read as layers even with one - BrowserDevice.TextureUse.Layered
+	var LayeredUse = 1 << 20;
+
 	function createTexture(width, height, mips, format, usage, label, layers, samples) {
+		usage &= ~LayeredUse;
 		return alloc(device.createTexture({
 			size: { width: width, height: height, depthOrArrayLayers: Math.max(1, layers || 1) },
 			mipLevelCount: mips,
@@ -194,12 +198,15 @@
 		}));
 	}
 
-	function createView(texture, format, aspect, baseMip, mipCount) {
+	//dimension "2d" is one layer, baseLayer, of an array - what a pass draws into it through; "2d-array" every layer as one
+	function createView(texture, format, aspect, baseMip, mipCount, baseLayer, dimension) {
 		var t = get(texture);
 		if (!t) return 0;
 		var desc = { aspect: aspect || "all", baseMipLevel: baseMip || 0 };
 		if (format) desc.format = format;
 		if (mipCount > 0) desc.mipLevelCount = mipCount;
+		if (dimension) desc.dimension = dimension;
+		if (dimension === "2d") { desc.baseArrayLayer = baseLayer || 0; desc.arrayLayerCount = 1; }
 		return alloc(t.createView(desc));
 	}
 
@@ -375,6 +382,28 @@
 	//Runs a frame's command stream from BrowserNative in one call instead of one call per command
 	var dynamicOffset = new Uint32Array(1);
 
+	//The depth under the scissor back to the far plane, for a depth-only pass - a page of a shadow map baked again, see
+	//BrowserSwapchain.ShadowArea. WebGPU clears only whole attachments, so one triangle at depth one is drawn
+	var depthClearer = null;
+
+	function clearDepth(p) {
+		if (!depthClearer) {
+			var module = device.createShaderModule({ code:
+				"@vertex fn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {" +
+				" return vec4<f32>(select(-1.0, 3.0, i == 1u), select(-1.0, 3.0, i == 2u), 1.0, 1.0); }" });
+
+			depthClearer = device.createRenderPipeline({
+				layout: "auto",
+				vertex: { module: module, entryPoint: "main" },
+				primitive: { topology: "triangle-list" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "always" }
+			});
+		}
+
+		p.setPipeline(depthClearer);
+		p.draw(3);
+	}
+
 	function runPass(pass, bytes, count, end) {
 		if (count > 0) {
 			var p = get(pass);
@@ -397,6 +426,7 @@
 					case 6: if (p) p.setScissorRect(w[i + 1], w[i + 2], w[i + 3], w[i + 4]); i += 5; break;
 					case 7: if (p) { frameDraws++; p.draw(w[i + 1], w[i + 2], w[i + 3], w[i + 4]); } i += 5; break;
 					case 8: if (p) { frameDraws++; p.drawIndexed(w[i + 1], w[i + 2], w[i + 3], w[i + 4], w[i + 5]); } i += 6; break;
+					case 10: if (p) clearDepth(p); i += 1; break;
 					case 9: {
 						var b = get(w[i + 1]), size = w[i + 3];
 						if (b) queue.writeBuffer(b, w[i + 2] >>> 0, v, (i + 4) * 4, size);

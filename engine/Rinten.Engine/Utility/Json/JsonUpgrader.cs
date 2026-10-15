@@ -16,12 +16,13 @@ internal static class JsonUpgrader
 	/// <summary>Runs through all upgraders that match its class where our version is lower than the specified version.</summary>
 	public static void Upgrade( int version, JsonObject json, Type targetType )
 	{
-		//This is normal, upgraders have not been initialized using UpdateUpgraders it's fine to ignore this.
+		//Upgraders not yet gathered by UpdateUpgraders: nothing to run
 		if ( _methods is null )
 			return;
 
+		//An abstract base's upgraders run for what derives from it - Light's for a PointLight
 		foreach ( var e in _methods
-			.Where( x => x.Attribute.Type == targetType )
+			.Where( x => x.Attribute.Type == targetType || ( x.Attribute.Type.IsAbstract && x.Attribute.Type.IsAssignableFrom( targetType ) ) )
 			.OrderBy( x => x.Attribute.Version )
 			.Where( x => x.Attribute.Version > version ) )
 		{

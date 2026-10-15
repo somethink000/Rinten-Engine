@@ -105,7 +105,6 @@ namespace Rinten
 			if ( type == Types.SceneLightObject ) return New<SceneLight>( ptr, ( h ) => new SceneLight( h ) );
 			if ( type == Types.SceneSkyBoxObject ) return New<SceneSkyBox>( ptr, ( h ) => new SceneSkyBox( h ) );
 			if ( type == Types.SceneAnimatableObject ) return New<SceneModel>( ptr, ( h ) => new SceneModel( h ) );
-			if ( type == Types.EnvMapSceneObject ) return New<SceneCubemap>( ptr, ( h ) => new SceneCubemap( h ) );
 			if ( type == Types.SceneLightProbeVolumeObject ) return New<SceneLightProbe>( ptr, ( h ) => new SceneLightProbe( h ) );
 			if ( type == Types.DecalSceneObject ) return New<DecalSceneObject>( ptr, ( h ) => new DecalSceneObject( h ) );
 
@@ -163,7 +162,6 @@ namespace Rinten
 			internal static uint SceneParticleObject { get; } = StringToken.FindOrCreate( "SceneParticleObject" );
 			internal static uint SceneAnimatableObject { get; } = StringToken.FindOrCreate( "SceneAnimatableObject" );
 			internal static uint ManagedSceneObject { get; } = StringToken.FindOrCreate( "ManagedSceneObject" );
-			internal static uint EnvMapSceneObject { get; } = StringToken.FindOrCreate( "EnvMapSceneObject" );
 			internal static uint SceneLightProbeVolumeObject { get; } = StringToken.FindOrCreate( "SceneLightProbeVolumeObject" );
 			internal static uint DecalSceneObject { get; } = StringToken.FindOrCreate( "DecalSceneObject" );
 

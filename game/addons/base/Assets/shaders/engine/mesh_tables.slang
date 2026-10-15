@@ -8,7 +8,7 @@
 static const uint MaxViews = 32;
 static const uint MaxLists = 100;
 
-//The project's level-of-detail groups: how many, and how many samples each curve is baked to. Rendering.LodGroups says the same two numbers.
+//The project's level-of-detail groups: how many, and samples a curve - as Rendering.LodGroups says
 static const uint MaxLodGroups = 16;
 static const uint LodCurveSamples = 32;
 static const uint ClusterVertices = 372;
@@ -17,12 +17,12 @@ static const uint InstanceDrawn = 1;
 static const uint InstanceNoShadow = 2;
 static const uint InstanceShadowOnly = 4;
 static const uint InstanceSquare = 8;
-//16 is InstancePosed and 32 InstanceNeverStill - neither is read here; they are the
-//processor's, and the list is kept whole so the bits cannot drift apart. See CoreMeshShaders.
+//The same numbers as CoreMeshShaders' - kept whole so the bits cannot drift apart
 static const uint InstancePosed = 16;
+static const uint InstanceNeverStill = 32;
 
-//The bit a visible-list entry carries above its cluster when the entry's triangles found no room in its list's run of the index buffer:
-//nothing draws it, and the bin pass must not shade it - see Append. Declared here because every shader that reads the entries needs it.
+//The bit an entry carries above its cluster when its triangles found no room in the list's index run:
+//nothing draws it and the bin pass must not shade it - see Append; here as every reader needs it
 static const uint ClusterDropped = 0x40000000u;
 
 //Distance slice stored in the entry so the count and fill passes can't disagree about it
@@ -32,8 +32,8 @@ static const uint ClusterSlices = 16;
 //First slice shaded with kFarShading (~45 m); must match CoreMeshShaders.FarSlice
 static const uint ClusterFarSlice = 11;
 
-//Where a span of a material's run begins, in slices: the first span is everything nearer than the cut, and the rest divide what is past
-//it. A material drawn in one call has one span and no cut at all - that call is the whole run and is drawn with the surface whole.
+//Where a span of a material's run begins, in slices: the first is all nearer than the cut, the rest divide
+//what is past it; a material drawn in one call has one span and no cut
 uint ClusterSpanFrom( uint span, uint draws, uint slices, uint cut )
 {
 	if ( draws <= 1u || span == 0u ) return 0u;
@@ -65,8 +65,8 @@ static const uint MaterialMoves = 16;
 //Free: it was MaterialThins, a surface the cull drew fewer clusters of with distance. A canopy's
 //levels are thinned where they are built now - see LevelChain - and nothing is dropped at draw time.
 
-//MeshInfo.flags: the mesh's levels are a chain - one level of the whole model at a time, every level judged by the mesh's sphere - and
-//two bits from MeshShadowShift say how many levels coarser its shadows are. See ChainLevel in mesh_cull.slang and CoreClusters.MeshChain.
+//MeshInfo.flags: levels are a chain judged by the mesh's sphere, and two bits from MeshShadowShift say how
+//much coarser its shadows are - see ChainLevel in mesh_cull.slang and CoreClusters.MeshChain
 static const uint MeshChain = 4u;
 static const uint MeshShadowShift = 8u;
 
@@ -80,7 +80,7 @@ struct MeshInfo
 	float4 boxMin;
 	float4 boxMax;
 
-	//A level a row: where its clusters are, how many, the smallest error any of them carries and the largest its parents do.
+	//A level a row: where its clusters are, how many, their least error and their parents' greatest
 	uint4 level[8];
 };
 
@@ -135,13 +135,13 @@ bool IsCamera( View view ) { return view.screen.w > 0.5; }
 //Orthographic view: size by eye.w directly, not by distance from its far-back eye
 bool IsFlat( View view ) { return view.screen.w > 1.5; }
 
-//Whether a light's view shrinks with distance - a lamp's face - and so cuts its DAG the way the camera does, from its own eye;
-//or looks down parallel rays - the sun's - and cuts by texels a metre wherever a thing stands. See NearLevels and LightLevels.
+//Whether a light's view shrinks with distance - a lamp's face, cut from its own eye like the camera's -
+//or looks down parallel rays like the sun's, cut by texels a metre; see NearLevels and LightLevels
 bool PerspectiveLight( View view ) { return !IsCamera( view ) && view.screen.y > 0.5; }
 uint ViewCasters( View view ) { return IsCamera( view ) ? CastersAll : uint( view.screen.x ); }
 
 //Whether an instance is one of what moves: posed, or put somewhere else since the last time it held still.
-bool Moves( Instance instance ) { return ( instance.flags & InstancePosed ) != 0 || instance.moving != 0; }
+bool Moves( Instance instance ) { return ( instance.flags & ( InstancePosed | InstanceNeverStill ) ) != 0 || instance.moving != 0; }
 
 struct ListInfo
 {
@@ -184,8 +184,8 @@ struct Params
 
 	//Distance slices per material bin (1..16); only orders clusters near-first within one run
 	uint binSlices;
-	//Where the lists' mesh-stage draws are in the visible buffer, four words a list: the group counts of a draw that gives every visible entry of
-	//the list a workgroup. Written by the cull's finish beside the indexed draws; read only where the device draws mesh stages - see CoreMeshRender.
+	//The lists' mesh-stage draws in the visible buffer, four words a list: group counts giving each entry a
+	//workgroup; written by the cull's finish, read only where mesh stages draw - see CoreMeshRender
 	uint meshArgsAt;
 
 	//Where the debug words are in the visible buffer, under RINTEN_MESH_DEBUG.
@@ -201,18 +201,18 @@ struct Params
 	//Bin count (materials * binSlices). Struct is written by index: never insert words, free in place
 	uint bins;
 
-	//Where the packed clusters live, as a uint4 index, and how many of them there is room for - see the emit in CullInstance.
+	//Where the packed clusters live as a uint4 index, and room for how many - see the emit in CullInstance
 	uint singlesAt;
 	uint singlesCapacity;
 
-	//The bins' runs of the index buffer: how far the bin pass has got into each, and where each begins - see the finish and the bin pass.
+	//The bins' index runs: how far the bin pass has got into each, and where each begins
 	uint binTriFillAt;
 	uint binTriOffsetsAt;
 
 	//Where the lists' indexed draws are, five words a list - see the finish.
 	uint drawArgsAt;
 
-	//The binned list's run of the index buffer, in triangles, how many triangles it has room for, and how many pairs the binned list has.
+	//The binned list's index run in triangles, its room, and how many pairs the list has
 	uint binIndexAt;
 	uint binIndexCapacity;
 	uint binnedCapacity;
@@ -220,14 +220,14 @@ struct Params
 	//Draw calls per material run, split by distance so far spans use the kFarShading pipeline
 	uint binDraws;
 
-	//Which lists of depth are drawn by a mesh stage this frame: a bit each for the camera's solid, two-sided and cut-out kinds, and 8
-	//for the lights'. Nothing writes indices for those, and their runs of the index buffer are not there. See CoreMeshRender.MeshKinds.
+	//Which depth lists a mesh stage draws this frame: a bit each for the camera's three kinds, 8 for the lights';
+	//nothing writes indices for those, and their runs are absent - see CoreMeshRender.MeshKinds
 	uint meshDepth;
 	//Offset of the visible-cell list in the work buffer (see CullCells)
 	uint cellsAt;
 
-	//Which still clusters the depth pre-pass draws, by distance slice: those in a nearer slice. Nought is none, all ones is all - see
-	//CoreSceneDrawer.PrepassSlices. Past it a cluster's material writes its depth in its own far pass, and the cull writes it no pre-pass run.
+	//Which still clusters the pre-pass draws, by distance slice; nought none, all ones all - see PrepassSlices;
+	//past it a material writes its own depth in its far pass
 	uint prepassSlices;
 
 	//Per-material texture demand words (float bits, max per frame), read back for texture streaming
@@ -241,8 +241,8 @@ struct Params
 	View views[MaxViews];
 	ListInfo lists[MaxLists];
 
-	//The level-of-detail groups' curves, baked: LodCurveSamples multiples of the error a group, then where each group's distance begins
-	//and one over how long it is, in x and y. Last, so nothing before it moved - see Rendering.LodGroups and LodScaleOf in mesh_cull.slang.
+	//The LOD groups' baked curves: LodCurveSamples error multiples a group, then each group's distance start
+	//and one over its length in xy; last, so nothing before it moved - see LodScaleOf in mesh_cull.slang
 	float4 lodCurves[MaxLodGroups * LodCurveSamples / 4];
 	float4 lodSpans[MaxLodGroups];
 };

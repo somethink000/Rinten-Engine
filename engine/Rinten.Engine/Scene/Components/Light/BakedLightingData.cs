@@ -5,10 +5,9 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-/// <summary>What a bake produced: the atlas and its directions, the volume, and which renderer has which square of the atlas. Kept in the scene's binary half - see BlobData - rather than in its text.</summary>
+/// <summary>A bake: atlas, directions, volume and each renderer's square - the binary half of a BakedLightmap.</summary>
 public sealed class BakedLightingData : BlobData
 {
-	public override int Version => 2;
 
 	/// <summary>One renderer's square of the atlas, and what it was when it was baked.</summary>
 	public struct Place
@@ -16,11 +15,14 @@ public sealed class BakedLightingData : BlobData
 		/// <summary>The renderer, by its component's id.</summary>
 		public Guid Renderer;
 
-		/// <summary>The model it drew then. Another model has another unwrap, and reads the volume until the next bake.</summary>
+		/// <summary>The model it drew; another model has another unwrap and reads the volume until rebaked.</summary>
 		public string Model;
 
 		/// <summary>Scale in xy, offset in zw - see ModelRenderer.LightmapRect.</summary>
 		public Vector4 Rect;
+
+		/// <summary>Its model's vertices: a MeshComponent edited since has another sheet, and reads the volume.</summary>
+		public int Vertices;
 	}
 
 	public int SheetWidth { get; set; }
@@ -28,9 +30,6 @@ public sealed class BakedLightingData : BlobData
 
 	/// <summary>Four halves a texel: the light arriving, over pi, and one where the texel is a surface's.</summary>
 	public Half[] Sheet { get; set; } = [];
-
-	/// <summary>Four halves a texel: which way that light mostly came from, and its lean onto the surface's own normal.</summary>
-	public Half[] Ways { get; set; } = [];
 
 	public List<Place> Places { get; set; } = new();
 
@@ -45,33 +44,111 @@ public sealed class BakedLightingData : BlobData
 	public Half[] VolumeGreen { get; set; } = [];
 	public Half[] VolumeBlue { get; set; } = [];
 
-	/// <summary>How much of each light with baked shadows the still world lets reach each texel of the sheet, a channel a light, four bytes a texel - empty where no light has them. See Light.Baked.</summary>
-	public byte[] SheetMask { get; set; } = [];
+	/// <summary>Every light in the bake - its bounce, and its direct light on lightmapped surfaces.</summary>
+	public List<Guid> Baked { get; set; } = new();
 
-	/// <summary>The same at each point of the volume, for what moves - laid out as its colours are.</summary>
-	public byte[] VolumeMask { get; set; } = [];
-
-	/// <summary>A light the bake holds something of, and what: its mask channel, or the whole of it.</summary>
-	public struct BakedLight
+	/// <summary>One BakedGlow group's light alone, scaled by its brightness in the frame.</summary>
+	public struct Glow
 	{
-		/// <summary>The light component.</summary>
-		public Guid Light;
+		/// <summary>The group, one to four - see BakedGlow.Group.</summary>
+		public int Group;
 
-		/// <summary>Which channel of the mask holds its shadow - nought to three - or -1 where the whole light is baked.</summary>
-		public int Channel;
+		/// <summary>Four halves a texel of the sheet: its light over pi, and one where the texel is a surface's.</summary>
+		public Half[] Sheet;
+
+		/// <summary>Four halves a point of the volume: its light's constant, and one.</summary>
+		public Half[] Volume;
 	}
 
-	/// <summary>Every light the bake took more than the bounces of.</summary>
-	public List<BakedLight> Lights { get; set; } = new();
+	/// <summary>The glow groups baked apart from the rest, each its own layer.</summary>
+	public List<Glow> Glows { get; set; } = new();
 
-	public bool HasSheetMask => HasSheet && SheetMask.Length >= SheetWidth * SheetHeight * 4;
+	/// <summary>Four halves a texel: which way the sky is open and how much is seen; the frame lights it.</summary>
+	public Half[] SheetSky { get; set; } = [];
 
-	public bool HasVolumeMask => HasVolume && VolumeMask.Length >= VolumeX * VolumeY * VolumeZ * 4;
+	/// <summary>The live bounce sheet's blocks across and down; nought where the bake has none.</summary>
+	public int BounceWidth { get; set; }
+	public int BounceHeight { get; set; }
 
-	//Counts every change, so whoever put it on the card knows to put it there again.
+	/// <summary>Each block's slot in TexelLinks, -1 for a block with none.</summary>
+	public int[] TexelSlots { get; set; } = [];
+
+	/// <summary>Each slot's surface and facing bin, which the frame smooths the bounce within.</summary>
+	public int[] TexelKeys { get; set; } = [];
+
+	/// <summary>The surfel clusters each slot's block sees, and the share of its view each fills.</summary>
+	public ushort[] TexelLinks { get; set; } = [];
+	public Half[] TexelWeights { get; set; } = [];
+
+	/// <summary>Whether the live bounce can be laid at the lightmap's detail, not read from the volume.</summary>
+	public bool HasTexelBounce => BounceWidth > 0 && BounceHeight > 0 && TexelSlots.Length == BounceWidth * BounceHeight
+		&& TexelLinks.Length > 0 && TexelLinks.Length == TexelWeights.Length && TexelKeys.Length * Bake.BakeSurfels.TexelLinks == TexelLinks.Length;
+
+	/// <summary>The sheet's first band over its light, half size - see BakeSheet.Band.</summary>
+	public byte[] SheetBand { get; set; } = [];
+
+	/// <summary>Whether the sheet's first band is kept, for the light to lean into a normal map by colour.</summary>
+	public bool HasBand => HasSheet && SheetBand.Length == Math.Max( SheetWidth / 2, 1 ) * Math.Max( SheetHeight / 2, 1 ) * 12;
+
+	/// <summary>Four halves a point: how much sky is seen, then its lean along x, y, z.</summary>
+	public Half[] VolumeSky { get; set; } = [];
+
+	/// <summary>Twelve bytes a cell, as three rows of the volume's picture: how far each corner sees into it.</summary>
+	public byte[] VolumeWalls { get; set; } = [];
+
+	/// <summary>The sun whose bounce the frame relights, empty for none; the sky's bounce is relit with it.</summary>
+	public Guid LiveSun { get; set; }
+
+	/// <summary>Points on the still world the bounce is relit through, BakeSurfels.Floats floats each.</summary>
+	public float[] Surfels { get; set; } = [];
+
+	/// <summary>Each surfel's sun visibility by direction, a bit each - see BakeSurfels.Sun.</summary>
+	public byte[] SurfelSun { get; set; } = [];
+
+	/// <summary>Each surfel's free distance by direction, a byte each - see BakeSurfels.Depth.</summary>
+	public byte[] SurfelDepth { get; set; } = [];
+
+	/// <summary>Each surfel's cluster - see BakeSurfels.Cluster.</summary>
+	public ushort[] SurfelClusters { get; set; } = [];
+
+	/// <summary>The clusters each surfel sees, BakeSurfels.Links each, and the share of its view they fill.</summary>
+	public ushort[] SurfelLinks { get; set; } = [];
+	public Half[] SurfelWeights { get; set; } = [];
+
+	/// <summary>The clusters each volume point sees, laid out as the surfels' own.</summary>
+	public ushort[] ProbeLinks { get; set; } = [];
+	public Half[] ProbeWeights { get; set; } = [];
+
+	/// <summary>Whether the frame can relight the sun's and sky's bounce - see CoreLiveBounce.</summary>
+	public bool HasBounce
+	{
+		get
+		{
+			if ( !HasVolume || Surfels.Length == 0 || Surfels.Length % Bake.BakeSurfels.Floats != 0 ) return false;
+
+			var count = Surfels.Length / Bake.BakeSurfels.Floats;
+
+			return SurfelSun.Length == count * Bake.BakeSurfels.SunBytes
+				&& SurfelDepth.Length == count * Bake.BakeSurfels.DepthBytes && SurfelClusters.Length == count
+				&& SurfelLinks.Length == count * Bake.BakeSurfels.Links && SurfelWeights.Length == SurfelLinks.Length
+				&& ProbeLinks.Length == VolumeX * VolumeY * VolumeZ * Bake.BakeSurfels.Links && ProbeWeights.Length == ProbeLinks.Length;
+		}
+	}
+
+	/// <summary>Whether the volume knows its walls, so a point reads only the corners on its side of one.</summary>
+	public bool HasWalls => HasVolume && VolumeWalls.Length == VolumeX * VolumeY * VolumeZ * 12;
+
+	/// <summary>Whether the sky is kept as visibility, for the frame to light by the sky as it is now.</summary>
+	public bool HasSky => HasVolume && VolumeSky.Length == VolumeRed.Length;
+
+	//New with every change and unique across bakes, so the card and the reflection probes know to catch up
 	internal int Revision { get; private set; }
 
-	public bool HasSheet => SheetWidth > 0 && SheetHeight > 0 && Sheet.Length >= SheetWidth * SheetHeight * 4 && Ways.Length == Sheet.Length;
+	private static int stamped;
+
+	public BakedLightingData() => Touched();
+
+	public bool HasSheet => SheetWidth > 0 && SheetHeight > 0 && Sheet.Length >= SheetWidth * SheetHeight * 4;
 
 	public bool HasVolume => VolumeX > 0 && VolumeY > 0 && VolumeZ > 0 && VolumeStep > 0.0f
 		&& VolumeRed.Length >= VolumeX * VolumeY * VolumeZ * 4
@@ -79,7 +156,7 @@ public sealed class BakedLightingData : BlobData
 
 	public bool IsEmpty => !HasSheet && !HasVolume;
 
-	internal void Touched() => Revision++;
+	internal void Touched() => Revision = System.Threading.Interlocked.Increment( ref stamped );
 
 	public override void Serialize( ref Writer writer )
 	{
@@ -88,7 +165,8 @@ public sealed class BakedLightingData : BlobData
 		s.Write( SheetWidth );
 		s.Write( SheetHeight );
 		Packed( ref s, Sheet );
-		Packed( ref s, Ways );
+		Packed( ref s, SheetSky );
+		PackedBytes( ref s, SheetBand );
 
 		s.Write( Places.Count );
 
@@ -97,6 +175,7 @@ public sealed class BakedLightingData : BlobData
 			s.Write( place.Renderer );
 			s.Write( place.Model ?? "" );
 			s.Write( place.Rect );
+			s.Write( place.Vertices );
 		}
 
 		s.Write( VolumeX );
@@ -107,71 +186,50 @@ public sealed class BakedLightingData : BlobData
 		Packed( ref s, VolumeRed );
 		Packed( ref s, VolumeGreen );
 		Packed( ref s, VolumeBlue );
+		Packed( ref s, VolumeSky );
+		PackedBytes( ref s, VolumeWalls );
 
-		//Version 2: the masks and the lights.
-		PackedBytes( ref s, SheetMask );
-		PackedBytes( ref s, VolumeMask );
+		s.Write( Baked.Count );
+		foreach ( var light in Baked ) s.Write( light );
 
-		s.Write( Lights.Count );
+		s.Write( Glows.Count );
 
-		foreach ( var light in Lights )
+		foreach ( var glow in Glows )
 		{
-			s.Write( light.Light );
-			s.Write( light.Channel );
+			s.Write( glow.Group );
+			Packed( ref s, glow.Sheet ?? [] );
+			Packed( ref s, glow.Volume ?? [] );
 		}
+
+		s.Write( LiveSun );
+		Packed( ref s, Surfels );
+		PackedBytes( ref s, SurfelSun );
+		PackedBytes( ref s, SurfelDepth );
+		Packed( ref s, SurfelClusters );
+		Packed( ref s, SurfelLinks );
+		Packed( ref s, SurfelWeights );
+		Packed( ref s, ProbeLinks );
+		Packed( ref s, ProbeWeights );
+
+		s.Write( BounceWidth );
+		s.Write( BounceHeight );
+		Packed( ref s, TexelSlots );
+		Packed( ref s, TexelKeys );
+		Packed( ref s, TexelLinks );
+		Packed( ref s, TexelWeights );
 
 		writer.Stream = s;
 	}
 
-	/// <summary>A version 1 bake: no masks, and every light it took it took whole - which is what Baked meant then. The lights are not named in it, so the frame treats a Baked light of such a bake as whole until it is baked again.</summary>
-	public override void Upgrade( ref Reader reader, int fromVersion )
-	{
-		if ( fromVersion >= 2 )
-		{
-			Deserialize( ref reader );
-			return;
-		}
-
-		ReadFirst( ref reader );
-		SheetMask = [];
-		VolumeMask = [];
-		Lights = new List<BakedLight>();
-		IsOld = true;
-
-		Touched();
-	}
-
-	//Whether this came out of a bake from before the masks - see Upgrade.
-	internal bool IsOld { get; private set; }
-
 	public override void Deserialize( ref Reader reader )
-	{
-		ReadFirst( ref reader );
-
-		var s = reader.Stream;
-
-		SheetMask = UnpackedBytes( ref s );
-		VolumeMask = UnpackedBytes( ref s );
-
-		var lights = s.Read<int>();
-		Lights = new List<BakedLight>( lights );
-
-		for ( var i = 0; i < lights; ++i )
-			Lights.Add( new BakedLight { Light = s.Read<Guid>(), Channel = s.Read<int>() } );
-
-		reader.Stream = s;
-		Touched();
-	}
-
-	//What version 1 held, which version 2 begins with.
-	private void ReadFirst( ref Reader reader )
 	{
 		var s = reader.Stream;
 
 		SheetWidth = s.Read<int>();
 		SheetHeight = s.Read<int>();
 		Sheet = Unpacked( ref s );
-		Ways = Unpacked( ref s );
+		SheetSky = Unpacked( ref s );
+		SheetBand = UnpackedBytes( ref s );
 
 		var places = s.Read<int>();
 		Places = new List<Place>( places );
@@ -183,6 +241,7 @@ public sealed class BakedLightingData : BlobData
 				Renderer = s.Read<Guid>(),
 				Model = s.Read<string>(),
 				Rect = s.Read<Vector4>(),
+				Vertices = s.Read<int>(),
 			} );
 		}
 
@@ -194,8 +253,38 @@ public sealed class BakedLightingData : BlobData
 		VolumeRed = Unpacked( ref s );
 		VolumeGreen = Unpacked( ref s );
 		VolumeBlue = Unpacked( ref s );
+		VolumeSky = Unpacked( ref s );
+		VolumeWalls = UnpackedBytes( ref s );
+
+		var baked = s.Read<int>();
+		Baked = new List<Guid>( baked );
+		for ( var i = 0; i < baked; ++i ) Baked.Add( s.Read<Guid>() );
+
+		var glows = s.Read<int>();
+		Glows = new List<Glow>( glows );
+
+		for ( var i = 0; i < glows; ++i )
+			Glows.Add( new Glow { Group = s.Read<int>(), Sheet = Unpacked( ref s ), Volume = Unpacked( ref s ) } );
+
+		LiveSun = s.Read<Guid>();
+		Surfels = Unpacked<float>( ref s );
+		SurfelSun = UnpackedBytes( ref s );
+		SurfelDepth = UnpackedBytes( ref s );
+		SurfelClusters = Unpacked<ushort>( ref s );
+		SurfelLinks = Unpacked<ushort>( ref s );
+		SurfelWeights = Unpacked( ref s );
+		ProbeLinks = Unpacked<ushort>( ref s );
+		ProbeWeights = Unpacked( ref s );
+
+		BounceWidth = s.Read<int>();
+		BounceHeight = s.Read<int>();
+		TexelSlots = Unpacked<int>( ref s );
+		TexelKeys = Unpacked<int>( ref s );
+		TexelLinks = Unpacked<ushort>( ref s );
+		TexelWeights = Unpacked( ref s );
 
 		reader.Stream = s;
+		Touched();
 	}
 
 	private static void PackedBytes( ref ByteStream s, byte[] values )
@@ -228,8 +317,8 @@ public sealed class BakedLightingData : BlobData
 		return values;
 	}
 
-	//Halves through deflate, length first. Light is smooth, and most of an atlas is the same few values over and over.
-	private static void Packed( ref ByteStream s, Half[] values )
+	//Through deflate, length first. Light is smooth, and most of an atlas is the same few values over and over.
+	private static void Packed<T>( ref ByteStream s, T[] values ) where T : unmanaged
 	{
 		using var memory = new MemoryStream();
 
@@ -243,7 +332,9 @@ public sealed class BakedLightingData : BlobData
 		s.Write( bytes );
 	}
 
-	private static Half[] Unpacked( ref ByteStream s )
+	private static Half[] Unpacked( ref ByteStream s ) => Unpacked<Half>( ref s );
+
+	private static T[] Unpacked<T>( ref ByteStream s ) where T : unmanaged
 	{
 		var count = s.Read<int>();
 		var length = s.Read<int>();
@@ -251,7 +342,7 @@ public sealed class BakedLightingData : BlobData
 		var bytes = new byte[length];
 		s.Read( bytes, 0, length );
 
-		var values = new Half[count];
+		var values = new T[count];
 
 		using var deflate = new DeflateStream( new MemoryStream( bytes ), CompressionMode.Decompress );
 		deflate.ReadExactly( MemoryMarshal.AsBytes( values.AsSpan() ) );

@@ -156,7 +156,16 @@ Out Shade( V2F i )
 
 	//What lies the mirror way: the room where a probe covers the water, the sky where none does - the same environment
 	//every surface reflects, so a pool indoors shows the room and not a sky it cannot see. See EnvironmentAt.
-	float3 sky = EnvironmentAt( ProbesHere( i.world ), i.world, normal, reflect( -toEye, normal ), clamp( g_flRoughness, 0.02, 1.0 ) );
+	float3 mirrorWay = reflect( -toEye, normal );
+	float mirrorRough = clamp( g_flRoughness, 0.02, 1.0 );
+	float skyLeft;
+	float3 probed = ProbesPart( ProbesHere( i.world ), i.world, mirrorWay, mirrorRough, skyLeft );
+	float3 lookAt = normalize( lerp( mirrorWay, normal, mirrorRough * mirrorRough ) );
+	float3 open = HasSky() ? SkyReflected( lookAt, mirrorRough ) : SceneAmbient( float3( 0.0, 0.0, 0.0 ) );
+	float3 sky = probed + ( open * skyLeft );
+
+	//Sky Reflection holds back only the open sky, which a canopy hides; a probe shows what is really there
+	float allowed = mirrored * lerp( 1.0, g_flSkyReflection, skyLeft );
 
 	//Lit as a polished dark surface: the sun's glint off the ripples and the sky's ambient in the body, with the fog the
 	//frame has. The reflection of the sky goes in as emission, at the Fresnel share and what the material allows of it.
@@ -173,7 +182,7 @@ Out Shade( V2F i )
 	//Subtract the sky the engine already reflects so the pond doesn't mirror it twice
 	float3 already = EnvBrdf( float3( 0.04, 0.04, 0.04 ), surface.roughness, facing );
 
-	surface.emission = sky * max( ( mirrored * g_flSkyReflection ) - already, 0.0 );
+	surface.emission = sky * max( allowed - already, 0.0 );
 	surface.uv = i.uv;
 	surface.id = i.depthId;
 	surface.lightmap = float2( 0.0, 0.0 );
@@ -187,7 +196,7 @@ Out Shade( V2F i )
 
 	if ( found.a > 0.0 )
 	{
-		float weight = lit.mirror + LightStrength( max( ( mirrored * g_flSkyReflection ) - already, 0.0 ) );
+		float weight = lit.mirror + LightStrength( max( allowed - already, 0.0 ) );
 		float3 through = ApplyFog( 1.0.xxx, i.world, EYE_FRAME( camera ).xyz, i.position.xy ) - ApplyFog( 0.0.xxx, i.world, EYE_FRAME( camera ).xyz, i.position.xy );
 
 		lit.colour = max( lit.colour + ( ( found.rgb - sky ) * weight * found.a * through ), 0.0 );

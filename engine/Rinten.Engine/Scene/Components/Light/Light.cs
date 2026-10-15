@@ -11,9 +11,9 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	internal SceneLight SceneObject => _sceneObject;
 
 	//Source size drives highlight size and shadow penumbra (see surface_shading.slang, frame.slang)
-	/// <summary>How wide the light itself is, in metres - which is how big its highlight is in a glossy surface, and how soft the edge of its shadow is.</summary>
-	[Property, Group( "Shadows" ), Range( 0.0f, 2.0f ), Title( "Source Width" )]
-	public float SourceRadius { get; set; } = 0.05f;
+	/// <summary>Half the light's width in metres (a shaded bulb is about 0.1): highlight size, shadow softness.</summary>
+	[Property, Group( "Shadows" ), Range( 0.0f, 2.0f ), Title( "Source Radius" )]
+	public float SourceRadius { get; set; } = 0.1f;
 
 	/// <summary>The main color of the light</summary>
 	[Property]
@@ -35,19 +35,18 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 	[Property, Range( 0, 100 ), Order( -5 )]
 	public float Brightness { get; set; } = 1.0f;
 
-	//Distance exponent: 1 is inverse square, 0 no falloff (ends at radius), above 1 falls off faster
-	/// <summary>How fast the light dies with distance, as the power the distance is raised to.</summary>
+	//1 is inverse square, 0 no falloff (ends at radius), above 1 falls off faster
+	/// <summary>How fast the light dies with distance, as the power the squared distance is raised to.</summary>
 	[Property, Range( 0, 2 ), Order( -4 )]
-	public float Attenuation { get; set; } = 0.15f;
+	public float Attenuation { get; set; } = 1.0f;
 
-	//The power the shading raises distance to, within its limits.
 	internal float Falloff => Attenuation.Clamp( 0.0f, 2.0f );
 
 	//Colour times brightness; culling range uses this too, so bright lights aren't cut off early
 	internal Color EmittedColor => new( LightColor.r * Brightness, LightColor.g * Brightness,
 		LightColor.b * Brightness, LightColor.a );
 
-	/// <summary>Whether this light lights the volumetric fog, and whether its shadow shows in it. Kept for that fog, which does not draw yet.</summary>
+	/// <summary>Whether this light lights the volumetric fog and shows its shadow in it.</summary>
 	[Property, Category( "Fog Settings" )]
 	public FogInfluence FogMode { get; set; } = FogInfluence.Enabled;
 
@@ -70,17 +69,13 @@ public abstract partial class Light : Component, IColorProvider, ExecuteInEditor
 		}
 	} = true;
 
-	//Bakes the static world's shadow from this light (stationary/mixed light); max four may overlap
-	/// <summary>Whether this light's shadows of the still world are baked.</summary>
-	[Property, Order( -4 )]
-	public bool Baked { get; set; }
+	//A baked light is all in the bake - its light, soft shadows and bounces - and costs the frame nothing; what moves
+	//takes it from the bake's volume. A light that must shadow or light what moves as it moves is left out of it
+	/// <summary>Whether this light is kept out of the bake, lighting only as the frame draws it.</summary>
+	[Property, Order( -4 ), Title( "Not Baked" )]
+	public bool NotBaked { get; set; }
 
-	//For a lamp filling a corridor, which wants no shadow of what walks past: it costs nothing to draw however many there are, and what moves under it is lit by it out of the bake's volume, softly, and casts no shadow from it. A light that keeps a character's shadow wants Baked alone.
-	/// <summary>Whether the whole of a baked light lives in the bake rather than in the frame - its light as well as its shadows.</summary>
-	[Property, Order( -3 ), ShowIf( nameof( Baked ), true ), Title( "Whole Light In Bake" )]
-	public bool BakedWhole { get; set; }
-
-	//Diffuse and specular are kept apart in the frame's shading - a light without specular lights a surface and leaves no highlight on it, one without diffuse leaves only the highlight - and the bake leaves a light without diffuse out altogether. Nothing here has a transmission term to switch.
+	//Diffuse and specular are kept apart in shading; the bake leaves out a light without diffuse
 	/// <summary>Which lighting terms this light is allowed to contribute to.</summary>
 	[Property, EnumButtonGroup, Title( "Contributes" )]
 	public LightContribution Contribution { get; set; } = LightContribution.Diffuse | LightContribution.Specular | LightContribution.Transmissive;

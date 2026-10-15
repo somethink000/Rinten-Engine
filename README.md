@@ -5,11 +5,18 @@
   </picture>
 </p>
 
-<h1 align="center">Rinten
+<h1 align="center">Rinten</h1>
 
 <p align="center">A C# multiplatform game engine</p>
 
-The editor runs on Windows and Linux. Games export to Windows, Linux, Steam Frame (Linux Arm), Android and the web, and run in VR through OpenXR or WebXR.
+<p align="center">
+  <a href="https://discord.gg/VdzBxYbPRb"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://www.patreon.com/lonepinedev/membership"><img src="https://img.shields.io/badge/Patreon-support-FF424D?style=for-the-badge&logo=patreon&logoColor=white" alt="Patreon"></a>
+</p>
+
+<p align="center">
+  <sub><b>Editor</b>: Windows · Linux &nbsp;|&nbsp; <b>Games</b>: Windows · Linux · Steam Frame · Android · Web &nbsp;|&nbsp; <b>VR</b>: OpenXR · WebXR</sub>
+</p>
 
 ## Get it
 

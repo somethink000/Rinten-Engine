@@ -49,6 +49,37 @@ public sealed class TileMapLayer
 		}
 	} = true;
 
+	/// <summary>
+	/// Whether the layer's tiles are lit by the scene's 2D lights - see <see cref="Light2D"/>.
+	/// Drawn as they are in a scene with no 2D lights, so on by default.
+	/// </summary>
+	[Property, Title( "Lit 2D" )]
+	public bool Lit2D
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Map?.LayerChanged( this );
+		}
+	} = true;
+
+	/// <summary>Whether the layer's tiles block 2D light, by their pictures' shapes, and so cast 2D shadows.</summary>
+	[Property, Title( "Occluder 2D" )]
+	public bool Occluder2D
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Map?.LayerChanged( this );
+		}
+	}
+
 	/// <summary>Multiplied into every tile of the layer.</summary>
 	[Property]
 	public Color Tint

@@ -204,15 +204,6 @@ public static class SceneUtility
 				sun.LightColor = Color.White * 0.4f;
 			}
 
-			//envmap
-			{
-				var go = new GameObject( true, "envmap" );
-				var c = go.AddComponent<EnvmapProbe>();
-				c.Mode = EnvmapProbe.EnvmapProbeMode.CustomTexture;
-				c.Texture = Texture.Load( "textures/cubemaps/default2.tex" );
-				c.Bounds = BBox.FromPositionAndSize( Vector3.Zero, 100000 );
-			}
-
 			GameObject o = default;
 
 			//prefab spawn

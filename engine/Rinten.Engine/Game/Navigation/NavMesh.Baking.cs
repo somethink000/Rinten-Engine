@@ -9,32 +9,48 @@ namespace Rinten.Navigation;
 
 public sealed partial class NavMesh
 {
-	[Menu( "Editor", "Scene/Bake NavMesh", "directions_run", Priority = 1800 )]
-	public static async void BakeNavMesh()
+	/// <summary>Whether a bake of the tiles is kept, which a load reads instead of building them from the world.</summary>
+	[Hide]
+	public bool HasBake => !string.IsNullOrEmpty( _bakedDataPath );
+
+	/// <summary>Builds the tiles where they are not built yet and keeps them in the scene's folder, reporting progress -
+	/// the navigation part of the scene's bake. Only in the editor, which has a folder to keep them in.</summary>
+	public async Task Bake( Scene scene, CancellationToken cancel = default )
 	{
-		if ( !Application.IsEditor ) throw new InvalidOperationException( "NavMesh Baking is only available in editor." );
+		if ( !scene.IsValid() || scene.Editor is null ) return;
 
-		var navMesh = Application.Editor.Scene.NavMesh;
+		using var progress = Application.Editor?.ProgressSection();
 
-		using var progress = Application.Editor.ProgressSection();
-		progress.Title = "Baking NavMesh";
-		progress.Subtitle = "Collecting tiles...";
+		if ( progress is not null )
+		{
+			progress.Icon = "directions_run";
+			progress.Title = "Baking navmesh";
+			progress.Subtitle = "Building tiles";
+		}
 
-		await navMesh.BakeData(
-			scene: Application.Editor.Scene,
-			onProgress: ( current, total ) =>
-			{
-				progress.Current = current;
-				progress.TotalCount = total;
-				progress.Subtitle = $"Processing chunk {current} / {total}";
-			},
-			cancelToken: progress.GetCancel()
-		);
+		//The scene loads a navmesh switched on as it ticks: that first, then every tile built from the world as it stands,
+		//so what an older bake held is not kept again
+		while ( ( IsGenerating || !IsLoaded ) && !cancel.IsCancellationRequested ) await GameTask.Yield();
+		if ( cancel.IsCancellationRequested ) return;
 
-		progress.Subtitle = "Complete!";
+		tileCache.ForgetBake();
+		await Generate( scene.PhysicsWorld );
+
+		using var both = progress is not null
+			? CancellationTokenSource.CreateLinkedTokenSource( cancel, progress.GetCancel() )
+			: CancellationTokenSource.CreateLinkedTokenSource( cancel );
+
+		await BakeData( scene, ( current, total ) =>
+		{
+			if ( progress is null ) return;
+
+			progress.Current = current;
+			progress.TotalCount = total;
+			progress.Subtitle = $"Chunk {current} of {total}";
+		}, both.Token );
 	}
 
-	//Core baking logic without editor dependencies. Used by BakeDataAsync and tests.
+	//Core baking logic without editor dependencies. Used by Bake and tests.
 	internal async Task BakeData( Scene scene, Action<int, int> onProgress = null, CancellationToken cancelToken = default )
 	{
 		var data = await BakeDataToBytes( onProgress, cancelToken );

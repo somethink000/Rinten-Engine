@@ -1,4 +1,4 @@
-﻿<Solution>
+<Solution>
   <Configurations>
     <Platform Name="Any CPU" />
     <Platform Name="x64" />
@@ -72,5 +72,8 @@
     <Project Path="Tests/Fixtures/HotloadTestAssembly/Rinten.Test.AfterHotload.csproj" />
     <Project Path="Tests/Fixtures/HotloadTestAssembly/Rinten.Test.BeforeHotload.csproj" />
     <Project Path="Tests/Fixtures/Rinten.Test.Generate/Rinten.Test.Generate.csproj" />
+  </Folder>
+  <Folder Name="/Tools/">
+    <Project Path="Tools/RazorGen/RazorGen.csproj" />
   </Folder>
 </Solution>

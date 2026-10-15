@@ -43,7 +43,7 @@ internal static class EngineLoop
 		//A page's frame is already paced by the browser (vsync or XR session), so it must not sleep here
 		if ( OperatingSystem.IsBrowser() )
 		{
-			MaxFrameRateSource = RenderSettings.Instance.VSync ? "browser vsync" : "browser, uncapped";
+			MaxFrameRateSource = Diagnostics.PerfReport.Uncapped ? "browser, uncapped" : "browser vsync";
 			return 0;
 		}
 

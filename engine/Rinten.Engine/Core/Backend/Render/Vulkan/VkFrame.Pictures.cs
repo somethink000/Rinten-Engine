@@ -171,6 +171,59 @@ internal static unsafe partial class VkFrame
 		}
 	}
 
+	//The world's pass into a picture of the screen's format and size, so the screen's pipelines draw there unchanged - its
+	//texture; or, turned off, the pass closed and what it drew left readable, and the next draw back on the screen
+	internal static ulong WorldAside( int on, out int width, out int height )
+	{
+		width = height = 0;
+
+		lock ( VkDevice.renderLock )
+		{
+			var p = Pics;
+			var view = VkSwapchain.currentView;
+
+			//A view drawing both eyes at once has no one picture to draw the world into
+			if ( !Current.Recording || p is null || Current.TargetPass || view is { Layers: > 1 } ) return 0;
+
+			var frame = CurrentFrame;
+
+			if ( on == 0 )
+			{
+				if ( !p.AsideOn ) return 0;
+
+				CloseOpenPasses( frame );
+				p.AsideOn = false;
+
+				if ( VkPictures.Get( p.Aside ) is { } drawn )
+					LevelTo( frame.Commands, drawn, 0, ImageLayout.ShaderReadOnlyOptimal );
+
+				return 0;
+			}
+
+			var format = view is not null ? view.OutputFormat : Current.Format;
+			var extent = p.ScreenExtent;
+
+			if ( VkPictures.Get( p.Aside ) is not { } aside || aside.Format != format ||
+				aside.Extent.Width != extent.Width || aside.Extent.Height != extent.Height )
+			{
+				if ( p.Aside != 0 ) VkPictures.Release( p.Aside );
+
+				p.Aside = VkPictures.AcquireIn( format, extent.Width, extent.Height );
+				aside = VkPictures.Get( p.Aside );
+			}
+
+			if ( aside is null ) return 0;
+
+			//What the screen's pass drew so far stays on the screen; the world starts afresh in the picture
+			CloseOpenPasses( frame );
+			p.AsideOn = true;
+
+			width = (int)extent.Width;
+			height = (int)extent.Height;
+			return aside.Handle;
+		}
+	}
+
 	//A picture pass left open ended the way TargetEnd ends one - closed, and what it drew back to being read.
 	//CloseOpenPasses alone would leave the level in the attachment layout with nothing tracking that it is.
 	private static void EndPictureIfOpen( Frame frame )

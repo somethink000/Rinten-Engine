@@ -1,8 +1,7 @@
-using static Rinten.SceneCubemap;
-
 namespace Rinten;
 
-/// <summary>A cubemap probe that captures the environment around it.</summary>
+/// <summary>A cubemap probe: what a place reflects, and how far its reflection reaches. Baked ones are taken by the
+/// scene's bake and kept in its envmaps asset; runtime ones draw themselves as they play.</summary>
 [Expose]
 [Title( "Envmap Probe" )]
 [Category( "Light" )]
@@ -13,14 +12,25 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	[Expose]
 	public enum EnvmapProbeMode
 	{
+		/// <summary>Taken by the scene's bake and read as it was kept - see BakedLighting.Envmaps.</summary>
 		[Icon( "🥖" )]
 		Baked,
 
+		/// <summary>Drawn while the game runs, as often as its update says.</summary>
 		[Icon( "📹" )]
-		Realtime,
+		Runtime,
+	}
 
-		[Icon( "📄" )]
-		CustomTexture
+	[Expose]
+	public enum ProjectionMode
+	{
+		/// <summary>Reflected as though everything were far away.</summary>
+		[Icon( "panorama_photosphere" )]
+		Sphere = 0,
+
+		/// <summary>Reflected off the box's walls, so a room's reflection lines up with the room.</summary>
+		[Icon( "check_box_outline_blank" )]
+		Box = 1,
 	}
 
 	[Expose]
@@ -34,40 +44,28 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 
 		[Title( "512x512" )]
 		Large = 512,
-
-		[Title( "1024x1024" )]
-		Huge = 1024
 	}
 
 	[Expose]
 	public enum CubemapDynamicUpdate
 	{
-		/// <summary>Update once, when the cubemap is enabled</summary>
+		/// <summary>Once, when it is switched on.</summary>
 		OnEnabled,
 
-		/// <summary>Update every frame (slow, not recommended)</summary>
+		/// <summary>Every frame, as far as LeastBetweenCaptures lets it.</summary>
 		EveryFrame,
 
-		/// <summary>Update every x frames</summary>
+		/// <summary>Every so many frames.</summary>
 		FrameInterval,
 
-		/// <summary>Update on a time based interval</summary>
+		/// <summary>Every so many seconds.</summary>
 		TimeInterval,
 	}
 
-	//Minimum seconds between captures of one probe; a cost cap, captures are expensive
+	//Seconds between a runtime probe's captures at least; each is six draws of the world
 	private const float LeastBetweenCaptures = 0.25f;
 
-	private float _capturedAt;
-
-	SceneCubemap _sceneObject;
-	Texture _dynamicTexture;
-	int _bouncesLeft;
-	int _queuedFrames;
-	float _queuedTime;
-
-	public bool Dirty;
-
+	/// <summary>Whether the probe is taken by the scene's bake or drawn while the game runs.</summary>
 	[Property, EnumButtonGroup, WideMode( HasLabel = false )]
 	public EnvmapProbeMode Mode
 	{
@@ -77,455 +75,139 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 			if ( field == value ) return;
 
 			field = value;
-			UpdateSceneObject();
+			CoreEnvmap.Forget( this );
+			owed = value == EnvmapProbeMode.Runtime;
 		}
 	}
 
+	/// <summary>How a reflection is read: as from far away, or off the box's walls.</summary>
 	[Property, Space]
-	public ProjectionMode Projection
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public ProjectionMode Projection { get; set; }
 
-			UpdateSceneObject();
-		}
-
-	}
+	/// <summary>What the reflection is multiplied by, alpha its strength.</summary>
 	[Property]
-	public Color TintColor
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public Color TintColor { get; set; } = Color.White;
 
-			UpdateSceneObject();
-		}
-	} = Color.White;
-
+	/// <summary>Where it reflects, about the probe: whole inside, fading over Feathering past it.</summary>
 	[Property]
-	public BBox Bounds
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public BBox Bounds { get; set; } = BBox.FromPositionAndSize( 0, 26.0f );
 
-			UpdateSceneObject();
-		}
-		//Twenty-six metres, which is the thousand and twenty-four units their editor defaulted to - and inches, as everything of theirs is. Left as
-		//it came across it was a probe a kilometre across, covering the level and every other probe in it, which reads as "the box does nothing".
-	} = BBox.FromPositionAndSize( 0, 26.0f );
+	/// <summary>How far past the box its reflection fades out, in metres.</summary>
+	[Property, Range( 0.0f, 32.0f )]
+	public float Feathering { get; set; } = 0.2f;
 
-	[Property, Range( -32.0f, 32.0f )]
-	public float Feathering
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
-
-			UpdateSceneObject();
-		}
-
-		//Eight of their units, which is a fifth of a metre. A fade of eight metres on a box of twenty-six leaves nothing at full strength.
-	} = 0.2f;
-
-	/// <summary>Gets or sets the priority level for the object.</summary>
+	/// <summary>Which of the probes over a place wins: higher first, then the nearer.</summary>
 	[Property, Range( 0, 100 )]
-	public int Priority
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
+	public int Priority { get; set; }
 
-			field = value;
-
-			if ( _sceneObject.IsValid() )
-			{
-				_sceneObject.Priority = field;
-			}
-		}
-	} = 0;
-
-	/// <summary>If this is set, the EnvmapProbe will use a custom cubemap texture instead of rendering dynamically</summary>
-	[Property]
-	[ShowIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	public Texture Texture
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
-
-			UpdateSceneObject();
-		}
-	}
-
-	/// <summary>The texture that was baked for this envmap probe</summary>
-	[Property, Hide]
-	public Texture BakedTexture { get; set; }
-
-	[Obsolete( "Use Mode to select the update mode" ), Hide]
-	public bool RenderDynamically
-	{
-		get => Mode == EnvmapProbeMode.Realtime;
-		set => Mode = value ? EnvmapProbeMode.Realtime : EnvmapProbeMode.CustomTexture;
-	}
-
-	/// <summary>Resolution of the cubemap texture</summary>
+	/// <summary>How big each of the six faces is drawn.</summary>
 	[Header( "Rendering" )]
-	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
+	[Property, EnumButtonGroup]
+	public CubemapResolution Resolution { get; set; } = CubemapResolution.Small;
+
+	/// <summary>The nearest a face draws, in metres.</summary>
 	[Property]
-	[EnumButtonGroup]
-	public CubemapResolution Resolution
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public float ZNear { get; set; } = 0.4f;
 
-			UpdateSceneObject();
-		}
-	} = CubemapResolution.Small;
-
-	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
+	/// <summary>The furthest a face draws, in metres.</summary>
 	[Property]
-	public float ZNear
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public float ZFar { get; set; } = 104.0f;
 
-			UpdateSceneObject();
-		}
-	} = 0.4f;
-
-	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
+	/// <summary>When a runtime probe draws itself again.</summary>
+	[Header( "Runtime Updates" )]
+	[ShowIf( nameof( Mode ), EnvmapProbeMode.Runtime )]
 	[Property]
-	public float ZFar
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public CubemapDynamicUpdate UpdateStrategy { get; set; }
 
-			UpdateSceneObject();
-		}
-	} = 104.0f;
-
-	[Header( "Realtime Updates" )]
-	[ShowIf( nameof( Mode ), EnvmapProbeMode.Realtime )]
-	[Property]
-	public CubemapDynamicUpdate UpdateStrategy
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
-
-			UpdateSceneObject();
-		}
-	}
-
-	/// <summary>Only update dynamically if we're this close to it</summary>
-	[ShowIf( nameof( Mode ), EnvmapProbeMode.Realtime )]
-	[Property]
-	public float MaxDistance { get; set; } = 13.0f;
-
-	[ShowIf( nameof( Mode ), EnvmapProbeMode.Realtime )]
+	/// <summary>Seconds between captures, for TimeInterval.</summary>
+	[ShowIf( nameof( Mode ), EnvmapProbeMode.Runtime )]
 	[ShowIf( nameof( UpdateStrategy ), CubemapDynamicUpdate.TimeInterval )]
 	[Property, Range( 0, 10 )]
 	public float DelayBetweenUpdates { get; set; } = 0.1f;
 
-	[ShowIf( nameof( Mode ), EnvmapProbeMode.Realtime )]
+	/// <summary>Frames between captures, for FrameInterval.</summary>
+	[ShowIf( nameof( Mode ), EnvmapProbeMode.Runtime )]
 	[ShowIf( nameof( UpdateStrategy ), CubemapDynamicUpdate.FrameInterval )]
 	[Property, Range( 0, 16 )]
 	public int FrameInterval { get; set; } = 5;
 
-	/// <summary>Minimum amount of reflection bounces to render when first enabled before settling, at cost of extra performance on load Often times you don't need this</summary>
-	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
+	/// <summary>Captures again a few times once switched on, so it shows itself in what it reflects.</summary>
+	[ShowIf( nameof( Mode ), EnvmapProbeMode.Runtime )]
 	[ShowIf( nameof( UpdateStrategy ), CubemapDynamicUpdate.OnEnabled )]
 	[Property]
-	public bool MultiBounce
-	{
-		get;
-		set
-		{
-			if ( field == value ) return;
-			field = value;
+	public bool MultiBounce { get; set; }
 
-			UpdateSceneObject();
-		}
-	} = false;
+	//A runtime probe's capture that is due
+	private bool owed;
 
-	/// <summary>Objects with any of these tags will be excluded when rendering this cubemap.</summary>
-	[HideIf( nameof( Mode ), EnvmapProbeMode.CustomTexture )]
-	[Property]
-	public TagSet RenderExcludeTags { get; set; } = new();
+	private float capturedAt;
+	private int bouncesLeft;
+	private int queuedFrames;
+	private float queuedTime;
 
 	protected override void OnEnabled()
 	{
-		Assert.True( !_sceneObject.IsValid() );
-		Assert.NotNull( Scene );
+		if ( Mode != EnvmapProbeMode.Runtime ) return;
 
-		_sceneObject = new SceneCubemap( Scene.SceneWorld, null, Bounds, WorldTransform, TintColor, Feathering, (int)Projection );
-		_sceneObject.Tags.SetFrom( Tags );
-		_sceneObject.Priority = Priority;
-
-		Transform.OnTransformChanged += OnTransformChanged;
-		UpdateSceneObject();
-
-		//A probe that has never been drawn reflects nothing, and "nothing" is black rather than
-		//absent - so the first capture is not something to leave until a strategy asks for it.
-		if ( CoreNative.Available && Mode != EnvmapProbeMode.CustomTexture )
-			Dirty = true;
+		bouncesLeft = MultiBounce ? 4 : 0;
+		owed = true;
 	}
 
 	protected override void OnDisabled()
 	{
-		Transform.OnTransformChanged -= OnTransformChanged;
-
 		CoreEnvmap.Forget( this );
-
-		Dirty = false;
-
-		_sceneObject?.Delete();
-		_sceneObject = null;
-
-		_dynamicTexture?.Dispose();
-		_dynamicTexture = null;
+		owed = false;
 	}
 
-	//First capture after loading finishes, so the probe sees the complete world and not a partial one
+	//A runtime probe's first capture once loading is done, so it sees the whole world and not part of it
 	void ISceneLoadingEvents.AfterLoad( Scene scene )
 	{
-		if ( Application.IsHeadless ) return;
-		if ( Mode == EnvmapProbeMode.CustomTexture ) return;
-		if ( !Dirty ) return;
+		if ( Application.IsHeadless || Mode != EnvmapProbeMode.Runtime || !owed ) return;
 
 		Capture( wait: true );
 	}
 
-	//Renders the six views now and folds them now or on a worker; not callable from inside a frame
-	internal bool Capture( bool wait = false )
+	//Draws the six faces now or a face a tick; not callable from inside a frame
+	private bool Capture( bool wait = false )
 	{
-		Dirty = false;
+		owed = false;
+		queuedFrames = 0;
+		queuedTime = 0;
+		capturedAt = RealTime.Now;
 
-		if ( _sceneObject.IsValid() ) _sceneObject.RequiresUpdate = false;
+		if ( bouncesLeft > 0 ) bouncesLeft--;
 
-		_queuedFrames = 0;
-		_queuedTime = 0;
-
-		if ( _bouncesLeft > 0 && UpdateStrategy == CubemapDynamicUpdate.OnEnabled )
-			_bouncesLeft--;
-
-		if ( Mode == EnvmapProbeMode.CustomTexture ) return false;
-		if ( !Scene.IsValid() ) return false;
-
-		return CoreEnvmap.Capture( Scene, this, wait );
-	}
-
-	void OnTransformChanged()
-	{
-		UpdateSceneObject();
-	}
-
-	void UpdateSceneObject()
-	{
-		if ( !_sceneObject.IsValid() )
-			return;
-
-		var tx = WorldTransform;
-		var bounds = Bounds;
-
-		if ( Mode == EnvmapProbeMode.Realtime )
-		{
-			tx = tx.WithScale( -1 );
-			bounds = new BBox( -Bounds.Maxs, -Bounds.Mins );
-		}
-
-		_sceneObject.Transform = tx;
-		_sceneObject.Projection = Projection;
-		_sceneObject.TintColor = TintColor;
-		_sceneObject.ProjectionBounds = bounds;
-		_sceneObject.LocalBounds = _sceneObject.ProjectionBounds;
-		_sceneObject.Feathering = Feathering;
-
-		//Update bounce count when strategy or multibounce changes
-		if ( UpdateStrategy == CubemapDynamicUpdate.OnEnabled )
-		{
-			_bouncesLeft = MultiBounce ? 4 : 0;
-		}
-
-		if ( Mode == EnvmapProbeMode.Baked )
-		{
-			_sceneObject.Texture = BakedTexture;
-		}
-		else if ( Mode == EnvmapProbeMode.CustomTexture )
-		{
-			_sceneObject.Texture = Texture;
-		}
-		else if ( Mode == EnvmapProbeMode.Realtime )
-		{
-			CreateTexture();
-			_sceneObject.Texture = _dynamicTexture;
-		}
-	}
-
-	//Tags have been updated - lets update our tags
-	protected override void OnTagsChanged()
-	{
-		if ( _sceneObject.IsValid() )
-		{
-			_sceneObject.Tags.SetFrom( Tags );
-			_sceneObject.RenderDirty();
-		}
+		return Scene.IsValid() && CoreEnvmap.Capture( Scene, this, wait );
 	}
 
 	protected override void OnUpdate()
 	{
-		base.OnUpdate();
-		TryToDirty();
-	}
+		if ( Mode != EnvmapProbeMode.Runtime || !CoreNative.Available ) return;
 
-	void TryToDirty()
-	{
-		//Captures happen in the tick, outside the frame; a capture in progress advances one face at a time
+		//A capture under way draws a face a tick
 		if ( CoreEnvmap.Capturing( this ) )
 		{
 			CoreEnvmap.Step( Scene, this );
 			return;
 		}
 
-		//The light coming into the room changed - the sun moved or the sky turned another colour - since
-		//the picture was taken: a picture of the room under that light is owed. See CoreEnvmap.Outdated.
-		if ( !Dirty && CoreNative.Available && Mode != EnvmapProbeMode.CustomTexture && CoreEnvmap.Outdated( Scene, this ) )
-			Dirty = true;
+		queuedFrames++;
+		queuedTime += Time.Delta;
 
-		if ( Dirty && CoreNative.Available )
-		{
-			//Throttle captures; each costs tens of milliseconds, so EveryFrame can't be honoured literally
-			if ( _capturedAt > 0.0f && RealTime.Now - _capturedAt < LeastBetweenCaptures )
-				return;
+		if ( !owed ) owed = Due();
+		if ( !owed ) return;
 
-			//And not in the same tick as another probe's: a sky that changed asks every probe at once - see CoreEnvmap.MayCapture.
-			if ( !CoreEnvmap.MayCapture ) return;
+		//A capture is six views of the scene, a face a tick, and probes take turns - see CoreEnvmap.MayCapture
+		if ( RealTime.Now - capturedAt < LeastBetweenCaptures || !CoreEnvmap.MayCapture ) return;
 
-			_capturedAt = RealTime.Now;
-
-			Capture();
-			return;
-		}
-
-		if ( Mode != EnvmapProbeMode.Realtime )
-		{
-			//Reset counters when not rendering dynamically
-			_queuedFrames = 0;
-			_queuedTime = 0;
-			return;
-		}
-
-		//Update counters
-		_queuedFrames++;
-		_queuedTime += Time.Delta;
-
-		if ( !IsReadyToUpdate() )
-			return;
-
-		Dirty = true;
+		Capture();
 	}
 
-	internal bool IsReadyToUpdate()
+	private bool Due() => UpdateStrategy switch
 	{
-		if ( UpdateStrategy == CubemapDynamicUpdate.EveryFrame )
-			return true;
-
-		if ( UpdateStrategy == CubemapDynamicUpdate.FrameInterval && _queuedFrames > FrameInterval )
-			return true;
-
-		if ( UpdateStrategy == CubemapDynamicUpdate.TimeInterval && _queuedTime > DelayBetweenUpdates )
-			return true;
-
-		//If it's dirty, always update even if we're render once
-		if ( _sceneObject?.RequiresUpdate ?? false )
-			return true;
-
-		if ( UpdateStrategy == CubemapDynamicUpdate.OnEnabled && _bouncesLeft > 0 )
-			return true;
-
-		return false;
-	}
-
-	void CreateTexture()
-	{
-		var cubemapSize = (int)Resolution;
-		var numMips = 7; //Cubemapper is calibrated for 7 mipmaps
-
-		if ( _dynamicTexture is not null && _dynamicTexture.Width == cubemapSize && _dynamicTexture.UAVAccess )
-			return;
-
-		//Dispose old texture if it exists
-		_dynamicTexture?.Dispose();
-
-		_dynamicTexture = Texture.CreateCube( cubemapSize, cubemapSize )
-							.WithUAVBinding()
-							.WithMips( numMips )
-							.WithFormat( ImageFormat.RGBA16161616F )
-							.Finish();
-	}
-
-	internal void RenderCubemap()
-	{
-		//Our renderer captures from the tick, not inside the frame; below is the native-renderer path
-		if ( CoreNative.Available )
-		{
-			Dirty = true;
-			return;
-		}
-
-		RenderCubemap( _dynamicTexture, CubemapRendering.GGXFilterType.Fast, RenderExcludeTags );
-	}
-
-	internal void RenderCubemap( Texture target, CubemapRendering.GGXFilterType filterType, TagSet excludeTags = null )
-	{
-		//Cleared whatever happens, including on the way out below. Left set it means "still to be rendered",
-		//and everything that waits on it waits for ever - which is exactly what the loading screen did.
-		Dirty = false;
-
-		if ( target is null )
-			return;
-
-		target.Clear( Color.Red );
-
-		if ( target.UAVAccess )
-		{
-			CubemapRendering.Render( Scene.SceneWorld, target, WorldTransform.WithScale( 1 ), ZNear.Clamp( 1, ZFar ), ZFar.Clamp( ZNear, 1024 * 16 ), filterType, excludeTags );
-		}
-
-		//Just finished rendering, signal to component that we're done
-		_sceneObject?.RequiresUpdate = false;
-
-		//Reset counters after rendering
-		_queuedFrames = 0;
-		_queuedTime = 0;
-
-		if ( _bouncesLeft > 0 && UpdateStrategy == CubemapDynamicUpdate.OnEnabled )
-			_bouncesLeft--;
-
-		Dirty = false;
-	}
+		CubemapDynamicUpdate.EveryFrame => true,
+		CubemapDynamicUpdate.FrameInterval => queuedFrames > FrameInterval,
+		CubemapDynamicUpdate.TimeInterval => queuedTime > DelayBetweenUpdates,
+		_ => bouncesLeft > 0,
+	};
 }

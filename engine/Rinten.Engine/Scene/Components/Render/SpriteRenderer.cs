@@ -88,6 +88,18 @@ public sealed partial class SpriteRenderer : Renderer, Component.ExecuteInEditor
 	[Property, Category( "Visuals" ), Order( -200 )]
 	public bool Lighting { get; set; }
 
+	/// <summary>Whether the sprite is lit by the scene's 2D lights; drawn as it is in a scene with no 2D lights, so on by default.</summary>
+	[Property, Category( "Visuals" ), Order( -200 ), Title( "Lit 2D" )]
+	public bool Lit2D { get; set; } = true;
+
+	/// <summary>Whether the sprite blocks 2D light, by its picture's shape, and so casts 2D shadows.</summary>
+	[Property, Category( "Visuals" ), Order( -200 ), Title( "Occluder 2D" )]
+	public bool Occluder2D { get; set; }
+
+	/// <summary>How brightly the sprite glows into the 2D lighting, as a multiplier on its own colour; nought for none.</summary>
+	[Property, Category( "Visuals" ), Order( -200 ), Range( 0.0f, 15.9f ), Title( "Emission 2D" )]
+	public float Emission2D { get; set; }
+
 	/// <summary>Amount of feathering applied to the depth, softening its intersection with geometry.</summary>
 	[Property, Category( "Visuals" ), Order( -200 )]
 	public float DepthFeather { get; set; }

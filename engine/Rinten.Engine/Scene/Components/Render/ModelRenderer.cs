@@ -111,6 +111,10 @@ public partial class ModelRenderer : Renderer, ExecuteInEditor, ITintable, IMate
 		}
 	} = ShadowRenderType.On;
 
+	/// <summary>Lightmap density against the bake's: above one for detail and contact, below for plain walls.</summary>
+	[Property, Category( "Lighting" ), Range( 0.125f, 8.0f )]
+	public float LightmapScale { get; set; } = 1.0f;
+
 	//Lightmap atlas rect (xy scale, zw offset); set by the bake on load, not saved
 	internal System.Numerics.Vector4 LightmapRect
 	{
@@ -124,8 +128,8 @@ public partial class ModelRenderer : Renderer, ExecuteInEditor, ITintable, IMate
 		}
 	}
 
-	//The same number in every view - the camera, the sun's pages, a lamp's faces - so the shape the shadow is cast by is the shape that is drawn. See NearLevels and CullCluster in the cull.
-	/// <summary>How much coarser than the rest of the world this model may be drawn: the error its clusters may carry is multiplied by this. One is the world's own detail; two lets it go twice as coarse before it goes finer, a half keeps it twice as fine.</summary>
+	//The same in every view - camera, sun pages, lamp faces - so a shadow's caster is the shape drawn; see CullCluster
+	/// <summary>Multiplies the error this model's clusters may carry: two draws it twice as coarse, a half twice as fine.</summary>
 	[Title( "Detail Bias" ), Property, Category( "Lighting" ), Range( 0.1f, 8.0f )]
 	public float LodBias
 	{
@@ -246,7 +250,7 @@ public partial class ModelRenderer : Renderer, ExecuteInEditor, ITintable, IMate
 
 		RenderOptions.Apply( _sceneObject );
 
-		//Set from the answer rather than only when it is yes: turning a renderer back from shadows-only left this on for the rest of its life.
+		//Set from the answer either way, so leaving shadows-only turns it back off
 		_sceneObject.Flags.SetFlag( Rendering.SceneObjectFlags.ExcludeGameLayer,
 			RenderType == ShadowRenderType.ShadowsOnly || ( !RenderOptions.Game && !RenderOptions.Overlay ) );
 

@@ -44,10 +44,13 @@
   },
   "ShadowQuality": {
     "Low": {
+      "r_shadow_filter": "0"
     },
     "Medium": {
+      "r_shadow_filter": "1"
     },
     "High": {
+      "r_shadow_filter": "2"
     }
   }
 }

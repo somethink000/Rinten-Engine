@@ -159,11 +159,6 @@ public sealed class MaterialPreviewScene : IDisposable
 			sun.WorldRotation = new Angles( 50, 45, 0 );
 			sun.LightColor = Color.White * 0.6f;
 
-			var env = new GameObject( true, "envmap" ).AddComponent<EnvmapProbe>();
-			env.Mode = EnvmapProbe.EnvmapProbeMode.CustomTexture;
-			env.Texture = Texture.Load( "textures/cubemaps/default2.tex" );
-			env.Bounds = BBox.FromPositionAndSize( Vector3.Zero, 2540f );
-
 			_renderer = new GameObject( true, "shape" ).AddComponent<ModelRenderer>();
 			_renderer.Model = ModelFor( Worn );
 		}

@@ -1,0 +1,122 @@
+//The build panel under the scene view's hammer: the button that bakes the scene, then a card for each thing it bakes
+.build-popup
+{
+	width: 380px;
+	min-width: 380px;
+	transition: none;
+	transform: none;
+
+	&:intro,
+	&:outro
+	{
+		transition: none;
+		transform: none;
+		opacity: 1;
+		margin-top: 0px;
+	}
+
+	> .body
+	{
+		flex-direction: column;
+		flex-shrink: 0;
+		row-gap: 6px;
+		max-height: 560px;
+		overflow-y: scroll;
+		overflow-x: hidden;
+		padding: 8px 0px;
+		pointer-events: all;
+	}
+
+	.head
+	{
+		flex-direction: row;
+		align-items: center;
+		column-gap: 6px;
+		flex-shrink: 0;
+		padding: 0px 10px 2px;
+
+		> i { color: $text-light; font-size: 14px; }
+
+		> .heading
+		{
+			flex-grow: 1;
+			color: $text-light;
+			font-size: 12px;
+			font-weight: 600;
+		}
+	}
+
+	.status
+	{
+		flex-direction: row;
+		flex-shrink: 0;
+		align-items: center;
+		column-gap: 6px;
+		margin: 0px 8px;
+		padding: 4px 8px;
+		border-radius: $radius-1;
+		background-color: $sunken;
+
+		> i { color: $text-disabled; font-size: 14px; }
+		> i.done { color: $green; }
+		> i.busy { color: $gold; }
+		> label { color: $ink-dim; font-size: $type-small; }
+	}
+
+	//Lightmaps and cubemaps, each a card as a component is - see InspectorCard
+	.cards
+	{
+		flex-direction: column;
+		flex-shrink: 0;
+		row-gap: 6px;
+		padding: 0px 8px;
+	}
+
+	.buttons
+	{
+		flex-direction: row;
+		flex-shrink: 0;
+		justify-content: flex-end;
+		column-gap: 6px;
+		padding: 0px 8px;
+
+		> .button
+		{
+			flex-direction: row;
+			align-items: center;
+			column-gap: 4px;
+			min-height: 24px;
+			padding: 2px 10px 2px 6px;
+			border-radius: $radius-1;
+			background-color: $slab;
+			cursor: pointer;
+			transition: background-color $fast $ease;
+
+			> label, > i { pointer-events: none; }
+
+			&:hover { background-color: $slab-hover; }
+			&:active { background-color: $slab-down; }
+
+			&.wide
+			{
+				flex-grow: 1;
+				justify-content: center;
+				min-height: 28px;
+			}
+
+			&.primary { background-color: $accent-fill; color: $frame-gap; }
+			&.primary:hover { opacity: 0.9; }
+
+			&.disabled
+			{
+				opacity: 0.4;
+				pointer-events: none;
+			}
+		}
+	}
+}
+
+.build-menu-button
+{
+	flex-direction: row;
+}

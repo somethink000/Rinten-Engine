@@ -28,7 +28,7 @@ public partial class SceneFile : GameResource
 	public JsonObject[] GameObjects { get; set; }
 	public JsonObject SceneProperties { get; set; }
 
-	public override int ResourceVersion => 4;
+	public override int ResourceVersion => 6;
 
 	[Hide, JsonIgnore]
 	protected override Type ActionGraphTargetType => null;

@@ -50,6 +50,30 @@ public class EditorSystemPublic : EditorSystem
 		return new ProgressJobSection();
 	}
 
+	public override string SaveResource( GameResource resource, string path )
+	{
+		if ( resource is null || string.IsNullOrWhiteSpace( path ) ) return null;
+
+		var asset = AssetSystem.FindByPath( path ) ?? Create( path );
+		if ( asset is null || !asset.SaveToDisk( resource ) ) return null;
+
+		return asset.Path;
+	}
+
+	//A new asset at a path under the assets of the project whose folder it is in - the first active one with that folder
+	private static Asset Create( string path )
+	{
+		var folder = System.IO.Path.GetDirectoryName( path ) ?? "";
+
+		var root = Project.All.Where( x => x.Active && x.HasAssetsPath() ).Select( x => x.GetAssetsPath() )
+			.FirstOrDefault( x => System.IO.Directory.Exists( System.IO.Path.Combine( x, folder ) ) );
+
+		if ( root is null ) return null;
+
+		var extension = System.IO.Path.GetExtension( path ).TrimStart( '.' );
+		return AssetSystem.CreateResource( extension, System.IO.Path.Combine( root, path ) );
+	}
+
 	//Walks every component of the scene - don't call per frame, use Scene.EditorCamera instead
 	public override CameraComponent Camera
 	{

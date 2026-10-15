@@ -96,6 +96,9 @@ struct V2F
 //The push block every world draw carries is the engine's, not this shader's - see frame.slang.
 #define ENGINE_WORLD_PUSH 1
 
+//The leaf's light through it, shaded with every light's - see Surface.transmission
+#define SURFACE_TRANSMITS F_TRANSMISSION
+
 #include "frame.slang"
 #include "surface_shading.slang"
 
@@ -315,49 +318,13 @@ Out Shade( V2F i, bool front )
 	surface.lightmap = i.lightmap;
 	surface.screen = i.position.xy;
 
-	Shaded lit = ShadeSurface( surface );
-
 #if F_TRANSMISSION
-	//Leaf transmission: diffuse and forward sun glow through the leaf in its own colour, plus some sky
-	{
-		float through = g_flTransmission * SampleUv( g_tThickness, uv ).r;
-
-		if ( through > 0.0 )
-		{
-			float3 filter = albedo.rgb * g_vTransmissionColour;
-
-			float3 v = normalize( EYE_FRAME( camera ).xyz - i.world );
-			float3 gain = float3( 0.0, 0.0, 0.0 );
-
-			if ( HasSun() )
-			{
-				float3 l = g_frame[0].sunDirection.xyz;
-
-				//The back of the leaf in the sun: how much of it faces the light.
-				float behind = saturate( dot( -n, l ) );
-
-				//And the sun behind the leaf from where the eye is.
-				float towards = pow( saturate( dot( -v, l ) ), g_flTransmissionSpread );
-
-				float lit = ( behind * 0.5 ) + ( towards * ( 0.3 + ( 0.7 * behind ) ) );
-
-				if ( lit > 0.0 )
-				{
-					int channel = SunMaskChannel();
-					float shadow = SunShadow( i.world, n, n, true, channel < 0 );
-					shadow = BakedShadow( shadow, i.world, n, i.lightmap, channel );
-
-					gain += g_frame[0].sunColour.rgb * ( lit * shadow );
-				}
-			}
-
-			if ( HasSky() )
-				gain += SceneAmbient( SkyAmbient( -n ) * SkyAmbientScale() ) * 0.25;
-
-			lit.colour += filter * gain * through;
-		}
-	}
+	//Light through the leaf in its own colour, from every light behind it - see ShadeSurfaceWith
+	surface.transmission = albedo.rgb * g_vTransmissionColour * ( g_flTransmission * SampleUv( g_tThickness, uv ).r );
+	surface.transmissionSpread = g_flTransmissionSpread;
 #endif
+
+	Shaded lit = ShadeSurface( surface );
 
 	Out o;
 	o.colour = float4( lit.colour, albedo.a );

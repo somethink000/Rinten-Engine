@@ -96,14 +96,6 @@ public class AssetPreview : IDisposable
 				sun.WorldRotation = new Angles( 50, 180 + 45 - 35, 0 );
 				sun.LightColor = Color.White * 0.6f;
 			}
-
-			{
-				var go = new GameObject( true, "envmap" );
-				var c = go.AddComponent<EnvmapProbe>();
-				c.Mode = EnvmapProbe.EnvmapProbeMode.CustomTexture;
-				c.Texture = Texture.Load( "textures/cubemaps/default2.tex" );
-				c.Bounds = BBox.FromPositionAndSize( Vector3.Zero, 2540f );
-			}
 		}
 
 		return Task.CompletedTask;

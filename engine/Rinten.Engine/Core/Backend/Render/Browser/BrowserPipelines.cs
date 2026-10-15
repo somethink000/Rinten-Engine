@@ -296,7 +296,7 @@ internal static class BrowserPipelines
 		int pixelModule, string pixelEntry,
 		int vertexLayout, int depthTest, int topology, int blend,
 		int depthWrite, int cullBack, int depthOnly, int target,
-		string vertexConstants = "", string pixelConstants = "" )
+		string vertexConstants = "", string pixelConstants = "", int pictureFormat = -1 )
 	{
 		var json = new StringBuilder( 2048 );
 
@@ -314,7 +314,13 @@ internal static class BrowserPipelines
 			Quoted( json, pixelEntry );
 			json.Append( ",\"targets\":[{\"format\":\"" );
 
-			if ( target == BrowserDevice.Target.Scene )
+			if ( target == BrowserDevice.Target.Picture )
+			{
+				json.Append( BrowserSwapchain.PictureFormatName( pictureFormat ) ).Append( "\",\"writeMask\":15" );
+				if ( blend != 0 ) json.Append( ",\"blend\":" ).Append( BlendJson );
+				json.Append( '}' );
+			}
+			else if ( target == BrowserDevice.Target.Scene )
 			{
 				//The scene pass writes colour and the thin g-buffer beside it.
 				json.Append( BrowserDevice.FormatRgba16Float ).Append( "\",\"writeMask\":15" );
@@ -339,22 +345,26 @@ internal static class BrowserPipelines
 			.Append( "\",\"cullMode\":\"" ).Append( cullBack != 0 ? "back" : "none" )
 			.Append( "\",\"frontFace\":\"ccw\"}" );
 
-		//Stencil is left at the browser's defaults, which are always/keep.
-		json.Append( ",\"depthStencil\":{\"format\":\"" ).Append( BrowserDevice.FormatDepth32 )
-			.Append( "\",\"depthWriteEnabled\":" ).Append( depthWrite != 0 ? "true" : "false" )
-			.Append( ",\"depthCompare\":\"" ).Append( depthTest switch
-			{
-				//As VkPipelines has them: less-or-equal, so the sky - drawn at the far plane, over a depth cleared to it - passes where nothing stands.
-				0 or 3 => "always",
-				2 => "equal",
-				_ => "less-equal",
-			} ).Append( '"' );
+		//A picture's pass has no depth, and a pipeline naming one would not draw in it
+		if ( target != BrowserDevice.Target.Picture )
+		{
+			//Stencil is left at the browser's defaults, which are always/keep.
+			json.Append( ",\"depthStencil\":{\"format\":\"" ).Append( BrowserDevice.FormatDepth32 )
+				.Append( "\",\"depthWriteEnabled\":" ).Append( depthWrite != 0 ? "true" : "false" )
+				.Append( ",\"depthCompare\":\"" ).Append( depthTest switch
+				{
+					//As VkPipelines has them: less-or-equal, so the sky - drawn at the far plane, over a depth cleared to it - passes where nothing stands.
+					0 or 3 => "always",
+					2 => "equal",
+					_ => "less-equal",
+				} ).Append( '"' );
 
-		//A shadow map is drawn from the light and read from the camera, and the two disagree by a fraction
-		//of a texel. The bias is what stops that disagreement from being a stripe across every lit surface.
-		if ( depthOnly != 0 ) json.Append( ",\"depthBias\":2,\"depthBiasSlopeScale\":2" );
+			//A shadow map is drawn from the light and read from the camera, and the two disagree by a fraction
+			//of a texel. The bias is what stops that disagreement from being a stripe across every lit surface.
+			if ( depthOnly != 0 ) json.Append( ",\"depthBias\":2,\"depthBiasSlopeScale\":2" );
 
-		json.Append( '}' );
+			json.Append( '}' );
+		}
 
 		json.Append( ',' ).Append( SingleSample ).Append( "\"mask\":4294967295}}" );
 		return json.ToString();
@@ -367,7 +377,7 @@ internal static class BrowserPipelines
 		byte* vertexCode, int vertexSize, string vertexEntry,
 		byte* pixelCode, int pixelSize, string pixelEntry,
 		int vertexLayout, int depthTest, int topology, int blend,
-		int depthWrite, int cullBack, int depthOnly, int target, int specialize = -1 )
+		int depthWrite, int cullBack, int depthOnly, int target, int specialize = -1, int pictureFormat = -1 )
 	{
 		if ( !BrowserDevice.Ready )
 		{
@@ -382,7 +392,7 @@ internal static class BrowserPipelines
 		}
 
 		var key = Key( vertexCode, vertexSize, vertexEntry, pixelCode, pixelSize, pixelEntry,
-			vertexLayout, depthTest, topology, blend, depthWrite, cullBack, depthOnly, target, specialize );
+			vertexLayout, depthTest, topology, blend, depthWrite, cullBack, depthOnly, target, specialize, pictureFormat );
 
 		if ( byKey.TryGetValue( key, out var known ) ) return known;
 
@@ -406,7 +416,7 @@ internal static class BrowserPipelines
 
 		var describe = Describe( pipelineLayout, vertexModule, vertexEntry, pixelModule, pixelEntry,
 			vertexLayout, depthTest, topology, blend, depthWrite, cullBack, depthOnly, target,
-			Constants( vertexCode, vertexSize, specialize ), Constants( pixelCode, pixelSize, specialize ) );
+			Constants( vertexCode, vertexSize, specialize ), Constants( pixelCode, pixelSize, specialize ), pictureFormat );
 
 		//A program built for both of a headset's eyes at once - see CoreRender.Multiview.
 		//Only the vertex stage says so: the pixel stage is told its view, not asked.
@@ -500,7 +510,7 @@ internal static class BrowserPipelines
 		byte* vertexCode, int vertexSize, string vertexEntry,
 		byte* pixelCode, int pixelSize, string pixelEntry,
 		int vertexLayout, int depthTest, int topology, int blend,
-		int depthWrite, int cullBack, int depthOnly, int target, int specialize )
+		int depthWrite, int cullBack, int depthOnly, int target, int specialize, int pictureFormat )
 	{
 		var hash = 14695981039346656037ul;
 
@@ -517,6 +527,7 @@ internal static class BrowserPipelines
 		hash = Fold( hash, (uint)depthOnly );
 		hash = Fold( hash, (uint)target );
 		hash = Fold( hash, (uint)specialize );
+		hash = Fold( hash, (uint)pictureFormat );
 		return hash;
 	}
 

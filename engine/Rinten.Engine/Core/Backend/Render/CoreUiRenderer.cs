@@ -2691,11 +2691,43 @@ internal static class CoreUiRenderer
 
 		var uv = uvRect ?? new Vector4( 0, 0, 1, 1 );
 
-		vertices.Add( Corner( left, top, uv.x, uv.y ) );
-		vertices.Add( Corner( right, top, uv.z, uv.y ) );
-		vertices.Add( Corner( left, bottom, uv.x, uv.w ) );
-		vertices.Add( Corner( left, bottom, uv.x, uv.w ) );
-		vertices.Add( Corner( right, top, uv.z, uv.y ) );
-		vertices.Add( Corner( right, bottom, uv.z, uv.w ) );
+		void Piece( float l, float t, float r, float b )
+		{
+			if ( r <= l || b <= t ) return;
+
+			float U( float x ) => uv.x + ( ( uv.z - uv.x ) * ( x - left ) / MathF.Max( right - left, 0.0001f ) );
+			float V( float y ) => uv.y + ( ( uv.w - uv.y ) * ( y - top ) / MathF.Max( bottom - top, 0.0001f ) );
+
+			vertices.Add( Corner( l, t, U( l ), V( t ) ) );
+			vertices.Add( Corner( r, t, U( r ), V( t ) ) );
+			vertices.Add( Corner( l, b, U( l ), V( b ) ) );
+			vertices.Add( Corner( l, b, U( l ), V( b ) ) );
+			vertices.Add( Corner( r, t, U( r ), V( t ) ) );
+			vertices.Add( Corner( r, b, U( r ), V( b ) ) );
+		}
+
+		//An outer shadow is masked out under its own box, so the part of the box clear of its corners is left out of the
+		//geometry: a ring of four bands round it instead of a quad whose middle every pixel shades only to discard
+		if ( kind == UiFill.Shadow )
+		{
+			var corner = MathF.Max( MathF.Max( MathF.Max( radii.x, radii.y ), MathF.Max( radii.z, radii.w ) ),
+				MathF.Max( MathF.Max( radiiV.x, radiiV.y ), MathF.Max( radiiV.z, radiiV.w ) ) ) + 1.0f;
+
+			var holeLeft = MathF.Max( rect.Left + corner, left );
+			var holeTop = MathF.Max( rect.Top + corner, top );
+			var holeRight = MathF.Min( rect.Right - corner, right );
+			var holeBottom = MathF.Min( rect.Bottom - corner, bottom );
+
+			if ( holeRight - holeLeft >= 8.0f && holeBottom - holeTop >= 8.0f )
+			{
+				Piece( left, top, right, holeTop );
+				Piece( left, holeBottom, right, bottom );
+				Piece( left, holeTop, holeLeft, holeBottom );
+				Piece( holeRight, holeTop, right, holeBottom );
+				return;
+			}
+		}
+
+		Piece( left, top, right, bottom );
 	}
 }

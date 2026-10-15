@@ -79,7 +79,8 @@ static partial class RenderBind
 		int layers, int samples );
 
 	[JSImport( "globalThis.RintenRender.createView" )]
-	internal static partial int CreateView( int texture, string format, string aspect, int baseMip, int mipCount );
+	internal static partial int CreateView( int texture, string format, string aspect, int baseMip, int mipCount,
+		int baseLayer, string dimension );
 
 	[JSImport( "globalThis.RintenRender.writeTexture" )]
 	internal static partial void WriteTexture( int texture, int mip, int x, int y,

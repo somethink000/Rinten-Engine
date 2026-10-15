@@ -40,6 +40,7 @@ public partial class Scene
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( MovieMaker.Properties.MovieBoneAnimatorSystem ) )]
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( SubtitlesGameObjectSystem ) )]
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( SceneSpriteSystem ) )]
+	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( SceneLight2DSystem ) )]
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( SoundSimulationSystem ) )]
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( ScenePhysicsSystem ) )]
 	[DynamicDependency( DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors, typeof( SceneSoundscapeSystem ) )]

@@ -36,10 +36,10 @@ internal static class CoreShaderCache
 	//What this run compiled that the file did not have.
 	private static readonly Dictionary<string, byte[]> compiled = new();
 
-	//Every key this run asked for - what a bake writes, so that words nothing asks for any more drop out of the file rather than riding along in it.
+	//Every key this run asked for - what a bake writes, so words nothing asks for drop out of the file
 	private static readonly HashSet<string> touched = new( StringComparer.Ordinal );
 
-	//The keys the baked file held when it was read: the engine's own, as the build baked them, apart from what this machine compiled beneath them.
+	//The keys in the baked file as read: the engine's own as the build baked them, not what this machine compiled
 	private static HashSet<string> baked = new( StringComparer.Ordinal );
 
 	//Every key asked for since Record, for WriteForGame. Null while nobody is recording.
@@ -52,14 +52,14 @@ internal static class CoreShaderCache
 	//own pipelines are made again when it moves; see CoreSceneDrawer.MakePostPipelines.
 	internal static int Revision { get; private set; }
 
-	//The language a bake is compiling for, while one is - see Target. Said once around a bake rather than handed down through every call that ends in a
-	//compile, the way CoreShaderFile.CompactName is: a bake asks the same questions a frame asks, in the same words, and only the answer's language differs.
+	//The language a bake compiles for while one does - see Target; said once around a bake, as a bake asks
+	//the same questions a frame does and only the answer's language differs
 	internal static CoreShaderCompiler.Format? Baking { get; set; }
 
-	//The language a stage is wanted in when whoever asks does not say: what a bake is compiling for, and otherwise what this process's device takes.
+	//The language a stage is wanted in when not said: a bake's, else what this device takes
 	internal static CoreShaderCompiler.Format Target => Baking ?? CoreRender.ShaderFormat;
 
-	//A shader file was edited, or a project that may carry its own was mounted: what the includes resolve to may be different now.
+	//A shader file was edited, or a project that may carry its own was mounted: the includes may resolve elsewhere
 	internal static void Changed()
 	{
 		CoreShaderFile.ForgetIncludes();
@@ -83,7 +83,7 @@ internal static class CoreShaderCache
 	//Whether to say what each key was made of - RINTEN_SHADER_KEYS=1.
 	private static readonly bool Saying = Environment.GetEnvironmentVariable( "RINTEN_SHADER_KEYS" ) == "1";
 
-	//What a key was made of, said where it is asked for - the two halves hashed apart, so a miss between a bake and a run names which half moved.
+	//What a key was made of, the two halves hashed apart, so a miss names which half moved
 	private static void Say( string name, string entry, CoreShaderCompiler.Stage stage, string source, string includes, string key )
 	{
 		if ( !Saying ) return;
@@ -95,14 +95,14 @@ internal static class CoreShaderCache
 			$"includes {Short( includes )} ({includes?.Length ?? 0}) -> {key[..8]}" );
 	}
 
-	/// <summary>One entry point of one of the engine's own passes - a file under <c>shaders/engine/</c>, the project's own where it has one - with the defines that choose which variant, put in front of it.</summary>
+	/// <summary>One entry point of an engine pass under shaders/engine/, with the defines choosing its variant.</summary>
 	public static byte[] Pass( string file, string entry, CoreShaderCompiler.Stage stage, string defines = null,
 		CoreShaderCompiler.Format? language = null, bool optional = false )
 	{
 		var format = language ?? Target;
 
-		//A pass the portable frame has not got - see RenderTier - is not a pass that is missing from it. Said here, once, rather than by everything that
-		//makes a pipeline: whoever asks already takes no words to mean the thing is not drawn, which in that frame is the right answer and not a fault.
+		//A pass the portable frame has not got is not missing from it: said here once, and whoever asks takes
+		//no words to mean it is not drawn, which in that frame is right
 		if ( CoreShaderCompiler.IsPortable( format ) && !EngineShaders.InPortableFrame( file ) ) return null;
 
 		var path = CoreShaderFile.Source( file );
@@ -119,8 +119,7 @@ internal static class CoreShaderCache
 
 		try
 		{
-			//Through the seal: a shipped build's shaders are sealed like the rest of its content, and read as they are the text a key is made
-			//of is nothing like the text it was baked from - so every pass missed its own words and a game drew nothing. See SealedFile.
+			//Through the seal: a shipped build's shaders are sealed, and the sealed bytes are not the text a key is made of
 			text = CompiledFile.TextOf( path );
 		}
 		catch ( IOException e )
@@ -140,7 +139,7 @@ internal static class CoreShaderCache
 		return Words( source, directory, entry, stage, format, file );
 	}
 
-	/// <summary>The compiled words for one entry point of a text, from the cache where they are in it and from the compiler where they are not.</summary>
+	/// <summary>The compiled words for one entry point, from the cache or else the compiler.</summary>
 	public static byte[] Words( string source, string directory, string entry, CoreShaderCompiler.Stage stage,
 		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv, string name = null, string instead = null )
 	{
@@ -176,8 +175,8 @@ internal static class CoreShaderCache
 		return words;
 	}
 
-	//The words for one entry of a text where the cache has them - and the key they are kept under either way - without compiling anything. The key
-	//reads the includes, so this runs on the thread that asks; what it did not find may be compiled elsewhere with CompileAndKeep. See CoreShaderJobs.
+	//The words for one entry where the cache has them, and their key, without compiling; the key reads the
+	//includes, so this runs on the asking thread - see CompileAndKeep and CoreShaderJobs
 	internal static bool Cached( string source, string directory, string entry, CoreShaderCompiler.Stage stage,
 		CoreShaderCompiler.Format format, out string key, out byte[] words )
 	{
@@ -237,8 +236,7 @@ internal static class CoreShaderCache
 
 		var words = CoreRenderDevice.CompileShaderSource( source, directory, entry, stage, format );
 
-		//A stage that will not compile said nothing at all: the caller reads a null, gives up on whatever it was for - a cluster
-		//pass, a depth build - and the frame draws differently for a reason nobody can see. The compiler's own words, once per entry.
+		//The compiler's own words, once per entry: a caller only sees a null and the frame silently draws differently
 		if ( words is null && Once( "broken " + ( name ?? "" ) + "|" + entry ) )
 			log.Warning( $"{name ?? entry}: {entry} would not compile - {CoreRenderDevice.ShaderError}" );
 
@@ -274,14 +272,14 @@ internal static class CoreShaderCache
 			}
 			catch ( Exception e ) when ( e is IOException or ArgumentException )
 			{
-				//A cache that will not read is one that gets compiled past, which is exactly what an absent one does. Said once so it is not a mystery.
+				//A cache that will not read is compiled past, as an absent one is; said once
 				read.Clear();
 				log.Warning( $"the shader cache would not read ({e.Message}) - compiling instead" );
 			}
 
 			baked = new HashSet<string>( read.Keys, StringComparer.Ordinal );
 
-			//And what this machine compiled since - beneath the baked file, which has the same words under the same key where both have one.
+			//And what this machine compiled since, beneath the baked file, which wins where both have a key
 			local = new Dictionary<string, byte[]>( StringComparer.Ordinal );
 
 			try
@@ -410,7 +408,7 @@ internal static class CoreShaderCache
 	//Held while SaveLocal writes - see there.
 	private static readonly object writing = new();
 
-	//The file's contents into a table: magic, version, how it is packed and the size of what is packed, then the packed table - see Serialise.
+	//The file into a table: magic, version, packing and packed size, then the table - see Serialise
 	private static void Read( byte[] file, Dictionary<string, byte[]> into )
 	{
 		if ( file.Length < 16 ) throw new ArgumentException( "too short to be one" );
@@ -772,8 +770,8 @@ internal static class CoreShaderCache
 
 		try
 		{
-			//GlslStereo is the engine's passes built for two views - what a pass that draws both of a headset's eyes at once binds. Only the passes: the project's
-			//surfaces are asked for once per language by the action below, and a surface's two-view run is baked into its own .shader_c rather than here.
+			//GlslStereo: the engine's passes for two views, as a pass drawing both eyes binds; only passes - a
+			//surface's two-view run is baked into its own .shader_c
 			foreach ( var format in new[] { CoreShaderCompiler.Format.Wgsl, CoreShaderCompiler.Format.Glsl } )
 			{
 				Baking = format;
@@ -823,7 +821,7 @@ internal static class CoreShaderCache
 		return whole;
 	}
 
-	//One frame's worth of a bake, in the language Baking names: the engine's passes that frame has, and every shader the engine ships.
+	//One frame's worth of a bake in Baking's language: that frame's engine passes and every shipped shader
 	private static bool BakeFrame( bool portable )
 	{
 		var whole = BakePasses( portable );
@@ -832,20 +830,20 @@ internal static class CoreShaderCache
 		//that names one and chooses nothing asks for. See CoreShaderFile.Compile, which is the same call a material makes.
 		foreach ( var shader in Shipped() )
 		{
-			//Written for a legacy shader compiler, which is not here - nothing of ours can build it, and nothing of ours draws with it.
+			//Written for a legacy shader compiler that is not here: nothing of ours builds or draws it
 			if ( CoreShaderFile.IsForeign( shader ) )
 			{
 				log.Info( $"{shader} is another engine's shader - left out" );
 				continue;
 			}
 
-			//A pass over the frame's pictures, in a frame that has none - see RenderTier. Nothing in the portable frame would ever ask for it.
+			//A pass over the frame's pictures, in a frame without them - see RenderTier
 			if ( portable && !CoreResources.IsSurface( shader ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( shader ) is { } doubt ) log.Warning( doubt );
 
-			//A pass that stores in the compact format is compiled for both of what that can be - the device decides which it runs - see CoreShaderFile.CompactName.
+			//A pass storing in the compact format, compiled both ways; the device picks - see CompactName
 			var variants = CoreShaderFile.IsPass( shader ) ? new[] { "r11f_g11f_b10f", "rgba16f" } : new string[] { null };
 
 			foreach ( var compact in variants )
@@ -866,7 +864,7 @@ internal static class CoreShaderCache
 					whole = false;
 				}
 
-				//And every entry of its own beyond the ones every file has - a bloom's three passes in one file. See CoreShaderFile.EntryWords.
+				//And each entry of its own beyond every file's - bloom's three in one file; see EntryWords
 				foreach ( var (entry, kind) in portable ? [] : CoreShaderFile.EntriesOf( shader ) )
 				{
 					if ( CoreShaderFile.EntryWords( shader, null, entry, kind ) is not null ) continue;
@@ -886,14 +884,14 @@ internal static class CoreShaderCache
 		return whole;
 	}
 
-	/// <summary>The cache written as a file at <paramref name="path"/> - what this run asked for, or everything known. What a game ships is <see cref="WriteForGame"/>.</summary>
+	/// <summary>The cache written as a file: what this run asked for, or everything; games ship WriteForGame's.</summary>
 	public static bool WriteTo( string path, bool touchedOnly = true )
 	{
 		try
 		{
 			Directory.CreateDirectory( Path.GetDirectoryName( path ) );
-			//Not the tightest packing: that is six seconds against a fifth of one, for a hundred and thirty kilobytes - see Serialise. The
-			//engine's own cache is written by every build; only the file a game ships is worth the six seconds, and WriteForGame asks for them.
+			//Not the tightest packing, six seconds against a fifth of one for 130 KB - see Serialise; only the file
+			//a game ships is worth it, and WriteForGame asks
 			File.WriteAllBytes( path, Write( touchedOnly ) );
 		}
 		catch ( IOException e )
@@ -930,6 +928,7 @@ internal static class EngineShaders
 	internal const string Billboard = "shaders/engine/billboard.slang";
 	internal const string Ui = "shaders/engine/ui.slang";
 	internal const string Background = "shaders/engine/background.slang";
+	internal const string Glow = "shaders/engine/glow.slang";
 
 	internal const string Velocity = "shaders/engine/velocity.slang";
 	internal const string Compose = "shaders/engine/compose.slang";
@@ -945,7 +944,22 @@ internal static class EngineShaders
 	internal const string Upscale = "shaders/engine/upscale.slang";
 	internal const string Fsr3 = "shaders/engine/fsr3.slang";
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
+	internal const string BakeDenoise = "shaders/engine/bake_denoise.slang";
+	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
+	internal const string RayGrid = "shaders/engine/ray_grid.slang";
 	internal const string SkyLight = "shaders/engine/sky_light.slang";
+	internal const string Light2D = "shaders/engine/light2d.slang";
+	internal const string Light2DSprites = "shaders/engine/light2d_sprites.slang";
+	internal const string Light2DCascades = "shaders/engine/light2d_cascades.slang";
+
+	//The 2D light's jump flood, which stores two half floats where the cascades store four - see light2d_cascades.slang.
+	internal const string Light2DSeeds = "#define LIGHT2D_SEEDS 1\n";
+
+	//The 2D lights' shadow maps, which store one whole float - see light2d_cascades.slang.
+	internal const string Light2DShadows = "#define LIGHT2D_SHADOWS 1\n";
+
+	//The tile maps' variant of the 2D light's sprite pass, which steps their animation - see CoreLight2D.IsTiles.
+	internal const string Light2DTiles = "#define LIGHT2D_TILE 1\n";
 
 	//UI shader for world-space panels; reads the frame block so stereo passes get each eye's view
 	internal const string UiWorld = "#define UI_WORLD 1\n";
@@ -1002,10 +1016,12 @@ internal static class EngineShaders
 		( Gizmo, "", Draws, true ),
 		( Billboard, "", Draws, true ),
 		( Ui, "", Draws, true ),
-		//A panel standing in the world and a headset's sheets - see CoreSceneDrawer.uiWorldPipeline. Missing here, a page had no build
-		//of it at all: world panels and every ScreenPanel in a browser headset drew nothing ("ui.slang is not in the shader cache").
+		//A panel in the world and a headset's sheets - see uiWorldPipeline; without it a page drew no world
+		//panels and no ScreenPanel in a browser headset
 		( Ui, UiWorld, Draws, true ),
 		( Background, "", Draws, true ),
+		//The portable frame's bloom, in pixel passes - see CorePortableGlow
+		( Glow, "", GlowDraws, true ),
 		( Velocity, "", Draws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),
@@ -1024,15 +1040,41 @@ internal static class EngineShaders
 		//A depth's chains of nearest and farthest - see CorePasses.FoldMode.
 		( Fold, FoldFormat( "r32f" ) + FoldMode( CorePasses.FoldMode.Least ), Runs, false ),
 		( Fold, FoldFormat( "r32f" ) + FoldMode( CorePasses.FoldMode.Most ), Runs, false ),
-		//The upscalers' passes - see CoreUpscaler. The full frame's alone: a temporal upscaler needs a picture of the world and compute.
+		//The upscalers' passes - see CoreUpscaler; full frame only, as they need the world's picture and compute
 		( Upscale, "", UpscaleRuns, false ),
 		( Upscale, CoreUpscaler.MotionDefines, MotionRuns, false ),
 		//And FSR 3's, one build a pass - see CoreFsr3.
 		.. Fsr3Builds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
+		( BakeDenoise, "", Runs, false ),
+		//The probes' bounce through hardware rays - see CoreLiveBounce. Built everywhere, run where the card has rays.
+		( RayBounce, "", Runs, false ),
+		//The probe grid of a scene with no bake - see CoreProbeGrid
+		( RayGrid, "", Runs, false ),
 		//The sky light's filters - see CoreSkyLight. Full frame only: they draw into pictures
 		( SkyLight, "", SkyLightDraws, false ),
+		//The 2D lighting's debug view, its scene and its passes - see CoreLight2D. Full frame only
+		( Light2D, "", Light2DDraws, false ),
+		( Light2DSprites, "", Draws, false ),
+		( Light2DSprites, Light2DTiles, Draws, false ),
+		( Light2DCascades, Light2DSeeds, Light2DFloodRuns, false ),
+		( Light2DCascades, Light2DShadows, Light2DShadowRuns, false ),
+		( Light2DCascades, "", Light2DCascadeRuns, false ),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DFloodRuns =
+		[("JumpCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DShadowRuns = [("ShadowsCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DCascadeRuns =
+		[("CascadeCs", CoreShaderCompiler.Stage.Compute), ("IntegrateCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DDraws =
+	[
+		("DebugVs", CoreShaderCompiler.Stage.Vertex),
+		("DebugPs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] SkyLightDraws =
@@ -1057,6 +1099,15 @@ internal static class EngineShaders
 		("EasuCs", CoreShaderCompiler.Stage.Compute),
 		("SharpenCs", CoreShaderCompiler.Stage.Compute),
 		("CopyCs", CoreShaderCompiler.Stage.Compute),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] GlowDraws =
+	[
+		("MainVs", CoreShaderCompiler.Stage.Vertex),
+		("BrightPs", CoreShaderCompiler.Stage.Pixel),
+		("DownPs", CoreShaderCompiler.Stage.Pixel),
+		("UpPs", CoreShaderCompiler.Stage.Pixel),
+		("ComposePs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =

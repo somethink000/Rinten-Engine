@@ -122,12 +122,6 @@ public class PreviewScenePanel : EditorPanel
 			sun.WorldRotation = new Angles( 50, 180 + 45 - 35, 0 );
 			sun.LightColor = Color.White * 0.6f;
 
-			var envGo = new GameObject( true, "envmap" );
-			var envmap = envGo.AddComponent<EnvmapProbe>();
-			envmap.Mode = EnvmapProbe.EnvmapProbeMode.CustomTexture;
-			envmap.Texture = Texture.Load( "textures/cubemaps/default2.tex" );
-			envmap.Bounds = BBox.FromPositionAndSize( Vector3.Zero, 100000 );
-
 			var skyGo = new GameObject( true, "skybox" );
 			skyGo.AddComponent<SkyBox2D>().SkyMaterial = Material.Load( "materials/skybox/skybox_workshop.vmat" );
 

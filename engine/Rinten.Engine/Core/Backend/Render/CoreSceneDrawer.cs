@@ -833,56 +833,6 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.UseFrame( was );
 	}
 
-	//Hash of what DrawLooseView would draw, so an unchanged shadow map is skipped; live if it can't vouch
-	private ulong LooseViewSignature( in CoreMeshRender.ViewSetup view, out bool live )
-	{
-		live = false;
-
-		if ( frameNow is null ) return 0;
-
-		Span<System.Numerics.Vector4> planes = stackalloc System.Numerics.Vector4[6]
-		{
-			view.Plane0, view.Plane1, view.Plane2, view.Plane3, view.Plane4, view.Plane5,
-		};
-
-		var hash = 14695981039346656037ul;
-		var count = 0;
-
-		foreach ( ref readonly var queued in CollectionsMarshal.AsSpan( opaque ) )
-		{
-			if ( !CastsInto( in queued, view.Casters, planes ) ) continue;
-
-			if ( queued.Pose is not null || queued.Morphs is not null || queued.Skinned || queued.Moves
-				|| queued.Instances > 1 || queued.CountFrom != 0 || queued.ArgsBuffer != 0 )
-			{
-				live = true;
-				return 0;
-			}
-
-			//The mesh by its buffers as well as by itself: a mesh edited in place - an
-			//editable one, while it is being worked on - is new buffers under the same object.
-			var mesh = queued.Mesh;
-
-			count++;
-			hash = ( hash ^ (ulong)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( mesh ) ) * 1099511628211ul;
-			hash = ( hash ^ mesh.Vertices ) * 1099511628211ul;
-			hash = ( hash ^ mesh.Indices ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolVertexAt ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolIndexAt ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolVertexCount ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.Part.GetHashCode() ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.Kind.GetHashCode() ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.World.GetHashCode() ) * 1099511628211ul;
-
-			foreach ( var word in MemoryMarshal.Cast<byte, ulong>( pushArena.AsSpan( queued.PushAt, CoreSceneRenderer.PushSize ) ) )
-				hash = ( hash ^ word ) * 1099511628211ul;
-		}
-
-		return ( hash ^ (ulong)count ) * 1099511628211ul;
-	}
-
-	private CorePortableSun.CasterSignature looseSignature;
-
 	//Whether a classic draw casts into a light's view: it casts, the view takes what it is, and it stands inside.
 	private bool CastsInto( in Queued queued, int casters, ReadOnlySpan<System.Numerics.Vector4> planes )
 	{
@@ -1582,6 +1532,10 @@ internal sealed partial class CoreSceneDrawer
 	//The sky's light on the card for this drawing's views - see CoreSkyLight
 	private readonly CoreSkyLight skyLight = new();
 
+	//The portable frame's bloom, and whether this frame draws it - see CorePortableGlow
+	private readonly CorePortableGlow glow = new();
+	private bool glowing;
+
 	//The sky table's bindless index, one as a flag in the portable frame, nought for none
 	private int SkyTableSlot()
 	{
@@ -1624,7 +1578,6 @@ internal sealed partial class CoreSceneDrawer
 	private readonly CoreLampMaps lampMaps;
 
 	//The sun's one map in the portable frame, which has neither of those - see RenderTier.
-	private readonly CorePortableSun portableSun = new();
 
 	//The classic draws a light's view takes, handed over once rather than as a delegate a frame - see DrawLooseView
 	private readonly CoreMeshRender.LooseView looseView;
@@ -1638,7 +1591,6 @@ internal sealed partial class CoreSceneDrawer
 		sunPages = new CoreSunPages( casters );
 		lampMaps = new CoreLampMaps( casters );
 		looseView = DrawLooseView;
-		looseSignature = LooseViewSignature;
 	}
 
 	private static ulong composePipeline;
@@ -1673,6 +1625,9 @@ internal sealed partial class CoreSceneDrawer
 
 	//World picture handle the materials were built against; a change means they're stale (e.g. resize)
 	private ulong postBuiltFrom;
+
+	//The light of a scene with no bake, traced about this view's camera where rays are on - see CoreProbeGrid
+	private readonly CoreProbeGrid probeGrid = new();
 
 	//Screen exposure: a fixed number now, no auto-exposure
 	private float exposure = Rinten.Rendering.DrawSettings.Exposure;
@@ -2015,6 +1970,8 @@ internal sealed partial class CoreSceneDrawer
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
 		CoreSkyLight.ForgetPipelines();
+		CoreLight2D.ForgetPipelines();
+		CorePortableGlow.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
 		pyramidPipeline = 0;
@@ -2027,7 +1984,9 @@ internal sealed partial class CoreSceneDrawer
 	{
 		DropPostInputs();
 		skyLight.Release();
+		glow.Release();
 		upscaler.Release();
+		probeGrid.Release();
 
 		for ( var i = 0; i < 2; i++ )
 		{
@@ -2175,8 +2134,7 @@ internal sealed partial class CoreSceneDrawer
 
 		var hasSun = sunLight is not null;
 
-		//And whether it casts. The Shadows box on the sun was once read by nothing on this path, and a sun told to
-		//cast nothing had its shadows drawn anyway; its pages are neither baked nor read now - see CoreSunPages.
+		//And whether it casts: a sun told to cast nothing has its pages neither baked nor read - see CoreSunPages
 		var sunCasts = hasSun && sunLight.Shadows;
 
 		CoreRenderDevice.ZoneBegin( "frame block" );
@@ -2217,13 +2175,17 @@ internal sealed partial class CoreSceneDrawer
 		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
 		skyLight.Lay( frame );
 
+		//The portable frame's bloom: the world drawn aside and kept past white, its curve left to the glow's compose
+		glowing = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
+			camera.PostProcess?.Glow is { } wantedGlow && glow.Open( wantedGlow, exposure );
+
 		//Upload the point effects the world's shading may carry, whichever way the frame ends up drawn
-		foldKey = FoldChain( camera );
+		foldKey = glowing ? null : FoldChain( camera );
 
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
 
-		CoreSceneRenderer.SetFinish( frame, exposure, frameCurve, Math.Max( foldAt, 0 ) );
+		CoreSceneRenderer.SetFinish( frame, exposure, glowing ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
 
 		//Next frame's exposure, taken here since the compose may not run when shading straight to screen
 		exposure = Rinten.Rendering.DrawSettings.Exposure;
@@ -2288,8 +2250,8 @@ internal sealed partial class CoreSceneDrawer
 
 		var meshes = !everything && !overlayOnly && tables is not null && CoreMeshRender.EnsurePipelines();
 
-		//Note table changes for the still-world shadow maps; full frame only, the portable one has no pages
-		if ( !overlayOnly && !CoreRenderDevice.PortableFrame )
+		//Note table changes for the still-world shadow maps
+		if ( !overlayOnly )
 		{
 			casters.Note( tables );
 			sunPages.Note();
@@ -2310,28 +2272,15 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		//A fully baked sun gets no pages; a shadow-baked one only needs pages for the fog march
-		var sunChannel = CoreSceneRenderer.BakedOn && sunLight is not null
-			? CoreBakedLighting.ChannelOf( sunLight ) : CoreBakedLighting.NotBaked;
-		var sunBaked = sunChannel == CoreBakedLighting.BakedWhole;
-		var sunPagesWanted = sunChannel < 0 || CoreSceneRenderer.FogVolumes;
+		sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
+			Rinten.Rendering.DrawSettings.MeshLodPixels );
 
-		if ( CoreRenderDevice.PortableFrame )
-		{
-			//One square of depth about the camera instead, and no lamp casts - see CorePortableSun.
-			portableSun.Plan( frame, sunCasts && !sunBaked && !overlayOnly, towards, sunLight?.ShadowDetail ?? 64.0f,
-				position, forward, far );
-		}
-		else
-		{
-			sunPages.Plan( frame, sunCasts && !sunBaked && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
-				Rinten.Rendering.DrawSettings.MeshLodPixels, stillWorld: sunPagesWanted );
+		lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
+			!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
+			//The frustum is one eye's, so a headset passes none, or faces only the other eye sees go undrawn
+			position, looseErrorScale, BothEyes ? default : planes, in clipToWorld );
 
-			lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
-				!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
-				//The frustum is one eye's, so a headset passes none, or faces only the other eye sees go undrawn
-				position, looseErrorScale, BothEyes ? default : planes, in clipToWorld );
-		}
+		if ( CoreRenderDevice.PortableFrame ) CoreSceneRenderer.LampFacesIntoBlock( frame );
 
 		CoreRenderDevice.SetupFrame( frame );
 		if ( BothEyes ) SetupSecondEye( frame );
@@ -2536,6 +2485,10 @@ internal sealed partial class CoreSceneDrawer
 		//So whether the world's passes are the last, applying exposure and curve
 		worldFinishes = !wantsOffscreen;
 
+		//Whether the adaptive shading rates are worth taking for this world - see VkFrame.Fovea
+		CoreRenderDevice.WorldShades( drawn || opaque.Count > 0 || translucent.Count > 0 ||
+			CoreImmediate.Instanced.Length > 0 || CoreImmediate.Blocks.Length > 0 );
+
 		//Let the pre-pass write the screen's depth directly when the frame shades onto the window
 		CoreRenderDevice.DepthOnScreen( viewport,
 			worldFinishes && CoreRenderDevice.DepthOnScreenPossible( viewport ) );
@@ -2550,7 +2503,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			CoreRenderDevice.ZoneBegin( "depth" );
 
-			//Under a name of its own: it was the one part of `depth` the report could not account for.
+			//Under a name of its own, so the report can account for it within `depth`
 			CoreRenderDevice.ZoneBegin( "prepass" );
 
 			if ( drawn && PrepassSlices > 0 ) meshRender.DrawCamera( appeared: false );
@@ -2599,6 +2552,27 @@ internal sealed partial class CoreSceneDrawer
 			//The air into its slice sheet, a march per froxel read in one tap; after the sun maps, before shading
 			var air = CoreVolumeFog.Draw( pixels, far );
 
+			//The scene for hardware rays, where they are on: into the block before the passes after the pre-pass trace it
+			if ( CoreRays.On )
+			{
+				CoreRenderDevice.ZoneBegin( "rays build" );
+				CoreRays.Build( scene );
+				CoreRays.Lay( frame );
+				CoreRenderDevice.ZoneEnd();
+
+				//And the light of a scene with no bake through them, about this view's camera
+				CoreRenderDevice.ZoneBegin( "probe grid" );
+				probeGrid.Trace( scene, position, frame );
+				CoreRenderDevice.ZoneEnd();
+
+				CoreRenderDevice.SetupFrame( frame );
+			}
+
+			//And the bake's bounce through them, before anything reads it
+			CoreRenderDevice.ZoneBegin( "baked bounce" );
+			CoreBakedLighting.TraceBounce( scene );
+			CoreRenderDevice.ZoneEnd();
+
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
 
 			//An "Occlusion" picture drawn here darkens surfaces (AmbientOcclusion); laid into the block, re-sent,
@@ -2618,6 +2592,18 @@ internal sealed partial class CoreSceneDrawer
 				laid = true;
 			}
 
+			//Traced near light where rays drew it, else what the occlusion gathered off the screen
+			if ( CorePasses.Find( CoreRayLight.Picture ) is { Index: > 0 } traced )
+			{
+				CoreSceneRenderer.LayScreenLight( frame, traced.Index, true );
+				laid = true;
+			}
+			else if ( CorePasses.Find( AmbientOcclusion.IndirectPicture ) is { Index: > 0 } indirect )
+			{
+				CoreSceneRenderer.LayScreenLight( frame, indirect.Index );
+				laid = true;
+			}
+
 			//And the picture of the depth itself, for the surfaces that read what is behind them - see DepthPicture.
 			if ( CorePasses.Find( DepthPicture.PictureName ) is { Index: > 0 } depthPicture )
 			{
@@ -2634,19 +2620,24 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 		}
 
-		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn
+		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn - but the portable
+		//frame has no depth block, and draws its sun's pages here the classic way, before the world reads them
 		if ( !lightsDrawn )
 		{
-			sunPages.Draw( null, 1, null );
-			lampMaps.Draw( null, 1, null );
-		}
+			var portable = CoreRenderDevice.PortableFrame && !overlayOnly ? looseView : null;
 
-		//The portable frame has no depth block, so its sun draws here before the world reads it
-		if ( CoreRenderDevice.PortableFrame && !overlayOnly ) portableSun.Draw( looseView, looseSignature );
+			sunPages.Draw( null, 1, portable );
+			lampMaps.Draw( null, 1 + sunPages.ViewCount, portable );
+		}
 
 		//The clusters' pixels first, a material at a time over the depth of material numbers; then the world's
 		//own picture opens over the real depth, keeping what was shaded, for everything drawn the classic way.
 		var offscreen = false;
+
+		//The 2D lighting's pictures, out of the sprites already queued, before the world's picture opens - see CoreLight2D.
+		//Overlay-only views too: the editor's 2D views are, and their sprites are lit the same over the finished picture
+		var light2d = !StereoPass &&
+			CoreLight2D.Draw( scene, camera, frame, pixels.Width, pixels.Height );
 
 		CoreRenderDevice.ZoneBegin( "world opaque" );
 
@@ -2697,7 +2688,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			//No sky and nothing to fill what the world left: the clear its own picture would have had
 			CoreRenderDevice.ZoneBegin( "background" );
-			DrawBackground( camera, frameCurve );
+			DrawBackground( camera, glowing ? CorePortableGlow.KeepCurve : frameCurve );
 			CoreRenderDevice.ZoneEnd();
 		}
 
@@ -2734,10 +2725,15 @@ internal sealed partial class CoreSceneDrawer
 			instancedInWorld = true;
 		}
 
+		//What of the 2D lighting Lighting2D.Debug asked to see, over the world it lit
+		if ( light2d && ( offscreen || worldFinishes ) ) CoreLight2D.DrawDebug( worldTarget );
+
 		//What lies over the world with its own depth (a held weapon), into the same picture so effects reach it
 		CoreRenderDevice.ZoneBegin( "world overlay" );
 		DrawLayer( overlayLayer );
 		CoreRenderDevice.ZoneEnd();
+
+		if ( glowing ) glow.Finish( frameCurve );
 
 		if ( offscreen )
 		{
@@ -3209,6 +3205,7 @@ internal sealed partial class CoreSceneDrawer
 		skyChainPipelines.Clear();
 		skyTablePipelines.Clear();
 		CoreSkyLight.ForgetPipelines();
+		CoreLight2D.ForgetPipelines();
 	}
 
 	//Only the background pass is made upfront; sky pipelines bake on demand per frame specialization
@@ -4322,8 +4319,7 @@ internal sealed partial class CoreSceneDrawer
 		bitmap.Clear( new Color( 0, 0, 0, 0 ) );
 		bitmap.DrawText( block, bitmap.Rect );
 
-		//Straight out of the bitmap's own pixels, which are already eight-bit RGBA: a copy
-		//into an array of colours was a picture's worth of garbage per new string (plan В5).
+		//Straight out of the bitmap's own pixels, already eight-bit RGBA: no copy into an array of colours per string
 		var texture = CoreRenderDevice.CreateTextureRgba( bitmap.GetBuffer(), width, height, srgb: true );
 
 		Rinten.UI.TextStats.Scope( System.Diagnostics.Stopwatch.GetTimestamp() - rasterStart, (long)width * height * 4 );
@@ -4607,7 +4603,7 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneBegin( "sheet draw" );
 
 			//Out of the sheet's own buffer, written once when it was walked: a kept frame's vertices are the same
-			//bytes every frame, and writing them into the frame's ring again was most of what drawing the sheet cost.
+			//bytes every frame, and are not written into the frame's ring again
 			var pipeline = Pick( uiSheetPipeline, uiSheetTwo );
 
 			foreach ( var batch in batches )
@@ -5413,7 +5409,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private Vertex[] stripScratch = System.Array.Empty<Vertex>();
 
-	//A headset eye drawn beside the other in one engine frame; CorePortableSun and BuildFrame share by the same test
+	//A headset eye drawn beside the other in one engine frame; BuildFrame shares by the same test
 	private static bool SharingViews => CoreRender.SharingViews && Rinten.VR.VRSystem.IsRendering;
 
 	//Which engine frame the sky's table was last drawn in, or -1 for none.
@@ -5432,8 +5428,8 @@ internal sealed partial class CoreSceneDrawer
 
 		System.Runtime.InteropServices.MemoryMarshal.Write( into, in matrix );
 
-		//The tint stays at sixty-four, where it has always been, and the mode goes after it - so a gizmo
-		//shader baked before this lane existed reads exactly what it read before. See g_mode in gizmo.slang.
+		//The tint stays at sixty-four and the mode goes after it, so a gizmo shader without this lane
+		//reads what it always did - see g_mode in gizmo.slang
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[64..],
 			new System.Numerics.Vector4( tint.r, tint.g, tint.b, tint.a ) );
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[80..],
@@ -5648,7 +5644,7 @@ internal sealed partial class CoreSceneDrawer
 			var a = lines[i * 2];
 			var b = lines[i * 2 + 1];
 
-			//x: line side; y: +1 at the start, -1 at the end, so the shader turns one way across; z: width in pixels
+			//X: the line's side; y: +1 at the start, -1 at the end, so the shader turns one way; z: width
 			var startLeft = Corner( a, b.Position, 1, 1, thickness );
 			var startRight = Corner( a, b.Position, -1, 1, thickness );
 			var endLeft = Corner( b, a.Position, 1, -1, thickness );

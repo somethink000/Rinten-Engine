@@ -7,6 +7,7 @@ namespace Rinten;
 [Title( "Point Light 2D" )]
 [Category( "Light 2D" )]
 [Icon( "lightbulb" )]
+[EditorHandle( Icon = "lightbulb" )]
 public class PointLight2D : Light2D
 {
 }

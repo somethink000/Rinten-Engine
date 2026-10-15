@@ -12,7 +12,8 @@ namespace Rinten;
 [Title( "Global Light 2D" )]
 [Category( "Light 2D" )]
 [Icon( "wb_sunny" )]
-public class GlobalLight2D : Component, Component.ExecuteInEditor
+[EditorHandle( Icon = "wb_sunny" )]
+public class GlobalLight2D : Component, Component.ExecuteInEditor, Component.IColorProvider
 {
 	/// <summary>The colour of the light.</summary>
 	[Property]
@@ -21,4 +22,7 @@ public class GlobalLight2D : Component, Component.ExecuteInEditor
 	/// <summary>How strong the light is, as a multiplier on <see cref="Color"/>.</summary>
 	[Property, Range( 0, 10 )]
 	public float Intensity { get; set; } = 1.0f;
+
+	//Tints the editor's handle for the light, as a 3D light's is.
+	Color IColorProvider.ComponentColor => Color;
 }

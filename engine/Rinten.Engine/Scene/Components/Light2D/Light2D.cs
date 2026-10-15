@@ -12,7 +12,7 @@ namespace Rinten;
 /// edges of its shadows.
 /// </remarks>
 [Expose]
-public abstract class Light2D : Component, Component.ExecuteInEditor
+public abstract class Light2D : Component, Component.ExecuteInEditor, Component.IColorProvider
 {
 	/// <summary>The colour of the light.</summary>
 	[Property]
@@ -35,6 +35,9 @@ public abstract class Light2D : Component, Component.ExecuteInEditor
 
 	/// <summary>The colour times the intensity.</summary>
 	internal Color Radiance => Color * Intensity;
+
+	//Tints the editor's handle for the light, as a 3D light's is.
+	Color IColorProvider.ComponentColor => Color;
 
 	/// <summary>Where the light points on the plane - see <see cref="SpotLight2D"/>.</summary>
 	/// <remarks>The object's right, not its forward: forward is -z, straight out of the plane.</remarks>

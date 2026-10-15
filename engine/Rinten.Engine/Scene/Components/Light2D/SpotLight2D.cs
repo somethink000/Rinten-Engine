@@ -8,6 +8,7 @@ namespace Rinten;
 [Title( "Spot Light 2D" )]
 [Category( "Light 2D" )]
 [Icon( "highlight" )]
+[EditorHandle( Icon = "highlight" )]
 public class SpotLight2D : Light2D
 {
 	/// <summary>How wide the cone is, in degrees, edge to edge.</summary>

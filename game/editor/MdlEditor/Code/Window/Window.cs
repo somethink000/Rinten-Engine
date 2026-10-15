@@ -297,40 +297,6 @@ public partial class Window : DockWindow, IAssetEditor, IPreviewHost, ILinkedEdi
 		}
 	}
 
-	//Open the graph of a model picked from the disk. A model, because that is where a
-	//graph is kept. There is no New: a graph is started by opening a model that has none.
-	[Shortcut( "editor.open", "CTRL+O" )]
-	private void Open()
-	{
-		var fd = new FileDialog( null )
-		{
-			Title = "Open a Model's Graph",
-			Directory = LastDialogDirectory( "mdl" )
-		};
-
-		fd.SetNameFilter( "Model (*.mdl)" );
-
-		if ( !fd.Execute() )
-			return;
-
-		SetLastDialogDirectory( "mdl", fd.SelectedFile );
-
-		if ( AssetSystem.FindByPath( fd.SelectedFile ) is { } asset )
-			AssetOpen( asset );
-	}
-
-	private static string LastDialogDirectory( string extension )
-	{
-		var dir = ProjectCookie.GetString( $"LastSaveLocation.{extension}", "" );
-		return System.IO.Directory.Exists( dir ) ? dir : Project.Current.GetAssetsPath();
-	}
-
-	private static void SetLastDialogDirectory( string extension, string file )
-	{
-		if ( System.IO.Path.GetDirectoryName( file ) is { Length: > 0 } dir )
-			ProjectCookie.SetString( $"LastSaveLocation.{extension}", dir );
-	}
-
 	private const string RecentFilesCookie = "animgraph.recentfiles";
 	private const string LastGraphCookie = "animgraph.lastgraph";
 	private const int MaxRecentFiles = 10;

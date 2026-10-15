@@ -35,7 +35,7 @@ public static class AssetContextMenuHelper
         {
             //Named the same as the folder menu's, which is the same command asked of the folder this file is in.
             var createMenu = menu.AddMenu("New", "note_add");
-            AssetCreator.AddOptions(createMenu, parentFolder);
+            CreateAsset.AddOptions(createMenu, parentFolder);
             menu.AddSeparator();
         }
 
@@ -153,7 +153,7 @@ public static class AssetContextMenuHelper
     public static void BuildEmptySpaceMenu(Menu menu, string folder, Action onRefresh)
     {
         var create = menu.AddMenu("Create", "add");
-        AssetCreator.AddOptions(create, folder);
+        CreateAsset.AddOptions(create, folder);
 
         if (WindowsClipboard.HasFiles())
         {

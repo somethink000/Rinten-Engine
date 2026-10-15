@@ -48,6 +48,19 @@ namespace Editor
 		//Code lives under Code; everything else an editor opens is an asset.
 		static bool IsCodeExtension( string extension ) => extension is "razor" or "cs" or "scss";
 
+		//What a file of this extension is called on the File menu.
+		static string KindName( string extension ) =>
+			AssetType.FromExtension( extension )?.FriendlyName is { Length: > 0 } name ? name
+			: extension == "razor" ? "Razor Panel" : $".{extension}";
+
+		//What File > New makes here: the first asset type this app is the registered editor for that can be made empty.
+		string CreatedExtension() => TargetType.GetCustomAttributes( typeof( EditorForAssetTypeAttribute ), true )
+			.OfType<EditorForAssetTypeAttribute>()
+			.Select( x => x.Extension.TrimStart( '.' ).ToLowerInvariant() )
+			.FirstOrDefault( x => EditorTypeLibrary.GetAttributes<AssetTypeAttribute>().Any( a => a.Extension == x ) );
+
+		bool MakesItsOwnFiles => TargetType.IsAssignableTo( typeof( IFileEditor ) );
+
 		/// <summary>A request for a file an app opens, answered by the tools addon's asset picker.</summary>
 		public sealed class FileRequest
 		{
@@ -70,9 +83,67 @@ namespace Editor
 		/// <summary>File > Open's label while this app is in front; null for an app that opens nothing.</summary>
 		public string OpenLabel()
 		{
-			var names = OpenedExtensions().Select( x => AssetType.FromExtension( x )?.FriendlyName is { Length: > 0 } name ? name : $".{x}" ).ToArray();
+			var names = OpenedExtensions().Select( KindName ).ToArray();
 
 			return names.Length == 0 ? null : $"Open {string.Join( " / ", names )}..";
+		}
+
+		/// <summary>File > New's label while this app is in front; null for an app that makes nothing.</summary>
+		public string NewLabel()
+		{
+			var extension = MakesItsOwnFiles ? OpenedExtensions().FirstOrDefault() : CreatedExtension();
+
+			return extension is null ? null : $"New {KindName( extension )}..";
+		}
+
+		/// <summary>Makes a file this app works on, named and placed by the user, and opens it; false if it makes none.</summary>
+		public bool AskToCreate()
+		{
+			if ( MakesItsOwnFiles )
+			{
+				if ( Open() is not IFileEditor editor ) return false;
+
+				editor.NewFile();
+				return true;
+			}
+
+			if ( CreatedExtension() is not { } extension ) return false;
+
+			CreateResource( $"New {KindName( extension )}", extension, OpenFile );
+			return true;
+		}
+
+		/// <summary>Asks a name and a folder for a new resource of this extension, makes it, and hands back its path.</summary>
+		public static void CreateResource( string title, string extension, Action<string> created )
+		{
+			//The folder the last one of these went in, as the editors' own save boxes remember it
+			var cookie = $"LastSaveLocation.{extension}";
+			var folder = ProjectCookie.GetString( cookie, "" );
+
+			if ( !System.IO.Directory.Exists( folder ) ) folder = Project.Current?.GetAssetsPath() ?? "";
+
+			EditorModal.PromptInFolder( null, title, folder, ( name, into ) =>
+			{
+				name = name.Trim();
+
+				if ( name.EndsWith( $".{extension}", StringComparison.OrdinalIgnoreCase ) )
+					name = name[..^( extension.Length + 1 )];
+
+				var path = System.IO.Path.Combine( into, $"{name}.{extension}" );
+
+				if ( System.IO.File.Exists( path ) )
+				{
+					EditorModal.Notice( null, title, $"{path} already exists." );
+					return;
+				}
+
+				ProjectCookie.SetString( cookie, into );
+
+				if ( AssetSystem.CreateResource( extension, path ) is null ) return;
+
+				created?.Invoke( path );
+			}, initial: $"new {KindName( extension ).ToLowerInvariant()}", icon: "note_add",
+				image: AssetType.FromExtension( extension )?.Icon64 );
 		}
 
 		/// <summary>Picks a file this app opens and opens it; false for an app that opens nothing.</summary>
@@ -200,5 +271,8 @@ namespace Editor
 	public interface IFileEditor
 	{
 		void OpenFile( string path );
+
+		/// <summary>File > New: asks for a new file of this editor's kind and opens it.</summary>
+		void NewFile();
 	}
 }

@@ -409,16 +409,6 @@ public partial class AssetList
 			} );
 	}
 
-	public static void OpenCreateFlyout( string resourceType, string defaultName, string extension, Action<string> onCreated, Vector2? position = null )
-	{
-		OpenLineEditFlyout( defaultName, $"What do you want to name {resourceType}?", position,
-			name =>
-			{
-				if ( string.IsNullOrWhiteSpace( name ) ) return;
-				onCreated( $"{name}{extension}" );
-			} );
-	}
-
 	public void OpenRenameFlyout( IAssetListEntry item, Vector2? position = null )
 	{
 		bool exactRename = item is AssetEntry ae && ae.Asset is null;
@@ -590,7 +580,7 @@ public partial class AssetList
 		if ( location.Type is AssetBrowser.LocationType.Assets or AssetBrowser.LocationType.Code or AssetBrowser.LocationType.Localization )
 		{
 			var menu = e.Menu.AddMenu( "New", "note_add" );
-			CreateAsset.AddOptions( menu, location );
+			CreateAsset.AddOptions( menu, location.Path );
 			e.Menu.AddSeparator();
 		}
 	}

@@ -38,10 +38,6 @@ public static class EditorScene
 		newSession.MakeActive();
 	}
 
-	/// <summary>File > Open on the tab in front: a scene, or what that editor works on.</summary>
-	[Shortcut( "editor.open", "CTRL+O" )]
-	public static void Open() => EditorMainWindow.Current?.OpenInCurrentWorkspace();
-
 	/// <summary>Opens the given scene file for editing, if it's not already open.</summary>
 	public static void OpenScene( SceneFile resource )
 	{

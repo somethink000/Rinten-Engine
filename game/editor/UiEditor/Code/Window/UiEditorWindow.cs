@@ -104,6 +104,8 @@ public sealed partial class UiEditorWindow : DockWindow, IFileEditor
 	//A razor file chosen on File > Open - see EditorAppAttribute.OpenFile.
 	void IFileEditor.OpenFile( string path ) => Open( path );
 
+	void IFileEditor.NewFile() => NewFile();
+
 	//Open a file here, in place of whatever was open.
 	internal void OpenDocument( RazorDocument document )
 	{

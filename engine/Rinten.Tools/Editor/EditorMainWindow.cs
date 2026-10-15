@@ -622,7 +622,13 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 		var open = app?.OpenLabel();
 
 		FileMenu.AddHeading( open is null ? "Scene" : app.Title );
-		FileMenu.AddOption( open ?? "Open Scene..", "file_open", OpenInCurrentWorkspace, "editor.open" );
+		FileMenu.AddOption( open ?? "Open Scene..", "file_open", OpenInCurrentWorkspace );
+
+		if ( open is null )
+			FileMenu.AddOption( "New Scene..", "note_add", NewScene );
+		else if ( app.NewLabel() is { } create )
+			FileMenu.AddOption( create, "note_add", () => app.AskToCreate() );
+
 		FileMenu.AddSeparator();
 		//The build page lives in the tools addon, which this cannot name - so it is asked for by event. See ProjectPage.OpenPage.
 		FileMenu.AddOption( "Build Game..", "publish", () => EditorEvent.Run( "project.build.open" ) );
@@ -631,9 +637,12 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 		FileMenu.AddOption( "Quit", "logout", Quit );
 	}
 
+	void NewScene() =>
+		EditorAppAttribute.CreateResource( "New Scene", "scene", path => AssetSystem.FindByPath( path )?.OpenInEditor() );
+
 	//File > Open: the asset picker, showing only what the tab in front opens - models on the model editor's, a razor
 	//panel under Code on the UI editor's, and a scene or a prefab on General and the workspaces built around the scene.
-	internal void OpenInCurrentWorkspace()
+	void OpenInCurrentWorkspace()
 	{
 		if ( CurrentApp?.AskForFile() == true ) return;
 

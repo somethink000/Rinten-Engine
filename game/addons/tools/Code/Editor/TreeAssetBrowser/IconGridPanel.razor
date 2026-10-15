@@ -132,6 +132,9 @@
 	{
 		base.Tick();
 
+		if ( !options.IsPickerMode )
+			canvas?.SyncScroll();
+
 		if ( reloadQueued && reloadDebounce > 0.25f )
 		{
 			reloadQueued = false;

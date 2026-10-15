@@ -12,7 +12,6 @@ public sealed class AssetTreePanel : TreePanel<AssetTreeItem>, ITreePathSource, 
 	bool suppressExpandSync;
 	int seenVersion;
 	TreeBrowserOptions options = TreeBrowserOptions.Dock;
-	HashSet<string> pendingAutoExpand = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>Mode this tree runs in; rebuilds the tree when it changes.</summary>
 	public TreeBrowserOptions Options
@@ -474,6 +473,20 @@ public sealed class AssetTreePanel : TreePanel<AssetTreeItem>, ITreePathSource, 
 		RefreshTree( skipDefaultOpen: true );
 	}
 
+	//Made on first use: a tree already open across a hotload never runs a field's initializer
+	ScrollFollower scroll;
+
+	/// <summary>Keeps this tree scrolled with the other browsers' trees - see ScrollFollower.</summary>
+	public void SyncScroll()
+	{
+		if ( options.IsPickerMode || model.IsSearchActive ) return;
+
+		scroll ??= new( AssetBrowserPlace.TreeScroll );
+		scroll.Tick( PointerOverRows, ScrollY, TopKey, ( key, into ) => ScrollToRow( x => x.Key == key, into ), () => ScrollY );
+	}
+
+	(string Key, float Into)? TopKey() => TopRow() is { } top ? (top.Node.Key, top.Into) : null;
+
 	/// <summary>Opens the tree down to a folder and picks it without raising the pick, as when following another browser.</summary>
 	public void FollowFolder( string path )
 	{
@@ -521,11 +534,7 @@ public sealed class AssetTreePanel : TreePanel<AssetTreeItem>, ITreePathSource, 
 
 	void RestoreExpandedFromPaths()
 	{
-		pendingAutoExpand.Clear();
 		var paths = AssetExpandedPaths.Snapshot();
-
-		foreach ( var path in paths )
-			pendingAutoExpand.Add( path );
 
 		suppressExpandSync = true;
 
@@ -552,8 +561,9 @@ public sealed class AssetTreePanel : TreePanel<AssetTreeItem>, ITreePathSource, 
 			if ( shouldExpand || hasChildToExpand )
 			{
 				Open( item );
-				model.GetChildren( item );
-				ApplyExpandedRecursive( item.Children, paths );
+
+				//GetChildren builds them only as it is walked, so it is walked here
+				ApplyExpandedRecursive( model.GetChildren( item ).ToList(), paths );
 			}
 		}
 	}

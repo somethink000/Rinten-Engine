@@ -176,6 +176,7 @@
 	{
 		base.Tick();
 		Tree?.SyncSharedExpandState();
+		Tree?.SyncScroll();
 		ApplyPendingReveal();
 	}
 

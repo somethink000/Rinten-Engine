@@ -208,14 +208,8 @@ internal sealed class ParticlePreviewPanel : EditorPanel
 			_camera.ZNear = 0.02f;
 			_camera.ZFar = 5000.0f;
 
-			var ambientObject = new GameObject( true, "ambient" );
-			ambientObject.AddComponent<AmbientLight>().Color = Color.White * 0.15f;
-
-			var sunObject = new GameObject( true, "sun" );
-
-			var sun = sunObject.AddComponent<DirectionalLight>();
-			sun.WorldRotation = new Angles( 50.0f, 45.0f, 0.0f );
-			sun.LightColor = Color.White * 0.6f;
+			PreviewLighting.HideSky( _camera );
+			PreviewLighting.Light( _scene, new Angles( _angles.y, -_angles.x, 0.0f ) );
 		}
 
 		if ( EditorCookie.Get( GroundCookie, false ) )

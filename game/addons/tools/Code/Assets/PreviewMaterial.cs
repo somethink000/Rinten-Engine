@@ -43,16 +43,13 @@ class PreviewMaterial : AssetPreview
 
 			if ( material.Flags.IsSky )
 			{
-				skyboxObject = PrimaryObject.AddComponent<SkyBox2D>();
+				//The preview's own sky wears it, and the camera shows it
+				skyboxObject = Scene.GetAllComponents<SkyBox2D>().FirstOrDefault() ?? PrimaryObject.AddComponent<SkyBox2D>();
 				skyboxObject.SkyMaterial = material;
+				Camera.RenderExcludeTags.Remove( "skybox" );
 			}
 			else
 			{
-				var go = Scene.Directory.FindByName( "envmap" )?.FirstOrDefault() ?? new GameObject( true, "envmap" );
-				var c = go.GetOrAddComponent<EnvmapProbe>();
-				c.Mode = EnvmapProbe.EnvmapProbeMode.Runtime;
-				c.WorldPosition = new Vector3( 0, 0, 0 );
-				c.TintColor = Color.White * 0.1f;
 				var sprite = PrimaryObject.AddComponent<ModelRenderer>();
 				sprite.Model = Plane;
 				sprite.MaterialOverride = material;

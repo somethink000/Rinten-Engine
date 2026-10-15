@@ -45,10 +45,11 @@ public class Preview : Widget
 				}
 			}
 
+			PreviewLighting.HideSky( Camera );
+			PreviewLighting.Light( Scene, Camera.WorldRotation.Angles() );
+
 			var world = Scene.SceneWorld;
 
-			new ScenePointLight( world, new Vector3( 2.54f ), 12.7f, Color.White * 4 ).ShadowsEnabled = false;
-			new ScenePointLight( world, new Vector3( -2.54f, -2.54f, 2.54f ), 12.7f, Color.White * 4 ).ShadowsEnabled = false;
 			SceneObject = new SceneModel( world, "models/citizen/citizen.vmdl", Transform.Zero.WithPosition( Vector3.Backward * (6.35f) ) );
 		}
 

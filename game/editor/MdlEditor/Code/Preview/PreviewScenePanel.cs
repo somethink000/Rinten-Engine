@@ -111,20 +111,8 @@ public class PreviewScenePanel : EditorPanel
 			//Worked out again from how far the camera is - see UpdateCamera. A tenth of a metre cut the model open as soon as it came close.
 			Camera.ZNear = 0.001f;
 
-			var ambGo = new GameObject( true, "ambient" );
-			ambGo.AddComponent<AmbientLight>().Color = Color.Cyan * 0.05f;
-
-			var sunGo = new GameObject( true, "sun" );
-			var sun = sunGo.AddComponent<DirectionalLight>();
-			sun.Shadows = true;
-			//Turned the way the camera starts out looking - yaw 225, see UpdateCamera - and a little to one side. A light travels
-			//along its forward (the renderer takes -Forward as the way to it), and at yaw 45 it lit the side of the model facing away.
-			sun.WorldRotation = new Angles( 50, 180 + 45 - 35, 0 );
-			sun.LightColor = Color.White * 0.6f;
-
-			var skyGo = new GameObject( true, "skybox" );
-			skyGo.AddComponent<SkyBox2D>().SkyMaterial = Material.Load( "materials/skybox/skybox_workshop.vmat" );
-
+			PreviewLighting.HideSky( Camera );
+			PreviewLighting.Light( Scene, new Angles( _angles.y, -_angles.x, 0 ) );
 		}
 
 		//Treadmills against root motion so the model stays put. Drawn as a gizmo rather than put in the scene, so it needs nothing from the scope above.

@@ -25,6 +25,10 @@ public class ClothingScene
 			Body.Model = Model.Load( "models/citizen_human/citizen_human_male.vmdl" );
 
 			camera.BackgroundColor = new Color( 0.1f, 0.1f, 0.1f, 0.0f );
+			camera.GetOrAddComponent<Sharpen>().Scale = 0.5f;
+
+			PreviewLighting.HideSky( camera );
+			PreviewLighting.Light( Scene, new Angles( Pitch, 180 - Yaw, 0 ) );
 		}
 	}
 
@@ -89,8 +93,6 @@ public class ClothingScene
 
 	public void Update()
 	{
-		UpdateLighting();
-
 		Body.Set( "b_grounded", true );
 		Body.Set( "aim_eyes", Vector3.Forward * (2.54f) );
 		Body.Set( "aim_head", Vector3.Forward * (2.54f) );
@@ -110,63 +112,6 @@ public class ClothingScene
 		Scene.EditorTick( RealTime.Now, RealTime.Delta );
 
 		UpdateCameraPosition();
-	}
-
-	void UpdateLighting()
-	{
-		using var _ = Scene.Push();
-
-		//sun
-		{
-			var go = Scene.Directory.FindByName( "sun" )?.FirstOrDefault() ?? new GameObject( true, "sun" );
-			var light = go.GetOrAddComponent<DirectionalLight>();
-			light.WorldRotation = Rotation.From( 45, -180, 0 );
-			light.LightColor = new Color( 1.0f, 0.9f, 0.7f );
-			light.SkyColor = Color.Gray * 0.55f;
-		}
-
-
-		//rim l
-		{
-			var go = Scene.Directory.FindByName( "pointlight1" )?.FirstOrDefault() ?? new GameObject( true, "pointlight1" );
-			var light = go.GetOrAddComponent<PointLight>();
-			light.WorldPosition = new Vector3( -100, 10, 70 ) * 0.02794f;
-			light.LightColor = new Color( 0.1f, 0.5f, 1.0f ) * 30;
-			light.Radius = 12.7f;
-			light.Shadows = true;
-		}
-
-		//rim r
-		{
-			var go = Scene.Directory.FindByName( "pointlight3" )?.FirstOrDefault() ?? new GameObject( true, "pointlight3" );
-			var light = go.GetOrAddComponent<PointLight>();
-			light.WorldPosition = new Vector3( -20, 40, 20 ) * 0.127f;
-			light.LightColor = new Color( 1.0f, 0.6f, 0.1f ) * 5;
-			light.Radius = 12.7f;
-			light.Shadows = true;
-		}
-
-		//warm
-		{
-			var go = Scene.Directory.FindByName( "pointlight2" )?.FirstOrDefault() ?? new GameObject( true, "pointlight2" );
-			var light = go.GetOrAddComponent<PointLight>();
-			light.WorldPosition = new Vector3( 1.27f, 2.54f, 4.318f );
-			light.LightColor = new Color( 0.9f, 0.8f, 0.6f ) * 2;
-			light.Radius = 12.7f;
-			light.Shadows = true;
-		}
-
-		//{
-		//var go = Scene.Directory.FindByName( "pointlight2" )?.FirstOrDefault() ?? new GameObject( true, "pointlight2" );
-		//var light = go.GetOrAddComponent<PointLight>();
-		//light.WorldPosition = new Vector3( 50, 100, 400 );
-		//light.LightColor = new Color( 0.9f, 0.8f, 0.6f ) * 30;
-		//light.Radius = 500;
-		//light.Shadows = true;
-		//}
-
-		var sharpen = Scene.Camera.GetOrAddComponent<Sharpen>();
-		sharpen.Scale = 0.5f;
 	}
 
 	void UpdateCameraPosition()

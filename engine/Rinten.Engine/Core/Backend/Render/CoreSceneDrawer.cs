@@ -2141,6 +2141,9 @@ internal sealed partial class CoreSceneDrawer
 
 		var frame = CoreSceneRenderer.BuildFrame( scene, drawnViewProjection, position );
 
+		//A camera excluding the skybox tag keeps the sky's light but shows its own background, as previews do
+		var skyShown = !overlayOnly && CoreSceneRenderer.HasSky( frame ) && !camera.RenderExcludeTags.Has( "skybox" );
+
 		//Rotation-only inverse view for direction lookups (the sky); headset eyes write their own
 		if ( !overlayOnly && !BothEyes )
 		{
@@ -2371,7 +2374,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//Whether nothing goes into the world picture this frame; clusters always count as drawing
 		var worldEmpty = !drawn && opaque.Count == 0 && translucent.Count == 0 &&
-			!overlayOnly && !CoreSceneRenderer.HasSky( frame );
+			!overlayOnly && !skyShown;
 
 		//Sky ambient table (by elevation and sun angle), drawn every frame with a sky, with the sky material
 		var skyTable = CoreSceneRenderer.HasSky( frame ) ? SkyTablePipeline( skyShader ) : 0;
@@ -2432,12 +2435,12 @@ internal sealed partial class CoreSceneDrawer
 		var blending = translucent.Count > 0;
 
 		//Whether every world pixel gets written (sky or background); else keep an offscreen picture
-		var fills = !overlayOnly && ( CoreSceneRenderer.HasSky( frame ) || backgroundPipeline != 0 );
+		var fills = !overlayOnly && ( skyShown || backgroundPipeline != 0 );
 
 		//Whether the world's shading carries the point effects instead of the compose (see FoldChain)
 		var folding = foldKey is not null && !softening && !carryingUp && !stretching && !upscaling && !inspecting &&
 			( !blending || CoreRenderDevice.PortableFrame ) &&
-			!overlayOnly && CoreSceneRenderer.HasSky( frame ) && !CorePointChain.Refused( foldKey );
+			skyShown && !CorePointChain.Refused( foldKey );
 
 		var folds = folding && foldKey == readyChain &&
 			SkyChainPipeline( skyShader, foldKey, CoreSceneRenderer.SkySpecialize( skyCore ) ) != 0;
@@ -2644,7 +2647,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//Whether the world's picture needs a clear: under a sky every untouched pixel is sky, and normal readers
 		//test depth first - see SceneSurface
-		var skyCovers = !overlayOnly && CoreSceneRenderer.HasSky( frame );
+		var skyCovers = skyShown;
 
 		if ( wantsOffscreen )
 		{
@@ -2678,7 +2681,7 @@ internal sealed partial class CoreSceneDrawer
 
 		Between( camera, offscreen, near, far, Rinten.Rendering.Stage.AfterOpaque );
 
-		if ( !overlayOnly && CoreSceneRenderer.HasSky( frame ) )
+		if ( skyShown )
 		{
 			CoreRenderDevice.ZoneBegin( "sky" );
 			DrawSky();

@@ -19,8 +19,7 @@ internal sealed class SceneDecorations
 		this.surfaceSize = surfaceSize;
 	}
 
-	//A sun and, in its sky colour, the flat ambient light a prefab with no sky has to be lit by from the sides the sun does not reach - see Scene.GatherAmbientLight.
-	/// <summary>We add a light in the prefab scene if there is no light. This can be toggled via the viewport settings.</summary>
+	/// <summary>Lights a prefab scene that has no light of its own with the preview light, unless the viewport settings turn it off.</summary>
 	public void DressPrefabScene( Scene scene )
 	{
 		if ( scene is not PrefabScene prefabScene )
@@ -32,37 +31,13 @@ internal sealed class SceneDecorations
 		DressPrefabLight( prefabScene );
 	}
 
-	//The work of DressPrefabScene, apart from its early outs. Its lambdas capture the prefab light, and a method that declares
-	//a capturing lambda builds the closure on entry - so every viewport paid for it every frame, prefab scene or not.
+	//Turned to the view's starting yaw - see SceneViewportPanel.State
 	void DressPrefabLight( PrefabScene prefabScene )
 	{
-		var directionalLights = prefabScene.GetAllComponents<DirectionalLight>().ToArray();
-
-		var prefabLight = directionalLights.FirstOrDefault( x => x.GameObject.Flags.HasFlag( GameObjectFlags.NotSaved ) && x.GameObject.Flags.HasFlag( GameObjectFlags.Hidden ) && x.GameObject.Tags.Has( "____prefabLight" ) );
-
-		var otherLightsExist = directionalLights.Where( x => x != prefabLight ).Any();
-
-		if ( prefabLight.IsValid() && (otherLightsExist || !state.EnablePrefabLighting) )
-		{
-			//Scene had or added a light, remove the prefab light
-			prefabLight.GameObject.Destroy();
-			return;
-		}
-
-		if ( state.EnablePrefabLighting && !prefabLight.IsValid() )
-		{
-			var go = prefabScene.CreateObject();
-			go.Flags = GameObjectFlags.NotSaved | GameObjectFlags.Hidden;
-			go.Tags.Add( "____prefabLight" );
-
-			//Turned the way the view starts out looking - yaw 45, see SceneViewportPanel.State - and a little to one side, as the asset previews
-			//are. A light travels along its forward; left at no turn at all it ran level along the ground and lit nothing but one side.
-			go.WorldRotation = new Angles( 50, 45 - 35, 0 );
-
-			prefabLight = go.Components.Create<DirectionalLight>();
-			prefabLight.LightColor = Color.White;
-			prefabLight.SkyColor = "#557685";
-		}
+		if ( state.EnablePrefabLighting )
+			PreviewLighting.Light( prefabScene, new Angles( 0, 45, 0 ) );
+		else
+			PreviewLighting.Remove( prefabScene );
 	}
 
 	//The tag the viewport's hover trace passes over, as the array WithoutTags takes - made once, not every frame.

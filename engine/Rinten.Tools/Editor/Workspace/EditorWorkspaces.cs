@@ -157,8 +157,7 @@ internal sealed class WorkspaceArea : Widget
 			return false;
 
 		//Only editors that declared themselves whole-workspace apps route here; everything else keeps opening the way it always has
-		var app = EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == found.TargetType );
+		var app = EditorAppAttribute.For( found.TargetType );
 
 		if ( app is not { Workspace: true } )
 			return false;

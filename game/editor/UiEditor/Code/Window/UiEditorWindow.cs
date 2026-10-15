@@ -88,11 +88,8 @@ public sealed partial class UiEditorWindow : DockWindow, IFileEditor
 
 		var full = Path.GetFullPath( razorPath );
 
-		var app = EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == typeof( UiEditorWindow ) );
-
 		//Makes the workspace and the window in it, or brings the one there is to the front; either way the window registers itself first in Editors.
-		app?.Open();
+		EditorAppAttribute.For( typeof( UiEditorWindow ) )?.Open();
 
 		var window = Editors.FirstOrDefault( x => x.IsValid() ) ?? new UiEditorWindow();
 
@@ -104,7 +101,7 @@ public sealed partial class UiEditorWindow : DockWindow, IFileEditor
 		return window;
 	}
 
-	//A razor file chosen on the Apps menu's modal - see EditorAppAttribute.OpenFile.
+	//A razor file chosen on File > Open - see EditorAppAttribute.OpenFile.
 	void IFileEditor.OpenFile( string path ) => Open( path );
 
 	//Open a file here, in place of whatever was open.

@@ -13,7 +13,7 @@ namespace Editor
 		/// <summary>Whether this takes over the editor's workspace instead of opening as its own window.</summary>
 		public bool Workspace { get; set; } = true;
 
-		/// <summary>Extension(s) this app needs a file of, e.g. "razor,cs"; asked for when opened from the Apps menu</summary>
+		/// <summary>Extensions File > Open offers in this app, e.g. "razor"; by default the asset types it edits</summary>
 		public string Opens { get; set; }
 
 		public EditorAppAttribute( string title, string icon, string description )
@@ -23,8 +23,12 @@ namespace Editor
 			Description = description;
 		}
 
-		//The extensions this app needs one of before it has anything to show, or none.
-		string[] NeededExtensions()
+		/// <summary>The app whose editor is this type, or null.</summary>
+		public static EditorAppAttribute For( Type type ) =>
+			type is null ? null : EditorTypeLibrary.GetAttributes<EditorAppAttribute>().FirstOrDefault( x => x.TargetType == type );
+
+		//The extensions File > Open offers while this app is in front, or none.
+		string[] OpenedExtensions()
 		{
 			var opens = Opens;
 
@@ -44,37 +48,7 @@ namespace Editor
 		//Code lives under Code; everything else an editor opens is an asset.
 		static bool IsCodeExtension( string extension ) => extension is "razor" or "cs" or "scss";
 
-		/// <summary>What picking the app from the Apps menu does: an app that needs a file and is not open yet asks for one first, on a modal with a button that opens the file box in the folder such files live in - Assets, or Code for a razor panel. Already open, it is only brought up.</summary>
-		public void OpenFromMenu()
-		{
-			var extensions = NeededExtensions();
-
-			if ( extensions.Length == 0 || IsOpen() )
-			{
-				Open();
-				return;
-			}
-
-			var kind = string.Join( " or ", extensions.Select( x => $".{x}" ) );
-
-			var modal = EditorModal.Choose( null, Title,
-				$"The {Title} works on a {kind} file. Choose one to open.", "Cancel",
-				new[] { new EditorModal.Choice( "Choose file…", () => PickAndOpen( extensions ) ) } );
-
-			if ( modal is not null )
-				modal.Icon = Icon;
-		}
-
-		//Whether this app already has a tab or a window up.
-		bool IsOpen()
-		{
-			if ( Workspace && WorkspaceArea.Current.IsValid() )
-				return WorkspaceArea.Current.FindEditor( TargetType ) is not null;
-
-			return false;
-		}
-
-		/// <summary>What an app asks for when it needs a file: the editor's asset picker answers it - see the tools addon's <c>"editor.app.pickfile"</c> handler - opened on the folder such files live in.</summary>
+		/// <summary>A request for a file an app opens, answered by the tools addon's asset picker.</summary>
 		public sealed class FileRequest
 		{
 			/// <summary>What the picker's window says.</summary>
@@ -93,20 +67,26 @@ namespace Editor
 			public bool Handled { get; set; }
 		}
 
-		/// <summary>Asks for the file this app works on and opens it here - what File > Open does while the app's tab is in front. False for an app that needs none.</summary>
+		/// <summary>File > Open's label while this app is in front; null for an app that opens nothing.</summary>
+		public string OpenLabel()
+		{
+			var names = OpenedExtensions().Select( x => AssetType.FromExtension( x )?.FriendlyName is { Length: > 0 } name ? name : $".{x}" ).ToArray();
+
+			return names.Length == 0 ? null : $"Open {string.Join( " / ", names )}..";
+		}
+
+		/// <summary>Picks a file this app opens and opens it; false for an app that opens nothing.</summary>
 		public bool AskForFile()
 		{
-			var extensions = NeededExtensions();
+			var extensions = OpenedExtensions();
 
 			if ( extensions.Length == 0 ) return false;
 
-			PickAndOpen( extensions );
+			PickFile( $"Open in {Title}", extensions, OpenFile );
 			return true;
 		}
 
-		void PickAndOpen( string[] extensions ) => PickFile( $"Open in {Title}", extensions, OpenFile );
-
-		/// <summary>The asset picker showing only files of these extensions, opened on the folder they live in - Assets, or Code for a razor panel - and <paramref name="picked"/> told the absolute path of what was chosen. The platform's own file box only where no picker answered: the tools addon not loaded.</summary>
+		/// <summary>Picks a file of these extensions from Assets, or Code for razor; the OS file box without the tools addon.</summary>
 		public static void PickFile( string title, string[] extensions, Action<string> picked )
 		{
 			var project = Project.Current;
@@ -134,7 +114,7 @@ namespace Editor
 			picked?.Invoke( fd.SelectedFile );
 		}
 
-		/// <summary>Opens a file in this app. An asset this app is the registered editor for goes the double-click way - a document tab of its own; any other asset is handed to the app (the animation graph opens a model's graph); a file that is not an asset goes to an <see cref="IFileEditor"/>.</summary>
+		/// <summary>Opens a file here: its own asset in a document tab, another asset handed over, other files by path.</summary>
 		public void OpenFile( string path )
 		{
 			var extension = System.IO.Path.GetExtension( path ).TrimStart( '.' ).ToLowerInvariant();
@@ -171,7 +151,7 @@ namespace Editor
 		/// <summary>Opens the app - its tab, or a window - and gives back the editor, where there is one.</summary>
 		public Widget Open()
 		{
-			//An editor laid out around the scene takes the scene area along, the way mapping does, rather than being a layout of its own with no scene in it.
+			//An editor laid out around the scene takes the scene area along, the way mapping does
 			if ( TargetType.IsAssignableTo( typeof( SceneWorkspace ) ) && Rinten.Internal.GlobalToolsNamespace.EditorWindow.IsValid() )
 			{
 				Rinten.Internal.GlobalToolsNamespace.EditorWindow.OpenSceneWorkspace( Title, Icon, () => EditorTypeLibrary.Create<SceneWorkspace>( TargetType ) );
@@ -187,8 +167,7 @@ namespace Editor
 			return window;
 		}
 
-		//Names are matched loosely because they are written for a menu: "Material Editor" is two words and a capital nobody wants to type at a console.
-		/// <summary>Opens one of the editor's apps by the name it goes by in the Tools menu - what picking it from that menu does, without the menu.</summary>
+		/// <summary>Opens an app by its menu title, ignoring case and spaces.</summary>
 		[ConCmd( "editor_app" )]
 		public static void OpenApp( string title )
 		{
@@ -217,7 +196,7 @@ namespace Editor
 		}
 	}
 
-	/// <summary>An editor app whose files are not assets - the UI editor's razor panels, which live under Code - opened by path. See <see cref="EditorAppAttribute.OpenFile"/>.</summary>
+	/// <summary>An app whose files are not assets, such as the UI editor's razor panels, opened by path.</summary>
 	public interface IFileEditor
 	{
 		void OpenFile( string path );

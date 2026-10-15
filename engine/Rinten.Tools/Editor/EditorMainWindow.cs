@@ -158,15 +158,8 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 
 		{
 			FileMenu = MenuBar.AddMenu( "File" );
-			//Open is the asset picker on what the tab in front works on - see OpenInCurrentWorkspace. No save entries: what
-			//is edited is written as it changes, and no New Scene or recent list - the asset browser makes and finds scenes.
-			FileMenu.AddOption( "Open", "file_open", OpenInCurrentWorkspace, "editor.open" );
-			FileMenu.AddSeparator();
-			//The build page lives in the tools addon, which this cannot name - so it is asked for by event. See ProjectPage.OpenPage.
-			FileMenu.AddOption( "Build Game..", "publish", () => EditorEvent.Run( "project.build.open" ) );
-			FileMenu.AddSeparator();
-			FileMenu.AddOption( "Open Launcher", "rocket_launch", StartupLoadProject.ShowLauncher );
-			FileMenu.AddOption( "Quit", "logout", Quit );
+			FileMenu.AboutToShow += BuildFileMenu;
+			BuildFileMenu();
 		}
 
 		{
@@ -540,6 +533,7 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 	public override void OnDestroyed()
 	{
 		//Unsubscribe from events
+		if ( FileMenu != null ) FileMenu.AboutToShow -= BuildFileMenu;
 		if ( ViewsMenu != null ) ViewsMenu.AboutToShow -= OnViewsMenuAboutToShow;
 		if ( EditMenu != null ) EditMenu.AboutToShow -= OnEditMenuAboutToShow;
 
@@ -615,15 +609,33 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 		Update();
 	}
 
+	//The app whose tab is in front, or null on General and the workspaces built around the scene.
+	EditorAppAttribute CurrentApp => EditorAppAttribute.For( Workspaces?.CurrentWorkspace?.EditorType );
+
+	//The editor in front first - its name and what it opens - then what the whole editor does. No save entries:
+	//what is edited is written as it changes, and the asset browser makes and finds scenes.
+	void BuildFileMenu()
+	{
+		FileMenu.Clear();
+
+		var app = CurrentApp;
+		var open = app?.OpenLabel();
+
+		FileMenu.AddHeading( open is null ? "Scene" : app.Title );
+		FileMenu.AddOption( open ?? "Open Scene..", "file_open", OpenInCurrentWorkspace, "editor.open" );
+		FileMenu.AddSeparator();
+		//The build page lives in the tools addon, which this cannot name - so it is asked for by event. See ProjectPage.OpenPage.
+		FileMenu.AddOption( "Build Game..", "publish", () => EditorEvent.Run( "project.build.open" ) );
+		FileMenu.AddSeparator();
+		FileMenu.AddOption( "Open Launcher", "rocket_launch", StartupLoadProject.ShowLauncher );
+		FileMenu.AddOption( "Quit", "logout", Quit );
+	}
+
 	//File > Open: the asset picker, showing only what the tab in front opens - models on the model editor's, a razor
 	//panel under Code on the UI editor's, and a scene or a prefab on General and the workspaces built around the scene.
-	void OpenInCurrentWorkspace()
+	internal void OpenInCurrentWorkspace()
 	{
-		var type = Workspaces?.CurrentWorkspace?.EditorType;
-
-		var app = type is null ? null : EditorTypeLibrary.GetAttributes<EditorAppAttribute>().FirstOrDefault( x => x.TargetType == type );
-
-		if ( app is not null && app.AskForFile() ) return;
+		if ( CurrentApp?.AskForFile() == true ) return;
 
 		EditorAppAttribute.PickFile( "Open Scene", new[] { "scene", "prefab" }, path =>
 		{

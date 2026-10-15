@@ -114,9 +114,7 @@ public partial class Window : DockWindow, IAssetEditor, IPreviewHost, ILinkedEdi
 	{
 		if ( model is null ) return;
 
-		EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == typeof( global::Editor.MdlEditor.Window ) )?
-			.Open();
+		EditorAppAttribute.For( typeof( global::Editor.MdlEditor.Window ) )?.Open();
 
 		//The one on screen now, which the line above made so. Following may have put it on this model already, and then this is nothing.
 		if ( EditorLink.Of( LinkedKind.Graph ).OfType<global::Editor.MdlEditor.Window>().FirstOrDefault() is { } editor )

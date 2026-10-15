@@ -38,30 +38,9 @@ public static class EditorScene
 		newSession.MakeActive();
 	}
 
+	/// <summary>File > Open on the tab in front: a scene, or what that editor works on.</summary>
 	[Shortcut( "editor.open", "CTRL+O" )]
-	public static void Open()
-	{
-		var fd = new FileDialog( null )
-		{
-			Title = "Open",
-			Directory = Project.Current.GetAssetsPath()
-		};
-		fd.SetNameFilter( "(*.scene; *.prefab)" );
-
-		if ( !fd.Execute() ) return;
-
-		var asset = AssetSystem.FindByPath( fd.SelectedFile );
-
-		var session = SceneEditorSession.CreateFromPath( asset.RelativePath );
-
-		if ( session is null )
-		{
-			Log.Error( $"Failed to open {fd.SelectedFile}" );
-			return;
-		}
-
-		session.MakeActive();
-	}
+	public static void Open() => EditorMainWindow.Current?.OpenInCurrentWorkspace();
 
 	/// <summary>Opens the given scene file for editing, if it's not already open.</summary>
 	public static void OpenScene( SceneFile resource )
@@ -325,7 +304,7 @@ public static class EditorScene
 
 		using ( scene.Push() )
 		{
-			//Copy, because this collection can be modified during prefab updating ( e.g. refreshing/deserializing prefab spawns GOs or components)
+			//Copied: updating a prefab can spawn objects or components into this collection
 			var prefabInstancesRequiringUpdate = scene.GetAllObjects( false )
 				.Where( x => x.IsPrefabInstanceRoot && x.PrefabInstanceSource == changedPath )
 				.Select( x => x.OutermostPrefabInstanceRoot ) //We always need to update the outermostprefab instance

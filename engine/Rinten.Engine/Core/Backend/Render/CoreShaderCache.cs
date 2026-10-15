@@ -951,8 +951,11 @@ internal static class EngineShaders
 	internal const string Light2DSprites = "shaders/engine/light2d_sprites.slang";
 	internal const string Light2DCascades = "shaders/engine/light2d_cascades.slang";
 
-	//The 2D light's jump flood, which stores whole floats where the cascades store half ones - see light2d_cascades.slang.
+	//The 2D light's jump flood, which stores two half floats where the cascades store four - see light2d_cascades.slang.
 	internal const string Light2DSeeds = "#define LIGHT2D_SEEDS 1\n";
+
+	//The 2D lights' shadow maps, which store one whole float - see light2d_cascades.slang.
+	internal const string Light2DShadows = "#define LIGHT2D_SHADOWS 1\n";
 
 	//The tile maps' variant of the 2D light's sprite pass, which steps their animation - see CoreLight2D.IsTiles.
 	internal const string Light2DTiles = "#define LIGHT2D_TILE 1\n";
@@ -1053,11 +1056,14 @@ internal static class EngineShaders
 		( Light2DSprites, "", Draws, false ),
 		( Light2DSprites, Light2DTiles, Draws, false ),
 		( Light2DCascades, Light2DSeeds, Light2DFloodRuns, false ),
+		( Light2DCascades, Light2DShadows, Light2DShadowRuns, false ),
 		( Light2DCascades, "", Light2DCascadeRuns, false ),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DFloodRuns =
-		[("SeedCs", CoreShaderCompiler.Stage.Compute), ("JumpCs", CoreShaderCompiler.Stage.Compute)];
+		[("JumpCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DShadowRuns = [("ShadowsCs", CoreShaderCompiler.Stage.Compute)];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] Light2DCascadeRuns =
 		[("CascadeCs", CoreShaderCompiler.Stage.Compute), ("IntegrateCs", CoreShaderCompiler.Stage.Compute)];

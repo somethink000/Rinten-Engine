@@ -714,14 +714,15 @@ float4 MainPs( V2F i ) : SV_Target
 		colour *= SampleUi( i.texture, float2( u, 0.5 ) );
 	}
 
-	//Border ring composited over the fill, using each side's own width; transparent borders add nothing
-	if ( i.misc.x > 0.0 )
+	//Border ring composited over the fill, using each side's own width; transparent borders add nothing.
+	//Left, top, right, bottom. Nothing said means the same all round, which is what the one width in misc always meant.
+	float4 w = i.filter;
+
+	if ( all( w <= 0.0 ) ) w = i.misc.x;
+
+	//The ring lies within its widest side of the edge; deeper in, the inner shape covers the pixel whole
+	if ( i.misc.x > 0.0 && distance > -( max( max( w.x, w.y ), max( w.z, w.w ) ) + 1.0 ) )
 	{
-		//Left, top, right, bottom. Nothing said means the same all round, which is what the one width in misc always meant.
-		float4 w = i.filter;
-
-		if ( all( w <= 0.0 ) ) w = i.misc.x;
-
 		float2 innerCentre = float2( w.x - w.z, w.y - w.w ) * 0.5;
 		float2 innerHalf = max( halfSize - float2( w.x + w.z, w.y + w.w ) * 0.5, 0.0 );
 

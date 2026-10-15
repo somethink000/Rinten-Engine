@@ -37,7 +37,6 @@ static const uint RecordsAt = CascadesAt + ( MostCascades * 2u );
 
 uint2 Address() { return asuint( g_params[HeaderAt].xy ); }
 uint ProbeCount() { return asuint( g_params[HeaderAt].z ); }
-uint Rays() { return asuint( g_params[HeaderAt].w ); }
 uint LampCount() { return asuint( g_params[HeaderAt + 1u].x ); }
 uint CascadeCount() { return asuint( g_params[HeaderAt + 1u].y ); }
 float3 SunTowards() { return g_params[HeaderAt + 3u].xyz; }
@@ -174,13 +173,22 @@ uint2 Halves( float4 v )
 
 float Luma( float3 c ) { return dot( c, float3( 0.2126, 0.7152, 0.0722 ) ); }
 
+//Rays a probe casts an update: a group a probe, a thread a ray - CoreProbeGrid.RaysPerProbe says the same
+static const uint GroupRays = 64u;
+
+//Each ray's share of the sums, then halved down to the group's in place: light and insides, the light's lean in each
+//colour, how far it went along the four ways of x and y and how much it leant along them, then the same along z
+static const uint Sums = 7u;
+groupshared float4 s_sums[Sums][GroupRays];
+
 [numthreads(64, 1, 1)]
-void main( uint3 id : SV_DispatchThreadID )
+void main( uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID )
 {
-	if ( id.x >= g_count ) return;
+	if ( group.x >= g_count ) return;
 
 	uint count = ProbeCount();
-	uint slot = ( g_first + id.x ) % count;
+	uint slot = ( g_first + group.x ) % count;
+	uint i = lane.x;
 
 	//Which cascade the slot is in, and the cell of the cascade's lattice it holds now
 	uint c = 0u;
@@ -201,52 +209,59 @@ void main( uint3 id : SV_DispatchThreadID )
 	float4 held = g_state[state + 5u];
 	bool fresh = any( int3( held.xyz ) != cell ) || held.w < 0.5;
 
-	RaytracingAccelerationStructure scene = Scene();
+	//A probe most of whose rays found the inside of something lights nothing a surface reads, so it is looked at again
+	//only one turn in eight, as RTXGI turns such probes off - the group leaves together, before any barrier
+	if ( !fresh && g_state[state + 4u].z > 0.5 && ( ( g_turn + slot ) & 7u ) != 0u ) return;
+
+	//The same turn for every ray of the probe, so they spread over the sphere together
 	uint seed = ( slot * 9781u ) ^ ( g_turn * 6271u );
 	float turn = Random( seed ) * 2.0 * Pi;
-
-	uint rays = Rays();
 	float far = place.w * float( max( counts.x, max( counts.y, counts.z ) ) );
 
-	float3 mean = 0.0;
-	float3 leanR = 0.0, leanG = 0.0, leanB = 0.0;
-	float4 wallsXY = 0.0, weightXY = 0.0;
-	float2 wallsZ = 0.0, weightZ = 0.0;
-	uint insides = 0u;
+	float3 way = Spread( i, GroupRays, turn );
+	float reached;
+	bool inside;
+	float3 light = Arriving( Scene(), at, way, far, reached, inside );
 
-	for ( uint i = 0u; i < rays; ++i )
+	//How far it went, towards the axes it leans along
+	float3 w = way * way;
+	float4 xy = float4( way.x > 0.0 ? w.x : 0.0, way.x < 0.0 ? w.x : 0.0, way.y > 0.0 ? w.y : 0.0, way.y < 0.0 ? w.y : 0.0 );
+	float2 z = float2( way.z > 0.0 ? w.z : 0.0, way.z < 0.0 ? w.z : 0.0 );
+
+	s_sums[0][i] = float4( light, inside ? 1.0 : 0.0 );
+	s_sums[1][i] = float4( way * light.r, 0.0 );
+	s_sums[2][i] = float4( way * light.g, 0.0 );
+	s_sums[3][i] = float4( way * light.b, 0.0 );
+	s_sums[4][i] = xy * reached;
+	s_sums[5][i] = xy;
+	s_sums[6][i] = float4( z * reached, z );
+
+	GroupMemoryBarrierWithGroupSync();
+
+	[unroll]
+	for ( uint apart = GroupRays / 2u; apart > 0u; apart /= 2u )
 	{
-		float3 way = Spread( i, rays, turn );
-		float reached;
-		bool inside;
-		float3 light = Arriving( scene, at, way, far, reached, inside );
+		if ( i < apart )
+		{
+			[unroll]
+			for ( uint k = 0u; k < Sums; ++k ) s_sums[k][i] += s_sums[k][i + apart];
+		}
 
-		if ( inside ) insides++;
-
-		mean += light;
-		leanR += way * light.r;
-		leanG += way * light.g;
-		leanB += way * light.b;
-
-		//How far it went, towards the axes it leans along
-		float3 w = way * way;
-		float4 xy = float4( way.x > 0.0 ? w.x : 0.0, way.x < 0.0 ? w.x : 0.0, way.y > 0.0 ? w.y : 0.0, way.y < 0.0 ? w.y : 0.0 );
-		float2 z = float2( way.z > 0.0 ? w.z : 0.0, way.z < 0.0 ? w.z : 0.0 );
-
-		wallsXY += xy * reached;
-		weightXY += xy;
-		wallsZ += z * reached;
-		weightZ += z;
+		GroupMemoryBarrierWithGroupSync();
 	}
 
-	float share = 1.0 / float( rays );
+	if ( i != 0u ) return;
+
+	float share = 1.0 / float( GroupRays );
+
+	float3 mean = s_sums[0][0].rgb;
 
 	//As BakeVolume's: the mean, and twice the mean along each way
-	float4 r = float4( mean.r * share, leanR * ( 2.0 * share ) );
-	float4 g = float4( mean.g * share, leanG * ( 2.0 * share ) );
-	float4 b = float4( mean.b * share, leanB * ( 2.0 * share ) );
-	float4 walls = wallsXY / max( weightXY, 1e-4 );
-	float4 wallsMore = float4( wallsZ / max( weightZ, 1e-4 ), float( insides ) * share, 0.0 );
+	float4 r = float4( mean.r * share, s_sums[1][0].xyz * ( 2.0 * share ) );
+	float4 g = float4( mean.g * share, s_sums[2][0].xyz * ( 2.0 * share ) );
+	float4 b = float4( mean.b * share, s_sums[3][0].xyz * ( 2.0 * share ) );
+	float4 walls = s_sums[4][0] / max( s_sums[5][0], 1e-4 );
+	float4 wallsMore = float4( s_sums[6][0].xy / max( s_sums[6][0].zw, 1e-4 ), s_sums[0][0].w * share, 0.0 );
 
 	float keep = fresh ? 0.0 : Keep();
 

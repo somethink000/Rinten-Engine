@@ -197,7 +197,7 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 		if ( !owed ) owed = Due();
 		if ( !owed ) return;
 
-		//Each capture is tens of milliseconds, and probes take turns - see CoreEnvmap.MayCapture
+		//A capture is six views of the scene, a face a tick, and probes take turns - see CoreEnvmap.MayCapture
 		if ( RealTime.Now - capturedAt < LeastBetweenCaptures || !CoreEnvmap.MayCapture ) return;
 
 		Capture();

@@ -245,6 +245,9 @@ internal static unsafe partial class VkSwapchain
 		/// <summary>True between ScreenInterrupt and ScreenResume, so only world draws use the world rectangle</summary>
 		public bool WorldOnScreen;
 
+		/// <summary>Whether the world being drawn has surfaces to shade, which an adaptive rate map is worth reading the picture for</summary>
+		public bool WorldShades = true;
+
 		/// <summary>Depth pre-pass writes the screen depth at the world offset, skipping a copy; see DepthGoesToScreen</summary>
 		public bool DepthOnScreen;
 
@@ -1635,6 +1638,7 @@ internal static unsafe partial class VkSwapchain
 		one.WorldY = 0;
 		one.LiftPending = false;
 		one.WorldOnScreen = false;
+		one.WorldShades = true;
 		one.DepthOnScreen = false;
 		one.WantsVsync = true;
 		one.DisplayStalled = false;

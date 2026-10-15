@@ -470,6 +470,11 @@ internal static unsafe class CoreRender
 	internal static int ScreenResume()
 		=> Portable ? 0 : VkFrame.ScreenResume();
 
+	internal static void WorldShades( int surfaces )
+	{
+		if ( !Portable ) VkFrame.WorldShades( surfaces != 0 );
+	}
+
 	//The near end of the depth range the next draws are squeezed into - see VkFrame.SetDepthCeiling.
 	internal static void SetDepthCeiling( float ceiling )
 	{

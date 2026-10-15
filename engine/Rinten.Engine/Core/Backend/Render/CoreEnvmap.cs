@@ -95,8 +95,8 @@ internal static class CoreEnvmap
 		=> scene.IsValid() && probe.IsValid() && probe.GameObject.IsValid() && CoreNative.Available && CoreRenderDevice.Initialize()
 			&& !CoreRenderDevice.PortableFrame && CoreSceneDrawer.EnsureResources();
 
-	//A runtime probe's capture: six frames of its own, so never while one is open - reading a view waits for the device.
-	//A face a tick, folded on a worker; or all of it now, for whoever waits on it
+	//A runtime probe's capture: six frames of its own, so never while one is open. A face a tick, each read back once the
+	//card is done with it rather than waited for, folded on a worker; or all of it now, for whoever waits on it
 	internal static bool Capture( Scene scene, EnvmapProbe probe, bool wait = false )
 	{
 		if ( !CanDraw( scene, probe ) ) return false;
@@ -145,7 +145,7 @@ internal static class CoreEnvmap
 		using ( Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Envmap: Six Draws" ) )
 		{
 			while ( job is not null && job.Next < 6 )
-				if ( !DrawFace( scene, job ) ) { job = null; return null; }
+				if ( !DrawFace( scene, job, wait: true ) ) { job = null; return null; }
 		}
 
 		var done = job;
@@ -154,7 +154,8 @@ internal static class CoreEnvmap
 		return done;
 	}
 
-	//A capture under way: the probe, faces drawn so far with their matrices, and where it stood
+	//A capture under way: the probe, faces read so far with their matrices, where it stood, and whether face Next is drawn
+	//and on its way back
 	private sealed class Job
 	{
 		public EnvmapProbe Probe;
@@ -163,6 +164,7 @@ internal static class CoreEnvmap
 		public Scratch Work;
 		public int Next;
 		public Vector3 Where;
+		public bool Drawn;
 	}
 
 	//The capture under way, if one is - there is only ever one.
@@ -206,18 +208,39 @@ internal static class CoreEnvmap
 	//Whether this probe's capture is under way - its next face owed on the next tick.
 	internal static bool Capturing( EnvmapProbe probe ) => job is not null && probe is not null && job.Probe == probe;
 
-	//Draws one capture face per tick; after the sixth, folds on a worker (see Settle)
+	//A capture face a tick: the one drawn before read once the card has finished it - until then nothing more is drawn,
+	//as the view has one picture to read back - then the next drawn. After the sixth, folds on a worker (see Settle)
 	internal static bool Step( Scene scene, EnvmapProbe probe )
 	{
 		if ( job is null || job.Probe != probe ) return false;
 
-		if ( !scene.IsValid() || !probe.IsValid() || !DrawFace( scene, job ) )
+		if ( !scene.IsValid() || !probe.IsValid() )
 		{
 			job = null;
 			return false;
 		}
 
-		if ( job.Next < 6 ) return true;
+		if ( job.Drawn )
+		{
+			if ( !CoreRenderDevice.ViewFrameReady( view ) ) return true;
+
+			if ( !CoreRenderDevice.ReadView( view, job.Work.Faces[job.Next] ) )
+			{
+				job = null;
+				return false;
+			}
+
+			job.Drawn = false;
+			job.Next++;
+		}
+
+		if ( job.Next < 6 )
+		{
+			if ( DrawFace( scene, job, wait: false ) ) return true;
+
+			job = null;
+			return false;
+		}
 
 		var done = job;
 		job = null;
@@ -229,8 +252,8 @@ internal static class CoreEnvmap
 		return true;
 	}
 
-	//The next face of a capture, drawn and read back.
-	private static bool DrawFace( Scene scene, Job at )
+	//The next face of a capture, drawn and read back now, or drawn and left for Step to read
+	private static bool DrawFace( Scene scene, Job at, bool wait )
 	{
 		var probe = at.Probe;
 		var face = at.Next;
@@ -254,12 +277,19 @@ internal static class CoreEnvmap
 
 			Drawer.Draw( scene, camera, view, at.Size, at.Size );
 
+			capturedAt = RealTime.Now;
+
+			if ( !wait )
+			{
+				at.Drawn = CoreRenderDevice.EndViewFrameAsync( view );
+				return at.Drawn;
+			}
+
 			if ( !CoreRenderDevice.EndViewFrame( view ) ) return false;
 
 			if ( !CoreRenderDevice.ReadView( view, at.Work.Faces[face] ) ) return false;
 
 			at.Next++;
-			capturedAt = RealTime.Now;
 
 			return true;
 		}

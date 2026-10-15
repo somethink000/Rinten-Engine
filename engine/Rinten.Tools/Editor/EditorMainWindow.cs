@@ -49,7 +49,7 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 		if ( !closeQuestion.IsValid() )
 		{
 			closeQuestion = EditorModal.Confirm( Shell?.Root, "Quit the editor?",
-				"Everything that is open is written out on the way.", QuitAnswered,
+				"Everything not saved will be lost.", QuitAnswered,
 				confirm: "Quit", cancel: "Cancel", destructive: true );
 		}
 

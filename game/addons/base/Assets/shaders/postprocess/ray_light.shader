@@ -180,7 +180,7 @@ float3 AroundAt( float3 at, float3 n )
 	if ( HasBakedVolume() )
 	{
 		float3 spot = BakedVolumeSpot( at + ( n * ( 0.35 / g_frame[0].volumeOrigin.w ) ), n );
-		float3 around = BakedVolume( spot, n ) + BakedGlows( float2( 0.0, 0.0 ), false, spot );
+		float3 around = BakedVolume( spot, n ) + BakedGlowVolumes( spot );
 
 		if ( HasBakedBounce() ) around += BakedBounce( spot, n );
 		if ( HasBakedSky() ) around += SkyLit( n ) * BakedSkyVolume( spot, n );

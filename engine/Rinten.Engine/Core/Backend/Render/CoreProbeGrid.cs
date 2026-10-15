@@ -15,12 +15,13 @@ internal sealed class CoreProbeGrid
 	private const float FirstStep = 1.0f;
 	private const int Cascades = 2;
 
-	//Rays a probe casts an update, and the most probes traced a frame - all of them about every seven frames
+	//Rays a probe casts an update - a group's threads in ray_grid.slang - and the most probes traced a frame, all of
+	//them about every thirteen frames: a GI budget of a few milliseconds on an integrated card
 	private const int RaysPerProbe = 64;
-	private const int ProbesPerFrame = 2048;
+	private const int ProbesPerFrame = 1024;
 
 	//How much of a probe's light an update keeps, the rest new
-	private const float Kept = 0.9f;
+	private const float Kept = 0.85f;
 
 	//Milliseconds between looks at the sky
 	private const long SkyEvery = 250;
@@ -87,13 +88,13 @@ internal sealed class CoreProbeGrid
 		Span<uint> push = stackalloc uint[4] { (uint)first, ProbesPerFrame, (uint)turn++, 0 };
 		Span<ulong> buffers = stackalloc ulong[3] { parameters[slot], state, output };
 
-		if ( !CoreRenderDevice.Dispatch( pipeline, buffers, ( ProbesPerFrame + 63 ) / 64, 1, 1, MemoryMarshal.AsBytes( push ) ) ) return;
+		//A group a probe, a thread a ray: a probe's rays traced side by side rather than one after another
+		if ( !CoreRenderDevice.Dispatch( pipeline, buffers, ProbesPerFrame, 1, 1, MemoryMarshal.AsBytes( push ) ) ) return;
 
 		first = ( first + ProbesPerFrame ) % Probes;
 
 		for ( var i = 0; i < pictures.Length; ++i )
 			VkFrame.RaysCopy( output, (long)Probes * 8 * i, pictures[i], Across * Up, Across * Cascades );
-
 
 		Lay( frame, eye );
 	}

@@ -91,21 +91,29 @@ float Acos( float x )
 	return x >= 0.0 ? r : Pi - r;
 }
 
+//The surface's own plane, from how the reconstructed position moves across one pixel, facing the eye; taken before
+//any pixel of the quad leaves, as a derivative must be, and the eye's way where the plane is no plane - a sky neighbour's
+float3 PlaneOf( float3 place, float3 view )
+{
+	float3 normal = cross( ddx( place ), ddy( place ) );
+	float size = dot( normal, normal );
+
+	normal = size > 1e-20 && size < 1e20 ? normal * rsqrt( size ) : view;
+	return dot( normal, view ) < 0.0 ? -normal : normal;
+}
+
 [shader("fragment")]
 float4 MainPs( PostV2F i ) : SV_Target0
 {
 	float raw = SceneDepthRaw( i.uv );
 
-	//Nothing was drawn here: the sky is not occluded by anything.
-	if ( raw >= 1.0 ) return float4( 1.0, 0.5, 0.5, 0.5 );
-
 	Rays rays = RaysOf();
 	float3 place = Place( rays, i.uv, raw );
-
-	//The surface's own plane, from how the reconstructed position moves across one pixel; facing the eye.
 	float3 view = normalize( rays.eye - place );
-	float3 normal = normalize( cross( ddx( place ), ddy( place ) ) );
-	if ( dot( normal, view ) < 0.0 ) normal = -normal;
+	float3 normal = PlaneOf( place, view );
+
+	//Nothing was drawn here: the sky is not occluded by anything.
+	if ( raw >= 1.0 ) return float4( 1.0, 0.5, 0.5, 0.5 );
 
 	//Texels a metre spans at this depth: the ray's width per screen at a metre, times the distance ahead
 	float2 size = g_vFrameSize.xy;
@@ -233,14 +241,13 @@ float SideSeen( float h, float n, float sinN, float cosN )
 float4 IndirectPs( PostV2F i ) : SV_Target0
 {
 	float raw = SceneDepthRaw( i.uv );
-	if ( raw >= 1.0 || g_flLast < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
 
 	Rays rays = RaysOf();
 	float3 place = Place( rays, i.uv, raw );
-
 	float3 view = normalize( rays.eye - place );
-	float3 normal = normalize( cross( ddx( place ), ddy( place ) ) );
-	if ( dot( normal, view ) < 0.0 ) normal = -normal;
+	float3 normal = PlaneOf( place, view );
+
+	if ( raw >= 1.0 || g_flLast < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
 
 	float2 size = g_vFrameSize.xy;
 	float ahead = dot( place - rays.eye, normalize( rays.corner + ( rays.across + rays.down ) * 0.5 ) );
@@ -370,9 +377,11 @@ float4 KeepPs( PostV2F i ) : SV_Target0
 	return FramePicture( g_flSource, i.uv );
 }
 
-//The lit world, as it is after the opaque, into the small picture next frame's IndirectPs reads
+//The lit world, as it is after the opaque, into the small picture next frame's IndirectPs reads; anything not a
+//finite light is left out, or the loop through this picture would carry it on frame after frame
 [shader("fragment")]
 float4 CopyPs( PostV2F i ) : SV_Target0
 {
-	return float4( SceneColour( i.uv ), 1.0 );
+	float3 lit = SceneColour( i.uv );
+	return float4( all( abs( lit ) < 65504.0 ) ? lit : 0.0, 1.0 );
 }

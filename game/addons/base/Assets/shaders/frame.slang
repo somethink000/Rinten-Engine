@@ -912,17 +912,19 @@ static const float ShadowSoftestTexels = 16.0;
 //The near edge ShadowEdge checks first, and past which ShadowFilter turns from its grid to its spiral
 static const float ShadowNearTexels = 2.0;
 
-//A pixel's turn of the soft filter's spiral, from where it is on the screen (interleaved gradient noise, Jimenez 2014);
-//set by the shading before it reads shadows, nought where nothing set it
-static float g_shadowTurn = 0.0;
+//A pixel's turn of the soft filter's spiral as its cosine and sine, from where it is on the screen (interleaved gradient
+//noise, Jimenez 2014); set by the shading before it reads shadows, unturned where nothing set it
+static float2 g_shadowTurn = float2( 1.0, 0.0 );
 
 void ShadowTurnAt( float2 screen )
 {
-	g_shadowTurn = 6.2831853 * frac( 52.9829189 * frac( dot( screen, float2( 0.06711056, 0.00583715 ) ) ) );
+	float turn = 6.2831853 * frac( 52.9829189 * frac( dot( screen, float2( 0.06711056, 0.00583715 ) ) ) );
+	g_shadowTurn = float2( cos( turn ), sin( turn ) );
 }
 
-//Nine taps, near and far, detect a shadow edge; when they agree, that's the final lit value and filtering is skipped
-bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, out float lit )
+//Five taps near and four out as far as the filter can spread (widest, in texels) detect a shadow edge; when they
+//agree, that's the final lit value and filtering is skipped. A filter no wider than the near ring needs no far one
+bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, float widest, out float lit )
 {
 #ifdef PORTABLE
 	lit = 1.0;
@@ -933,10 +935,14 @@ bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, 
 	float least = 1.0;
 	float most = 0.0;
 
+	uint rings = widest > ShadowNearTexels ? 2u : 1u;
+
 	[unroll]
 	for ( uint ring = 0u; ring < 2u; ++ring )
 	{
-		float reach = ring == 0u ? ShadowNearTexels : ShadowSoftestTexels * 0.75;
+		if ( ring >= rings ) break;
+
+		float reach = ring == 0u ? ShadowNearTexels : min( widest, ShadowSoftestTexels ) * 0.75;
 
 		[unroll]
 		for ( uint k = 0u; k < 4u; ++k )
@@ -1004,10 +1010,13 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 		[unroll]
 		for ( uint k = 0u; k < Taps; k++ )
 		{
-			//Evenly over the disc by area, each tap a golden angle round from the last
-			float r = soft * sqrt( ( float( k ) + 0.5 ) / float( Taps ) );
-			float a = ( float( k ) * 2.39996323 ) + g_shadowTurn;
-			float2 o = float2( cos( a ), sin( a ) ) * r;
+			//Evenly over the disc by area, each tap a golden angle round from the last: constants once unrolled,
+			//turned by the pixel's turn
+			float r = sqrt( ( float( k ) + 0.5 ) / float( Taps ) );
+			float a = float( k ) * 2.39996323;
+			float2 spot = float2( cos( a ), sin( a ) ) * r;
+			float2 turn = g_shadowTurn;
+			float2 o = float2( ( spot.x * turn.x ) - ( spot.y * turn.y ), ( spot.x * turn.y ) + ( spot.y * turn.x ) ) * soft;
 
 			spiral += g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
 		}
@@ -1113,7 +1122,7 @@ float SunSoft( uint map, uint depthMap, float3 tap, float compare, float texel, 
 	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, tap, compare, slope );
 
 	float lit;
-	if ( !ShadowEdge( map, tap, compare, texel, slope, lit ) ) return lit;
+	if ( !ShadowEdge( map, tap, compare, texel, slope, quality < 1.5 ? 1.0 : ShadowSoftestTexels, lit ) ) return lit;
 
 	//A fixed edge a texel each side, without the blocker search
 	if ( quality < 1.5 ) return ShadowFilter( map, tap, compare, texel, slope, 1.0 );
@@ -1341,7 +1350,7 @@ float LampLit( uint map, uint depthMap, float3 at, float compare, float texel, f
 	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, at, compare, slope );
 
 	float lit;
-	if ( !ShadowEdge( map, at, compare, texel, slope, lit ) ) return lit;
+	if ( !ShadowEdge( map, at, compare, texel, slope, quality < 1.5 ? 1.0 : ShadowSoftestTexels, lit ) ) return lit;
 
 	if ( quality < 1.5 ) return ShadowFilter( map, at, compare, texel, slope, 1.0 );
 
@@ -1610,6 +1619,16 @@ static const int kAreaOn = 0;
 [vk::constant_id( 19 )] const int kAreaOn = 1;
 #else
 static const int kAreaOn = 1;
+#endif
+
+//Whether the frame can have the probe grid of a scene with no bake (rays on); nought folds GridLight and its registers
+//out of every surface - a third of them, where it was compiled in and never read
+#ifdef PORTABLE
+static const int kProbeGridOn = 0;
+#elif defined( SPECIALIZED )
+[vk::constant_id( 20 )] const int kProbeGridOn = 1;
+#else
+static const int kProbeGridOn = 1;
 #endif
 
 //Whether there is any night (NightFactor above nought); nought folds the moon and stars out of the sky
@@ -1978,26 +1997,41 @@ bool HasBakedVolume()
 
 #ifndef PORTABLE
 
-//A sheet picture read cubic, B-spline over its sixteen nearest texels, each kept only where it lies on the same face as
-//the pixel's own texel by the light sheet's alpha (BakeSheet.FaceOf) - smooth within a face, nothing from the one beside
-float4 SheetFaces( uint picture, uint faces, float2 uv )
+//The sixteen sheet texels about a spot, each one's B-spline weight kept only where it lies on the same face as the
+//spot's own texel by the light sheet's alpha (BakeSheet.FaceOf) - smooth within a face, nothing from the one beside -
+//and the light sheet read with them. Worked out once a pixel: every other sheet there is read with the same weights
+struct SheetSpot
 {
+	float2 uv;
+	float2 cell;
 	float2 size;
-	g_textures[faces].GetDimensions( size.x, size.y );
 
-	float2 at = ( uv * size ) - 0.5;
-	float2 cell = floor( at );
-	float2 f = at - cell;
+	//The weights a row of four at a time, the row nearest nought first
+	float4 weights[4];
+	float total;
+
+	float4 light;
+};
+
+SheetSpot SheetSpotAt( uint sheet, float2 uv )
+{
+	SheetSpot spot;
+	spot.uv = uv;
+	g_textures[sheet].GetDimensions( spot.size.x, spot.size.y );
+
+	float2 at = ( uv * spot.size ) - 0.5;
+	spot.cell = floor( at );
+	float2 f = at - spot.cell;
 
 	float2 f2 = f * f;
 	float2 f3 = f2 * f;
 	float2 w[4] = { ( -f3 + ( 3.0 * f2 ) - ( 3.0 * f ) + 1.0 ) / 6.0, ( ( 3.0 * f3 ) - ( 6.0 * f2 ) + 4.0 ) / 6.0,
 		( ( -3.0 * f3 ) + ( 3.0 * f2 ) + ( 3.0 * f ) + 1.0 ) / 6.0, f3 / 6.0 };
 
-	float own = g_textures[faces].SampleLevel( ( floor( uv * size ) + 0.5 ) / size, 0.0 ).a;
+	float own = g_textures[sheet].SampleLevel( ( floor( uv * spot.size ) + 0.5 ) / spot.size, 0.0 ).a;
 
 	float4 sum = 0.0;
-	float total = 0.0;
+	spot.total = 0.0;
 
 	[unroll]
 	for ( int j = 0; j < 4; ++j )
@@ -2005,20 +2039,39 @@ float4 SheetFaces( uint picture, uint faces, float2 uv )
 		[unroll]
 		for ( int i = 0; i < 4; ++i )
 		{
-			float2 texel = ( cell + float2( i - 1, j - 1 ) + 0.5 ) / size;
-			float same = abs( g_textures[faces].SampleLevel( texel, 0.0 ).a - own ) < ( 0.5 / 64.0 ) ? 1.0 : 0.0;
-			float weight = w[i].x * w[j].y * same;
+			float4 texel = g_textures[sheet].SampleLevel( ( spot.cell + float2( i - 1, j - 1 ) + 0.5 ) / spot.size, 0.0 );
+			float weight = abs( texel.a - own ) < ( 0.5 / 64.0 ) ? w[i].x * w[j].y : 0.0;
 
-			sum += ( picture == faces ? g_textures[faces].SampleLevel( texel, 0.0 ) : g_textures[picture].SampleLevel( texel, 0.0 ) ) * weight;
-			total += weight;
+			spot.weights[j][i] = weight;
+			sum += texel * weight;
+			spot.total += weight;
 		}
 	}
 
-	return total > 1e-5 ? sum / total : g_textures[picture].SampleLevel( uv, 0.0 );
+	spot.light = spot.total > 1e-5 ? sum / spot.total : g_textures[sheet].SampleLevel( uv, 0.0 );
+	return spot;
+}
+
+//Another sheet of the same size at a spot, read with its weights
+float4 SheetRead( SheetSpot spot, uint picture )
+{
+	if ( spot.total <= 1e-5 ) return g_textures[picture].SampleLevel( spot.uv, 0.0 );
+
+	float4 sum = 0.0;
+
+	[unroll]
+	for ( int j = 0; j < 4; ++j )
+	{
+		[unroll]
+		for ( int i = 0; i < 4; ++i )
+			sum += g_textures[picture].SampleLevel( ( spot.cell + float2( i - 1, j - 1 ) + 0.5 ) / spot.size, 0.0 ) * spot.weights[j][i];
+	}
+
+	return sum / spot.total;
 }
 
 //A sheet picture read bilinear over the four lightmap texels round a spot, each kept only where it lies on the pixel's
-//own face (as SheetFaces, at a quarter of its taps) - for what is smooth already, as the live bounce's sheet
+//own face (as SheetSpotAt, at a quarter of its taps) - for what is smooth already, as the live bounce's sheet
 float3 SheetFacesLinear( uint picture, uint faces, float2 uv )
 {
 	float2 size;
@@ -2050,12 +2103,10 @@ float3 SheetFacesLinear( uint picture, uint faces, float2 uv )
 
 //Baked lightmap diffuse at a normal: the light as the face took it, leaning by colour into where the normal turns
 //from the face by the first band the bake kept (L1 lightmaps)
-float3 BakedSheet( float2 uv, float3 normal, float3 face )
+float3 BakedSheet( SheetSpot spot, float3 normal, float3 face )
 {
-	uint sheet = uint( g_frame[0].bakedMaps.x );
-
-	//Frame-uniform - see SkyTableAt.
-	float3 light = SheetFaces( sheet, sheet, uv ).rgb;
+	float2 uv = spot.uv;
+	float3 light = spot.light.rgb;
 
 	uint band = uint( g_frame[0].bakedMore.w );
 	if ( band == 0u ) return light;
@@ -2187,10 +2238,10 @@ bool HasBakedSky()
 }
 
 //A sheet texel's sky: which way it is open xyz, how much of it is seen w - see BakeSheet.Sky
-float4 BakedSkySheet( float2 uv )
+float4 BakedSkySheet( SheetSpot spot )
 {
 	//Frame-uniform - see SkyTableAt.
-	return SheetFaces( uint( g_frame[0].bakedMaps.z ), uint( g_frame[0].bakedMaps.x ), uv );
+	return SheetRead( spot, uint( g_frame[0].bakedMaps.z ) );
 }
 
 //How much sky a surface facing normal sees at a point of the volume: its visibility's two bands - see BakeVolume.Sky
@@ -2199,20 +2250,34 @@ float BakedSkyVolume( float3 at, float3 normal )
 	return saturate( dot( BakedVolumeAt( uint( g_frame[0].volumeCount.w ), at ), float4( 1.0, normal ) ) );
 }
 
-//The glow layers' light times their groups' brightness now: from the sheet where uv is on it, else the volume's spot
-float3 BakedGlows( float2 uv, bool sheet, float3 at )
+//The glow layers' light times their groups' brightness now, from their sheets at a spot. Looped rather than unrolled:
+//most scenes have none, and four copies of a sixteen-tap read were registers every lightmapped pixel paid for
+float3 BakedGlowSheets( SheetSpot spot )
 {
 	float3 sum = float3( 0.0, 0.0, 0.0 );
 
-	[unroll]
+	[loop]
 	for ( uint i = 0u; i < 4u; ++i )
 	{
 		//Frame-uniform - see SkyTableAt.
 		float4 glow = g_frame[0].bakedGlow[i];
-		if ( glow.z <= 0.0 ) continue;
+		if ( glow.z > 0.0 && glow.x > 0.5 ) sum += SheetRead( spot, uint( glow.x ) ).rgb * glow.z;
+	}
 
-		if ( sheet && glow.x > 0.5 ) sum += SheetFaces( uint( glow.x ), uint( g_frame[0].bakedMaps.x ), uv ).rgb * glow.z;
-		else if ( !sheet && glow.y > 0.5 ) sum += BakedVolumeAt( uint( glow.y ), at ).rgb * glow.z;
+	return sum;
+}
+
+//The same from the glow layers' volumes, at a spot of the volume
+float3 BakedGlowVolumes( float3 at )
+{
+	float3 sum = float3( 0.0, 0.0, 0.0 );
+
+	[loop]
+	for ( uint i = 0u; i < 4u; ++i )
+	{
+		//Frame-uniform - see SkyTableAt.
+		float4 glow = g_frame[0].bakedGlow[i];
+		if ( glow.z > 0.0 && glow.y > 0.5 ) sum += BakedVolumeAt( uint( glow.y ), at ).rgb * glow.z;
 	}
 
 	return sum;
@@ -2227,7 +2292,7 @@ bool HasBakedBounce()
 //Whether the frame has the probe grid of a scene with no bake - see CoreProbeGrid
 bool HasGrid()
 {
-	return g_frame[0].grid[0].x > 0.5;
+	return kProbeGridOn != 0 && g_frame[0].grid[0].x > 0.5;
 }
 
 //One probe's four texels: colour, lean, the way to walls along +x -x +y -y, and along +z -z with the inside share

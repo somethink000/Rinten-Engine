@@ -1630,6 +1630,11 @@ internal static unsafe class CoreSceneRenderer
 
 	internal const int AreaFold = PanoramaFold + 1;
 
+	//Whether the frame can carry the probe grid: rays on and no bake to read instead - see kProbeGridOn, constant 20
+	internal static bool ProbeGridOn => CoreRays.On && !BakedOn;
+
+	internal const int ProbeGridFold = AreaFold + 1;
+
 	//Whether the frame drew itself a sky table - see kSkyTableOn.
 	internal static bool SkyTableOn { get; private set; }
 
@@ -1677,7 +1682,8 @@ internal static unsafe class CoreSceneRenderer
 			| ( BakedOn ? 1024 : 0 )
 			| ( FogVolumes && !FogSheetLaid ? 16384 : 0 )
 			| ( PanoramaOn ? 1 << PanoramaFold : 0 )
-			| ( AreaOn ? 1 << AreaFold : 0 );
+			| ( AreaOn ? 1 << AreaFold : 0 )
+			| ( ProbeGridOn ? 1 << ProbeGridFold : 0 );
 
 	//Sky pass specialization: the world bits, the frame's sky bits, and the sky material's Fold() ids
 	internal static int SkySpecialize( CoreMaterial sky = null )

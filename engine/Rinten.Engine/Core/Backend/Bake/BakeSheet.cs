@@ -454,7 +454,7 @@ internal sealed class BakeSheet
 		}
 	}
 
-	//An island as one of 63 marks over 64 - what the frame's filter keeps its taps to (SheetFaces), so it blends across
+	//An island as one of 63 marks over 64 - what the frame's filter keeps its taps to (SheetSpotAt), so it blends across
 	//a curved model's triangles but not into the island packed beside it
 	private static float IslandKey( int island ) => ( ( island % 63 ) + 1 ) / 64.0f;
 

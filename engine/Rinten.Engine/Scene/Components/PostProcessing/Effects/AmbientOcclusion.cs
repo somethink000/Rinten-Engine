@@ -87,8 +87,8 @@ public sealed partial class AmbientOcclusion : BasePostProcess<AmbientOcclusion>
 		}
 
 		//And the light those horizons hide, at medium and high: from last frame's picture, once there is one - unless rays
-		//trace it (CoreRayLight)
-		if ( UserQuality >= 2 && Camera.IsValid() && !CoreRayLight.On )
+		//trace it (CoreRayLight), or a bake holds the bounce already and this would only add it again
+		if ( UserQuality >= 2 && Camera.IsValid() && !CoreRayLight.On && !CoreBakedLighting.Baked( Camera.Scene ) )
 		{
 			var known = history.TryGetValue( Camera, out var last );
 			var device = known ? last.ColorTarget?.core?.Device() ?? 0 : 0;

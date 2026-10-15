@@ -331,6 +331,12 @@ internal static unsafe class CoreRenderDevice
 	public static bool InterruptScreen()
 		=> CoreNative.Available && CoreRender.ScreenInterrupt() != 0;
 
+	/// <summary>Whether the world drawn next has surfaces to shade; without any it is shaded at every pixel's rate.</summary>
+	public static void WorldShades( bool surfaces )
+	{
+		if ( CoreNative.Available ) CoreRender.WorldShades( surfaces ? 1 : 0 );
+	}
+
 	/// <summary>Says the world's drawing on the screen is over - see <see cref="InterruptScreen"/>.</summary>
 	public static void ResumeScreen()
 	{
@@ -1185,7 +1191,7 @@ internal static unsafe class CoreRenderDevice
 	}
 
 	//Max specialization constants per pipeline; ids below CoreResources.FirstShaderFold are the frame's
-	internal const int SpecializationCount = 20;
+	internal const int SpecializationCount = 21;
 
 	public static ulong CreatePipeline( byte[] vertexSpirv, byte[] pixelSpirv,
 		CoreRender.VertexLayoutKind vertexLayout = CoreRender.VertexLayoutKind.None, bool depthTest = false,

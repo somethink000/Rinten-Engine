@@ -13,16 +13,16 @@ internal static class CoreLight2D
 	//One view's pictures, by name. Every view has its own: two views in one frame - the editor's and the game's - sharing
 	//one name had the second remake the first's pictures at its own size while the first's sprites still read them.
 	//The jump flood's two and the cascades' two are each written while the other is read
-	private sealed record Names( string Scene, string Light, string SeedsA, string SeedsB, string CascadeA, string CascadeB )
+	private sealed record Names( string Scene, string Light, string SeedsA, string SeedsB, string CascadeA, string CascadeB, string Shadows )
 	{
 		public static Names For( int view ) => new( $"L2D.{view}.Scene", $"L2D.{view}.Light",
-			$"L2D.{view}.SeedsA", $"L2D.{view}.SeedsB", $"L2D.{view}.CascadeA", $"L2D.{view}.CascadeB" );
+			$"L2D.{view}.SeedsA", $"L2D.{view}.SeedsB", $"L2D.{view}.CascadeA", $"L2D.{view}.CascadeB", $"L2D.{view}.Shadows" );
 	}
 
 	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CameraComponent, Names> namesOf = new();
 	private static int viewsNamed;
 
-	//The first cascade's stretch, in the scene's pixels; each one past it is four times the one before
+	//The first cascade's stretch in its probes' spacings; each one past it is four times the one before
 	private const float Interval0 = 1.5f;
 
 	//How much this view's screen was shrunk inside the pictures, what it asked to be shown and its names - see DrawDebug
@@ -89,7 +89,7 @@ internal static class CoreLight2D
 		CoreRenderDevice.ZoneBegin( "light 2d solve" );
 
 		//Where the passes cannot run, the light is not laid: sprites fall back to the global light alone
-		if ( !Solve( names, glow, light, system.GlobalLight, system.Glows, system.Lights.Count > 0, wide, tall ) )
+		if ( !Solve( names, glow, light, system.GlobalLight, system.Glows, system.Lights.Count, wide, tall ) )
 		{
 			if ( said.Add( "solve" ) ) Log.Warning( $"the 2D light's passes did not run: {CoreRenderDevice.ShaderError}" );
 
@@ -118,95 +118,155 @@ internal static class CoreLight2D
 	}
 
 	//The scene marched into the light: the jump flood, the cascades from the coarsest down where anything glows, then
-	//the finest averaged with the 2D lights added
-	private static bool Solve( Names names, CorePasses.Named scene, CorePasses.Named light, Color sky, bool glows, bool lights, int wide, int tall )
+	//the finest gathered with the 2D lights added
+	private static bool Solve( Names names, CorePasses.Named scene, CorePasses.Named light, Color sky, bool glows, int lights, int wide, int tall )
 	{
-		var seed = SolvePipeline( "SeedCs" );
 		var jump = SolvePipeline( "JumpCs" );
 		var cascade = SolvePipeline( "CascadeCs" );
+		var shadows = SolvePipeline( "ShadowsCs" );
 		var integrate = SolvePipeline( "IntegrateCs" );
 
-		if ( seed == 0 || jump == 0 || cascade == 0 || integrate == 0 ) return false;
+		if ( jump == 0 || cascade == 0 || shadows == 0 || integrate == 0 ) return false;
 
 		Span<float> push = stackalloc float[16];
 
 		push[0] = wide;
 		push[1] = tall;
 		push[4] = scene.Index;
+		push[5] = ProbeSpacing;
 		push[8] = sky.r;
 		push[9] = sky.g;
 		push[10] = sky.b;
-		push[11] = Interval0;
+		push[11] = Interval0 * ProbeSpacing;
 
 		//Only the global light: flat, nothing to march
-		if ( !glows && !lights ) return Run( integrate, light, push, wide, tall );
+		if ( !glows && lights == 0 ) return Run( integrate, light, push, wide, tall );
 
-		var seedsA = CorePasses.Acquire( names.SeedsA, CoreRender.PictureKind.Full, wide, tall, 1 );
-		var seedsB = CorePasses.Acquire( names.SeedsB, CoreRender.PictureKind.Full, wide, tall, 1 );
+		CoreRenderDevice.ZoneBegin( "light 2d flood" );
+		var flooded = Flood( names, jump, push, wide, tall );
+		CoreRenderDevice.ZoneEnd();
+
+		if ( !flooded ) return false;
+
+		//The cascades carry only what glows - the lights are added straight and the global light is flat - so where
+		//nothing glows they are not run at all
+		if ( glows )
+		{
+			CoreRenderDevice.ZoneBegin( "light 2d cascades" );
+			var cascaded = Cascades( names, cascade, push, wide, tall );
+			CoreRenderDevice.ZoneEnd();
+
+			if ( !cascaded ) return false;
+		}
+
+		//Each light's shadow map: a row of angles marched once, which every pixel it reaches reads rather than marching
+		if ( lights > 0 )
+		{
+			var map = CorePasses.Acquire( names.Shadows, CoreRender.PictureKind.SingleFull, ShadowAngles, SceneLight2DSystem.MostLights, 1 );
+			if ( map is null ) return false;
+
+			CorePasses.Close();
+
+			push[14] = map.Index;
+
+			CoreRenderDevice.ZoneBegin( "light 2d shadows" );
+			var mapped = Run( shadows, map, push, ShadowAngles, lights );
+			CoreRenderDevice.ZoneEnd();
+
+			if ( !mapped ) return false;
+		}
+
+		CoreRenderDevice.ZoneBegin( "light 2d lights" );
+		var done = Run( integrate, light, push, wide, tall );
+		CoreRenderDevice.ZoneEnd();
+
+		return done;
+	}
+
+	//Every two by two block's nearest blocking block, as the way to it: strides halving down to one, the first taking
+	//each blocker as its own seed. From no further than FloodStride pixels, all a ray needs: a texel given no blocker
+	//is that far from one at least, and strides that far. A ray only strides by it, so blocks are near enough, at a
+	//quarter of the work. Leaves the result's index in push[6]
+	private static bool Flood( Names names, ulong jump, Span<float> push, int wide, int tall )
+	{
+		var (blocksWide, blocksTall) = (( wide + 1 ) / 2, ( tall + 1 ) / 2);
+
+		var seedsA = CorePasses.Acquire( names.SeedsA, CoreRender.PictureKind.Pair, blocksWide, blocksTall, 1 );
+		var seedsB = CorePasses.Acquire( names.SeedsB, CoreRender.PictureKind.Pair, blocksWide, blocksTall, 1 );
 
 		if ( seedsA is null || seedsB is null ) return false;
 
 		CorePasses.Close();
 
-		//The flood: every blocker its own seed, then strides halving down to one. From no further than FloodStride, which
-		//is all a ray needs to know: a texel it gives no blocker is that far from one at least, and strides that far
-		var stride = Math.Min( HighestBit( Math.Max( wide, tall ) ), FloodStride );
-
-		push[12] = stride;
-
-		if ( !Run( seed, seedsA, push, wide, tall ) ) return false;
+		var first = Math.Min( HighestBit( Math.Max( blocksWide, blocksTall ) ), FloodStride / 2 );
+		push[12] = first * 2;
 
 		var (read, write) = ( seedsA, seedsB );
 
-		for ( ; stride >= 1; stride /= 2 )
+		for ( var stride = first; stride >= 1; stride /= 2 )
 		{
 			push[2] = stride;
 			push[7] = read.Index;
+			push[15] = stride == first ? 1.0f : 0.0f;
 
-			if ( !Run( jump, write, push, wide, tall ) ) return false;
+			if ( !Run( jump, write, push, blocksWide, blocksTall ) ) return false;
 
 			( read, write ) = ( write, read );
 		}
 
 		push[6] = read.Index;
+		push[15] = 0.0f;
+		return true;
+	}
 
-		//The cascades carry only what glows - the lights are added straight and the global light is flat - so where
-		//nothing glows they are not run at all, and are half the cost of the whole
-		if ( glows )
+	//The cascades, the coarsest first, each merging the one above it out of the other picture. Leaves the finest's index
+	//in push[7] and says in push[13] that they ran
+	private static bool Cascades( Names names, ulong cascade, Span<float> push, int wide, int tall )
+	{
+		var count = CascadeCount( wide, tall );
+		var (cascadeWide, cascadeTall) = CascadeSize( wide, tall, count );
+
+		var cascadeA = CorePasses.Acquire( names.CascadeA, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
+		var cascadeB = CorePasses.Acquire( names.CascadeB, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
+
+		if ( cascadeA is null || cascadeB is null ) return false;
+
+		CorePasses.Close();
+
+		var (above, into) = ( cascadeA, cascadeB );
+
+		push[3] = count;
+
+		for ( var n = count - 1; n >= 0; n-- )
 		{
-			var count = CascadeCount( wide, tall );
-			var (cascadeWide, cascadeTall) = CascadeSize( wide, tall, count );
+			push[2] = n;
+			push[7] = n == count - 1 ? 0 : above.Index;
 
-			var cascadeA = CorePasses.Acquire( names.CascadeA, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
-			var cascadeB = CorePasses.Acquire( names.CascadeB, CoreRender.PictureKind.Hdr, cascadeWide, cascadeTall, 1 );
+			var (probesWide, probesTall) = Probes( wide, tall, n );
 
-			if ( cascadeA is null || cascadeB is null ) return false;
+			if ( !Run( cascade, into, push, probesWide << n, probesTall << n ) ) return false;
 
-			CorePasses.Close();
-
-			//The coarsest first, each merging the one above it out of the other picture
-			var (above, into) = ( cascadeA, cascadeB );
-
-			push[3] = count;
-
-			for ( var n = count - 1; n >= 0; n-- )
-			{
-				push[2] = n;
-				push[7] = n == count - 1 ? 0 : above.Index;
-
-				var probesWide = ( wide + ( 1 << n ) - 1 ) >> n;
-				var probesTall = ( tall + ( 1 << n ) - 1 ) >> n;
-
-				if ( !Run( cascade, into, push, probesWide * ( 2 << n ), probesTall * ( 2 << n ) ) ) return false;
-
-				( above, into ) = ( into, above );
-			}
-
-			push[7] = above.Index;
-			push[13] = 1.0f;
+			( above, into ) = ( into, above );
 		}
 
-		return Run( integrate, light, push, wide, tall );
+		push[7] = above.Index;
+		push[13] = 1.0f;
+		return true;
+	}
+
+	//Angles a light's shadow map has about it - see ShadowsCs in light2d_cascades.slang
+	private const int ShadowAngles = 1024;
+
+	//How far apart the first cascade's probes stand, in the scene's pixels; each cascade past it twice the one before.
+	//Every cascade sends four times as many rays as the picture has pixels over this squared, which is what they cost
+	//less than at one probe a pixel - the glow they carry is soft light, and the lights' own shadows are mapped apart
+	private const int ProbeSpacing = 4;
+
+	//A cascade's probes along each side
+	private static (int Wide, int Tall) Probes( int wide, int tall, int cascade )
+	{
+		var spacing = ProbeSpacing << cascade;
+		return (( wide + spacing - 1 ) / spacing, ( tall + spacing - 1 ) / spacing);
 	}
 
 	//How far the flood reaches, in the scene's pixels: past it a ray strides this far at a time through empty space.
@@ -219,12 +279,12 @@ internal static class CoreLight2D
 		var diagonal = MathF.Sqrt( ( wide * (float)wide ) + ( tall * (float)tall ) );
 		var count = 1;
 
-		while ( count < 10 && Interval0 * ( ( 1 << ( 2 * count ) ) - 1 ) / 3.0f < diagonal ) count++;
+		while ( count < 10 && Interval0 * ProbeSpacing * ( ( 1 << ( 2 * count ) ) - 1 ) / 3.0f < diagonal ) count++;
 
 		return count;
 	}
 
-	//A cascade's probes times the side of each one's block of rays, the widest of them all
+	//A cascade's probes times the side of each one's block of averages - a quarter of its rays - the widest of them all
 	private static (int Wide, int Tall) CascadeSize( int wide, int tall, int count )
 	{
 		var cascadeWide = 0;
@@ -232,8 +292,10 @@ internal static class CoreLight2D
 
 		for ( var n = 0; n < count; n++ )
 		{
-			cascadeWide = Math.Max( cascadeWide, ( ( wide + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
-			cascadeTall = Math.Max( cascadeTall, ( ( tall + ( 1 << n ) - 1 ) >> n ) * ( 2 << n ) );
+			var (probesWide, probesTall) = Probes( wide, tall, n );
+
+			cascadeWide = Math.Max( cascadeWide, probesWide << n );
+			cascadeTall = Math.Max( cascadeTall, probesTall << n );
 		}
 
 		return (cascadeWide, cascadeTall);
@@ -368,7 +430,12 @@ internal static class CoreLight2D
 	{
 		if ( solvePipelines.TryGetValue( entry, out var made ) ) return made;
 
-		var defines = entry is "SeedCs" or "JumpCs" ? EngineShaders.Light2DSeeds : null;
+		var defines = entry switch
+		{
+			"JumpCs" => EngineShaders.Light2DSeeds,
+			"ShadowsCs" => EngineShaders.Light2DShadows,
+			_ => null,
+		};
 		var code = CoreShaderCache.Pass( EngineShaders.Light2DCascades, entry, CoreShaderCompiler.Stage.Compute, defines );
 
 		made = code is null ? 0 : CoreRenderDevice.CreatePassPipeline( code );

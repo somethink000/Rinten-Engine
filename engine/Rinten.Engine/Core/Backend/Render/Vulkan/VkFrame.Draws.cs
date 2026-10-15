@@ -343,8 +343,6 @@ internal static unsafe partial class VkFrame
 
 			try
 			{
-				Current.Recording = false;
-
 				var frame = CurrentFrame;
 
 				//A frame where the sun looked and nothing else drew still has a pass to close, and a frame where nothing drew at all still owes the screen its clear.
@@ -370,6 +368,7 @@ internal static unsafe partial class VkFrame
 				//The frame's own pair of timestamps closes here, with any zone somebody forgot to end
 				//- every reserved query has to be written or the readback would find nothing ready.
 				CloseOpenZones( frame );
+				Current.Recording = false;
 
 				if ( frame.Queries.Handle != 0 )
 					VkDevice.dialect.Timestamp( frame.Commands, PipelineStageFlags2.AllCommandsBit, frame.Queries, 1 );
@@ -583,6 +582,7 @@ internal static unsafe partial class VkFrame
 			finally
 			{
 				//Whatever happened above, the frame is over and the swapchain goes back to nobody's - so the next one can begin, on this or on any other.
+				Current.Recording = false;
 				VkSwapchain.active = VkSwapchain.placeholder;
 			}
 		}
@@ -1517,6 +1517,14 @@ internal static unsafe partial class VkFrame
 			if ( !Current.Recording ) return;
 
 			Current.DepthCeiling = System.Math.Clamp( ceiling, 0.0001f, 1.0f );
+		}
+	}
+
+	internal static void WorldShades( bool surfaces )
+	{
+		lock ( VkDevice.renderLock )
+		{
+			if ( Current.Recording ) Current.WorldShades = surfaces;
 		}
 	}
 

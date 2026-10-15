@@ -2534,6 +2534,10 @@ internal sealed partial class CoreSceneDrawer
 		//So whether the world's passes are the last, applying exposure and curve
 		worldFinishes = !wantsOffscreen;
 
+		//Whether the adaptive shading rates are worth taking for this world - see VkFrame.Fovea
+		CoreRenderDevice.WorldShades( drawn || opaque.Count > 0 || translucent.Count > 0 ||
+			CoreImmediate.Instanced.Length > 0 || CoreImmediate.Blocks.Length > 0 );
+
 		//Let the pre-pass write the screen's depth directly when the frame shades onto the window
 		CoreRenderDevice.DepthOnScreen( viewport,
 			worldFinishes && CoreRenderDevice.DepthOnScreenPossible( viewport ) );
@@ -2600,17 +2604,23 @@ internal sealed partial class CoreSceneDrawer
 			//The scene for hardware rays, where they are on: into the block before the passes after the pre-pass trace it
 			if ( CoreRays.On )
 			{
+				CoreRenderDevice.ZoneBegin( "rays build" );
 				CoreRays.Build( scene );
 				CoreRays.Lay( frame );
+				CoreRenderDevice.ZoneEnd();
 
 				//And the light of a scene with no bake through them, about this view's camera
+				CoreRenderDevice.ZoneBegin( "probe grid" );
 				probeGrid.Trace( scene, position, frame );
+				CoreRenderDevice.ZoneEnd();
 
 				CoreRenderDevice.SetupFrame( frame );
 			}
 
 			//And the bake's bounce through them, before anything reads it
+			CoreRenderDevice.ZoneBegin( "baked bounce" );
 			CoreBakedLighting.TraceBounce( scene );
+			CoreRenderDevice.ZoneEnd();
 
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
 

@@ -710,6 +710,14 @@ internal static unsafe partial class VkFrame
 		//Without a headset, the map the last frame's picture laid - see VkFrame.Adaptive.
 		if ( VkFovea.Adaptive && AdaptiveMap( p ) is null ) return null;
 
+		//A world of sky or background alone shades too little to pay for reading its picture; the map starts
+		//from every pixel's rate when surfaces come back, not from what a picture long gone said
+		if ( VkFovea.Adaptive && !Current.WorldShades )
+		{
+			p.Fovea.Cleared = false;
+			return null;
+		}
+
 		if ( p?.Fovea is null ) return null;
 		if ( p.Extent.Width != p.ScreenExtent.Width || p.Extent.Height != p.ScreenExtent.Height ) return null;
 
@@ -1555,6 +1563,7 @@ internal static unsafe partial class VkFrame
 
 		//A clean slate for the profiler and bind cache: state and bindings belong to the just-reset buffer
 		Current.WorldOnScreen = false;
+		Current.WorldShades = true;
 		frame.ZoneCount = 0;
 		frame.ZoneDepth = 0;
 		frame.DroppedOpen = 0;

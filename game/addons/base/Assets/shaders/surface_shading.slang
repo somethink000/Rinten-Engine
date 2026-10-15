@@ -543,37 +543,43 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float facing = dot( normal, l );
 		float nDotL = saturate( facing );
 
-#if SURFACE_TRANSMITS
-		//Through a leaf or thin cloth: its back to the light, and the glow of a light behind it towards the eye;
-		//a baked light's on a lightmapped surface is in the lightmap already - see BakeScene.Transmission
-		if ( attenuation > 0.0 && any( s.transmission > 0.0 ) && !( sheetLit && LightBaked( light ) ) && ( LightWithholds( light ) & 1u ) == 0u )
-		{
-			float behind = saturate( -dot( geometric, l ) );
-			float glow = pow( saturate( dot( -v, l ) ), s.transmissionSpread );
-			float through = ( behind * 0.5 ) + ( glow * ( 0.3 + ( 0.7 * behind ) ) );
-
-			if ( through > 0.0 )
-			{
-				float backShadow = light.colour.w < 0.5 ? SunShadow( s.world, -geometric, -geometric, true ) : LampShadow( s.world, -geometric, light, distance );
-				litDiffuse += s.transmission * light.colour.rgb * ( through * attenuation * backShadow );
-			}
-		}
-#endif
-
 		//How far past the terminator each colour still takes this light: wrapped diffuse,
 		//kept to the energy of a plain one. At nought scatter this is nDotL in all three.
 		float3 wrap = float3( 0.5, 0.2, 0.12 ) * scatter;
 		float3 lit = saturate( ( facing + wrap ) / ( 1.0 + wrap ) );
 
-		if ( lit.r <= 0.0 || attenuation <= 0.0 ) continue;
-
-		float shadow;
-
 		//A baked light on a lightmapped surface is in its lightmap: what movers shade of it is taken away, as
 		//UE's stationary lights shadow movers over a lightmap, and its highlight is drawn live as theirs is - a
 		//lightmap's one averaged way per texel blurs every lamp's into one smear
 		bool taken = sheetLit && LightBaked( light );
+
+#if SURFACE_TRANSMITS
+		//Through a leaf or thin cloth: its back to the light, and the glow of a light behind it towards the eye;
+		//a baked light's on a lightmapped surface is in the lightmap already - see BakeScene.Transmission
+		float through = 0.0;
+
+		if ( attenuation > 0.0 && !taken && any( s.transmission > 0.0 ) && ( LightWithholds( light ) & 1u ) == 0u )
+		{
+			float behind = saturate( -dot( geometric, l ) );
+			float glow = pow( saturate( dot( -v, l ) ), s.transmissionSpread );
+			through = ( behind * 0.5 ) + ( glow * ( 0.3 + ( 0.7 * behind ) ) );
+		}
+
+		if ( ( lit.r <= 0.0 && through <= 0.0 ) || attenuation <= 0.0 ) continue;
+#else
+		if ( lit.r <= 0.0 || attenuation <= 0.0 ) continue;
+#endif
+
+		float shadow;
 		float seen = 0.0;
+
+#if SURFACE_TRANSMITS
+		//Stepped off the side the light is on, so a sheet lit from behind is not shadowed by itself; one tap serves
+		//the light on its face and the light through it
+		float3 side = dot( geometric, l ) >= 0.0 ? geometric : -geometric;
+#else
+		float3 side = geometric;
+#endif
 
 		if ( taken )
 		{
@@ -584,13 +590,18 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		else if ( light.colour.w < 0.5 )
 		{
 			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow
-			shadow = SunShadow( s.world, geometric, geometric, true );
+			shadow = SunShadow( s.world, side, side, true );
 		}
 		else
 		{
 			//Out of the lamp's faces, where it casts - see LampShadow.
-			shadow = LampShadow( s.world, geometric, light, distance );
+			shadow = LampShadow( s.world, side, light, distance );
 		}
+
+#if SURFACE_TRANSMITS
+		if ( through > 0.0 ) litDiffuse += s.transmission * light.colour.rgb * ( through * attenuation * shadow );
+		if ( lit.r <= 0.0 ) continue;
+#endif
 
 		//Shadow blocks only this light; lights add independently, so nothing gives it back
 		if ( !taken ) seen = shadow;
@@ -753,7 +764,10 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 #ifndef PORTABLE
 	if ( HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0 )
 	{
-		ambientSky = BakedSheet( s.lightmap, normal, geometric ) + BakedGlows( s.lightmap, true, s.world );
+		//Frame-uniform - see SkyTableAt.
+		SheetSpot spot = SheetSpotAt( uint( g_frame[0].bakedMaps.x ), s.lightmap );
+
+		ambientSky = BakedSheet( spot, normal, geometric ) + BakedGlowSheets( spot );
 		visible = 1.0;
 
 		//The bounce of the lights left out of the bake, as they are now: at the lightmap's detail where the bake linked
@@ -766,7 +780,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		if ( HasBakedSky() && g_frame[0].bakedMaps.z > 0.5 )
 		{
 			//The sky now, from where the texel sees it, as much as it sees - right at any hour without a new bake
-			float4 open = BakedSkySheet( s.lightmap );
+			float4 open = BakedSkySheet( spot );
 			float3 way = dot( open.xyz, open.xyz ) > 1e-4 ? normalize( open.xyz ) : normal;
 
 			ambientSky += SkyLit( way ) * open.w;
@@ -782,7 +796,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
 		float3 spot = BakedVolumeSpot( lifted, geometric );
 
-		ambientSky = BakedVolume( spot, normal ) + BakedGlows( float2( 0.0, 0.0 ), false, spot );
+		ambientSky = BakedVolume( spot, normal ) + BakedGlowVolumes( spot );
 		if ( HasBakedBounce() ) ambientSky += BakedBounce( spot, normal );
 
 		if ( HasBakedSky() )

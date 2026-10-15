@@ -21,7 +21,7 @@ public sealed partial class TileMap : Collider, Component.ExecuteInEditor
 		}
 	} = Vector2.One;
 
-	/// <summary>The layers, back to front.</summary>
+	/// <summary>The layers, back to front within one <see cref="TileMapLayer.ZIndex"/>.</summary>
 	[Property, WideMode]
 	public List<TileMapLayer> Layers { get; set; } = new();
 
@@ -222,6 +222,15 @@ public sealed partial class TileMap : Collider, Component.ExecuteInEditor
 	{
 		RebuildLayer( layer );
 		collisionDirty = true;
+	}
+
+	//A layer's z-index changed: every layer may now stand at another depth, so all of them are drawn again.
+	internal void LayerOrderChanged()
+	{
+		foreach ( var layer in Layers ?? [] )
+		{
+			if ( layer is not null ) RebuildLayer( layer );
+		}
 	}
 
 	private void RebuildAll()

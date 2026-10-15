@@ -14,6 +14,7 @@ public sealed partial class TileMap
 		public GpuBuffer<SpriteBatchSceneObject.SpriteData> Buffer;
 		public bool Opaque;
 		public int Order;
+		public int ZIndex;
 		public BBox Bounds;
 
 		public void Release()
@@ -31,10 +32,13 @@ public sealed partial class TileMap
 	//The tile set revision each layer was last built with, to notice a set being edited.
 	private readonly Dictionary<TileMapLayer, (TileSet Set, int Revision)> builtWith = new();
 
-	//What draws the chunks, one for the whole map - see TileMapSceneObject.
-	private TileMapSceneObject sceneObject;
+	//What draws the chunks, one a z-index the map's layers use, so each is drawn in its place among the sprites - see TileMapSceneObject.
+	private readonly Dictionary<int, TileMapSceneObject> sceneObjects = new();
 
-	//The chunks in the order they are drawn: back layer first, the ones that blend last.
+	//Where each layer stands towards the viewer: its place among the layers in z-index order, the list's order within one z-index.
+	private readonly Dictionary<TileMapLayer, int> ranks = new();
+
+	//The chunks in the order they are drawn: lowest z-index first, and within one the back layer first and the ones that blend last.
 	private readonly List<DrawnChunk> drawOrder = new();
 	private bool drawOrderDirty;
 
@@ -82,29 +86,40 @@ public sealed partial class TileMap
 		var world = Scene?.SceneWorld;
 		if ( world is null || Application.IsHeadless ) return;
 
-		if ( !sceneObject.IsValid() )
-		{
-			sceneObject = new TileMapSceneObject( world, this );
-			sceneObject.Tags.SetFrom( Tags );
-		}
+		RankLayers();
 
 		var transform = WorldTransform;
 
 		foreach ( var (layer, coord) in dirty )
 		{
-			var index = Layers?.IndexOf( layer ) ?? -1;
-			if ( index < 0 ) continue;
+			if ( !ranks.TryGetValue( layer, out var rank ) ) continue;
 
-			BuildChunk( layer, index, coord, transform );
+			BuildChunk( layer, rank, coord, transform );
 		}
 
 		dirty.Clear();
 		drawOrderDirty = true;
 
-		UpdateBounds();
+		UpdateSceneObjects( world );
 	}
 
-	private void BuildChunk( TileMapLayer layer, int index, Vector2Int coord, Transform transform )
+	private void RankLayers()
+	{
+		ranks.Clear();
+
+		var layers = Layers;
+		if ( layers is null ) return;
+
+		//OrderBy keeps the list's order among layers of one z-index.
+		var rank = 0;
+
+		foreach ( var layer in layers.Where( l => l is not null ).OrderBy( l => l.ZIndex ) )
+		{
+			if ( ranks.TryAdd( layer, rank ) ) rank++;
+		}
+	}
+
+	private void BuildChunk( TileMapLayer layer, int rank, Vector2Int coord, Transform transform )
 	{
 		var key = (layer, coord);
 
@@ -126,10 +141,11 @@ public sealed partial class TileMap
 
 		chunkDrawn ??= drawn[key] = new DrawnChunk();
 
-		BuildTiles( chunkDrawn, set, layer, chunk, index * LayerSpacing, transform );
+		BuildTiles( chunkDrawn, set, layer, chunk, rank * LayerSpacing, transform );
 
 		chunkDrawn.Opaque = layer.Tint.a >= 1.0f;
-		chunkDrawn.Order = index;
+		chunkDrawn.Order = rank;
+		chunkDrawn.ZIndex = layer.ZIndex;
 
 		if ( chunkDrawn.Count == 0 )
 		{
@@ -239,24 +255,39 @@ public sealed partial class TileMap
 	//Where a tile's alpha is cut: under it the pixel is not there at all.
 	private const float AlphaCutoff = 0.5f;
 
-	//The box round everything drawn, so the map is culled as one object.
-	private void UpdateBounds()
+	//An object for every z-index something is drawn at, and none for the rest, each with the box round its chunks so it is culled as one.
+	private void UpdateSceneObjects( SceneWorld world )
 	{
-		if ( !sceneObject.IsValid() ) return;
-
-		BBox? all = null;
+		var bounds = new Dictionary<int, BBox>();
 
 		foreach ( var chunk in drawn.Values )
 		{
-			all = all is { } a ? a.AddBBox( chunk.Bounds ) : chunk.Bounds;
+			bounds[chunk.ZIndex] = bounds.TryGetValue( chunk.ZIndex, out var b ) ? b.AddBBox( chunk.Bounds ) : chunk.Bounds;
 		}
 
-		sceneObject.Bounds = all ?? new BBox( WorldPosition, WorldPosition );
+		foreach ( var (zIndex, sceneObject) in sceneObjects.ToArray() )
+		{
+			if ( bounds.ContainsKey( zIndex ) && sceneObject.IsValid() ) continue;
+
+			if ( sceneObject.IsValid() ) sceneObject.Delete();
+			sceneObjects.Remove( zIndex );
+		}
+
+		foreach ( var (zIndex, box) in bounds )
+		{
+			if ( !sceneObjects.TryGetValue( zIndex, out var sceneObject ) )
+			{
+				sceneObject = sceneObjects[zIndex] = new TileMapSceneObject( world, this, zIndex );
+				sceneObject.Tags.SetFrom( Tags );
+			}
+
+			sceneObject.Bounds = box;
+		}
 	}
 
-	//Draw every chunk, for the view being gathered - called by the map's scene object while the frame collects what is drawn by hand. Solid chunks
+	//Draw the chunks of one z-index, for the view being gathered - called by its scene object while the frame collects what is drawn by hand. Solid chunks
 	//write their depth and need no order among themselves; a layer tinted see-through blends, and is drawn after the solid ones, back layer first.
-	internal void DrawChunks()
+	internal void DrawChunks( int zIndex )
 	{
 		if ( drawn.Count == 0 ) return;
 
@@ -264,7 +295,8 @@ public sealed partial class TileMap
 		{
 			drawOrder.Clear();
 			drawOrder.AddRange( drawn.Values );
-			drawOrder.Sort( static ( a, b ) => a.Opaque != b.Opaque ? ( a.Opaque ? -1 : 1 ) : a.Order.CompareTo( b.Order ) );
+			drawOrder.Sort( static ( a, b ) => a.ZIndex != b.ZIndex ? a.ZIndex.CompareTo( b.ZIndex )
+				: a.Opaque != b.Opaque ? ( a.Opaque ? -1 : 1 ) : a.Order.CompareTo( b.Order ) );
 			drawOrderDirty = false;
 		}
 
@@ -275,7 +307,7 @@ public sealed partial class TileMap
 
 		foreach ( var layer in Layers ?? [] )
 		{
-			layer?.TileSet?.Sheet?.MarkUsed( ushort.MaxValue );
+			if ( layer?.ZIndex == zIndex ) layer.TileSet?.Sheet?.MarkUsed( ushort.MaxValue );
 		}
 
 		var attributes = RenderAttributes.Pool.Get();
@@ -289,6 +321,8 @@ public sealed partial class TileMap
 
 			foreach ( var chunk in drawOrder )
 			{
+				if ( chunk.ZIndex < zIndex ) continue;
+				if ( chunk.ZIndex > zIndex ) break;
 				if ( chunk.Count == 0 ) continue;
 
 				attributes.SetCombo( "D_OPAQUE", chunk.Opaque ? 1 : 0 );
@@ -331,7 +365,10 @@ public sealed partial class TileMap
 	{
 		base.OnTagsChanged();
 
-		if ( sceneObject.IsValid() ) sceneObject.Tags.SetFrom( Tags );
+		foreach ( var sceneObject in sceneObjects.Values )
+		{
+			if ( sceneObject.IsValid() ) sceneObject.Tags.SetFrom( Tags );
+		}
 	}
 
 	private void ReleaseLayer( TileMapLayer layer )
@@ -353,21 +390,29 @@ public sealed partial class TileMap
 		dirty.Clear();
 		builtWith.Clear();
 
-		if ( sceneObject.IsValid() ) sceneObject.Delete();
-		sceneObject = null;
+		foreach ( var sceneObject in sceneObjects.Values )
+		{
+			if ( sceneObject.IsValid() ) sceneObject.Delete();
+		}
+
+		sceneObjects.Clear();
 	}
 }
 
-//What draws a TileMap: one object in the world for the whole map, which draws its chunks the way sprites are drawn - see TileMap.DrawChunks.
+//What draws a TileMap: one object in the world for each z-index its layers use, which draws their chunks the way sprites are drawn, in
+//its place among them - see TileMap.DrawChunks.
 internal sealed class TileMapSceneObject : SceneCustomObject
 {
 	private readonly TileMap map;
+	private readonly int zIndex;
 
-	public TileMapSceneObject( SceneWorld world, TileMap map ) : base( world )
+	public TileMapSceneObject( SceneWorld world, TileMap map, int zIndex ) : base( world )
 	{
 		this.map = map;
+		this.zIndex = zIndex;
+		DrawOrder = zIndex;
 		Flags.CastShadows = false;
 	}
 
-	public override void RenderSceneObject() => map?.DrawChunks();
+	public override void RenderSceneObject() => map?.DrawChunks( zIndex );
 }

@@ -35,6 +35,23 @@ public sealed class TileMapLayer
 		}
 	} = true;
 
+	/// <summary>
+	/// Where the layer is drawn among the map's other layers and the scene's sprites - higher on top, as a sprite's Order In Layer is.
+	/// Layers of one z-index keep the order they are listed in.
+	/// </summary>
+	[Property, Title( "Order In Layer" )]
+	public int ZIndex
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Map?.LayerOrderChanged();
+		}
+	}
+
 	/// <summary>Whether its solid tiles are part of the map's collision.</summary>
 	[Property]
 	public bool Collides

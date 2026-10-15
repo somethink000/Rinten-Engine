@@ -852,7 +852,8 @@ internal sealed partial class CoreSceneDrawer
 		{
 			if ( !CastsInto( in queued, view.Casters, planes ) ) continue;
 
-			if ( queued.Pose is not null || queued.Morphs is not null || queued.Skinned || queued.Moves
+			//A shader bending a still thing - wind in leaves - is not a caster moving: the sun's pages keep it as it stands too
+			if ( queued.Pose is not null || queued.Morphs is not null || queued.Skinned
 				|| queued.Instances > 1 || queued.CountFrom != 0 || queued.ArgsBuffer != 0 )
 			{
 				live = true;

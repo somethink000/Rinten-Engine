@@ -2456,10 +2456,46 @@ float3 BakedVolume( float3 at, float3 normal )
 [[vk::binding(8,1)]] Sampler2D g_bakedSheet;
 [[vk::binding(9,1)]] Sampler2D g_bakedVolume;
 
-//A sheet texel's light rgb and how much sky it sees a
+//A portable sheet texel's face mark, and in sky how much sky it sees - packed as CoreBakedLighting.MakePortableSheet does
+float PortableMark( float packed, out float sky )
+{
+	float mark = floor( packed + 0.05 );
+	sky = saturate( ( packed - mark ) / 0.9 );
+	return mark;
+}
+
+//The sheet's light rgb and how much sky it sees a: bilinear over the four texels about the spot, each kept only where
+//it lies on the spot's own face, as the full frame's SheetFacesLinear - so a box's sides do not bleed into each other
 float4 PortableSheet( float2 uv )
 {
-	return g_bakedSheet.SampleLevel( uv, 0.0 );
+	float2 size = max( g_frame[0].portableBake.xy, float2( 1.0, 1.0 ) );
+
+	float2 at = ( uv * size ) - 0.5;
+	float2 cell = floor( at );
+	float2 f = at - cell;
+
+	float ownSky;
+	float4 centre = g_bakedSheet.SampleLevel( ( floor( uv * size ) + 0.5 ) / size, 0.0 );
+	float own = PortableMark( centre.a, ownSky );
+
+	float4 sum = 0.0;
+	float total = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 4u; ++k )
+	{
+		float2 corner = float2( float( k & 1u ), float( k >> 1u ) );
+		float4 texel = g_bakedSheet.SampleLevel( ( cell + corner + 0.5 ) / size, 0.0 );
+		float2 w2 = lerp( 1.0 - f, f, corner );
+
+		float sky;
+		float weight = PortableMark( texel.a, sky ) == own ? w2.x * w2.y : 0.0;
+
+		sum += float4( texel.rgb, sky ) * weight;
+		total += weight;
+	}
+
+	return total > 1e-5 ? sum / total : float4( centre.rgb, ownSky );
 }
 
 //Whether there is a volume to read

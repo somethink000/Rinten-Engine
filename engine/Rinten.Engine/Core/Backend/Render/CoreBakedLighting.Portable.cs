@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//The bake as the portable frame binds it (g_bakedSheet, g_bakedVolume): sheet light and sky, ≤ 2048 a side,
+//The bake as the portable frame binds it (g_bakedSheet, g_bakedVolume): sheet light, face and sky, ≤ 2048 a side,
 //the volume's layers as tiles with the live bounce below; glow layers folded in at their brightness
 internal static partial class CoreBakedLighting
 {
@@ -104,7 +104,8 @@ internal static partial class CoreBakedLighting
 		return made;
 	}
 
-	//Halved until it fits, each texel the mean of those it covers: light and glows rgb, sky seen a
+	//Halved until it fits, each texel the mean of those it covers on the face most of them lie on: light and glows rgb,
+	//and in a the face's mark (BakeSheet.FaceOf, a whole number) with the sky seen as the fraction - see PortableSheet
 	private static void MakePortableSheet( PortablePictures made, BakedLightingData data, ReadOnlySpan<float> brightness )
 	{
 		var step = 1;
@@ -115,26 +116,33 @@ internal static partial class CoreBakedLighting
 		var pixels = new Half[width * height * 4];
 
 		var sky = data.HasSky && data.SheetSky.Length == data.Sheet.Length ? data.SheetSky : null;
-		var share = 1.0f / ( step * step );
+		Span<int> marks = stackalloc int[step * step];
 
 		for ( var y = 0; y < height; ++y )
 		for ( var x = 0; x < width; ++x )
 		{
-			System.Numerics.Vector4 light = default;
+			//The face most of the covered texels lie on, which is the only one they are averaged over
+			for ( var i = 0; i < marks.Length; ++i )
+				marks[i] = MarkAt( data, ( ( ( y * step ) + ( i / step ) ) * data.SheetWidth ) + ( x * step ) + ( i % step ) );
 
-			for ( var dy = 0; dy < step; ++dy )
-			for ( var dx = 0; dx < step; ++dx )
+			var mark = Commonest( marks );
+
+			System.Numerics.Vector4 light = default;
+			var count = 0;
+
+			for ( var i = 0; i < marks.Length; ++i )
 			{
-				var from = ( ( ( y * step ) + dy ) * data.SheetWidth ) + ( x * step ) + dx;
-				var texel = from * 4;
+				if ( marks[i] != mark ) continue;
+
+				var texel = ( ( ( ( y * step ) + ( i / step ) ) * data.SheetWidth ) + ( x * step ) + ( i % step ) ) * 4;
 
 				var r = (float)data.Sheet[texel];
 				var g = (float)data.Sheet[texel + 1];
 				var b = (float)data.Sheet[texel + 2];
 
-				for ( var i = 0; i < data.Glows.Count && i < BakedGlow.Groups; ++i )
+				for ( var k = 0; k < data.Glows.Count && k < BakedGlow.Groups; ++k )
 				{
-					var glow = data.Glows[i];
+					var glow = data.Glows[k];
 					if ( glow.Sheet is not { } layer || layer.Length != data.Sheet.Length ) continue;
 
 					var by = brightness[Math.Clamp( glow.Group, 1, BakedGlow.Groups ) - 1];
@@ -144,14 +152,45 @@ internal static partial class CoreBakedLighting
 				}
 
 				light += new System.Numerics.Vector4( r, g, b, sky is null ? 0.0f : (float)sky[texel + 3] );
+				count++;
 			}
 
-			Put( pixels, ( ( y * width ) + x ) * 4, light * share );
+			light /= Math.Max( count, 1 );
+			light.W = mark + ( Math.Clamp( light.W, 0.0f, 1.0f ) * PortableSkyShare );
+
+			Put( pixels, ( ( y * width ) + x ) * 4, light );
 		}
 
 		made.Sheet = CoreRenderDevice.CreateTextureHalf( pixels, width, height );
 		made.SheetWidth = width;
 		made.SheetHeight = height;
+	}
+
+	//What of a portable sheet texel's fraction the sky seen takes: under one by enough that a half, a thirty-second
+	//apart at sixty-four, never rounds the mark up into the next face's
+	private const float PortableSkyShare = 0.9f;
+
+	//A sheet texel's face mark as a whole number, nought for a texel no face owns - see BakeSheet.FaceOf
+	private static int MarkAt( BakedLightingData data, int texel ) => (int)MathF.Round( (float)data.Sheet[( texel * 4 ) + 3] * 64.0f );
+
+	private static int Commonest( ReadOnlySpan<int> marks )
+	{
+		var best = marks[0];
+		var most = 0;
+
+		foreach ( var mark in marks )
+		{
+			var count = 0;
+			foreach ( var other in marks ) if ( other == mark ) count++;
+
+			if ( count > most || ( count == most && best == 0 ) )
+			{
+				best = mark;
+				most = count;
+			}
+		}
+
+		return best;
 	}
 
 	//Each layer a tile, as many to a row as fit: light and glow constants rgb, sky seen a; the bounce half below

@@ -267,9 +267,9 @@ internal static class BrowserDevice
 
 		if ( compare )
 		{
-			//A comparison sampler is asked a question, not filtered: the browser refuses
-			//a linear filter on one, and the shadow lookup does its own spreading anyway.
-			json.Append( ",\"compare\":\"less-equal\",\"magFilter\":\"nearest\",\"minFilter\":\"nearest\"" )
+			//Linear, as WebGPU and WebGL2 both allow on a comparison: each tap is the four texels' answers blended,
+			//which the shadow lookup's few taps need - nearest gave them a staircase a texel a step
+			json.Append( ",\"compare\":\"less-equal\",\"magFilter\":\"linear\",\"minFilter\":\"linear\"" )
 				.Append( ",\"mipmapFilter\":\"nearest\"" );
 		}
 		else

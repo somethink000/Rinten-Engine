@@ -25,6 +25,9 @@ public partial class Scene : GameObject
 	//Time in ms the last load spent building the object tree from the file's root objects
 	internal static double RootsReadMs;
 
+	//Whether a scene's own settings - physics mode, navmesh, bake - have been loaded into this one, so a later additive load is one on top
+	private bool settingsLoaded;
+
 	public bool Load( SceneLoadOptions options )
 	{
 		var sceneFile = options.GetSceneFile();
@@ -131,15 +134,21 @@ public partial class Scene : GameObject
 					/ System.Diagnostics.Stopwatch.Frequency;
 			}
 
+			//Additive into a scene nothing was loaded into - a built game's start, see GameInstance.OpenStartupScene - is the first
+			//scene, and its settings are the scene's; only one added on top of a loaded scene leaves them as they were
+			var onTop = options.IsAdditive && settingsLoaded;
+
 			if ( sceneFile.SceneProperties is not null )
 			{
 				//The physics mode is the scene's own: a scene added on top of it does not get to change what the loaded one simulates.
-				DeserializeProperties( sceneFile.SceneProperties, options.IsSystemScene, keepPhysicsMode: options.IsAdditive );
+				DeserializeProperties( sceneFile.SceneProperties, options.IsSystemScene, keepPhysicsMode: onTop );
 			}
+
+			if ( !options.IsSystemScene ) settingsLoaded = true;
 
 			//The scene was emptied above, so if the one loaded simulates differently the old world can go. Still inside the callback
 			//batch: the components that make bodies are only started when it ends, so they get a world of the right kind. See Deserialize.
-			if ( !options.IsAdditive && !options.IsSystemScene )
+			if ( !onTop && !options.IsSystemScene )
 			{
 				DropMismatchedPhysicsWorld();
 			}

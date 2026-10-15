@@ -9,6 +9,9 @@ internal class PostProcessLayers
 	/// <summary>Whether an effect this frame reads how far what moved moved - see BlitMode.WantsMotion.</summary>
 	public bool WantsMotion;
 
+	/// <summary>The bloom the portable frame draws itself, from Bloom's numbers - see CorePortableGlow.</summary>
+	public CorePortableGlow.Settings? Glow;
+
 	//Layers taken out of the stages by Clear, to be handed out again by CreateLayer: the same effects hang the same layers every frame.
 	private readonly Stack<PostProcessLayer> spare = new();
 
@@ -23,6 +26,7 @@ internal class PostProcessLayers
 		}
 
 		WantsMotion = false;
+		Glow = null;
 	}
 
 	/// <summary>Add a new post process layer to a specific stage</summary>

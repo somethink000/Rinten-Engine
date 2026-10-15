@@ -72,10 +72,26 @@ public static partial class TextRendering
 
 	static RealTimeSince _timeSinceCleanup;
 
+	//The fonts the cached text was set in - see FontManager.Generation.
+	static int fontGeneration = -1;
+
 	//Free old, unused textblocks (and their textures)
 	internal static void Tick()
 	{
 		Assert.False( Application.IsHeadless );
+
+		//A face came or went - on a page, one that was still downloading when the text was first set: what was
+		//set in a stand-in is set again, or text drawn every frame keeps the stand-in for good
+		var fonts = FontManager.Generation;
+
+		if ( fonts != fontGeneration )
+		{
+			fontGeneration = fonts;
+			Shaped.Clear();
+
+			foreach ( var item in Dictionary ) item.Value.Dispose();
+			Dictionary.Clear();
+		}
 
 		if ( _timeSinceCleanup < 0.5f ) return;
 		_timeSinceCleanup = 0;

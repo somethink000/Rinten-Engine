@@ -878,13 +878,49 @@ float3 SkyReflected( float3 direction, float roughness )
 //And the same maps read as plain depth - no compare - through their second place in the table, for
 //how far in front of a point what shades it stands; see VkTextures.ShadowMapCreate and ShadowBlocker.
 [[vk::binding(0,3)]] Sampler2DArray g_depthMaps[];
+#else
+//The portable frame has no table, so the sun's maps are bound where its frame set has room: the pages
+//twice over, as a restart bakes into the other, and the movers' - map 0, 1 and 2, see CoreSunPages.Write
+[[vk::binding(2,1)]] Sampler2DArrayShadow g_portablePages;
+[[vk::binding(10,1)]] Sampler2DArrayShadow g_portablePagesOther;
+[[vk::binding(11,1)]] Sampler2DArrayShadow g_portableMovers;
+
+//And the lamps' faces, the still world's and the movers' - map 3 and 4, see CoreLampMaps.Plan
+[[vk::binding(12,1)]] Sampler2DArrayShadow g_portableLamps;
+[[vk::binding(13,1)]] Sampler2DArrayShadow g_portableLampMovers;
 #endif
 
+//One compare against a shadow map (1 lit): out of the table, or in the portable frame out of the map's
+//binding - read with the implicit level, which is the only one GLSL ES has for a layered compare
+float ShadowCompare( uint map, float3 at, float compare )
+{
+#ifdef WEBGL
+	//GL keeps a picture's rows bottom first, so a map drawn the way every other device draws it is upside down here
+	at.y = 1.0 - at.y;
+#endif
+
+#ifdef PORTABLE
+	//Branches, not a choice of three: both sides of one are worked out, which would be every map read every tap
+	if ( map == 0u ) return g_portablePages.SampleCmp( at, compare );
+	if ( map == 1u ) return g_portablePagesOther.SampleCmp( at, compare );
+	if ( map == 2u ) return g_portableMovers.SampleCmp( at, compare );
+	if ( map == 3u ) return g_portableLamps.SampleCmp( at, compare );
+	return g_portableLampMovers.SampleCmp( at, compare );
+#else
+	return g_shadowMaps[map].SampleCmpLevelZero( at, compare );
+#endif
+}
+
 //CoreSunPages' layout: texels a page, pages a level across, and how far a level reads (ReachPages there),
-//which must agree or an edge tap lands on the torus's far side
+//which must agree or an edge tap lands on the torus's far side; the portable frame's pages are half as wide
+#ifdef PORTABLE
+static const float SunPageTexels = 16.0;
+static const float SunReachPages = 30.75;
+#else
 static const float SunPageTexels = 32.0;
-static const float SunPageGrid = 64.0;
 static const float SunReachPages = 30.875;
+#endif
+static const float SunPageGrid = 64.0;
 
 //And the map of what moves: texels a zone across.
 static const float MoverTexels = 1024.0;
@@ -898,11 +934,7 @@ static const float SunLiftTexels = 2.0;
 //One hard shadow compare (1 lit), against the receiver's plane via slope to avoid self-shadow streaks
 float ShadowSharp( uint map, float3 at, float compare, float2 slope )
 {
-#ifdef PORTABLE
-	return 1.0;
-#else
-	return g_shadowMaps[map].SampleCmpLevelZero( at, compare - ( 0.5 * ( abs( slope.x ) + abs( slope.y ) ) ) );
-#endif
+	return ShadowCompare( map, at, compare - ( 0.5 * ( abs( slope.x ) + abs( slope.y ) ) ) );
 }
 
 //The widest a shadow edge spreads each side, in the read map's texels - a lamp in a shade a metre from what it shades
@@ -926,10 +958,6 @@ void ShadowTurnAt( float2 screen )
 //agree, that's the final lit value and filtering is skipped. A filter no wider than the near ring needs no far one
 bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, float widest, out float lit )
 {
-#ifdef PORTABLE
-	lit = 1.0;
-	return false;
-#else
 	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
 
 	float least = 1.0;
@@ -948,20 +976,19 @@ bool ShadowEdge( uint map, float3 at, float compare, float texel, float2 slope, 
 		for ( uint k = 0u; k < 4u; ++k )
 		{
 			float2 o = float2( ( k & 1u ) != 0u ? reach : -reach, ( k & 2u ) != 0u ? reach : -reach );
-			float tap = g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+			float tap = ShadowCompare( map, at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
 
 			least = min( least, tap );
 			most = max( most, tap );
 		}
 	}
 
-	float e = g_shadowMaps[map].SampleCmpLevelZero( at, compare );
+	float e = ShadowCompare( map, at, compare );
 	least = min( least, e );
 	most = max( most, e );
 
 	lit = least;
 	return most - least >= 0.001;
-#endif
 }
 
 //PCSS blocker search: average occluder depth over nine gathers, a 3x3 spread half the softest edge wide, so a blocker
@@ -995,9 +1022,6 @@ float ShadowBlocker( uint depthMap, float3 at, float compare, float texel, float
 //spiral turned by g_shadowTurn, as a stretched grid would band; under half a texel ShadowSharp
 float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slope, float soft )
 {
-#ifdef PORTABLE
-	return 1.0;
-#else
 	if ( soft < 0.5 ) return ShadowSharp( map, at, compare, slope );
 
 	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
@@ -1018,7 +1042,7 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 			float2 turn = g_shadowTurn;
 			float2 o = float2( ( spot.x * turn.x ) - ( spot.y * turn.y ), ( spot.x * turn.y ) + ( spot.y * turn.x ) ) * soft;
 
-			spiral += g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+			spiral += ShadowCompare( map, at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
 		}
 
 		return spiral / float( Taps );
@@ -1037,79 +1061,37 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 		for ( uint i = 0u; i < 4u; i++ )
 		{
 			float2 o = ( float2( float( i ), float( j ) ) - 1.5 ) * apart;
-			lit += weights[i] * weights[j] * g_shadowMaps[map].SampleCmpLevelZero( at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+			lit += weights[i] * weights[j] * ShadowCompare( map, at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
 		}
 	}
 
 	return lit / 64.0;
-#endif
+}
+
+//Four filtered compares half a texel out each way, along the receiver's plane: each blends its four texels, so the
+//edge runs two texels wide for four reads - the portable frame's whole filter, see SunSoft
+float ShadowQuad( uint map, float3 at, float compare, float texel, float2 slope )
+{
+	compare -= 0.5 * ( abs( slope.x ) + abs( slope.y ) );
+
+	float lit = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 4u; ++k )
+	{
+		float2 o = float2( ( k & 1u ) != 0u ? 0.5 : -0.5, ( k & 2u ) != 0u ? 0.5 : -0.5 );
+		lit += ShadowCompare( map, at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );
+	}
+
+	return lit * 0.25;
 }
 
 //One tap for a point in the air, with no plane to lie along or step off; only VolumeFog asks
 float ShadowTap( uint map, float3 at, float compare )
 {
-#ifdef PORTABLE
-	return 1.0;
-#else
-	return g_shadowMaps[map].SampleCmpLevelZero( at, compare );
-#endif
+	return ShadowCompare( map, at, compare );
 }
 
-//Sun visibility (1 lit) from still-world pages and movers map; step off along the geometric normal
-#ifdef PORTABLE
-//The portable frame's sun: one map, the device's own, bound where the full frame binds nothing
-//- see CorePortableSun, which draws it and writes what this reads into the words the pages use.
-[[vk::binding(2,1)]] Sampler2DShadow g_sunShadow;
-
-//The portable frame's SunShadow: the same step off the surface and one tap held off the receiver's plane,
-//over one square instead of levels - see ShadowSharp
-float PortableSunShadow( float3 world, float3 normal, float3 step )
-{
-	float side = g_frame[0].sunPages.x;
-	float texels = g_frame[0].sunPages.y;
-	float zScale = g_frame[0].sunPages.w;
-
-	if ( side <= 0.0 || texels <= 0.0 ) return 1.0;
-
-	float texelWorld = side / texels;
-
-	float4 at = mul( float4( world + ( step * ( texelWorld * 1.5 ) ), 1.0 ), g_frame[0].sunToPages );
-	float2 uv = ( at.xy * 0.5 ) + 0.5;
-
-	//GL stores pictures bottom row first, so the top of the light's view is the bottom of the map
-#ifdef WEBGL
-	uv.y = 1.0 - uv.y;
-#endif
-
-	float edge = 2.0 / texels;
-	if ( any( uv < edge ) || any( uv > 1.0 - edge ) ) return 1.0;
-
-	//The receiver's plane as the pages have it: across and up span two over the side, along by depth scale
-	float3 facing = mul( float4( normal, 0.0 ), g_frame[0].sunToPages ).xyz;
-	float3 metres = float3( facing.xy * ( side * 0.5 ), facing.z / max( zScale, 1e-8 ) );
-	float2 tilt = metres.xy / max( -metres.z, 0.1 );
-
-	float perTexel = texelWorld * zScale;
-	float2 slope = tilt * perTexel;
-
-#ifdef WEBGL
-	slope.y = -slope.y;
-#endif
-
-	float compare = at.z - ( ShadowBiasTexels * perTexel ) - ( 0.5 * ( abs( slope.x ) + abs( slope.y ) ) );
-
-	if ( g_frame[0].shadow.x < 0.5 ) return g_sunShadow.SampleCmpLevelZero( uv, compare );
-
-	//Four filtered compares half a texel out each way: a soft edge two texels wide for four reads
-	float2 nudge = float2( 0.5, 0.5 ) / texels;
-	float lit = g_sunShadow.SampleCmpLevelZero( uv + float2( -nudge.x, -nudge.y ), compare - ( 0.5 * ( slope.x + slope.y ) ) );
-	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( nudge.x, -nudge.y ), compare + ( 0.5 * ( slope.x - slope.y ) ) );
-	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( -nudge.x, nudge.y ), compare + ( 0.5 * ( slope.y - slope.x ) ) );
-	lit += g_sunShadow.SampleCmpLevelZero( uv + float2( nudge.x, nudge.y ), compare + ( 0.5 * ( slope.x + slope.y ) ) );
-
-	return lit * 0.25;
-}
-#endif
 
 //The sun's angular radius as a tangent: an edge spreads this much per metre between receiver and caster
 static const float SunSourceTan = 0.004651;
@@ -1119,7 +1101,17 @@ static const float SunSourceTan = 0.004651;
 float SunSoft( uint map, uint depthMap, float3 tap, float compare, float texel, float2 slope, float texelWorld, float zScale )
 {
 	float quality = g_frame[0].shadow.x;
-	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, tap, compare, slope );
+
+#ifdef PORTABLE
+	//No depth to search for the blocker in, and a phone's budget: four filtered compares half a texel out, an edge two texels wide
+	if ( quality < 0.5 ) return ShadowSharp( map, tap, compare, slope );
+
+	return ShadowQuad( map, tap, compare, texel, slope );
+#else
+	if ( depthMap == 0u ) quality = 0.0;
+#endif
+
+	if ( quality < 0.5 ) return ShadowSharp( map, tap, compare, slope );
 
 	float lit;
 	if ( !ShadowEdge( map, tap, compare, texel, slope, quality < 1.5 ? 1.0 : ShadowSoftestTexels, lit ) ) return lit;
@@ -1213,8 +1205,6 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 #if defined( PORTABLE ) && defined( DEPTH_ONLY )
 	//A stage drawing into the map may not read it: the frame's set holds the map it is drawing into.
 	return 1.0;
-#elif defined( PORTABLE )
-	return PortableSunShadow( world, normal, step );
 #endif
 
 	float2 tilt = SunTilt( normal );
@@ -1235,9 +1225,6 @@ float SunBakedShade( float3 world, float3 normal, out float moved )
 {
 	moved = 0.0;
 
-#ifdef PORTABLE
-	return 0.0;
-#else
 	if ( !SunCasts() ) return 1.0;
 
 	float2 tilt = SunTilt( normal );
@@ -1245,7 +1232,6 @@ float SunBakedShade( float3 world, float3 normal, out float moved )
 	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * SunStill( world, normal, tilt, true );
 
 	return SunStill( world, normal, tilt, false ) * movers;
-#endif
 }
 
 #ifndef PORTABLE
@@ -1322,7 +1308,11 @@ float3 SunLevelView( float3 world, float3 normal )
 }
 
 //Lamp shadow map layout constants; must match CoreLampMaps
+#ifdef PORTABLE
+static const float LampLayerTexels = 1024.0;
+#else
 static const float LampLayerTexels = 2048.0;
+#endif
 static const float LampGuardTexels = 4.0;
 
 //A lamp read's step and bias in texels of a 512 face whatever its size, so in metres; per-texel halving
@@ -1341,12 +1331,19 @@ void LampAxes( float3 forward, out float3 right, out float3 up )
 	up = normalize( cross( forward, right ) );
 }
 
-#ifndef PORTABLE
 //Lamp shadow from one map, softened by the lamp's source width (light.cone.y), PCSS-style
 float LampLit( uint map, uint depthMap, float3 at, float compare, float texel, float2 slope, Light light,
 	float along, float far, float b, float texelWorld )
 {
 	float quality = g_frame[0].shadow.x;
+
+#ifdef PORTABLE
+	//As the sun's: four filtered compares, or one - see SunSoft
+	if ( quality < 0.5 ) return ShadowSharp( map, at, compare, slope );
+
+	return ShadowQuad( map, at, compare, texel, slope );
+#endif
+
 	if ( depthMap == 0u || quality < 0.5 ) return ShadowSharp( map, at, compare, slope );
 
 	float lit;
@@ -1361,7 +1358,6 @@ float LampLit( uint map, uint depthMap, float3 at, float compare, float texel, f
 
 	return ShadowFilter( map, at, compare, texel, slope, clamp( soft, 0.0, ShadowSoftestTexels ) );
 }
-#endif
 
 //Where a point falls in a lamp's maps: the face, the tap, its depth to compare and how the receiver slopes
 struct LampTap
@@ -1376,7 +1372,6 @@ struct LampTap
 	float texelWorld;
 };
 
-#ifndef PORTABLE
 //The face chosen for the stepped lookup point; false where the lamp has no faces or the point is outside them
 bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float distance, out LampTap t )
 {
@@ -1461,12 +1456,12 @@ float LampMovers( LampTap t, Light light )
 	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), t.at, t.compare, 1.0 / LampLayerTexels, t.slope,
 		light, t.along, t.far, t.b, t.texelWorld );
 }
-#endif
 
 //Lamp visibility (1 lit) from its cube faces; face chosen for the stepped lookup point
 float LampShadow( float3 world, float3 normal, float3 step, Light light, float distance )
 {
-#ifdef PORTABLE
+#if defined( PORTABLE ) && defined( DEPTH_ONLY )
+	//A stage drawing into the maps may not read them - see SunShadow
 	return 1.0;
 #else
 	LampTap t;
@@ -1483,9 +1478,6 @@ float LampBakedShade( float3 world, float3 normal, Light light, float distance, 
 {
 	moved = 0.0;
 
-#ifdef PORTABLE
-	return 0.0;
-#else
 	LampTap t;
 	if ( !LampTapOf( world, normal, normal, light, distance, t ) ) return 1.0;
 
@@ -1493,7 +1485,6 @@ float LampBakedShade( float3 world, float3 normal, Light light, float distance, 
 	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * LampStill( t, light );
 
 	return ShadowSharp( uint( g_frame[0].sunMaps.w ), t.at, t.compare, t.slope ) * movers;
-#endif
 }
 
 //The same, stepped off along the normal - what every surface wants.
@@ -2699,7 +2690,12 @@ float3 EngineFinishToScreen( float3 colour, float4 position )
 
 float3 FinishToScreen( float3 colour )
 {
-	return EngineTonemap( colour * g_frame[0].finish.x, g_frame[0].finish.y );
+	float3 exposed = colour * g_frame[0].finish.x;
+
+	//A curve below nought: the glow's compose curves it, so this keeps light past white as x / (1 + x) - see glow.slang
+	if ( g_frame[0].finish.y < -0.5 ) return max( exposed, 0.0 ) / ( 1.0 + max( exposed, 0.0 ) );
+
+	return EngineTonemap( exposed, g_frame[0].finish.y );
 }
 
 #endif

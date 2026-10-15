@@ -146,6 +146,33 @@ internal static unsafe class VkPictures
 		}
 	}
 
+	//The same, in a format named outright - the screen's, for a pass whose pipelines were made for the screen
+	internal static ulong AcquireIn( Format format, uint width, uint height )
+	{
+		lock ( VkDevice.renderLock )
+		{
+			if ( !VkDevice.Ready ) return 0;
+
+			foreach ( var one in all.Values )
+			{
+				if ( one.Held || one.Format != format || one.Levels != 1 || one.Storage ) continue;
+				if ( one.Extent.Width != width || one.Extent.Height != height ) continue;
+
+				one.Held = true;
+				return one.Id;
+			}
+
+			var made = Make( format, new Extent2D( width, height ), 1, false );
+
+			if ( made is null ) return 0;
+
+			made.Held = true;
+			all[made.Id] = made;
+
+			return made.Id;
+		}
+	}
+
 	//Given back: the next request of the same shape may have it.
 	internal static void Release( ulong id )
 	{

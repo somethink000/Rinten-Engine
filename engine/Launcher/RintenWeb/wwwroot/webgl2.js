@@ -286,6 +286,9 @@
 
 	//--- textures ---------------------------------------------------------------
 
+	//The engine's bit for a texture read as layers even with one - must match BrowserDevice.TextureUse.Layered
+	var LayeredUse = 1 << 20;
+
 	//WebGPU's format names, as WebGL's sized formats: internal, format, type.
 	function formatOf(name, renderable) {
 		if (blocks && blocks[name] !== undefined)
@@ -315,7 +318,8 @@
 		this.width = width;
 		this.height = height;
 		this.layers = Math.max(1, layers || 1);
-		this.target = this.layers > 1 ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D;
+		//An array whatever its layers where the engine asked for one - a shadow map read as layers - see LayeredUse
+		this.target = this.layers > 1 || (usage & LayeredUse) !== 0 ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D;
 		this.format = formatOf(format, (usage & 16) !== 0);
 		this.framebuffers = [];
 
@@ -333,7 +337,7 @@
 
 		gl.bindTexture(this.target, this.gl);
 
-		if (this.layers > 1)
+		if (this.target === gl.TEXTURE_2D_ARRAY)
 			gl.texStorage3D(this.target, Math.max(1, mips), this.format.internal, width, height, this.layers);
 		else
 			gl.texStorage2D(this.target, Math.max(1, mips), this.format.internal, width, height);
@@ -367,10 +371,12 @@
 	}
 
 	//A view is the texture and its first level; WebGL binds textures, and nothing views part of one otherwise
-	function createView(texture, format, aspect, baseMip, mipCount) {
+	//A one-layer view of an array ("2d") is what a pass draws into that layer through; others are the whole texture
+	function createView(texture, format, aspect, baseMip, mipCount, baseLayer, dimension) {
 		var t = get(texture);
 		if (!t) return 0;
-		return alloc({ texture: t, mip: baseMip || 0 });
+		var layer = dimension === "2d" && t.target === gl.TEXTURE_2D_ARRAY ? (baseLayer || 0) : -1;
+		return alloc({ texture: t, mip: baseMip || 0, layer: layer });
 	}
 
 	function writeTexture(texture, mip, x, y, width, height, bytesPerRow, bytes) {
@@ -790,7 +796,7 @@
 	function framebufferKey(colours, depth) {
 		var key = "";
 		for (var c of colours) key += (c ? idOf(c.texture) + ":" + c.mip : "-") + ",";
-		return key + (depth ? idOf(depth.texture) + ":" + depth.mip : "-");
+		return key + (depth ? idOf(depth.texture) + ":" + depth.mip + ":" + depth.layer : "-");
 	}
 
 	var nextId = 1;
@@ -842,7 +848,8 @@
 		gl.drawBuffers(buffers.length ? buffers : [gl.NONE]);
 
 		if (depth) {
-			if (depth.texture.layers > 1) attachMultiview(gl.DEPTH_ATTACHMENT, depth);
+			if (depth.layer >= 0) gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, depth.texture.gl, depth.mip, depth.layer);
+			else if (depth.texture.layers > 1) attachMultiview(gl.DEPTH_ATTACHMENT, depth);
 			else if (depth.texture.renderbuffer) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth.texture.renderbuffer);
 			else gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depth.texture.gl, depth.mip);
 			depth.texture.framebuffers.push(key);
@@ -1080,7 +1087,7 @@
 					gl.activeTexture(gl.TEXTURE0 + s.unit);
 					units.active = s.unit;
 				}
-				gl.bindTexture(gl.TEXTURE_2D, texture);
+				gl.bindTexture(e.view.texture.target || gl.TEXTURE_2D, texture);
 				units.textures[s.unit] = texture;
 			}
 			if (units.samplers[s.unit] !== sampler) {
@@ -1183,6 +1190,14 @@
 		else gl.drawElements(p.mode, indexCount, pass.indexType, at);
 	}
 
+	//The depth under the scissor back to the far plane - a page of a shadow map baked again, see BrowserSwapchain.ShadowArea
+	function clearDepth() {
+		if (!pass) return;
+		gl.depthMask(true);
+		current.depthWrite = true;
+		gl.clearBufferfv(gl.DEPTH, 0, [1]);
+	}
+
 	function endPass(passHandle) {
 		if (pass && pass.resolves) resolvePass(pass);
 		pass = null;
@@ -1206,6 +1221,7 @@
 					case 6: setScissorRect(passHandle, w[i + 1], w[i + 2], w[i + 3], w[i + 4]); i += 5; break;
 					case 7: draw(passHandle, w[i + 1], w[i + 2], w[i + 3], w[i + 4]); i += 5; break;
 					case 8: drawIndexed(passHandle, w[i + 1], w[i + 2], w[i + 3], w[i + 4], w[i + 5]); i += 6; break;
+					case 10: clearDepth(); i += 1; break;
 					case 9: {
 						var b = get(w[i + 1]), size = w[i + 3];
 						if (b) b.write(w[i + 2] >>> 0, v.subarray((i + 4) * 4, (i + 4) * 4 + size));

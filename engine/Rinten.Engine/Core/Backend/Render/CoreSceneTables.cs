@@ -1361,6 +1361,11 @@ internal sealed class CoreSceneTables
 				entry.SaysPlan = CoreShaderParams.PlanOf( says );
 			}
 		}
+		else if ( count > 0 && CoreResources.Declared( overShader ?? mesh.Meshes[0].Shader ) is { } declared && CoreShaderParams.AnyAttribute( declared ) )
+		{
+			//Nothing sets them, so they are what the shader declares: nought would be a particle's emission off, drawing it black
+			CoreShaderParams.PlanOf( declared ).Defaults.AsSpan( 0, said.Length ).CopyTo( said );
+		}
 
 		var previous = record.World;
 		if ( previous == default ) previous = world;

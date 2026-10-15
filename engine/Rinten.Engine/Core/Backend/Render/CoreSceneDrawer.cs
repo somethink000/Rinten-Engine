@@ -833,57 +833,6 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.UseFrame( was );
 	}
 
-	//Hash of what DrawLooseView would draw, so an unchanged shadow map is skipped; live if it can't vouch
-	private ulong LooseViewSignature( in CoreMeshRender.ViewSetup view, out bool live )
-	{
-		live = false;
-
-		if ( frameNow is null ) return 0;
-
-		Span<System.Numerics.Vector4> planes = stackalloc System.Numerics.Vector4[6]
-		{
-			view.Plane0, view.Plane1, view.Plane2, view.Plane3, view.Plane4, view.Plane5,
-		};
-
-		var hash = 14695981039346656037ul;
-		var count = 0;
-
-		foreach ( ref readonly var queued in CollectionsMarshal.AsSpan( opaque ) )
-		{
-			if ( !CastsInto( in queued, view.Casters, planes ) ) continue;
-
-			//A shader bending a still thing - wind in leaves - is not a caster moving: the sun's pages keep it as it stands too
-			if ( queued.Pose is not null || queued.Morphs is not null || queued.Skinned
-				|| queued.Instances > 1 || queued.CountFrom != 0 || queued.ArgsBuffer != 0 )
-			{
-				live = true;
-				return 0;
-			}
-
-			//The mesh by its buffers as well as by itself: a mesh edited in place - an
-			//editable one, while it is being worked on - is new buffers under the same object.
-			var mesh = queued.Mesh;
-
-			count++;
-			hash = ( hash ^ (ulong)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( mesh ) ) * 1099511628211ul;
-			hash = ( hash ^ mesh.Vertices ) * 1099511628211ul;
-			hash = ( hash ^ mesh.Indices ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolVertexAt ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolIndexAt ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)mesh.PoolVertexCount ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.Part.GetHashCode() ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.Kind.GetHashCode() ) * 1099511628211ul;
-			hash = ( hash ^ (ulong)queued.World.GetHashCode() ) * 1099511628211ul;
-
-			foreach ( var word in MemoryMarshal.Cast<byte, ulong>( pushArena.AsSpan( queued.PushAt, CoreSceneRenderer.PushSize ) ) )
-				hash = ( hash ^ word ) * 1099511628211ul;
-		}
-
-		return ( hash ^ (ulong)count ) * 1099511628211ul;
-	}
-
-	private CorePortableSun.CasterSignature looseSignature;
-
 	//Whether a classic draw casts into a light's view: it casts, the view takes what it is, and it stands inside.
 	private bool CastsInto( in Queued queued, int casters, ReadOnlySpan<System.Numerics.Vector4> planes )
 	{
@@ -1583,6 +1532,10 @@ internal sealed partial class CoreSceneDrawer
 	//The sky's light on the card for this drawing's views - see CoreSkyLight
 	private readonly CoreSkyLight skyLight = new();
 
+	//The portable frame's bloom, and whether this frame draws it - see CorePortableGlow
+	private readonly CorePortableGlow glow = new();
+	private bool glowing;
+
 	//The sky table's bindless index, one as a flag in the portable frame, nought for none
 	private int SkyTableSlot()
 	{
@@ -1625,7 +1578,6 @@ internal sealed partial class CoreSceneDrawer
 	private readonly CoreLampMaps lampMaps;
 
 	//The sun's one map in the portable frame, which has neither of those - see RenderTier.
-	private readonly CorePortableSun portableSun = new();
 
 	//The classic draws a light's view takes, handed over once rather than as a delegate a frame - see DrawLooseView
 	private readonly CoreMeshRender.LooseView looseView;
@@ -1639,7 +1591,6 @@ internal sealed partial class CoreSceneDrawer
 		sunPages = new CoreSunPages( casters );
 		lampMaps = new CoreLampMaps( casters );
 		looseView = DrawLooseView;
-		looseSignature = LooseViewSignature;
 	}
 
 	private static ulong composePipeline;
@@ -2020,6 +1971,7 @@ internal sealed partial class CoreSceneDrawer
 		skyTablePipelines.Clear();
 		CoreSkyLight.ForgetPipelines();
 		CoreLight2D.ForgetPipelines();
+		CorePortableGlow.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
 		pyramidPipeline = 0;
@@ -2032,6 +1984,7 @@ internal sealed partial class CoreSceneDrawer
 	{
 		DropPostInputs();
 		skyLight.Release();
+		glow.Release();
 		upscaler.Release();
 		probeGrid.Release();
 
@@ -2222,13 +2175,17 @@ internal sealed partial class CoreSceneDrawer
 		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
 		skyLight.Lay( frame );
 
+		//The portable frame's bloom: the world drawn aside and kept past white, its curve left to the glow's compose
+		glowing = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
+			camera.PostProcess?.Glow is { } wantedGlow && glow.Open( wantedGlow, exposure );
+
 		//Upload the point effects the world's shading may carry, whichever way the frame ends up drawn
-		foldKey = FoldChain( camera );
+		foldKey = glowing ? null : FoldChain( camera );
 
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
 
-		CoreSceneRenderer.SetFinish( frame, exposure, frameCurve, Math.Max( foldAt, 0 ) );
+		CoreSceneRenderer.SetFinish( frame, exposure, glowing ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
 
 		//Next frame's exposure, taken here since the compose may not run when shading straight to screen
 		exposure = Rinten.Rendering.DrawSettings.Exposure;
@@ -2293,8 +2250,8 @@ internal sealed partial class CoreSceneDrawer
 
 		var meshes = !everything && !overlayOnly && tables is not null && CoreMeshRender.EnsurePipelines();
 
-		//Note table changes for the still-world shadow maps; full frame only, the portable one has no pages
-		if ( !overlayOnly && !CoreRenderDevice.PortableFrame )
+		//Note table changes for the still-world shadow maps
+		if ( !overlayOnly )
 		{
 			casters.Note( tables );
 			sunPages.Note();
@@ -2315,22 +2272,15 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		if ( CoreRenderDevice.PortableFrame )
-		{
-			//One square of depth about the camera instead, and no lamp casts - see CorePortableSun.
-			portableSun.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 64.0f,
-				position, forward, far );
-		}
-		else
-		{
-			sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
-				Rinten.Rendering.DrawSettings.MeshLodPixels );
+		sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
+			Rinten.Rendering.DrawSettings.MeshLodPixels );
 
-			lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
-				!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
-				//The frustum is one eye's, so a headset passes none, or faces only the other eye sees go undrawn
-				position, looseErrorScale, BothEyes ? default : planes, in clipToWorld );
-		}
+		lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
+			!overlayOnly, Rinten.Rendering.DrawSettings.MeshLodPixels, CoreMeshShaders.MaxViews - 1 - sunPages.ViewCount,
+			//The frustum is one eye's, so a headset passes none, or faces only the other eye sees go undrawn
+			position, looseErrorScale, BothEyes ? default : planes, in clipToWorld );
+
+		if ( CoreRenderDevice.PortableFrame ) CoreSceneRenderer.LampFacesIntoBlock( frame );
 
 		CoreRenderDevice.SetupFrame( frame );
 		if ( BothEyes ) SetupSecondEye( frame );
@@ -2670,15 +2620,15 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 		}
 
-		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn
+		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn - but the portable
+		//frame has no depth block, and draws its sun's pages here the classic way, before the world reads them
 		if ( !lightsDrawn )
 		{
-			sunPages.Draw( null, 1, null );
-			lampMaps.Draw( null, 1, null );
-		}
+			var portable = CoreRenderDevice.PortableFrame && !overlayOnly ? looseView : null;
 
-		//The portable frame has no depth block, so its sun draws here before the world reads it
-		if ( CoreRenderDevice.PortableFrame && !overlayOnly ) portableSun.Draw( looseView, looseSignature );
+			sunPages.Draw( null, 1, portable );
+			lampMaps.Draw( null, 1 + sunPages.ViewCount, portable );
+		}
 
 		//The clusters' pixels first, a material at a time over the depth of material numbers; then the world's
 		//own picture opens over the real depth, keeping what was shaded, for everything drawn the classic way.
@@ -2738,7 +2688,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			//No sky and nothing to fill what the world left: the clear its own picture would have had
 			CoreRenderDevice.ZoneBegin( "background" );
-			DrawBackground( camera, frameCurve );
+			DrawBackground( camera, glowing ? CorePortableGlow.KeepCurve : frameCurve );
 			CoreRenderDevice.ZoneEnd();
 		}
 
@@ -2782,6 +2732,8 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.ZoneBegin( "world overlay" );
 		DrawLayer( overlayLayer );
 		CoreRenderDevice.ZoneEnd();
+
+		if ( glowing ) glow.Finish( frameCurve );
 
 		if ( offscreen )
 		{
@@ -5457,7 +5409,7 @@ internal sealed partial class CoreSceneDrawer
 
 	private Vertex[] stripScratch = System.Array.Empty<Vertex>();
 
-	//A headset eye drawn beside the other in one engine frame; CorePortableSun and BuildFrame share by the same test
+	//A headset eye drawn beside the other in one engine frame; BuildFrame shares by the same test
 	private static bool SharingViews => CoreRender.SharingViews && Rinten.VR.VRSystem.IsRendering;
 
 	//Which engine frame the sky's table was last drawn in, or -1 for none.

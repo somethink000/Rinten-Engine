@@ -386,7 +386,7 @@ internal static unsafe class CoreSceneRenderer
 	private static long sharedFrame = -1;
 
 	//Whether this is one of a headset's eyes. True for exactly the span the eyes are drawn in, so a camera drawing
-	//into a texture builds its own - the same scoping CorePortableSun shares its square by, and for the same reason.
+	//into a texture builds its own.
 	private static bool Sharing => CoreRender.SharingViews && Rinten.VR.VRSystem.IsRendering;
 	private static readonly List<(Light Light, SceneLight Loose, float Reach)> lightScratch = new();
 	private static readonly List<Light> lightsScratch = new();
@@ -631,6 +631,23 @@ internal static unsafe class CoreSceneRenderer
 		AreaOn = shaped && CoreAreaLights.Write( block );
 
 		CoreRenderDevice.ZoneEnd();
+	}
+
+	//Where each lamp's faces are in the lamps' maps, as CoreLampMaps.Plan wrote them into the records after the block took its copy -
+	//into the block's copy too, which is where the portable frame reads its lights
+	internal static void LampFacesIntoBlock( float[] block )
+	{
+		var count = Math.Min( LightsInFrame, MaxLights );
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var from = i * CoreLights.LightFloats;
+			var into = LightsAt + from;
+
+			block[into + 14] = LightBlock[from + 14];
+			block[into + 15] = LightBlock[from + 15];
+			block[into + 17] = LightBlock[from + 17];
+		}
 	}
 
 	//The flat ambient light the scene's components ask for - see AmbientAt.
@@ -969,33 +986,6 @@ internal static unsafe class CoreSceneRenderer
 		frame[MoverZoneAt + 3] = 0.0f;
 
 		MoversOn = moverSide > 0.0f;
-	}
-
-	//Writes the portable frame's single sun shadow map into the pages' slots; zero width means no map
-	internal static void SetPortableSun( float[] frame, System.Numerics.Matrix4x4 worldToClip, float side, int texels, float zScale )
-	{
-		if ( frame is null || frame.Length < FrameFloats ) return;
-
-		var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes( frame.AsSpan() );
-		System.Runtime.InteropServices.MemoryMarshal.Write( bytes[( SunToPagesAt * 4 )..], in worldToClip );
-
-		frame[SunPagesAt + 0] = side;
-		frame[SunPagesAt + 1] = texels;
-		frame[SunPagesAt + 2] = 0.0f;
-		frame[SunPagesAt + 3] = zScale;
-
-		frame[SunEyeAt + 0] = 0.0f;
-		frame[SunEyeAt + 1] = 0.0f;
-		frame[SunEyeAt + 2] = 0.0f;
-		frame[SunEyeAt + 3] = side > 0.0f ? 1.0f : 0.0f;
-
-		for ( var i = 0; i < 4; i++ )
-		{
-			frame[SunMapsAt + i] = 0.0f;
-			frame[MoverZoneAt + i] = 0.0f;
-		}
-
-		MoversOn = false;
 	}
 
 	//Lamp faces' table indices, compared and as depth, and the movers map's the same - see CoreLampMaps,

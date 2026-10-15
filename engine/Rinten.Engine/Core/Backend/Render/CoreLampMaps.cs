@@ -7,9 +7,9 @@ namespace Rinten;
 //Faces sized by screen coverage, only visible faces drawn, with a Guard border for filtering
 internal sealed class CoreLampMaps : IDisposable
 {
-	//Layer width (finest face), coarsest face and guard border; match LampLayerTexels/LampGuardTexels
-	internal const int Side = 2048;
-	internal const int Smallest = 256;
+	//Layer width (finest face) and guard border; match LampLayerTexels/LampGuardTexels - the portable frame's layer is
+	//half as wide, a quarter of the memory, its faces the same classes of it
+	private static int Side => CoreRenderDevice.PortableFrame ? 1024 : 2048;
 	internal const int Guard = 4;
 
 	//How many sizes a face comes in: Side halved this many times less one.
@@ -278,6 +278,16 @@ internal sealed class CoreLampMaps : IDisposable
 				records[at + 14] = lamp.OldFirst;
 				records[at + 15] = lamp.OldClass;
 			}
+		}
+
+		//The portable frame binds the two in its own places 3 and 4 and reads them by those - see ShadowCompare in frame.slang
+		if ( CoreRenderDevice.PortableFrame )
+		{
+			CoreRenderDevice.PortableShadowMap( 3, map );
+			CoreRenderDevice.PortableShadowMap( 4, movers );
+
+			CoreSceneRenderer.SetLampMaps( frame, map != 0 ? 3u : 0u, 0u, movers != 0 ? 4u : 0u, 0u );
+			return;
 		}
 
 		CoreSceneRenderer.SetLampMaps( frame, CoreRenderDevice.ShadowMapIndex( map ), CoreRenderDevice.ShadowMapIndex( map, depth: true ),

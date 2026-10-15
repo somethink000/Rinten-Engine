@@ -928,6 +928,7 @@ internal static class EngineShaders
 	internal const string Billboard = "shaders/engine/billboard.slang";
 	internal const string Ui = "shaders/engine/ui.slang";
 	internal const string Background = "shaders/engine/background.slang";
+	internal const string Glow = "shaders/engine/glow.slang";
 
 	internal const string Velocity = "shaders/engine/velocity.slang";
 	internal const string Compose = "shaders/engine/compose.slang";
@@ -1019,6 +1020,8 @@ internal static class EngineShaders
 		//panels and no ScreenPanel in a browser headset
 		( Ui, UiWorld, Draws, true ),
 		( Background, "", Draws, true ),
+		//The portable frame's bloom, in pixel passes - see CorePortableGlow
+		( Glow, "", GlowDraws, true ),
 		( Velocity, "", Draws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),
@@ -1096,6 +1099,15 @@ internal static class EngineShaders
 		("EasuCs", CoreShaderCompiler.Stage.Compute),
 		("SharpenCs", CoreShaderCompiler.Stage.Compute),
 		("CopyCs", CoreShaderCompiler.Stage.Compute),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] GlowDraws =
+	[
+		("MainVs", CoreShaderCompiler.Stage.Vertex),
+		("BrightPs", CoreShaderCompiler.Stage.Pixel),
+		("DownPs", CoreShaderCompiler.Stage.Pixel),
+		("UpPs", CoreShaderCompiler.Stage.Pixel),
+		("ComposePs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =

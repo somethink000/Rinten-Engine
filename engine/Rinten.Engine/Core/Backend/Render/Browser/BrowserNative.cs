@@ -64,7 +64,7 @@ internal static class BrowserNative
 	//-- textures ----------------------------------------------------------------
 
 	internal static Func<int, int, int, string, int, string, int, int, int> CreateTextureFn;
-	internal static Func<int, string, string, int, int, int> CreateViewFn;
+	internal static Func<int, string, string, int, int, int, string, int> CreateViewFn;
 	internal static WriteTextureDelegate WriteTextureFn;
 
 	//A picture's Basis blocks, the format to turn them into and its block size - see TranscodeInto.
@@ -177,8 +177,10 @@ internal static class BrowserNative
 		int layers = 1, int samples = 1 )
 		=> CreateTextureFn( width, height, mips, format, usage, label, layers, samples );
 
-	internal static int CreateView( int texture, string format, string aspect, int baseMip, int mipCount )
-		=> CreateViewFn( texture, format, aspect, baseMip, mipCount );
+	//A dimension of "2d" is one layer, baseLayer, of an array; "2d-array" every layer as one; empty the texture's own
+	internal static int CreateView( int texture, string format, string aspect, int baseMip, int mipCount,
+		int baseLayer = 0, string dimension = "" )
+		=> CreateViewFn( texture, format, aspect, baseMip, mipCount, baseLayer, dimension );
 
 	internal static void WriteTexture( int texture, int mip, int x, int y,
 		int width, int height, int bytesPerRow, Span<byte> bytes )
@@ -233,6 +235,7 @@ internal static class BrowserNative
 	private const int OpDraw = 7;
 	private const int OpDrawIndexed = 8;
 	private const int OpWrite = 9;
+	private const int OpClearDepth = 10;
 
 	//The largest write carried in the words; anything larger goes on its own.
 	private const int LargestWritten = 64 * 1024;
@@ -326,6 +329,13 @@ internal static class BrowserNative
 		w[4] = BitConverter.SingleToInt32Bits( height );
 		w[5] = BitConverter.SingleToInt32Bits( minDepth );
 		w[6] = BitConverter.SingleToInt32Bits( maxDepth );
+	}
+
+	//The depth under the scissor back to the far plane - see BrowserSwapchain.ShadowArea
+	internal static void ClearDepth( int pass )
+	{
+		var w = Words( pass, 1 );
+		w[0] = OpClearDepth;
 	}
 
 	internal static void SetScissorRect( int pass, int x, int y, int width, int height )

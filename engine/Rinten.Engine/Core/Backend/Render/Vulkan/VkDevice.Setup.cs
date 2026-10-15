@@ -1168,17 +1168,6 @@ internal static unsafe partial class VkDevice
 
 		shadowDepthSampler = made;
 
-		//And the portable frame's, texel by texel: a phone need not filter depth; the shader spreads its own taps
-		compareInfo.CompareEnable = true;
-		compareInfo.MagFilter = Filter.Nearest;
-		compareInfo.MinFilter = Filter.Nearest;
-		compareInfo.AddressModeU = SamplerAddressMode.ClampToEdge;
-		compareInfo.AddressModeV = SamplerAddressMode.ClampToEdge;
-
-		if ( vk.CreateSampler( device, &compareInfo, null, &made ) != Result.Success ) return false;
-
-		portableShadowSampler = made;
-
 		//Set 0, a material: four images then the numbers.
 		{
 			var bindings = stackalloc DescriptorSetLayoutBinding[(int)MaterialTextures + 1];
@@ -1341,7 +1330,7 @@ internal static unsafe partial class VkDevice
 
 		//Set 1: the bones of this draw, and the camera and lights of this frame.
 		{
-			var frameBindings = stackalloc DescriptorSetLayoutBinding[8];
+			var frameBindings = stackalloc DescriptorSetLayoutBinding[12];
 
 			//Read by a pixel too where the slot holds a run of sprites - the portable frame's, see sprite_ps.shader
 			frameBindings[0].Binding = 0;
@@ -1369,7 +1358,7 @@ internal static unsafe partial class VkDevice
 			frameBindings[3].DescriptorCount = 1;
 			frameBindings[3].StageFlags = DrawStages | ShaderStageFlags.ComputeBit;
 
-			//And in the portable frame the sun's one map, which has no table to be read out of there - see portableSunMap.
+			//And in the portable frame the sun's pages, which have no table to be read out of there - see PortableShadowMap.
 			frameBindings[4].Binding = 2;
 			frameBindings[4].DescriptorType = DescriptorType.CombinedImageSampler;
 			frameBindings[4].DescriptorCount = 1;
@@ -1390,10 +1379,19 @@ internal static unsafe partial class VkDevice
 				frameBindings[i].StageFlags = ShaderStageFlags.FragmentBit;
 			}
 
+			//And the other shadow maps beside the sun's pages in 2: its other pages, its movers', the lamps' and theirs - see g_portablePages in frame.slang
+			for ( var i = 8; i < 12; ++i )
+			{
+				frameBindings[i].Binding = (uint)( i + 2 );
+				frameBindings[i].DescriptorType = DescriptorType.CombinedImageSampler;
+				frameBindings[i].DescriptorCount = 1;
+				frameBindings[i].StageFlags = ShaderStageFlags.FragmentBit;
+			}
+
 			var boneLayoutInfo = new DescriptorSetLayoutCreateInfo
 			{
 				SType = StructureType.DescriptorSetLayoutCreateInfo,
-				BindingCount = Tier == RenderTier.Portable ? 8u : 4u,
+				BindingCount = Tier == RenderTier.Portable ? 12u : 4u,
 				PBindings = frameBindings,
 			};
 
@@ -1467,8 +1465,9 @@ internal static unsafe partial class VkDevice
 		CoreXr.Shutdown();
 
 		//The portable frame's sun map is the device's own: into the graveyard before it is drained
-		if ( portableSunMap != 0 ) VkTextures.ShadowMapDestroy( portableSunMap );
-		portableSunMap = 0;
+		if ( portableNoShadow != 0 ) VkTextures.ShadowMapDestroy( portableNoShadow );
+		portableNoShadow = 0;
+		Array.Clear( portableShadows );
 
 		VkRays.Destroy();
 
@@ -1518,9 +1517,7 @@ internal static unsafe partial class VkDevice
 		if ( pointSampler.Handle != 0 ) vk.DestroySampler( device, pointSampler, null );
 		if ( shadowSampler.Handle != 0 ) vk.DestroySampler( device, shadowSampler, null );
 		shadowSampler = default;
-		if ( portableShadowSampler.Handle != 0 ) vk.DestroySampler( device, portableShadowSampler, null );
-		portableShadowSampler = default;
-		portableSunMap = 0;
+		portableNoShadow = 0;
 
 		if ( shadowDepthSampler.Handle != 0 ) vk.DestroySampler( device, shadowDepthSampler, null );
 		shadowDepthSampler = default;

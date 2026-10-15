@@ -265,14 +265,23 @@ internal static unsafe partial class VkDevice
 	//Shadow map sampler: depth compare, repeat addressing since sun pages wrap as a torus
 	internal static Sampler shadowSampler;
 
-	//The portable frame's single sun shadow map, bound at frame set binding 2. Zero in the full frame
-	internal static ulong portableSunMap;
+	//The portable frame's shadow maps by slot, bound at the frame set's PortableShadowBindings as it has no table - see ShadowCompare
+	internal static readonly ulong[] portableShadows = new ulong[5];
+	internal static readonly uint[] PortableShadowBindings = [2, 10, 11, 12, 13];
 
-	//Texels across it.
-	internal const int PortableSunSide = 2048;
+	//What those bindings hold where there is no map yet: one texel, never read, as the frame block says nothing is whole
+	internal static ulong portableNoShadow;
 
-	//What it is read with: compared, texel by texel, clamped.
-	internal static Sampler portableShadowSampler;
+	//Whether a slot holds another map than the current frame set was written with - see VkFrame.BindFrameSet
+	internal static bool portableShadowsMoved;
+
+	internal static void PortableShadowMap( int slot, ulong map )
+	{
+		if ( slot < 0 || slot >= portableShadows.Length || portableShadows[slot] == map ) return;
+
+		portableShadows[slot] = map;
+		portableShadowsMoved = true;
+	}
 
 	//The same maps read as plain depth - the nearest texel, no compare, wrapped the same way - for how far the surface
 	//in front of a pixel is, which is what a shadow's softness is worked out from. See ShadowSoft in frame.slang.
@@ -968,7 +977,7 @@ internal static unsafe partial class VkDevice
 	{
 		var poolSizes = stackalloc DescriptorPoolSize[5];
 
-		//And four a frame set in the portable frame: its sun map, sky table and bake's two pictures - see portableSunMap.
+		//And eight a frame set in the portable frame: its five shadow maps, sky table and bake's two pictures - see portableShadows.
 		poolSizes[0].Type = DescriptorType.CombinedImageSampler;
 		poolSizes[0].DescriptorCount = ( TextureSets * MaterialTextures ) + 128;
 

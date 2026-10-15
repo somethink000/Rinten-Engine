@@ -644,6 +644,13 @@ internal static unsafe class CoreRenderDevice
 		=> CoreNative.Available && CoreRender.PictureBegin( picture, level,
 			clear.r, clear.g, clear.b, clear.a, clearFirst ? 1 : discard ? 2 : 0, withDepth ? 1 : 0 ) != 0;
 
+	/// <summary>Sends the world's pass into a picture of the screen's format, or back; that picture's texture, or nought.</summary>
+	public static ulong WorldAside( bool on, out int width, out int height )
+	{
+		width = height = 0;
+		return CoreNative.Available ? CoreRender.WorldAside( on ? 1 : 0, out width, out height ) : 0;
+	}
+
 	/// <summary>The Vulkan format of a stored picture name (rgba16f, rgba8, r16f...), or nought.</summary>
 	public static int StorageFormat( string name ) => name switch
 	{
@@ -711,6 +718,12 @@ internal static unsafe class CoreRenderDevice
 	public static void DestroyShadowMap( ulong map )
 	{
 		if ( CoreNative.Available && map != 0 ) CoreRender.ShadowMapDestroy( map );
+	}
+
+	/// <summary>The shadow map the portable frame binds in one of its places, having no picture table: the sun's pages twice, its movers', a lamps' and their movers' - see ShadowCompare in frame.slang.</summary>
+	public static void PortableShadowMap( int slot, ulong map )
+	{
+		if ( CoreNative.Available ) CoreRender.PortableShadowMap( slot, map );
 	}
 
 	/// <summary>Where a shadow map sits in the picture table - what a shader is told to read it by.</summary>

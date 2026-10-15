@@ -50,6 +50,20 @@ public class Bloom : BasePostProcess<Bloom>
 		if ( Strength <= 0.0f || !UserEnabled )
 			return;
 
+		//The portable frame has no compute or world picture for the passes below, and draws its own
+		if ( CoreRenderDevice.PortableFrame )
+		{
+			var scale = GetWeighted( x => x.Strength, 0 );
+			var colour = GetWeighted( x => x.Tint, Color.White );
+			var falloff = 0.70f + ( 0.60f * Math.Clamp( GetWeighted( x => x.Spread, 0.5f, onlyLerpBetweenVolumes: true ), 0.0f, 1.0f ) );
+
+			Camera.PostProcess.Glow = new CorePortableGlow.Settings( GetWeighted( x => x.Threshold, 0 ),
+				new Vector3( scale * colour.r, scale * colour.g, scale * colour.b ), falloff,
+				Mode switch { BloomMode.Additive => 1.0f, BloomMode.Screen => 2.0f, _ => 3.0f } );
+
+			return;
+		}
+
 		var cl = NextList( "Bloom" );
 
 		//What is over the line, at half the frame's size, with a chain of halvings under it. The

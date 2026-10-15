@@ -7,16 +7,17 @@ namespace Rinten;
 //Pages are double-buffered so rebakes don't blank shadows; planned before the frame block uploads
 internal sealed class CoreSunPages : IDisposable
 {
-	//Texels per level (2048, finest level reaches ~4 m) and per page; a level is Grid by Grid pages
-	internal const int Side = 2048;
-	internal const int PageTexels = 32;
-	internal const int Grid = Side / PageTexels;
+	//A level is Grid by Grid pages; the full frame's pages are 32 texels (2048 a level, the finest reaching ~4 m),
+	//the portable frame's 16 - a quarter of the memory, each level half as far, at the same texels a metre
+	internal const int Grid = 64;
+	private static int PageTexels => CoreRenderDevice.PortableFrame ? 16 : 32;
+	private static int Side => Grid * PageTexels;
 
 	//Max levels (~4 m to ~1 km at default detail); only those reaching the far plane are made
 	internal const int MostLevels = 9;
 
-	//Readable distance from the eye in pages; must match SunShadow in frame.slang or taps wrap the torus
-	internal const float ReachPages = ( Grid / 2 ) - 1.0f - ( 4.0f / PageTexels );
+	//Readable distance from the eye in pages; must match SunReachPages in frame.slang or taps wrap the torus
+	private static float ReachPages => ( Grid / 2 ) - 1.0f - ( 4.0f / PageTexels );
 
 	//The movers' map: texels across, how far from the eye movers still cast, and its least square, in metres
 	internal const int MoverSide = 1024;
@@ -839,11 +840,23 @@ internal sealed class CoreSunPages : IDisposable
 		var high = reading ? shown.ZHigh : zHigh;
 		var eyeThere = reading ? shown.Eye : eyeSun;
 
+		var read = reading ? shown.Map : drawn;
+
+		//The portable frame binds the three maps where its set has room and reads them by that place - see ShadowCompare
+		var portable = CoreRenderDevice.PortableFrame;
+
+		if ( portable )
+		{
+			CoreRenderDevice.PortableShadowMap( 0, maps[0] );
+			CoreRenderDevice.PortableShadowMap( 1, maps[1] );
+			CoreRenderDevice.PortableShadowMap( 2, movers );
+		}
+
 		CoreSceneRenderer.SetSunPages( frame, reading ? shown.Basis : basis,
 			reading ? shown.PageWorld : pageWorld, levels, low, high > low ? 1.0f / ( high - low ) : 0.0f,
 			eyeThere.x, eyeThere.y, casts ? ( reading ? shown.Mask : validMask ) : 0u, casts,
-			CoreRenderDevice.ShadowMapIndex( maps[reading ? shown.Map : drawn] ), CoreRenderDevice.ShadowMapIndex( movers ),
-			CoreRenderDevice.ShadowMapIndex( maps[reading ? shown.Map : drawn], depth: true ), CoreRenderDevice.ShadowMapIndex( movers, depth: true ),
+			portable ? (uint)read : CoreRenderDevice.ShadowMapIndex( maps[read] ), portable ? 2u : CoreRenderDevice.ShadowMapIndex( movers ),
+			portable ? 0u : CoreRenderDevice.ShadowMapIndex( maps[read], depth: true ), portable ? 0u : CoreRenderDevice.ShadowMapIndex( movers, depth: true ),
 			moverCorner.X, moverCorner.Y, casts && moverViews > 0 ? moverWide : 0.0f );
 	}
 

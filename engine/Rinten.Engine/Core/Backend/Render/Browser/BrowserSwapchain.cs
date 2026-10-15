@@ -64,8 +64,8 @@ internal static unsafe class BrowserSwapchain
 		public int BonesUsed;
 		public byte[] FrameHost;
 
-		/// <summary>The sun map's view the group was made with - see FrameGroup.</summary>
-		public int GroupSun;
+		/// <summary>The shadow maps' views the group was made with, by slot - see FrameGroup.</summary>
+		public readonly int[] GroupShadows = new int[5];
 
 		/// <summary>The bake's sheet and volume views the group holds - see FrameGroup.</summary>
 		public int GroupSheet, GroupVolume;
@@ -103,6 +103,10 @@ internal static unsafe class BrowserSwapchain
 		public Picture SceneNormal;
 		public Picture Screen;
 		public ulong ScreenHandle;
+
+		/// <summary>The screen's format and size, which the world's pass draws into while AsideWorldOn.</summary>
+		public Picture AsideWorld;
+		public bool AsideWorldOn, AsideWorldBegun;
 
 		/// <summary>Samples the world's pass draws with: one for views, WantedSamples for the canvas.</summary>
 		public int Samples = 1;
@@ -152,6 +156,8 @@ internal static unsafe class BrowserSwapchain
 
 	private static void EndPass()
 	{
+		drawingShadow = null;
+
 		if ( Current.Pass == 0 ) return;
 
 		BrowserNative.EndPass( Current.Pass );
@@ -219,18 +225,22 @@ internal static unsafe class BrowserSwapchain
 		if ( scratch.Frame == 0 || scratch.Bones == 0 || scratch.Dynamic == 0
 			|| scratch.Aside == 0 || scratch.Second == 0 ) return false;
 
-		scratch.GroupSun = BrowserDevice.shadowView;
+		Array.Fill( scratch.GroupShadows, BrowserDevice.shadowView );
 		scratch.GroupSheet = scratch.GroupVolume = BrowserDevice.noBakeView;
-		scratch.BonesGroup = MakeBonesGroup( scratch, scratch.Frame, BrowserDevice.shadowView, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
-		scratch.AsideGroup = MakeBonesGroup( scratch, scratch.Aside, BrowserDevice.shadowView, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
+		scratch.BonesGroup = MakeBonesGroup( scratch, scratch.Frame, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
+		scratch.AsideGroup = MakeBonesGroup( scratch, scratch.Aside, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
 		return scratch.BonesGroup != 0 && scratch.AsideGroup != 0;
 	}
 
-	private static int MakeBonesGroup( FrameScratch scratch, int frame, int sun, int sheet, int volume )
+	private static int MakeBonesGroup( FrameScratch scratch, int frame, ReadOnlySpan<int> shadows, int sheet, int volume )
 		=> BrowserDevice.MakeBindGroup( BrowserDevice.boneSetLayout,
 			BrowserDevice.Bind.Buffer( 0, scratch.Bones, BrowserDevice.BoneBlockSize ),
 			BrowserDevice.Bind.Buffer( 1, frame, BrowserDevice.FrameBlockSize ),
-			BrowserDevice.Bind.View( 2, sun ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[0], shadows[0] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[1], shadows[1] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[2], shadows[2] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[3], shadows[3] ),
+			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[4], shadows[4] ),
 			BrowserDevice.Bind.Sampler( BrowserDevice.ShadowSamplerBinding, BrowserDevice.shadowSampler ),
 			BrowserDevice.Bind.Sampler( BrowserDevice.FilterSamplerBinding, BrowserDevice.clampSampler ),
 			BrowserDevice.Bind.View( 5, BrowserDevice.skyTableView ),
@@ -263,7 +273,7 @@ internal static unsafe class BrowserSwapchain
 			scratch.AsideGroup = 0;
 			scratch.Aside = 0;
 			scratch.Second = 0;
-			scratch.GroupSun = 0;
+			Array.Clear( scratch.GroupShadows );
 			scratch.GroupSheet = scratch.GroupVolume = 0;
 			scratch.DynamicUsed = 0;
 			scratch.PushUsed = 0;
@@ -321,6 +331,7 @@ internal static unsafe class BrowserSwapchain
 		DropPicture( ref viewport.SceneNormal );
 		DropPicture( ref viewport.Screen );
 		DropPicture( ref viewport.Multisampled );
+		DropPicture( ref viewport.AsideWorld );
 		viewport.ScreenHandle = 0;
 	}
 
@@ -531,12 +542,22 @@ internal static unsafe class BrowserSwapchain
 		var colour = Current.Screen.View;
 		if ( colour == 0 ) colour = Current.CurrentColorView;
 
+		//Or the picture the world is drawn aside into, cleared the first time this frame whatever the screen had
+		var clearColour = first;
+
+		if ( Current.AsideWorldOn )
+		{
+			colour = Current.AsideWorld.View;
+			clearColour = !Current.AsideWorldBegun;
+			Current.AsideWorldBegun = true;
+		}
+
 		//Drawn into the samples and averaged into the screen's picture - see Viewport.Samples.
 		if ( Current.Multisampled.View != 0 )
-			return BeginPass( Current.Multisampled.View, 0, Current.Depth.View, Current.Clear, first, first,
+			return BeginPass( Current.Multisampled.View, 0, Current.Depth.View, Current.Clear, clearColour, first,
 				colour, Current.Multisampled.Samples );
 
-		return BeginPass( colour, 0, Current.Depth.View, Current.Clear, first, first );
+		return BeginPass( colour, 0, Current.Depth.View, Current.Clear, clearColour, first );
 	}
 
 	private static void Submit()
@@ -686,7 +707,7 @@ internal static unsafe class BrowserSwapchain
 		if ( baked == 0 )
 		{
 			//Not drawn because the browser has not finished it yet - which a pass whose result is kept
-			//has to know, or it keeps a picture missing the draw for good. See CorePortableSun.Draw.
+			//has to know, or it keeps a picture missing the draw for good.
 			if ( BrowserPipelines.Baking( pipeline, Current.PassSamples ) ) DrawsWaiting++;
 			return 0;
 		}
@@ -721,27 +742,38 @@ internal static unsafe class BrowserSwapchain
 		return 1;
 	}
 
-	//The frame's group, made again when the sun's map or the bake's pictures it holds are not the ones there are now -
-	//the stand-ins until the portable frame first asks for a map, and while there is no bake
+	//The frame's group, made again when the sun's maps or the bake's pictures it holds are not the ones there are now -
+	//the stand-ins until the portable frame first asks for maps, and while there is no bake
 	private static int FrameGroup( FrameScratch scratch )
 	{
-		var sun = sunMap.View != 0 ? sunMap.View : BrowserDevice.shadowView;
+		Span<int> shadows = stackalloc int[5];
+		var same = true;
+
+		for ( var i = 0; i < shadows.Length; i++ )
+		{
+			shadows[i] = ShadowViewOr( portableMaps[i] );
+			same &= scratch.GroupShadows[i] == shadows[i];
+		}
+
 		var sheet = ViewOr( CoreBakedLighting.PortableSheet );
 		var volume = ViewOr( CoreBakedLighting.PortableVolume );
 
-		if ( scratch.GroupSun == sun && scratch.GroupSheet == sheet && scratch.GroupVolume == volume ) return scratch.BonesGroup;
+		if ( same && scratch.GroupSheet == sheet && scratch.GroupVolume == volume ) return scratch.BonesGroup;
 
-		var made = MakeBonesGroup( scratch, scratch.Frame, sun, sheet, volume );
+		var made = MakeBonesGroup( scratch, scratch.Frame, shadows, sheet, volume );
 		if ( made == 0 ) return scratch.BonesGroup;
 
 		if ( scratch.BonesGroup != 0 ) BrowserNative.Release( scratch.BonesGroup );
 
 		scratch.BonesGroup = made;
-		scratch.GroupSun = sun;
+		shadows.CopyTo( scratch.GroupShadows );
 		scratch.GroupSheet = sheet;
 		scratch.GroupVolume = volume;
 		return made;
 	}
+
+	private static int ShadowViewOr( ulong map )
+		=> map != 0 && shadowMaps.TryGetValue( map, out var found ) ? found.Whole : BrowserDevice.shadowView;
 
 	private static int ViewOr( ulong texture )
 	{
@@ -750,14 +782,6 @@ internal static unsafe class BrowserSwapchain
 	}
 
 	//-- the portable frame's sun ----------------------------------------------------------
-
-	//Texels across the sun's map - see CorePortableSun.
-	internal const int PortableSunSide = 2048;
-
-	//The one sun map, the device's own and in every frame group - the same shape as VkDevice.portableSunMap,
-	//for the same reason: the portable frame has no table of pictures to find a drawer's own in by number.
-	private static Picture sunMap;
-	private static ulong sunMapHandle;
 
 	//The portable frame's sky table onto the device (CoreSkyTable, g_skyTable); the picture is already in
 	//every frame group, so a send is only the write
@@ -770,30 +794,257 @@ internal static unsafe class BrowserSwapchain
 			new Span<byte>( texels, side * side * 8 ) );
 	}
 
-	internal static ulong PortableSunMap()
+	//A drawer's shadow map - see CoreSunPages: its layers read as one array, and each drawn into through its own view
+	private sealed class ShadowMap
 	{
-		if ( sunMapHandle != 0 ) return sunMapHandle;
-		if ( !BrowserDevice.Ready ) return 0;
-
-		if ( !MakePicture( ref sunMap, PortableSunSide, PortableSunSide, BrowserDevice.FormatDepth32,
-				BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding, BrowserDevice.AspectDepth ) )
-			return 0;
-
-		sunMapHandle = nextHandle++;
-		return sunMapHandle;
+		public int Image, Whole, Side;
+		public int[] Layers = [];
 	}
 
-	//Begins drawing into the sun's map, cleared - the whole of it, every time.
+	private static readonly Dictionary<ulong, ShadowMap> shadowMaps = new();
+
+	//The shadow maps the portable frame binds, by slot - see CoreRenderDevice.PortableShadowMap
+	private static readonly ulong[] portableMaps = new ulong[5];
+
+	//The one being drawn into and its side, for ShadowArea's rectangles.
+	private static ShadowMap drawingShadow;
+
+	internal static ulong ShadowMapCreate( int side, int layers )
+	{
+		if ( !BrowserDevice.Ready || side < 1 || layers < 1 ) return 0;
+
+		var made = new ShadowMap { Side = side, Layers = new int[layers] };
+
+		made.Image = BrowserDevice.MakeTexture( side, side, BrowserDevice.FormatDepth32,
+			BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding | BrowserDevice.TextureUse.Layered, 1, layers );
+
+		if ( made.Image != 0 )
+		{
+			made.Whole = BrowserNative.CreateView( made.Image, BrowserDevice.FormatDepth32, BrowserDevice.AspectDepth, 0, 0, 0, "2d-array" );
+
+			for ( var layer = 0; layer < layers; layer++ )
+				made.Layers[layer] = BrowserNative.CreateView( made.Image, BrowserDevice.FormatDepth32, BrowserDevice.AspectDepth, 0, 0, layer, "2d" );
+		}
+
+		if ( made.Image == 0 || made.Whole == 0 || made.Layers.Contains( 0 ) )
+		{
+			DropShadowMap( made );
+			return 0;
+		}
+
+		var handle = nextHandle++;
+		shadowMaps[handle] = made;
+		return handle;
+	}
+
+	internal static void ShadowMapDestroy( ulong handle )
+	{
+		if ( !shadowMaps.Remove( handle, out var found ) ) return;
+
+		if ( ReferenceEquals( drawingShadow, found ) ) drawingShadow = null;
+		DropShadowMap( found );
+	}
+
+	private static void DropShadowMap( ShadowMap map )
+	{
+		foreach ( var view in map.Layers ) if ( view != 0 ) BrowserNative.Release( view );
+		if ( map.Whole != 0 ) BrowserNative.Release( map.Whole );
+		if ( map.Image != 0 ) BrowserNative.Release( map.Image );
+	}
+
+	internal static void PortableShadowMap( int slot, ulong map )
+	{
+		if ( slot >= 0 && slot < portableMaps.Length ) portableMaps[slot] = map;
+	}
+
+	//Begins drawing one layer of a shadow map, kept - a bake clears only its own rectangle, see ShadowArea
 	internal static int ShadowBegin( ulong handle, int layer )
 	{
-		if ( !Current.Recording || handle == 0 || handle != sunMapHandle || layer != 0 ) return 0;
+		if ( !Current.Recording || !shadowMaps.TryGetValue( handle, out var map ) || layer < 0 || layer >= map.Layers.Length ) return 0;
 
 		Span<float> none = [0, 0, 0, 0];
-		return BeginPass( 0, 0, sunMap.View, none, false, true ) ? 1 : 0;
+		if ( !BeginPass( 0, 0, map.Layers[layer], none, false, false ) ) return 0;
+
+		drawingShadow = map;
+		return 1;
+	}
+
+	//Narrows the open shadow layer's next draws to a rectangle, cleared to the far plane where asked - see CoreLampMaps.Into
+	internal static void ShadowScissor( int x, int y, int width, int height, int clear )
+	{
+		if ( !Current.Recording || Current.Pass == 0 || drawingShadow is not { } map ) return;
+
+		var left = Math.Clamp( x, 0, map.Side );
+		var top = Math.Clamp( y, 0, map.Side );
+		var right = Math.Clamp( x + width, left, map.Side );
+		var bottom = Math.Clamp( y + height, top, map.Side );
+
+		if ( right <= left || bottom <= top ) return;
+
+		BrowserNative.SetScissorRect( Current.Pass, left, top, right - left, bottom - top );
+
+		if ( clear != 0 ) ClearShadow();
+	}
+
+	//The depth under the scissor back to the far plane; a draw of its own on WebGPU, past which the pass's pipeline and groups are said again
+	private static void ClearShadow()
+	{
+		BrowserNative.ClearDepth( Current.Pass );
+		Current.BoundPipeline = 0;
+		Current.BoundTexture = 0;
+		ForgetBindings();
+	}
+
+	//Where in the open shadow layer the next draws land, and the rectangle cleared to the far plane first where asked
+	internal static void ShadowArea( int x, int y, int width, int height, int clear )
+	{
+		if ( !Current.Recording || Current.Pass == 0 || drawingShadow is not { } map ) return;
+
+		var left = Math.Clamp( x, 0, map.Side );
+		var top = Math.Clamp( y, 0, map.Side );
+		var right = Math.Clamp( x + width, left, map.Side );
+		var bottom = Math.Clamp( y + height, top, map.Side );
+
+		if ( right <= left || bottom <= top ) return;
+
+		BrowserNative.SetViewport( Current.Pass, left, top, right - left, bottom - top, 0.0f, 1.0f );
+		BrowserNative.SetScissorRect( Current.Pass, left, top, right - left, bottom - top );
+
+		if ( clear != 0 ) ClearShadow();
 	}
 
 	//A second frame block the draws read once FrameUse says so - see VkFrame.FrameBlockPut. One a frame: a page
 	//writes a buffer before anything recorded runs, so a second would be the first again
+	//-- the frame's pictures: one level each, drawn into without depth - see CoreRender.PictureAcquire ----------------
+
+	private sealed class HeldPicture
+	{
+		public Picture Picture;
+		public bool Held;
+	}
+
+	private static readonly Dictionary<ulong, HeldPicture> pictures = new();
+
+	//Given back and kept for the next request of their shape; past this many the oldest goes
+	private static readonly List<ulong> givenBack = new();
+	private const int KeptBack = 12;
+
+	//Formats as PictureShape says them - what BrowserPipelines bakes a pipeline for the picture in
+	internal const int PictureHalves = 1, PictureBytes = 2;
+
+	internal static string PictureFormatName( int format ) => format == PictureBytes ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+
+	internal static ulong PictureAcquire( int kind, int width, int height, int levels )
+	{
+		if ( !BrowserDevice.Ready || width < 1 || height < 1 || levels != 1 ) return 0;
+
+		var format = kind == (int)CoreRender.PictureKind.Colour ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+
+		foreach ( var id in givenBack )
+		{
+			var one = pictures[id];
+			if ( one.Picture.Format != format || one.Picture.Width != width || one.Picture.Height != height ) continue;
+
+			givenBack.Remove( id );
+			one.Held = true;
+			return id;
+		}
+
+		var made = new HeldPicture { Held = true };
+
+		if ( !MakePicture( ref made.Picture, width, height, format,
+				BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding ) )
+		{
+			DropPicture( ref made.Picture );
+			return 0;
+		}
+
+		made.Picture.Adopted = BrowserTextures.Adopt( made.Picture.View );
+
+		var handle = nextHandle++;
+		pictures[handle] = made;
+		return handle;
+	}
+
+	internal static void PictureRelease( ulong picture )
+	{
+		if ( !pictures.TryGetValue( picture, out var one ) || !one.Held ) return;
+
+		one.Held = false;
+		givenBack.Add( picture );
+
+		if ( givenBack.Count <= KeptBack ) return;
+
+		var oldest = givenBack[0];
+		givenBack.RemoveAt( 0 );
+
+		if ( pictures.Remove( oldest, out var gone ) ) DropPicture( ref gone.Picture );
+	}
+
+	internal static int PictureShape( ulong picture, out int width, out int height, out int levels, out int format )
+	{
+		width = height = levels = format = 0;
+		if ( !pictures.TryGetValue( picture, out var one ) ) return 0;
+
+		width = one.Picture.Width;
+		height = one.Picture.Height;
+		levels = 1;
+		format = one.Picture.Format == BrowserDevice.FormatRgba8 ? PictureBytes : PictureHalves;
+		return 1;
+	}
+
+	internal static ulong PictureTexture( ulong picture ) => pictures.TryGetValue( picture, out var one ) ? one.Picture.Adopted : 0;
+
+	//Its one level as what the next draws fill, until TargetEnd; no depth here, and a discard is a clear
+	internal static int PictureBegin( ulong picture, int level, float r, float g, float b, float a, int clear, int depth )
+	{
+		if ( !Current.Recording || level != 0 || depth != 0 || !pictures.TryGetValue( picture, out var one ) ) return 0;
+
+		Span<float> colour = [r, g, b, a];
+		if ( !BeginPass( one.Picture.View, 0, 0, colour, clear != 0, false ) ) return 0;
+
+		Current.CurrentTarget = BrowserDevice.Target.Picture;
+		return 1;
+	}
+
+	//The world's pass into a picture of the screen's format, so its pipelines draw there unchanged - that picture's
+	//texture; or, turned off, the pass closed so the next draw opens the screen's again, keeping what it had
+	internal static ulong WorldAside( int on, out int width, out int height )
+	{
+		width = height = 0;
+		if ( !Current.Recording || Current.Screen.Layers > 1 ) return 0;
+
+		if ( on == 0 )
+		{
+			if ( !Current.AsideWorldOn ) return 0;
+
+			EndPass();
+			Current.AsideWorldOn = false;
+			return 0;
+		}
+
+		var aside = Current.AsideWorld;
+
+		if ( aside.View == 0 || aside.Width != Current.Width || aside.Height != Current.Height )
+		{
+			if ( !MakePicture( ref Current.AsideWorld, Current.Width, Current.Height, BrowserDevice.ScreenFormat,
+					BrowserDevice.TextureUse.RenderAttachment | BrowserDevice.TextureUse.TextureBinding ) )
+			{
+				DropPicture( ref Current.AsideWorld );
+				return 0;
+			}
+
+			Current.AsideWorld.Adopted = BrowserTextures.Adopt( Current.AsideWorld.View );
+		}
+
+		EndPass();
+		Current.AsideWorldOn = true;
+
+		width = Current.Width;
+		height = Current.Height;
+		return Current.AsideWorld.Adopted;
+	}
+
 	internal static ulong FramePut( float* data, int floatCount )
 	{
 		if ( !Current.Recording || data is null || floatCount <= 0 ) return 0;
@@ -821,8 +1072,9 @@ internal static unsafe class BrowserSwapchain
 		foreach ( var pair in swapchains ) DropViewport( pair.Value );
 		foreach ( var pair in views ) DropViewport( pair.Value );
 
-		DropPicture( ref sunMap );
-		sunMapHandle = 0;
+		foreach ( var pair in shadowMaps ) DropShadowMap( pair.Value );
+		shadowMaps.Clear();
+		Array.Clear( portableMaps );
 
 		swapchains.Clear();
 		views.Clear();
@@ -963,6 +1215,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Encoder = BrowserNative.CreateCommandEncoder();
 		viewport.Recording = true;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		viewport.UsingAside = false;
 		viewport.CurrentTarget = BrowserDevice.Target.Screen;
 		viewport.Clear[0] = r;
@@ -1168,6 +1421,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Clear[2] = b;
 		viewport.Clear[3] = a;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		return 1;
 	}
 
@@ -1194,6 +1448,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Encoder = BrowserNative.CreateCommandEncoder();
 		viewport.Recording = true;
 		viewport.WorldBegun = false;
+		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
 		viewport.Clear[0] = r;
 		viewport.Clear[1] = g;
 		viewport.Clear[2] = b;

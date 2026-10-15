@@ -253,35 +253,54 @@ internal static unsafe partial class VkFrame
 
 		vk.UpdateDescriptorSets( device, 3, writes, 0, null );
 
-		if ( VkDevice.Tier == RenderTier.Portable ) WritePortableSun( set );
+		if ( VkDevice.Tier == RenderTier.Portable ) WritePortableSun( frame, set );
 	}
 
-	//The portable frame's sun map into a frame set (VkDevice.portableSunMap), made on the first write
-	private static void WritePortableSun( DescriptorSet set )
+	//The portable frame's shadow maps into a frame set - see VkDevice.PortableShadowMap; a texel of nothing
+	//where there is none yet, which the frame block says is not whole, so it is never read
+	private static void WritePortableSun( Frame frame, DescriptorSet set )
 	{
-		if ( VkDevice.portableSunMap == 0 )
-			VkDevice.portableSunMap = VkTextures.ShadowMapCreate( VkDevice.PortableSunSide, 1, false );
+		if ( VkDevice.portableNoShadow == 0 ) VkDevice.portableNoShadow = VkTextures.ShadowMapCreate( 1, 1, false );
 
-		if ( VkTextures.ShadowMapOf( VkDevice.portableSunMap ) is not { Layers.Length: > 0 } map ) return;
+		var maps = VkDevice.portableShadows;
+		var bindings = VkDevice.PortableShadowBindings;
 
-		var image = new DescriptorImageInfo
+		var images = stackalloc DescriptorImageInfo[maps.Length];
+		var writes = stackalloc WriteDescriptorSet[maps.Length];
+		var count = 0u;
+
+		for ( var i = 0; i < maps.Length; ++i )
 		{
-			Sampler = VkDevice.portableShadowSampler,
-			ImageView = map.Layers[0],
-			ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
-		};
+			var map = VkTextures.ShadowMapOf( maps[i] );
+			var inPass = Current.MainPass || Current.TargetPass;
 
-		var write = new WriteDescriptorSet
-		{
-			SType = StructureType.WriteDescriptorSet,
-			DstSet = set,
-			DstBinding = 2,
-			DescriptorCount = 1,
-			DescriptorType = DescriptorType.CombinedImageSampler,
-			PImageInfo = &image,
-		};
+			//Every layer made readable before anything has drawn into it - see ReadyWhole - which a barrier inside a pass may not do
+			if ( map is null || ( !map.Ready && inPass ) ) map = VkTextures.ShadowMapOf( VkDevice.portableNoShadow );
+			if ( map is null || map.Whole.Handle == 0 || ( !map.Ready && inPass ) ) continue;
 
-		VkDevice.vk.UpdateDescriptorSets( VkDevice.device, 1, &write, 0, null );
+			ReadyWhole( frame, map );
+
+			images[count] = new DescriptorImageInfo
+			{
+				Sampler = VkDevice.shadowSampler,
+				ImageView = map.Whole,
+				ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+			};
+
+			writes[count] = new WriteDescriptorSet
+			{
+				SType = StructureType.WriteDescriptorSet,
+				DstSet = set,
+				DstBinding = bindings[i],
+				DescriptorCount = 1,
+				DescriptorType = DescriptorType.CombinedImageSampler,
+				PImageInfo = &images[count],
+			};
+
+			count++;
+		}
+
+		if ( count > 0 ) VkDevice.vk.UpdateDescriptorSets( VkDevice.device, count, writes, 0, null );
 
 		WritePortableSkyTable( set );
 		WritePortableBake( set, 8, CoreBakedLighting.PortableSheet );
@@ -443,6 +462,9 @@ internal static unsafe partial class VkFrame
 		//would let the next transition discard it - p.PostLayout is kept on purpose
 		p.DepthLayout = ImageLayout.Undefined;
 		p.ScreenDepthLayout = ImageLayout.Undefined;
+
+		p.AsideOn = false;
+		p.AsideBegun = false;
 	}
 
 	//Puts our own frame picture into SHADER_READ_ONLY before a pass samples it; foreign textures skip
@@ -614,7 +636,14 @@ internal static unsafe partial class VkFrame
 		//which is why a view is a viewport and not a special case
 		var view = VkSwapchain.currentView;
 
-		if ( view is not null )
+		//Or the picture the world is drawn aside into, of the screen's own format - see WorldAside
+		var aside = p.AsideOn ? VkPictures.Get( p.Aside ) : null;
+
+		if ( aside is not null )
+		{
+			LevelTo( frame.Commands, aside, 0, ImageLayout.ColorAttachmentOptimal );
+		}
+		else if ( view is not null )
 		{
 			MoveTo( frame.Commands, view.OutputImage, ref view.OutputLayout, ImageLayout.ColorAttachmentOptimal );
 		}
@@ -622,13 +651,15 @@ internal static unsafe partial class VkFrame
 		var colour = new RenderingAttachmentInfo
 		{
 			SType = StructureType.RenderingAttachmentInfo,
-			ImageView = view is not null ? view.OutputView : Current.Views[Current.ImageIndex],
+			ImageView = aside is not null ? aside.Level[0] : view is not null ? view.OutputView : Current.Views[Current.ImageIndex],
 			ImageLayout = ImageLayout.ColorAttachmentOptimal,
 
 			//A pass that was interrupted to take a copy resumes where it left off; clearing again would throw away the world it just drew.
-			LoadOp = Current.MainBegun ? AttachmentLoadOp.Load : AttachmentLoadOp.Clear,
+			LoadOp = ( aside is not null ? p.AsideBegun : Current.MainBegun ) ? AttachmentLoadOp.Load : AttachmentLoadOp.Clear,
 			StoreOp = AttachmentStoreOp.Store,
 		};
+
+		if ( aside is not null ) p.AsideBegun = true;
 
 		colour.ClearValue.Color = new ClearColorValue( Current.Clear[0], Current.Clear[1], Current.Clear[2], Current.Clear[3] );
 
@@ -671,7 +702,7 @@ internal static unsafe partial class VkFrame
 			PDepthAttachment = &depth,
 		};
 
-		var formats = VkPassFormats.Of( view is not null ? view.OutputFormat : Current.Format, VkDevice.DepthFormat );
+		var formats = VkPassFormats.Of( aside?.Format ?? ( view is not null ? view.OutputFormat : Current.Format ), VkDevice.DepthFormat );
 		formats.ViewMask = viewMask;
 
 		//Where the world goes straight to the screen - the portable frame - this is its pass, foveated per eye;
@@ -863,6 +894,21 @@ internal static unsafe partial class VkFrame
 	//and lights. Skipped when the offsets have not moved - only skinned draws move them.
 	private static void BindFrameSet( Frame frame, PipelineLayout layout, ulong boneOffset, ulong morphOffset = 0 )
 	{
+		//The portable frame's shadow maps changed since its set was written - another view's drawer planned, or a map was made:
+		//a set of its own from here, as one already bound in this recording may not be written again
+		if ( VkDevice.portableShadowsMoved && frame.BoneSet.Handle != 0 )
+		{
+			VkDevice.portableShadowsMoved = false;
+
+			if ( VkDevice.AllocateDescriptorSet( VkDevice.boneSetLayout, out var replacement ) )
+			{
+				VkDevice.RetireDescriptorSet( frame.BoneSet );
+				frame.BoneSet = replacement;
+				WriteFrameSet( frame );
+				frame.FrameSetBound = false;
+			}
+		}
+
 		if ( frame.FrameSetBound && frame.LastBoneOffset == boneOffset && frame.LastMorphOffset == morphOffset )
 		{
 			frame.StatSkippedBinds++;

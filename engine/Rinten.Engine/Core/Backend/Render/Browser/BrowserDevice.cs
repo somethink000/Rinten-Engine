@@ -26,6 +26,9 @@ internal static class BrowserDevice
 		internal const int CopyDst = 2;
 		internal const int TextureBinding = 4;
 		internal const int RenderAttachment = 16;
+
+		/// <summary>Not WebGPU's: read as layers even with one, as a shadow map is - see webgl2.js.</summary>
+		internal const int Layered = 1 << 20;
 	}
 
 	private static class Stage
@@ -85,6 +88,9 @@ internal static class BrowserDevice
 		internal const int Screen = 0;
 		internal const int Scene = 1;
 		internal const int Depth = 4;
+
+		/// <summary>A frame picture: one colour attachment of its own format, no depth.</summary>
+		internal const int Picture = 20;
 	}
 
 	//-- the device ---------------------------------------------------------------
@@ -115,6 +121,9 @@ internal static class BrowserDevice
 	//The portable frame's bake, its sheet and its volume - see g_bakedSheet in frame.slang and CoreBakedLighting.Portable
 	internal const int BakedSheetBinding = 8;
 	internal const int BakedVolumeBinding = 9;
+
+	//The portable frame's shadow maps by slot: sun pages twice, sun movers, lamps, lamp movers - see g_portablePages
+	internal static readonly int[] ShadowBindings = [2, 10, 11, 12, 13];
 
 	//What those two hold where there is no bake: one texel of nothing
 	internal static int noBakeImage, noBakeView;
@@ -304,7 +313,11 @@ internal static class BrowserDevice
 		{"entries":[
 		{"binding":0,"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage","minBindingSize":{{{BoneBlockSize}}},"hasDynamicOffset":true}},
 		{"binding":1,"visibility":{{{Stage.VertexFragment}}},"buffer":{"type":"read-only-storage","minBindingSize":{{{FrameBlockSize}}}}},
-		{"binding":2,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d"}},
+		{"binding":2,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d-array"}},
+		{"binding":10,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d-array"}},
+		{"binding":11,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d-array"}},
+		{"binding":12,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d-array"}},
+		{"binding":13,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"depth","viewDimension":"2d-array"}},
 		{"binding":{{{ShadowSamplerBinding}}},"visibility":{{{Stage.Fragment}}},"sampler":{"type":"comparison"}},
 		{"binding":{{{FilterSamplerBinding}}},"visibility":{{{Stage.Fragment}}},"sampler":{"type":"filtering"}},
 		{"binding":5,"visibility":{{{Stage.Fragment}}},"texture":{"sampleType":"float","viewDimension":"2d"}},
@@ -333,10 +346,9 @@ internal static class BrowserDevice
 
 	private static bool CreateShadows()
 	{
-		const int usage = TextureUse.RenderAttachment | TextureUse.TextureBinding;
+		const int usage = TextureUse.RenderAttachment | TextureUse.TextureBinding | TextureUse.Layered;
 
-		//A page draws the portable frame, which has no shadow maps - see RenderTier. The depth one fills the
-		//layout's slot and is never drawn into; it was once four thousand texels a side, 128 MB nothing read.
+		//What the sun's map slots hold until there are maps - one texel, never read, as the frame block says nothing is whole
 		shadowImage = MakeTexture( 1, 1, FormatDepth32, usage );
 
 		//Cleared: alpha stays nought, meaning no table, until CoreSkyTable sends one - see SkyTableAt in frame.slang
@@ -345,7 +357,7 @@ internal static class BrowserDevice
 
 		if ( shadowImage == 0 || skyTableImage == 0 ) return false;
 
-		shadowView = MakeView( shadowImage, FormatDepth32, AspectDepth );
+		shadowView = BrowserNative.CreateView( shadowImage, FormatDepth32, AspectDepth, 0, 0, 0, "2d-array" );
 		skyTableView = MakeView( skyTableImage, FormatRgba16Float );
 
 		var empty = new byte[SkyTableSide * SkyTableSide * 8];
@@ -377,6 +389,10 @@ internal static class BrowserDevice
 			Bind.Buffer( 0, defaultBonesBuffer, BoneBlockSize ),
 			Bind.Buffer( 1, defaultFrameBuffer, FrameBlockSize ),
 			Bind.View( 2, shadowView ),
+			Bind.View( 10, shadowView ),
+			Bind.View( 11, shadowView ),
+			Bind.View( 12, shadowView ),
+			Bind.View( 13, shadowView ),
 			Bind.Sampler( ShadowSamplerBinding, shadowSampler ),
 			Bind.Sampler( FilterSamplerBinding, clampSampler ),
 			Bind.View( 5, skyTableView ),
@@ -478,7 +494,8 @@ internal static class BrowserDevice
 		sampler = MakeSampler( "repeat", "linear", false );
 		clampSampler = MakeSampler( "clamp-to-edge", "linear", false );
 		pointSampler = MakeSampler( "clamp-to-edge", "nearest", false );
-		shadowSampler = MakeSampler( "clamp-to-edge", "linear", true );
+		//Wrapped, as the sun's pages are a torus whose levels are read past their edges - see SunLevel in frame.slang
+		shadowSampler = MakeSampler( "repeat", "linear", true );
 
 		if ( !CreateLayouts() || !CreateShadows() || !CreateDefaults() )
 		{

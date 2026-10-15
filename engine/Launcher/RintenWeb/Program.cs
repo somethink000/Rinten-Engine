@@ -185,9 +185,9 @@ public static partial class Program
 						return 0;
 					}
 
-					//The display's clock where the player asked for vsync, or a headset is drawing (its own
-					//frame calls Tick and this only keeps turning); otherwise as fast as the frame goes.
-					return CoreHeadset.Driving || Rinten.Engine.Settings.RenderSettings.Instance.VSync ? 2 : 1;
+					//The display's clock: a page shows one picture a refresh, and turns run past it starve the browser's
+					//own drawing and input. Only a measured run goes as fast as the frame does.
+					return Rinten.Diagnostics.PerfReport.Uncapped && !CoreHeadset.Driving ? 1 : 2;
 				}
 
 				//What only other scenes use comes down now, a file at a time between frames, so

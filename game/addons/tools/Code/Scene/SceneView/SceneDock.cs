@@ -60,7 +60,9 @@ public partial class SceneDock : PanelWidget
 	{
 		base.OnVisibilityChanged( visible );
 
-		if ( !visible ) return;
+		//A view behind the front tab is shown too - while a switch finishes, or when the scene area moves into
+		//another workspace - and taking the session from that would leave the strip on one scene and the editor on another
+		if ( !visible || !_editorSession.IsFrontTab ) return;
 
 		Active = this;
 

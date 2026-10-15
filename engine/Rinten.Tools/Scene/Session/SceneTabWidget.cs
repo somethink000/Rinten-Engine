@@ -123,7 +123,9 @@ sealed class SceneTabWidget : Widget
 		_currentTab = tab;
 		_content.Show( tab.Session.SceneDock );
 
-		_tabBar.Update();
+		//Each tab paints itself, so the one left and the one picked both repaint
+		foreach ( var each in _tabs )
+			each.Update();
 	}
 
 	public void UpdateTitle( SceneEditorSession session )
@@ -143,6 +145,8 @@ sealed class SceneTabWidget : Widget
 	}
 
 	internal bool IsCurrent( SceneTab tab ) => _currentTab == tab;
+
+	internal bool IsCurrent( SceneEditorSession session ) => _currentTab?.Session == session;
 
 	internal List<SceneTab> Tabs => _tabs;
 
@@ -375,6 +379,10 @@ sealed class SceneTab : Widget
 			CloseSession();
 			return;
 		}
+
+		//The close button acts on release, so its press falls through to here and would open the scene being closed
+		if ( _close.IsValid() && new Rect( _close.Position, _close.Size ).IsInside( e.LocalPosition ) )
+			return;
 
 		if ( e.LeftMouseButton )
 		{

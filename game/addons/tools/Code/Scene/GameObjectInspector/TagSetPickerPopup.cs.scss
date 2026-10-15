@@ -1,8 +1,11 @@
+//The tag picker: an entry for a new tag over the tags the scene already uses, the ones the object has picked out.
+//As wide as a few tags and as tall as what is in it - it was held at five hundred pixels whatever it held, over
+//the rows below its button. Base look is .editor-popup
 .tagset-picker-popup {
+  width: 260px;
+  max-height: 320px;
   gap: 4px;
   padding: 4px;
-  min-height: 500px;
-  min-width: 100px;
 
   > .entry-wrap {
     position: relative;
@@ -37,24 +40,27 @@
   > .suggestions {
     flex-direction: row;
     flex-wrap: wrap;
+    flex-shrink: 1;
+    min-height: 0;
     gap: 4px;
+    overflow: scroll;
 
+    //As wide as its name, not stretched to fill the row
     > .tag-suggestion {
       flex-direction: row;
-      pointer-events: all;
+      flex-grow: 0;
+      flex-shrink: 0;
       align-items: center;
-      flex-grow: 1;
-      flex-basis: 0;
-      min-width: 25%;
-      min-height: 24px;
+      max-width: 100%;
+      min-height: 22px;
       padding: 2px 8px;
-      gap: 4px;
+      gap: 6px;
+      pointer-events: all;
       border-radius: $control-radius;
       background-color: $control-background-light;
       cursor: pointer;
 
       > .name {
-        flex-grow: 1;
         font-size: $type-body;
         color: $ink-dim;
         @include one-line;
@@ -64,6 +70,23 @@
         flex-shrink: 0;
         font-size: $type-small;
         color: $text-light;
+      }
+
+      &:hover {
+        background-color: $list-row-hover;
+
+        > .name {
+          color: $text;
+        }
+      }
+
+      //A tag the object has
+      &.on {
+        background-color: $selected-background;
+
+        > .name {
+          color: $text-highlight;
+        }
       }
     }
   }

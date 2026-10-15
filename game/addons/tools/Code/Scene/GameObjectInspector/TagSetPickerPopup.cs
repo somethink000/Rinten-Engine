@@ -129,7 +129,7 @@ public sealed class TagSetPickerPopup : Popup
 		foreach ( var tag in suggested )
 		{
 			var count = scene is null ? 0 : CountTagUsage( scene, tag );
-			suggestions.AddChild( new TagSuggestionPanel( tag, count, () => ToggleTag( tag ) ) );
+			suggestions.AddChild( new TagSuggestionPanel( tag, count, tags.Has( tag ), () => ToggleTag( tag ) ) );
 		}
 
 		suggestions.SetClass( "hidden", !suggestions.HasChildren );
@@ -151,9 +151,10 @@ public sealed class TagSetPickerPopup : Popup
 
 internal sealed class TagSuggestionPanel : Panel
 {
-	public TagSuggestionPanel( string tag, int count, Action onClick )
+	public TagSuggestionPanel( string tag, int count, bool on, Action onClick )
 	{
 		AddClass( "tag-suggestion" );
+		SetClass( "on", on );
 
 		AddChild<Rinten.UI.Label>( "name" ).Text = tag;
 

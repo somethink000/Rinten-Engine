@@ -1,100 +1,192 @@
-﻿using Rinten.Engine;
-using System;
+﻿using System;
 
 namespace Editor;
 
-//The document level of a workspace: one tab per open asset, each backed by a complete editor instance of its own.
-//The workspace bar answers "which editor am I in", this bar answers "which of its documents am I looking at".
-internal sealed class DocumentTabWidget : Widget
+//An editor's open documents, each a complete editor instance of its own, shown one at a time with the shared tab strip
+//over the editor's central view - as the scene tabs stand over the scene. The workspace strip says which editor; this, which document
+internal sealed class DocumentTabWidget : StackedHost
 {
 	/// <summary>Fired when the last document closes - the workspace has nothing left to show.</summary>
 	public Action OnEmpty;
 
-	readonly Widget _tabBar;
-	readonly ContentHost _content;
+	readonly string _blankTitle;
 	readonly List<Document> _documents = new();
 
-	/// <summary>How many documents are open - the number on the tool strip's icon.</summary>
-	internal int Count => _documents.Count;
-
 	Document _current;
+	bool _closingAll;
 
-	internal sealed class Document
+	internal sealed class Document : IEditorTab
 	{
-		public string Key;
-		public string Title;
+		public DocumentTabWidget Owner;
 
-		/// <summary>The editor instance - a hidden window husk once its parts are embedded.</summary>
+		//The file's full path in lower case, or null while nothing is open in it
+		public string Key;
+		public string Name;
+
+		//The editor instance - a hidden window husk once its parts are embedded
 		public Widget Editor;
 
-		/// <summary>What actually fills the workspace: the editor's parts in a column.</summary>
+		//What fills the workspace: the editor's parts, with this document's strip over its central view
 		public Widget Content;
+		public EditorTabStrip Strip;
 
-		public DocumentTab Tab;
+		public string Title => Name ?? Owner._blankTitle;
+		public string Icon => null;
+		public Color? Accent => null;
+		public bool Unsaved => Editor is IAssetEditor { HasUnsavedChanges: true };
+
+		public void Select() => Owner.MakeCurrent( this );
+		public void Close() => Owner.Close( this );
 	}
 
-	public DocumentTabWidget( Widget parent ) : base( parent )
+	public DocumentTabWidget( Widget parent, string blankTitle ) : base( parent )
 	{
 		Name = "Documents";
-		Layout = Layout.Column();
+		Background = Theme.TabBackground;
 
-		_tabBar = Layout.Add( new TabBar( this ) );
-		_content = Layout.Add( new ContentHost( this ), 1 );
+		_blankTitle = blankTitle;
 	}
 
-	/// <summary>Show the document for this asset, creating it through <paramref name="factory"/> if it isn't open. The factory returns the editor instance and its embedded content; returning default means the editor couldn't be created.</summary>
-	public IAssetEditor Open( Asset asset, Func<(Widget Editor, Widget Content)> factory )
-	{
-		var key = asset.Path?.ToLowerInvariant() ?? asset.Name;
+	/// <summary>How many files are open - the number on the tool strip's square.</summary>
+	internal int Count => _documents.Count( x => x.Key is not null );
 
-		if ( _documents.FirstOrDefault( x => x.Key == key ) is { } existing )
+	/// <summary>The editor of the document in front.</summary>
+	internal Widget CurrentEditor => _current?.Editor;
+
+	/// <summary>Brings up the document for this file, making it if it is not open: a blank document in front takes it, else a new tab
+	/// does. A null path opens a blank document. The editor is made by <paramref name="create"/>, then handed to <paramref name="load"/>.</summary>
+	public Widget Open( string path, string name, Func<Widget> create, Action<Widget> load )
+	{
+		var key = path is null ? null : System.IO.Path.GetFullPath( path ).ToLowerInvariant();
+
+		if ( key is not null && _documents.FirstOrDefault( x => x.Key == key ) is { } open )
 		{
-			MakeCurrent( existing );
-			return existing.Editor as IAssetEditor;
+			MakeCurrent( open );
+			return open.Editor;
 		}
 
-		var (editor, content) = factory();
+		var document = key is not null && _current is { Key: null } blank ? blank : Add( create );
 
-		if ( !editor.IsValid() || !content.IsValid() )
+		if ( document is null )
 			return null;
 
-		var document = new Document
+		if ( key is not null )
 		{
-			Key = key,
-			Title = asset.Name,
-			Editor = editor,
-			Content = content
-		};
+			document.Key = key;
+			document.Name = name;
 
-		document.Tab = new DocumentTab( _tabBar, this, document );
+			//After the embed, so anything it builds lands in the right parents. Editors written
+			//as windows call Show() in there - the husk is put away again before it ever paints
+			load?.Invoke( document.Editor );
 
-		content.Parent = _content;
-		content.Visible = false;
+			if ( document.Editor is Window window )
+				window.Visible = false;
+		}
+
+		MakeCurrent( document );
+		Changed();
+
+		return document.Editor;
+	}
+
+	Document Add( Func<Widget> create )
+	{
+		var editor = create();
+
+		if ( !editor.IsValid() )
+			return null;
+
+		var content = WorkspaceArea.Embed( editor );
+
+		if ( !content.IsValid() )
+		{
+			editor.Destroy();
+			return null;
+		}
+
+		var document = new Document { Owner = this, Editor = editor };
+
+		document.Strip = new EditorTabStrip( null );
+		document.Strip.Reordered = Reorder;
+		document.Content = WithStrip( editor, content, document.Strip );
+
+		document.Content.Parent = this;
+		document.Content.Visible = false;
 
 		_documents.Add( document );
-		RebuildTabBar();
-		WorkspaceArea.Current?.TabBar.UpdateTabs();
-		MakeCurrent( document );
 
-		return editor as IAssetEditor;
+		return document;
+	}
+
+	//The strip goes over the editor's central view, where the scene tabs stand over the scene; an editor without one has it over everything
+	static Widget WithStrip( Widget editor, Widget content, EditorTabStrip strip )
+	{
+		var frame = new Widget( null ) { Name = "DocumentView" };
+		frame.Layout = Layout.Column();
+		frame.Layout.Add( strip );
+
+		if ( editor is DockWindow window && window.DockManager.FindDockWidget( "CentralWidget" ) is { } central && central.Widget.IsValid() )
+		{
+			var view = central.Widget;
+
+			central.Widget = frame;
+			frame.Layout.Add( view, 1 );
+
+			return content;
+		}
+
+		frame.Layout.Add( content, 1 );
+
+		return frame;
 	}
 
 	public void Close( Document document )
+	{
+		if ( !_documents.Contains( document ) ) return;
+
+		//The editor's own close, which writes what is unsaved; one that asks first closes itself later, and Prune sees it go
+		if ( document.Editor.IsValid() && !document.Editor.AskClose() )
+			return;
+
+		Remove( document );
+	}
+
+	/// <summary>Closes every document; false where one asked to stay open for now.</summary>
+	public bool CloseAll()
+	{
+		_closingAll = true;
+
+		try
+		{
+			foreach ( var document in _documents.ToList() )
+				Close( document );
+		}
+		finally
+		{
+			_closingAll = false;
+		}
+
+		return _documents.Count == 0;
+	}
+
+	void Remove( Document document )
 	{
 		var index = _documents.IndexOf( document );
 		if ( index < 0 ) return;
 
 		_documents.Remove( document );
-		WorkspaceArea.Current?.TabBar.UpdateTabs();
 
 		document.Content?.Destroy();
 		document.Editor?.Destroy();
-		document.Tab?.Destroy();
 
 		if ( _documents.Count == 0 )
 		{
 			_current = null;
-			OnEmpty?.Invoke();
+			Changed();
+
+			if ( !_closingAll )
+				OnEmpty?.Invoke();
+
 			return;
 		}
 
@@ -104,7 +196,59 @@ internal sealed class DocumentTabWidget : Widget
 			MakeCurrent( _documents[Math.Min( index, _documents.Count - 1 )] );
 		}
 
-		RebuildTabBar();
+		Changed();
+	}
+
+	//An editor that asked before closing, and then closed itself
+	[EditorEvent.Frame]
+	void Prune()
+	{
+		foreach ( var document in _documents.Where( x => !x.Editor.IsValid() ).ToList() )
+			Remove( document );
+	}
+
+	void MakeCurrent( Document document )
+	{
+		if ( _current == document ) return;
+
+		var outgoing = _current;
+		_current = document;
+
+		//Every document of an editor wears the layout the user left the last one in
+		if ( outgoing?.Editor is DockWindow from && document.Editor is DockWindow to && from.DockManager.IsValid() && to.DockManager.IsValid() )
+		{
+			var state = from.DockManager.State;
+
+			if ( state != to.DockManager.State )
+				to.DockManager.State = state;
+		}
+
+		Show( document.Content );
+
+		foreach ( var each in _documents )
+			each.Strip.SetCurrent( document );
+	}
+
+	void Reorder( IReadOnlyList<IEditorTab> order )
+	{
+		var sorted = order.OfType<Document>().ToList();
+
+		_documents.Clear();
+		_documents.AddRange( sorted );
+
+		Changed();
+	}
+
+	//Every document's strip shows them all, and the tool strip its count
+	void Changed()
+	{
+		foreach ( var each in _documents )
+		{
+			each.Strip.SetItems( _documents );
+			each.Strip.SetCurrent( _current );
+		}
+
+		WorkspaceArea.Current?.TabBar.UpdateTabs();
 	}
 
 	public override void OnDestroyed()
@@ -112,7 +256,7 @@ internal sealed class DocumentTabWidget : Widget
 		base.OnDestroyed();
 
 		//The husk windows aren't our children, so destroying the widget tree wouldn't reach them. One that
-		//throws on its way out is its own problem: it must not keep the tabs after it from being torn down too.
+		//throws on its way out is its own problem: it must not keep the tabs after it from being torn down too
 		foreach ( var document in _documents )
 		{
 			try
@@ -126,183 +270,5 @@ internal sealed class DocumentTabWidget : Widget
 		}
 
 		_documents.Clear();
-	}
-
-	internal bool IsCurrent( Document document ) => _current == document;
-
-	void MakeCurrent( Document document )
-	{
-		if ( _current == document ) return;
-
-		_current = document;
-		_content.Show( document.Content );
-		_tabBar.Update();
-	}
-
-	void RebuildTabBar()
-	{
-		_tabBar.Layout.Clear( false );
-
-		foreach ( var document in _documents )
-		{
-			_tabBar.Layout.Add( document.Tab );
-		}
-
-		_tabBar.Layout.AddStretchCell();
-		_tabBar.Update();
-	}
-
-	sealed class TabBar : Widget
-	{
-		public TabBar( Widget parent ) : base( parent )
-		{
-			Layout = Layout.Row();
-			FixedHeight = 24;
-		}
-
-		protected override void OnPaint()
-		{
-			//The strip itself is nothing: a run of tabs standing on the window, not a bar of its own
-			//colour behind them. The one that is open is what carries a surface - see DocumentTab.
-		}
-	}
-
-	internal sealed class DocumentTab : Widget
-	{
-		readonly DocumentTabWidget _owner;
-		readonly Document _document;
-		readonly IconButton _close;
-
-		bool IsCurrent => _owner.IsCurrent( _document );
-
-		//The asset's name, and a star while its editor holds edits not yet saved.
-		string Shown => _document.Editor is IAssetEditor { HasUnsavedChanges: true } ? $"{_document.Title} *" : _document.Title;
-
-		string _painted;
-
-		public override bool UsesCanvasDraw => true;
-
-		public DocumentTab( Widget parent, DocumentTabWidget owner, Document document ) : base( parent )
-		{
-			_owner = owner;
-			_document = document;
-			Cursor = CursorShape.Finger;
-
-			_close = new IconButton( "close", () => _owner.Close( _document ), this )
-			{
-				ToolTip = "Close",
-				Background = Color.Transparent,
-				Foreground = Theme.TextLight,
-				IconSize = 8,
-				FixedWidth = 14,
-				FixedHeight = 14
-			};
-		}
-
-		protected override Vector2 SizeHint()
-		{
-			Paint.SetDefaultFont();
-			return new Vector2( Paint.MeasureText( Shown ).x + 44, 24 );
-		}
-
-		protected override void OnPaint()
-		{
-			var background = IsCurrent ? Theme.TabBackground
-				: Paint.HasMouseOver ? Theme.Slab
-				: Color.Transparent;
-
-			var round = Theme.TabRadius;
-
-			//Round along the top, square where it meets the document under it.
-			Paint.ClearPen();
-			Paint.SetBrush( background );
-			Paint.DrawRect( LocalRect, round, round, 0.0f, 0.0f );
-
-			Paint.SetPen( IsCurrent ? Theme.Text : Theme.TextLight );
-			Paint.SetDefaultFont();
-			_painted = Shown;
-			Paint.DrawText( LocalRect.Shrink( 8, 0, 24, 0 ), _painted, TextFlag.LeftCenter );
-		}
-
-		//Drawn again, and measured again, when the star comes or goes.
-		[EditorEvent.Frame]
-		void WatchSaved()
-		{
-			if ( _painted is null || _painted == Shown ) return;
-
-			UpdateGeometry();
-			Update();
-		}
-
-		protected override void OnResize()
-		{
-			base.OnResize();
-			_close.Position = new Vector2( Width - 18, (Height - _close.Height) * 0.5f );
-		}
-
-		protected override void OnMousePress( MouseEvent e )
-		{
-			base.OnMousePress( e );
-
-			if ( e.LeftMouseButton )
-				_owner.MakeCurrent( _document );
-
-			if ( e.MiddleMouseButton )
-				_owner.Close( _document );
-		}
-	}
-
-	//Same stacked hosting the workspace and scene tabs use - switching documents swaps visibility, never relayouts.
-	sealed class ContentHost : Widget
-	{
-		Widget _current;
-
-		public ContentHost( Widget parent ) : base( parent )
-		{
-		}
-
-		public void Show( Widget widget )
-		{
-			if ( _current == widget ) return;
-
-			var outgoing = _current;
-			_current = widget;
-
-			widget.Position = 0;
-			widget.Size = Size;
-			widget.Visible = true;
-
-			if ( !outgoing.IsValid() || !outgoing.Visible )
-				return;
-
-			widget.Lower();
-
-			EngineLoop.DisposeAtFrameEnd( new Rinten.Utility.DisposeAction( () =>
-			{
-				if ( outgoing.IsValid() && outgoing != _current )
-					outgoing.Visible = false;
-
-				if ( _current.IsValid() )
-					_current.Raise();
-			} ) );
-		}
-
-		protected override void OnPaint()
-		{
-			Paint.ClearPen();
-			Paint.SetBrush( Theme.TabBackground );
-			Paint.DrawRect( LocalRect );
-		}
-
-		protected override void OnResize()
-		{
-			foreach ( var child in Children )
-			{
-				if ( !child.Visible ) continue;
-
-				child.Position = 0;
-				child.Size = Size;
-			}
-		}
 	}
 }

@@ -215,9 +215,10 @@ internal sealed class NewPanelModal : EditorPanel
 
 		Delete();
 
-		_window.OpenDocument( new RazorDocument( path ) );
+		//Through the documents, so it gets a tab: the blank one it was asked in, or a new one
+		var window = UiEditorWindow.Open( path ) ?? _window;
 
-		if ( _toScene ) _window.PutInSceneWhenCompiled( name );
+		if ( _toScene ) window.PutInSceneWhenCompiled( name );
 	}
 
 	//Clicking beside the card is the same as leaving.

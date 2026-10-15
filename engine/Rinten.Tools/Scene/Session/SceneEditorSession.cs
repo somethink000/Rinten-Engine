@@ -213,8 +213,6 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 				SceneDock.SetWindowIcon( "grid_4x4" );
 				SceneDock.WindowTitle = name;
 			}
-
-			EditorWindow?.SceneTabs?.UpdateTitle( this );
 		}
 	}
 

@@ -108,17 +108,13 @@ public partial class Window : DockWindow, IAssetEditor, IPreviewHost, ILinkedEdi
 		Show();
 	}
 
-	//Brings the graph editor up on the graph a model carries: the model page's graph button, and the model editor's. Through the
-	//app rather than the asset: a .mdl opened as an asset is the model editor's, and there is no graph file here to open instead.
+	//Brings the graph editor up on the graph a model carries, in a tab of its own: the model page's graph button, and the model
+	//editor's. Through the app rather than the asset: a .mdl opened as an asset is the model editor's
 	internal static void OpenGraphOf( Asset model )
 	{
-		if ( model is null ) return;
+		if ( model?.AbsolutePath is not { } path ) return;
 
-		EditorAppAttribute.For( typeof( global::Editor.MdlEditor.Window ) )?.Open();
-
-		//The one on screen now, which the line above made so. Following may have put it on this model already, and then this is nothing.
-		if ( EditorLink.Of( LinkedKind.Graph ).OfType<global::Editor.MdlEditor.Window>().FirstOrDefault() is { } editor )
-			editor.ShowModelGraph( model );
+		EditorAppAttribute.For( typeof( global::Editor.MdlEditor.Window ) )?.OpenFile( path );
 	}
 
 	//Show the graph a model carries, unless that is what is up already.

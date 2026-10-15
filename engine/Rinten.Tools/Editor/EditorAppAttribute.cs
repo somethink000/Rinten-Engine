@@ -109,7 +109,7 @@ namespace Editor
 
 			if ( CreatedExtension() is not { } extension ) return false;
 
-			CreateResource( $"New {KindName( extension )}", extension, OpenFile );
+			CreateResource( $"New {KindName( extension )}", extension, path => OpenFile( path ) );
 			return true;
 		}
 
@@ -153,7 +153,7 @@ namespace Editor
 
 			if ( extensions.Length == 0 ) return false;
 
-			PickFile( $"Open in {Title}", extensions, OpenFile );
+			PickFile( $"Open in {Title}", extensions, path => OpenFile( path ) );
 			return true;
 		}
 
@@ -185,38 +185,38 @@ namespace Editor
 			picked?.Invoke( fd.SelectedFile );
 		}
 
-		/// <summary>Opens a file here: its own asset in a document tab, another asset handed over, other files by path.</summary>
-		public void OpenFile( string path )
+		/// <summary>Opens a file here and gives back the editor holding it: in the workspace, as a document tab of its own.</summary>
+		public Widget OpenFile( string path )
 		{
 			var extension = System.IO.Path.GetExtension( path ).TrimStart( '.' ).ToLowerInvariant();
-
-			var registered = TargetType.GetCustomAttributes( typeof( EditorForAssetTypeAttribute ), true )
-				.OfType<EditorForAssetTypeAttribute>()
-				.Any( x => string.Equals( x.Extension, extension, StringComparison.OrdinalIgnoreCase ) );
-
 			var asset = IsCodeExtension( extension ) ? null : AssetSystem.FindByPath( path );
 
-			if ( asset is not null && registered )
+			var assets = asset is not null && TargetType.IsAssignableTo( typeof( IAssetEditor ) );
+
+			if ( !assets && !TargetType.IsAssignableTo( typeof( IFileEditor ) ) )
 			{
-				IAssetEditor.OpenInEditor( asset, out _ );
-				return;
+				Log.Warning( $"{Title}: cannot open {path}" );
+				return null;
 			}
 
-			var editor = Open();
-
-			if ( asset is not null && editor is IAssetEditor assetEditor )
+			void Load( Widget editor )
 			{
-				assetEditor.AssetOpen( asset );
-				return;
+				if ( assets ) ( editor as IAssetEditor )?.AssetOpen( asset );
+				else ( editor as IFileEditor )?.OpenFile( path );
 			}
 
-			if ( editor is IFileEditor fileEditor )
+			asset?.RecordOpened();
+
+			if ( Workspace && WorkspaceArea.Current.IsValid() )
 			{
-				fileEditor.OpenFile( path );
-				return;
+				return WorkspaceArea.Current.OpenDocument( TargetType, Title, Icon, path,
+					asset?.Name ?? System.IO.Path.GetFileName( path ), Load );
 			}
 
-			Log.Warning( $"{Title}: cannot open {path}" );
+			var opened = Open();
+			Load( opened );
+
+			return opened;
 		}
 
 		/// <summary>Opens the app - its tab, or a window - and gives back the editor, where there is one.</summary>

@@ -81,22 +81,7 @@ internal static class SourceEyedropperTool
 
 		catcher?.CoverEverything();
 
-		hoveredPanel = FindPanelAt( Application.CursorPosition, layer );
-
-		//Over a game view, pick the game's own UI using the cursor in the picture's pixels
-		hoveredOffset = default;
-
-		if ( GameViewAt( Application.CursorPosition ) is { } view && OverThePicture( hoveredPanel, view ) )
-		{
-			var corner = view.ScreenPosition;
-			var inside = FindGamePanelAt( Application.CursorPosition - corner );
-
-			if ( inside.IsValid() )
-			{
-				hoveredPanel = inside;
-				hoveredOffset = corner;
-			}
-		}
+		hoveredPanel = PanelAtCursor( layer, out hoveredOffset );
 
 		hoveredPart = PartOf( hoveredPanel );
 
@@ -107,6 +92,29 @@ internal static class SourceEyedropperTool
 		}
 
 		highlight?.PointAt( hoveredPanel, layer, hoveredOffset, SourceLabel( hoveredPanel ), hoveredPart );
+	}
+
+	//The panel under the cursor, and where its own space starts in the window's - shared with the UI Panels
+	//dock's picker. Over a game view, pick the game's own UI using the cursor in the picture's pixels
+	internal static IPanel PanelAtCursor( EditorOverlay layer, out Vector2 offset )
+	{
+		var found = FindPanelAt( Application.CursorPosition, layer );
+
+		offset = default;
+
+		if ( GameViewAt( Application.CursorPosition ) is { } view && OverThePicture( found, view ) )
+		{
+			var corner = view.ScreenPosition;
+			var inside = FindGamePanelAt( Application.CursorPosition - corner );
+
+			if ( inside.IsValid() )
+			{
+				found = inside;
+				offset = corner;
+			}
+		}
+
+		return found;
 	}
 
 	//The widget part under the cursor (e.g. a row via Widget.PartAt), in window coordinates
@@ -138,7 +146,7 @@ internal static class SourceEyedropperTool
 	}
 
 	//The running game view under this point, recognised by its renderer having engine overlays on
-	static SceneRenderingPanel GameViewAt( Vector2 pos )
+	internal static SceneRenderingPanel GameViewAt( Vector2 pos )
 	{
 		foreach ( var view in SceneViewPanel.All )
 		{

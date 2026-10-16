@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -42,6 +42,7 @@ partial class StandaloneExporter
 
 		//What the serializer makes generic over the game's values, which the compiler has to be told - see WebDirectives. Asked of the game's own library.
 		var directives = Path.Combine( work, "rd.xml" );
+		var descriptor = Path.Combine( work, "kept.xml" );
 		HashSet<string> inModule = null;
 
 		await OnMainThread( () =>
@@ -60,12 +61,13 @@ partial class StandaloneExporter
 			var kept = types.Concat( described )
 				.Where( x => !x.IsGenericType && !x.IsArray && inModule.Contains( x.Assembly.GetName().Name ) && Ours( x.Assembly.GetName().Name ) )
 				.Distinct().ToList();
-			File.WriteAllText( directives, WebDirectives.For( made, inModule, kept ) );
+			File.WriteAllText( directives, WebDirectives.For( made, inModule ) );
+			File.WriteAllText( descriptor, WebDirectives.Descriptor( kept, inModule ) );
 			Logger.Info( $"web module: {made.Count} serializer generics from {types.Count} types" );
 		} );
 
 		//The same inputs make the same module, and making it is most of an export: a game exported again with only its content changed takes the last one.
-		var key = ModuleKey( project, gameBin, directives, inModule );
+		var key = ModuleKey( project, gameBin, [directives, descriptor], inModule );
 		var last = Path.Combine( work, "kept", key );
 
 		if ( ModuleFiles.All( x => File.Exists( Path.Combine( last, x ) ) ) )
@@ -83,7 +85,7 @@ partial class StandaloneExporter
 
 		var arguments = $"publish \"{project}\" -r browser-wasm -c Release -m:{compiles} -p:IlcSingleThreaded=true " +
 			"-p:BuildProjectReferences=false " +
-			$"-p:RintenGameBin=\"{gameBin}\" -p:RintenRdXml=\"{directives}\" " +
+			$"-p:RintenGameBin=\"{gameBin}\" -p:RintenRdXml=\"{directives}\" -p:RintenDescriptor=\"{descriptor}\" " +
 			$"-p:RintenWasmBin=\"{WasmBin}{Path.DirectorySeparatorChar}\" " +
 			$"-p:NativeIntermediateOutputPath=\"{native}{Path.DirectorySeparatorChar}\" -p:NativeOutputPath=\"{output}{Path.DirectorySeparatorChar}\"";
 
@@ -180,7 +182,7 @@ partial class StandaloneExporter
 	private static string WasmBin => Path.Combine( Environment.CurrentDirectory, ExportPlatform.Web.BinFolder );
 
 	//One hash over everything the module is compiled from, to skip rebuilding an unchanged module
-	private static string ModuleKey( string project, string gameBin, string directives, HashSet<string> inModule )
+	private static string ModuleKey( string project, string gameBin, string[] directives, HashSet<string> inModule )
 	{
 		var player = Path.GetDirectoryName( project );
 		var managed = Path.GetDirectoryName( typeof( Rinten.Scene ).Assembly.Location );
@@ -195,7 +197,7 @@ partial class StandaloneExporter
 		var shared = Path.Combine( player, "prebuilt", "Shared.props" );
 		if ( File.Exists( shared ) )
 			files.AddRange( System.Text.RegularExpressions.Regex.Matches( File.ReadAllText( shared ), @"bin/managed/([^""]+\.dll)" ).Select( m => Path.Combine( managed, m.Groups[1].Value ) ) );
-		files.Add( directives );
+		files.AddRange( directives );
 		files.AddRange( Directory.GetFiles( gameBin, "*.dll" ) );
 		files.AddRange( inModule.Select( x => Path.Combine( managed, x + ".dll" ) ).Where( File.Exists ) );
 		files.Add( Path.Combine( WasmBin, "rintencore.a" ) );

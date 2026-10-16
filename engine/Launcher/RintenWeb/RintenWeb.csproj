@@ -71,6 +71,10 @@
 	<ItemGroup Condition="'$(RintenRdXml)' != ''">
 		<RdXmlFile Include="$(RintenRdXml)" />
 	</ItemGroup>
+	<!-- The types made by name, kept as far as reflection reads them (fields, accessors, marked methods, overrides) - see WebDirectives.Descriptor -->
+	<ItemGroup Condition="'$(RintenDescriptor)' != ''">
+		<TrimmerRootDescriptor Include="$(RintenDescriptor)" />
+	</ItemGroup>
 	<ItemGroup Condition="'$(RintenRdXml)' == '' and Exists('rd.xml')">
 		<RdXmlFile Include="rd.xml" />
 	</ItemGroup>

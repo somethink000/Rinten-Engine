@@ -37,6 +37,11 @@ $tile: #444444;
 $tile-hover: #4a4a4c;
 $tile-down: #3a3a3c;
 
+//An inspector card - a component, a project in the launcher: darker than its pane, edged in $edge with an $edge-lit top
+$card: #2a2a2a;
+$card-hover: #303030;
+$card-down: #262626;
+
 //A button standing on a card: the four little squares at the end of a project in the launcher. One more step
 //up, and a grey leaning to the accent when it is on - a blue-grey, turned green at the same brightness.
 $chip: #525254;

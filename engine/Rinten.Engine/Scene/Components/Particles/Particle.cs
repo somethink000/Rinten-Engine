@@ -144,7 +144,9 @@ public partial class Particle : IDynamicFloatContext
 
 	private Dictionary<string, object> _data;
 
-	public static Queue<Particle> Pool = new( 512 );
+	//Taken and given back from the effects' steps, which run on several threads at once
+	/// <summary>Particles ended and kept for the next one made.</summary>
+	public static readonly System.Collections.Concurrent.ConcurrentQueue<Particle> Pool = new();
 
 	public static Particle Create()
 	{

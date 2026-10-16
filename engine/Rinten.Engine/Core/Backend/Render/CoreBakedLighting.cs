@@ -359,7 +359,7 @@ internal static partial class CoreBakedLighting
 		foreach ( var light in scene.GetAllComponents<DirectionalLight>() )
 		{
 			if ( !light.IsValid() || !light.Enabled || !light.Active || !light.NotBaked ) continue;
-			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
+			if ( !( ( light.Contribution & Light.LightContribution.Diffuse ) == Light.LightContribution.Diffuse ) ) continue;
 
 			liveSun = light.Id;
 			break;

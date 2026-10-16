@@ -254,7 +254,13 @@ public class ModelAttachments
 
 	public Attachment Get( string name )
 	{
-		return All.FirstOrDefault( x => x.IsNamed( name ) );
+		//A loop: asked by name every frame for what is held or carried, and a lambda over the name was an allocation each time
+		foreach ( var attachment in _all )
+		{
+			if ( attachment.IsNamed( name ) ) return attachment;
+		}
+
+		return null;
 	}
 
 	public Transform? GetTransform( string name )

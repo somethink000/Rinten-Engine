@@ -200,7 +200,7 @@ internal static unsafe class CoreFbxImport
 		for ( var node = 0; node < nodeCount; node++ )
 		{
 			var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, node );
-			if ( !flags.HasFlag( Ufbx.NodeFlags.Mesh ) ) continue;
+			if ( !( ( flags & Ufbx.NodeFlags.Mesh ) == Ufbx.NodeFlags.Mesh ) ) continue;
 			if ( Ufbx.rn_fbx_mesh_deformer( scene, node ) >= 0 ) continue;
 
 			var above = Ufbx.rn_fbx_node_parent( scene, node );
@@ -277,8 +277,8 @@ internal static unsafe class CoreFbxImport
 	{
 		var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, node );
 
-		if ( flags.HasFlag( Ufbx.NodeFlags.Root ) || flags.HasFlag( Ufbx.NodeFlags.Mesh ) ) return false;
-		if ( flags.HasFlag( Ufbx.NodeFlags.Bone ) ) return false;
+		if ( ( ( flags & Ufbx.NodeFlags.Root ) == Ufbx.NodeFlags.Root ) || ( ( flags & Ufbx.NodeFlags.Mesh ) == Ufbx.NodeFlags.Mesh ) ) return false;
+		if ( ( ( flags & Ufbx.NodeFlags.Bone ) == Ufbx.NodeFlags.Bone ) ) return false;
 
 		var name = NodeName( scene, node );
 		if ( name.Length == 0 ) return false;
@@ -331,7 +331,7 @@ internal static unsafe class CoreFbxImport
 			for ( var i = 0; i < nodeCount; i++ )
 			{
 				var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, i );
-				if ( flags.HasFlag( Ufbx.NodeFlags.Root ) || !flags.HasFlag( Ufbx.NodeFlags.Bone ) ) continue;
+				if ( ( ( flags & Ufbx.NodeFlags.Root ) == Ufbx.NodeFlags.Root ) || !( ( flags & Ufbx.NodeFlags.Bone ) == Ufbx.NodeFlags.Bone ) ) continue;
 
 				keep[i] = true;
 				any = true;
@@ -344,7 +344,7 @@ internal static unsafe class CoreFbxImport
 			for ( var i = 0; i < nodeCount; i++ )
 			{
 				var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, i );
-				if ( flags.HasFlag( Ufbx.NodeFlags.Root ) || flags.HasFlag( Ufbx.NodeFlags.Attribute ) ) continue;
+				if ( ( ( flags & Ufbx.NodeFlags.Root ) == Ufbx.NodeFlags.Root ) || ( ( flags & Ufbx.NodeFlags.Attribute ) == Ufbx.NodeFlags.Attribute ) ) continue;
 
 				keep[i] = true;
 			}
@@ -368,7 +368,7 @@ internal static unsafe class CoreFbxImport
 		for ( var i = 0; i < nodeCount; i++ )
 		{
 			var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, i );
-			if ( flags.HasFlag( Ufbx.NodeFlags.Root ) || !flags.HasFlag( Ufbx.NodeFlags.Bone ) ) continue;
+			if ( ( ( flags & Ufbx.NodeFlags.Root ) == Ufbx.NodeFlags.Root ) || !( ( flags & Ufbx.NodeFlags.Bone ) == Ufbx.NodeFlags.Bone ) ) continue;
 
 			keep[i] = true;
 			anyBone = true;
@@ -379,7 +379,7 @@ internal static unsafe class CoreFbxImport
 			for ( var i = 0; i < nodeCount; i++ )
 			{
 				var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, i );
-				if ( flags.HasFlag( Ufbx.NodeFlags.Root ) || flags.HasFlag( Ufbx.NodeFlags.Attribute ) ) continue;
+				if ( ( ( flags & Ufbx.NodeFlags.Root ) == Ufbx.NodeFlags.Root ) || ( ( flags & Ufbx.NodeFlags.Attribute ) == Ufbx.NodeFlags.Attribute ) ) continue;
 
 				keep[i] = true;
 			}
@@ -535,7 +535,7 @@ internal static unsafe class CoreFbxImport
 		for ( var node = 0; node < nodeCount; node++ )
 		{
 			var flags = (Ufbx.NodeFlags)Ufbx.rn_fbx_node_flags( scene, node );
-			if ( !flags.HasFlag( Ufbx.NodeFlags.Mesh ) ) continue;
+			if ( !( ( flags & Ufbx.NodeFlags.Mesh ) == Ufbx.NodeFlags.Mesh ) ) continue;
 
 			var attributes = (Ufbx.MeshAttributes)Ufbx.rn_fbx_mesh_attributes( scene, node );
 
@@ -596,20 +596,20 @@ internal static unsafe class CoreFbxImport
 
 					vertex.Normal = new Vector3( normals[at * 3], normals[( at * 3 ) + 1], normals[( at * 3 ) + 2] );
 
-					if ( attributes.HasFlag( Ufbx.MeshAttributes.Tangents ) )
+					if ( ( ( attributes & Ufbx.MeshAttributes.Tangents ) == Ufbx.MeshAttributes.Tangents ) )
 					{
 						vertex.Tangent = new Vector4( tangents[at * 3],
 							tangents[( at * 3 ) + 1], tangents[( at * 3 ) + 2], -1.0f );
 					}
 
-					if ( attributes.HasFlag( Ufbx.MeshAttributes.TexCoord0 ) )
+					if ( ( ( attributes & Ufbx.MeshAttributes.TexCoord0 ) == Ufbx.MeshAttributes.TexCoord0 ) )
 					{
 						//FBX counts V from the bottom, every renderer here from the top.
 						vertex.TexCoord0 = new Vector4( uv0[at * 2], 1.0f - uv0[( at * 2 ) + 1], 0.0f, 0.0f );
 					}
 
 					//Second UV set, for lightmap unwraps; anything beyond two is ignored
-					if ( attributes.HasFlag( Ufbx.MeshAttributes.TexCoord1 ) )
+					if ( ( ( attributes & Ufbx.MeshAttributes.TexCoord1 ) == Ufbx.MeshAttributes.TexCoord1 ) )
 						vertex.TexCoord1 = new Vector4( uv1[at * 2], 1.0f - uv1[( at * 2 ) + 1], 0.0f, 0.0f );
 
 					//White where the mesh has no colours, which is what the shim hands over for one.

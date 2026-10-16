@@ -204,7 +204,7 @@ public abstract partial class Component : BytePack.ISerializer
 	{
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( GetType() ) )
 		{
-			if ( !propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost ) )
+			if ( !( ( propertyAndAttribute.Attribute.Flags & SyncFlags.FromHost ) == SyncFlags.FromHost ) )
 				continue;
 
 			try

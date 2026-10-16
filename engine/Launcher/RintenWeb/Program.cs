@@ -102,6 +102,10 @@ public static partial class Program
 			Phase( "filesystem" );
 			Native.Say( "Code…" );
 			await LoadGameAssemblies();
+
+			//The project's mixers, as a desktop game's instance reads them; after the code, whose types a mixer's processors may be.
+			//Without a master mixer every buffer the device asks for is silence
+			Rinten.Audio.Mixer.LoadFromSettings( ProjectSettings.Mixer, Game.TypeLibrary );
 			await Native.NextFrame();
 
 			CoreWindow window = null;

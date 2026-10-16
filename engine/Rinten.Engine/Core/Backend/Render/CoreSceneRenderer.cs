@@ -1517,8 +1517,8 @@ internal static unsafe class CoreSceneRenderer
 	{
 		//What a light component is kept out of: one for the diffuse, two for the highlight - see Light.Contribution.
 		private static int WithheldBy( Light light )
-			=> ( light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ? 0 : 1 )
-				| ( light.Contribution.HasFlag( Light.LightContribution.Specular ) ? 0 : 2 );
+			=> ( ( light.Contribution & Light.LightContribution.Diffuse ) != 0 ? 0 : 1 )
+				| ( ( light.Contribution & Light.LightContribution.Specular ) != 0 ? 0 : 2 );
 
 		/// <summary>Kind is nought for the sun, one for a point, two for a spot - the shader's own numbering.</summary>
 		public static LightSource Of( Light light ) => light switch

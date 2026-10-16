@@ -44,9 +44,9 @@ internal class VTexWriter
 	//never write a header claiming mips or faces that the streaming data doesn't contain (the engine would read out of bounds).
 	void NormalizeCompressedDiskFormat()
 	{
-		bool isMultiImage = Header.Flags.HasFlag( VTEX_Flags_t.VTEX_FLAG_CUBE_TEXTURE )
-			|| Header.Flags.HasFlag( VTEX_Flags_t.VTEX_FLAG_VOLUME_TEXTURE )
-			|| Header.Flags.HasFlag( VTEX_Flags_t.VTEX_FLAG_TEXTURE_ARRAY );
+		bool isMultiImage = ( ( Header.Flags & VTEX_Flags_t.VTEX_FLAG_CUBE_TEXTURE ) == VTEX_Flags_t.VTEX_FLAG_CUBE_TEXTURE )
+			|| ( ( Header.Flags & VTEX_Flags_t.VTEX_FLAG_VOLUME_TEXTURE ) == VTEX_Flags_t.VTEX_FLAG_VOLUME_TEXTURE )
+			|| ( ( Header.Flags & VTEX_Flags_t.VTEX_FLAG_TEXTURE_ARRAY ) == VTEX_Flags_t.VTEX_FLAG_TEXTURE_ARRAY );
 
 		//A PNG blob can only hold a single 2D image, store raw pixels instead
 		if ( Header.Format == VTEX_Format_t.VTEX_FORMAT_PNG_RGBA8888 && isMultiImage )

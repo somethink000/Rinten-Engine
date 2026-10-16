@@ -47,7 +47,7 @@ public static class ChangeCallback
 
 		if ( p.Object is Component component )
 		{
-			if ( component.Flags.HasFlag( ComponentFlags.Deserializing ) )
+			if ( ( ( component.Flags & ComponentFlags.Deserializing ) == ComponentFlags.Deserializing ) )
 			{
 				//Do nothing if the component is deserializing. This should be the first time the property is loaded, so we don't want to invoke a callback.
 				return;
@@ -55,8 +55,8 @@ public static class ChangeCallback
 
 			var go = component.GameObject;
 			if ( go.IsValid()
-				 && (go.Flags.HasFlag( GameObjectFlags.Deserializing )
-					 || go.Flags.HasFlag( GameObjectFlags.Loading )) )
+				 && (( ( go.Flags & GameObjectFlags.Deserializing ) == GameObjectFlags.Deserializing )
+					 || ( ( go.Flags & GameObjectFlags.Loading ) == GameObjectFlags.Loading )) )
 			{
 				//Do nothing if the component's GameObject is deserializing or we're loading.
 				return;

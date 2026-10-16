@@ -204,7 +204,7 @@ internal sealed class CoreProbeGrid
 
 		var sun = CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene );
 
-		if ( sun is not null && sun.Contribution.HasFlag( Light.LightContribution.Diffuse ) )
+		if ( sun is not null && ( ( sun.Contribution & Light.LightContribution.Diffuse ) == Light.LightContribution.Diffuse ) )
 		{
 			var towards = -sun.WorldRotation.Forward.Normal;
 			var colour = sun.EmittedColor;
@@ -261,7 +261,7 @@ internal sealed class CoreProbeGrid
 		foreach ( var light in scene.GetAllComponents<Light>() )
 		{
 			if ( light is not ( PointLight or SpotLight ) || !light.IsValid() || !light.Enabled || !light.Active ) continue;
-			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
+			if ( !( ( light.Contribution & Light.LightContribution.Diffuse ) == Light.LightContribution.Diffuse ) ) continue;
 
 			var emitted = light.EmittedColor;
 			if ( emitted.r <= 0.0f && emitted.g <= 0.0f && emitted.b <= 0.0f ) continue;

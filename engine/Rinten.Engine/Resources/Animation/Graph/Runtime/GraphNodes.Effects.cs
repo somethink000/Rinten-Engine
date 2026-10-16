@@ -492,16 +492,16 @@ internal sealed class RootMotionOverrideNode : PoseNode
 
 		var position = carried.Position;
 
-		if ( flags.HasFlag( AnimGraphBuilder.RootMotionOverrideFlags.MoveX ) ) position.x += step.x;
-		if ( flags.HasFlag( AnimGraphBuilder.RootMotionOverrideFlags.MoveY ) ) position.y += step.y;
-		if ( flags.HasFlag( AnimGraphBuilder.RootMotionOverrideFlags.MoveZ ) ) position.z += step.z;
+		if ( ( ( flags & AnimGraphBuilder.RootMotionOverrideFlags.MoveX ) == AnimGraphBuilder.RootMotionOverrideFlags.MoveX ) ) position.x += step.x;
+		if ( ( ( flags & AnimGraphBuilder.RootMotionOverrideFlags.MoveY ) == AnimGraphBuilder.RootMotionOverrideFlags.MoveY ) ) position.y += step.y;
+		if ( ( ( flags & AnimGraphBuilder.RootMotionOverrideFlags.MoveZ ) == AnimGraphBuilder.RootMotionOverrideFlags.MoveZ ) ) position.z += step.z;
 
 		carried.Position = position;
 
 		var direction = facingNode?.Vector( context ) ?? Vector3.Zero;
 
 		//A character told to face something above it looks up only if the graph said it should - otherwise it turns towards it and stays upright.
-		if ( !flags.HasFlag( AnimGraphBuilder.RootMotionOverrideFlags.FacingPitch ) ) direction.y = 0.0f;
+		if ( !( ( flags & AnimGraphBuilder.RootMotionOverrideFlags.FacingPitch ) == AnimGraphBuilder.RootMotionOverrideFlags.FacingPitch ) ) direction.y = 0.0f;
 
 		if ( direction.Length <= 0.001f ) return;
 

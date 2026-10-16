@@ -129,7 +129,7 @@ public partial class Texture : Resource, IDisposable
 	public int LastUsed => 0;
 
 	/// <summary>Gets if the texture has UAV access</summary>
-	public bool UAVAccess => Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_UAV );
+	public bool UAVAccess => ( ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_UAV ) == RuntimeTextureSpecificationFlags.TSPEC_UAV );
 
 	internal RenderMultisampleType MultisampleType
 	{
@@ -231,7 +231,7 @@ public partial class Texture : Resource, IDisposable
 		return;
 	}
 
-	internal bool IsRenderTarget => core.Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
+	internal bool IsRenderTarget => ( ( core.Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
 
 	//Mark this texture as loading, create a texture in a task, replace this texture with it, mark it as loaded.
 	//This is for situations where you create a placeholder texture then replace it with the real texture later.

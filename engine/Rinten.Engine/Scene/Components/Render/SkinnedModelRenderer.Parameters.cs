@@ -56,11 +56,11 @@ public sealed partial class SkinnedModelRenderer
 		//Tick the animation by a frame so we're fully up to date on the first frame.
 		if ( Scene.IsEditor && !CanUpdateInEditor() )
 		{
-			SceneModel.UpdateToBindPose( ReadBonesFromGameObjects );
+			SceneModel.UpdateToBindPose( readBones ??= ReadBonesFromGameObjects );
 		}
 		else
 		{
-			SceneModel.Update( Time.Delta, ReadBonesFromGameObjects );
+			SceneModel.Update( Time.Delta, readBones ??= ReadBonesFromGameObjects );
 		}
 	}
 

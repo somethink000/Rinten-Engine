@@ -716,7 +716,7 @@ internal sealed class BakeScene
 		foreach ( var light in scene.GetAllComponents<Light>() )
 		{
 			if ( !light.IsValid() || !light.Enabled || !light.Active || light.NotBaked || !Saved( light ) ) continue;
-			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
+			if ( !( ( light.Contribution & Light.LightContribution.Diffuse ) == Light.LightContribution.Diffuse ) ) continue;
 
 			var colour = light.EmittedColor;
 			var forward = light.WorldRotation.Forward.Normal;

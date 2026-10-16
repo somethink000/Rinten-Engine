@@ -52,7 +52,7 @@ internal sealed class CoreTexture
 	//Changes whenever the shown content changes; render targets count as changing every frame
 	internal int Content =>
 		borrowed ? borrowedVersion
-		: Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) ? unchecked( (int)EngineLoop.LoopFrames )
+		: ( ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) ? unchecked( (int)EngineLoop.LoopFrames )
 		: Version;
 
 	internal int Width => Desc.m_nWidth;
@@ -533,7 +533,7 @@ internal sealed class CoreTexture
 	//Upload with mips instead of level 0 only, so downscaled pictures aren't jagged; RGBA8 2D only
 	private bool Chained => Mips > 1 && Format == ImageFormat.RGBA8888 && Depth == 1
 		&& !Desc.IsCube && !Desc.IsArray
-		&& !Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
+		&& !( ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
 
 	//The picture onto the device with every level, built here from the first one where nobody wrote them. Zero where the device would not take it.
 	private ulong UploadChain( int width, int height )

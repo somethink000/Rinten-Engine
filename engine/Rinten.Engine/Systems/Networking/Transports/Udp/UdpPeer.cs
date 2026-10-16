@@ -252,7 +252,7 @@ internal sealed class UdpPeer
 
 		if ( header.Kind != UdpProtocol.Kind.Payload ) return;
 
-		var reliable = header.Flags.HasFlag( UdpProtocol.Flags.Reliable );
+		var reliable = ( ( header.Flags & UdpProtocol.Flags.Reliable ) == UdpProtocol.Flags.Reliable );
 
 		//Acknowledgements ride on whatever goes back the other way, and an end that has nothing to say would hold the other one up
 		//until it did - which is every resend timer's worth of packets, for nothing. So a reliable packet is a reason to say something.

@@ -133,7 +133,7 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 
 			if ( value is not null )
 			{
-				if ( !value.Desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) )
+				if ( !( ( value.Desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) )
 					throw new Exception( $"{nameof( RenderTarget )} texture needs to be a render target" );
 			}
 

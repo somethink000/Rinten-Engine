@@ -320,15 +320,8 @@ public sealed class EventModule : ParticleModule, IParticleModuleStep, IParticle
 public sealed class ParticleEventRelay : ParticleController
 {
 	readonly ConcurrentQueue<Pending> _pending = new();
-	readonly Dictionary<EventModule, List<Child>> _spawned = new();
+	readonly Dictionary<EventModule, ParticleChildEffects> _spawned = new();
 	readonly List<EventModule> _events = new();
-
-	//Spawned effects that have played through, kept to be played again rather than built again - an effect is a tree
-	//of objects and components, and a burst of sparks on every bounce is that tree made and thrown away each time
-	readonly Dictionary<EventModule, Stack<ParticlePlayer>> _idle = new();
-
-	//A spawned effect, the particle it follows, and the frame it began - it is not over before it has stepped once.
-	record struct Child( GameObject Object, ParticlePlayer Player, Particle Particle, long Began );
 
 	//The context rows' values come from a shared pool and go back once spawned: an event is often, and each wanted an array of its own.
 	readonly record struct Pending( EventModule Event, Vector3 Position, Vector3 Velocity, Vector4[] Context, Particle Particle, float Scale );
@@ -380,35 +373,7 @@ public sealed class ParticleEventRelay : ParticleController
 		}
 
 		//Carried along: a spawned effect that follows its particle goes where it goes, and is let go where it dies.
-		foreach ( var (module, list) in _spawned )
-		{
-			for ( var i = list.Count - 1; i >= 0; i-- )
-			{
-				var child = list[i];
-
-				if ( !child.Object.IsValid() || !child.Player.IsValid() )
-				{
-					list.RemoveAt( i );
-					continue;
-				}
-
-				//Played through: kept for the next spawn of this event
-				if ( child.Began < EngineLoop.LoopFrames && !child.Player.IsActive )
-				{
-					list.RemoveAt( i );
-					Idle( module ).Push( child.Player );
-					continue;
-				}
-
-				if ( module.Follow && child.Particle is not null ) child.Object.WorldPosition = child.Particle.Position;
-			}
-		}
-	}
-
-	Stack<ParticlePlayer> Idle( EventModule module )
-	{
-		if ( !_idle.TryGetValue( module, out var idle ) ) _idle[module] = idle = new Stack<ParticlePlayer>();
-		return idle;
+		foreach ( var children in _spawned.Values ) children.Update();
 	}
 
 	void Spawn( in Pending pending )
@@ -417,32 +382,17 @@ public sealed class ParticleEventRelay : ParticleController
 
 		if ( module.Effect is null || !Scene.IsValid() ) return;
 
-		if ( !_spawned.TryGetValue( module, out var list ) )
-			_spawned[module] = list = new List<Child>();
+		if ( !_spawned.TryGetValue( module, out var children ) )
+			_spawned[module] = children = new ParticleChildEffects();
 
-		if ( list.Count >= module.MaxAlive ) return;
+		if ( children.Playing >= module.MaxAlive ) return;
 
 		var rotation = module.AlignToVelocity && !pending.Velocity.IsNearlyZero()
 			? Rotation.LookAt( pending.Velocity.Normal )
 			: Rotation.Identity;
 
-		var player = Reused( module );
-		var go = player?.GameObject;
-
-		if ( player is null )
-		{
-			go = new GameObject( false, $"{module.Effect.ResourceName} (event)" );
-
-			go.Flags = go.Flags
-				.WithFlag( GameObjectFlags.Hidden, true )
-				.WithFlag( GameObjectFlags.NotSaved, true )
-				.WithFlag( GameObjectFlags.NotNetworked, true );
-
-			player = go.AddComponent<ParticlePlayer>();
-
-			player.Definition = module.Effect;
-			player.PlayOnce = true;
-		}
+		var player = children.Take( module.Effect, $"{module.Effect.ResourceName} (event)" );
+		var go = player.GameObject;
 
 		go.WorldPosition = pending.Position;
 		go.WorldRotation = rotation;
@@ -467,24 +417,7 @@ public sealed class ParticleEventRelay : ParticleController
 				player.Set( row.Parameter, ParticleFloatBinding.Channel( v, row.Channel ) );
 		}
 
-		if ( go.Enabled ) player.Restart();
-		else go.Enabled = true;
-
-		list.Add( new Child( go, player, module.Follow ? pending.Particle : null, EngineLoop.LoopFrames ) );
-	}
-
-	//A played-through effect of this event still standing, or null
-	ParticlePlayer Reused( EventModule module )
-	{
-		if ( !_idle.TryGetValue( module, out var idle ) ) return null;
-
-		while ( idle.TryPop( out var player ) )
-		{
-			if ( player.IsValid() && player.GameObject.IsValid() && player.Definition == module.Effect ) return player;
-			if ( player.GameObject.IsValid() ) player.GameObject.Destroy();
-		}
-
-		return null;
+		children.Start( player, module.Follow ? pending.Particle : null );
 	}
 
 	static bool Declares<T>( List<T> parameters, string name ) where T : ParticleDefinition.Parameter
@@ -500,13 +433,7 @@ public sealed class ParticleEventRelay : ParticleController
 	protected override void OnParticleDestroyed( Particle p )
 	{
 		//A followed effect is let go where its particle died - the particle object goes back to the pool and would be somebody else's next.
-		foreach ( var list in _spawned.Values )
-		{
-			for ( var i = 0; i < list.Count; i++ )
-			{
-				if ( ReferenceEquals( list[i].Particle, p ) ) list[i] = list[i] with { Particle = null };
-			}
-		}
+		foreach ( var children in _spawned.Values ) children.LetGo( p );
 
 		if ( _events.Count == 0 || !ParticleEffect.IsValid() ) return;
 
@@ -524,23 +451,8 @@ public sealed class ParticleEventRelay : ParticleController
 	{
 		base.OnDisabled();
 
-		foreach ( var list in _spawned.Values )
-		{
-			foreach ( var child in list )
-			{
-				if ( child.Object.IsValid() ) child.Object.Destroy();
-			}
-		}
-
-		foreach ( var idle in _idle.Values )
-		{
-			foreach ( var player in idle )
-			{
-				if ( player.IsValid() && player.GameObject.IsValid() ) player.GameObject.Destroy();
-			}
-		}
+		foreach ( var children in _spawned.Values ) children.Clear();
 
 		_spawned.Clear();
-		_idle.Clear();
 	}
 }

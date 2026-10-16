@@ -1,6 +1,6 @@
 namespace Rinten;
 
-//Added by SpawnEffectOnDeathModule; the spawned player is hidden, unsaved and plays loops once
+//Added by SpawnEffectOnDeathModule; the spawned players are hidden, unsaved, play loops once and are played again when done
 /// <summary>Plays another effect where a particle dies - a burst where a rocket ran out, a splash where a drop stopped, a puff where an ember went out.</summary>
 [Hide]
 [Expose]
@@ -37,12 +37,14 @@ public sealed class ParticleEffectSpawner : ParticleController
 	[Property]
 	public int MaxAlive { get; set; } = 16;
 
-	readonly List<GameObject> _spawned = new();
+	readonly ParticleChildEffects _spawned = new();
+
+	//Where particles died, from the threads the effect steps on; played on the main thread, as an effect is a game object
+	readonly System.Collections.Concurrent.ConcurrentQueue<(Vector3 Position, Vector3 Velocity)> _deaths = new();
 
 	protected override void OnParticleDestroyed( Particle p )
 	{
 		if ( Effect is null ) return;
-		if ( !Scene.IsValid() ) return;
 
 		//A death by collision leaves a hit time behind; one by age does not.
 		var collided = p.HitTime > 0.0f && ( Time.Now - p.HitTime ) < 0.1f;
@@ -52,42 +54,37 @@ public sealed class ParticleEffectSpawner : ParticleController
 
 		if ( Chance < 1.0f && Random.Shared.Float( 0.0f, 1.0f ) > Chance ) return;
 
-		_spawned.RemoveAll( x => !x.IsValid() );
+		_deaths.Enqueue( (p.Position, p.Velocity) );
+	}
 
-		if ( _spawned.Count >= MaxAlive ) return;
+	protected override void OnUpdate()
+	{
+		base.OnUpdate();
 
-		var rotation = AlignToVelocity && !p.Velocity.IsNearlyZero()
-			? Rotation.LookAt( p.Velocity.Normal )
-			: Rotation.Identity;
+		_spawned.Update();
 
-		var go = new GameObject( true, $"{Effect.ResourceName} (spawned)" );
+		while ( _deaths.TryDequeue( out var death ) )
+		{
+			if ( Effect is null || !Scene.IsValid() || _spawned.Playing >= MaxAlive ) continue;
 
-		go.WorldPosition = p.Position;
-		go.WorldRotation = rotation;
-		go.WorldScale = Scale;
-		go.Flags = go.Flags
-			.WithFlag( GameObjectFlags.Hidden, true )
-			.WithFlag( GameObjectFlags.NotSaved, true )
-			.WithFlag( GameObjectFlags.NotNetworked, true );
+			var player = _spawned.Take( Effect, $"{Effect.ResourceName} (spawned)" );
+			var go = player.GameObject;
 
-		var player = go.AddComponent<ParticlePlayer>();
+			go.WorldPosition = death.Position;
+			go.WorldRotation = AlignToVelocity && !death.Velocity.IsNearlyZero()
+				? Rotation.LookAt( death.Velocity.Normal )
+				: Rotation.Identity;
+			go.WorldScale = Scale;
 
-		player.Definition = Effect;
-		player.DestroyOnEnd = true;
-		player.PlayOnce = true;
-
-		_spawned.Add( go );
+			_spawned.Start( player );
+		}
 	}
 
 	protected override void OnDisabled()
 	{
 		base.OnDisabled();
 
-		foreach ( var go in _spawned )
-		{
-			if ( go.IsValid() ) go.Destroy();
-		}
-
 		_spawned.Clear();
+		_deaths.Clear();
 	}
 }

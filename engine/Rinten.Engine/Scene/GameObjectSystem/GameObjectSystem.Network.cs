@@ -139,7 +139,7 @@ public abstract partial class GameObjectSystem : IDeltaSnapshot
 		//Register all our Sync properties with the data table.
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( type ) )
 		{
-			var isQuery = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.Query );
+			var isQuery = ( ( propertyAndAttribute.Attribute.Flags & SyncFlags.Query ) == SyncFlags.Query );
 
 			try
 			{

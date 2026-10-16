@@ -969,7 +969,7 @@ public partial class GameObject
 
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( componentType.TargetType ) )
 		{
-			if ( !propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost ) )
+			if ( !( ( propertyAndAttribute.Attribute.Flags & SyncFlags.FromHost ) == SyncFlags.FromHost ) )
 				continue;
 
 			componentJson.Remove( propertyAndAttribute.Property.Name );

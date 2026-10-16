@@ -217,6 +217,11 @@ internal sealed class CustomBuildPanel : Panel
 	protected override string GetRenderTreeChecksum() => treeChecksum?.Invoke() ?? "";
 	protected override int BuildHash() => buildHash?.Invoke() ?? 0;
 
+	//Said rather than read off the type by reflection, which a trimmed web module may not answer: the component's
+	//BuildHash is asked every frame, and the panel takes its turn only when that moves or something asks
+	protected override bool TicksEveryFrameOfItsOwn => true;
+	protected override bool TickWhenAsked => true;
+
 	protected override void OnMouseDown( MousePanelEvent e ) => component.OnMouseDown( e );
 	protected override void OnMouseMove( MousePanelEvent e ) => component.OnMouseMove( e );
 	protected override void OnMouseUp( MousePanelEvent e ) => component.OnMouseUp( e );

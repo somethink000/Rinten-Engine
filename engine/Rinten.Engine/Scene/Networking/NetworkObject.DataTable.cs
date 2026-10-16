@@ -56,8 +56,8 @@ internal sealed partial class NetworkObject
 		//Register all our Sync properties with the data table.
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( type ) )
 		{
-			var isHostSync = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost );
-			var isQuery = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.Query );
+			var isHostSync = ( ( propertyAndAttribute.Attribute.Flags & SyncFlags.FromHost ) == SyncFlags.FromHost );
+			var isQuery = ( ( propertyAndAttribute.Attribute.Flags & SyncFlags.Query ) == SyncFlags.Query );
 
 			try
 			{

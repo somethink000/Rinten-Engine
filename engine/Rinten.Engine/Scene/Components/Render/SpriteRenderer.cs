@@ -318,7 +318,7 @@ public sealed partial class SpriteRenderer : Renderer, Component.ExecuteInEditor
 	//Run any user-defined broadcast events
 	void RunBroadcastEvent( Sprite.BroadcastEvent broadcastEvent )
 	{
-		var isEditorOnly = Scene.IsEditor && GameObject.Flags.HasFlag( GameObjectFlags.EditorOnly );
+		var isEditorOnly = Scene.IsEditor && ( ( GameObject.Flags & GameObjectFlags.EditorOnly ) == GameObjectFlags.EditorOnly );
 		var shouldBroadcast = Game.IsPlaying || isEditorOnly;
 		switch ( broadcastEvent.Type )
 		{

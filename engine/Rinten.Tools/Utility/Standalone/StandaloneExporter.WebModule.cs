@@ -96,6 +96,14 @@ partial class StandaloneExporter
 
 		if ( !built ) return false;
 
+		//A compiler stopped at the memory ceiling leaves the SDK saying it succeeded, with nothing written
+		if ( !ModuleFiles.All( x => File.Exists( Path.Combine( output, x ) ) ) )
+		{
+			Problem( $"no web module: the build ended without writing it - most often the compiler was stopped past the {ceiling} GB " +
+				"of memory it was given; close what else is running and export again" );
+			return false;
+		}
+
 		Logger.Info( $"web module: compiled in {clock.Elapsed.TotalMinutes:F1} min" );
 
 		if ( !PlaceModule( output, target, gameBin ) ) return false;
@@ -350,14 +358,14 @@ partial class StandaloneExporter
 	[return: MarshalAs( UnmanagedType.Bool )]
 	private static extern bool GlobalMemoryStatusEx( ref MemoryStatus status );
 
-	//Runs the SDK with these arguments and this environment; true where it finished well. On Linux inside a scope
-	//of its own with a hard memory ceiling, so a build that wants more than it was given is the one that stops.
+	//Runs the SDK with these arguments and this environment; true where it finished well. On Linux inside a scope of its own
+	//with a ceiling on memory, so the desktop keeps what it needs; past the ceiling the build swaps and is slower rather than killed
 	private static bool RunDotnet( string arguments, Dictionary<string, string> environment, int ceilingGB, out string log )
 	{
 		var capped = OperatingSystem.IsLinux() && File.Exists( "/usr/bin/systemd-run" );
 		var dotnet = ExportToolchain.Dotnet ?? "dotnet";
 		var start = new ProcessStartInfo( capped ? "/usr/bin/systemd-run" : dotnet,
-			capped ? $"--user --scope --quiet -p MemoryMax={ceilingGB}G -p MemorySwapMax=0 \"{dotnet}\" {arguments}" : arguments )
+			capped ? $"--user --scope --quiet -p MemoryMax={ceilingGB}G \"{dotnet}\" {arguments}" : arguments )
 		{
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,

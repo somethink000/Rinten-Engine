@@ -340,7 +340,7 @@ public abstract partial class SerializedProperty : IValid
 
 			if ( value.GetType() == typeof( string ) )
 			{
-				return JsonSerializer.Deserialize<T>( (string)value );
+				return JsonSerializer.Deserialize<T>( (string)value, EnumConvert.Plain );
 			}
 
 			//Convert.ChangeType doesn't support long to enum
@@ -360,7 +360,7 @@ public abstract partial class SerializedProperty : IValid
 			if ( converted is not null )
 				return (T)converted;
 
-			var jsonElement = JsonSerializer.SerializeToElement( value );
+			var jsonElement = JsonSerializer.SerializeToElement( value, EnumConvert.Plain );
 			return jsonElement.Deserialize<T>();
 		}
 		catch ( System.Exception )

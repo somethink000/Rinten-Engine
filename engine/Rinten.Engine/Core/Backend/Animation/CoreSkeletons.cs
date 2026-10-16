@@ -300,7 +300,7 @@ internal static class CoreSkeletons
 		AllowTrailingCommas = true,
 		IncludeFields = true,
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(), new ModelDefinition.ModelGraph.Skim() },
+		Converters = { new EnumConvert(), new ModelDefinition.ModelGraph.Skim() },
 	};
 
 	//What a model's definition said, read the first time anything asks for any part of it and kept until the model is forgotten.

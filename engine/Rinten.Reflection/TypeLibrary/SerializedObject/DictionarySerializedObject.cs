@@ -59,7 +59,7 @@ file class TypeSerializedProperty : SerializedProperty
 		}
 
 		NotePreChange();
-		typeSerializedObject.ValueStore[prop.Name] = JsonSerializer.Serialize( value );
+		typeSerializedObject.ValueStore[prop.Name] = JsonSerializer.Serialize( value, EnumConvert.Plain );
 		NoteChanged();
 	}
 
@@ -71,6 +71,6 @@ file class TypeSerializedProperty : SerializedProperty
 		if ( typeof( T ) == typeof( string ) )
 			return (T)(object)value;
 
-		return JsonSerializer.Deserialize<T>( value );
+		return JsonSerializer.Deserialize<T>( value, EnumConvert.Plain );
 	}
 }

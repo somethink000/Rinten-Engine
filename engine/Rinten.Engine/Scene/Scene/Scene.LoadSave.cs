@@ -288,7 +288,7 @@ public partial class Scene : GameObject
 			if ( prop.Name == "Name" ) continue;
 			if ( prop.Name == "Lerp" ) continue;
 
-			jso.Add( prop.Name, JsonValue.Create( prop.GetValue( this ) ) );
+			jso.Add( prop.Name, Json.ToNode( prop.GetValue( this ), prop.PropertyType ) );
 		}
 
 		jso.Add( "Metadata", SerializeMetadata() );

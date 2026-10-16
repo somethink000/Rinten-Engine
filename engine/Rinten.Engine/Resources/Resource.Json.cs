@@ -169,7 +169,7 @@ public partial class Resource
 				EmbeddedResource = resource with { Data = Json.SerializeAsObject( this ) };
 			}
 
-			JsonSerializer.Serialize( writer, EmbeddedResource );
+			JsonSerializer.Serialize( writer, EmbeddedResource, EnumConvert.Plain );
 			return;
 		}
 

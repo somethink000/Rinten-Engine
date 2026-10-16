@@ -242,12 +242,12 @@ public sealed partial class SkinnedModelRenderer
 
 			foreach ( var value in _vectors )
 			{
-				vectorsObj.Add( value.Key, JsonSerializer.SerializeToNode( value.Value ) );
+				vectorsObj.Add( value.Key, JsonSerializer.SerializeToNode( value.Value, EnumConvert.Plain ) );
 			}
 
 			foreach ( var value in _rotations )
 			{
-				rotationsObj.Add( value.Key, JsonSerializer.SerializeToNode( value.Value ) );
+				rotationsObj.Add( value.Key, JsonSerializer.SerializeToNode( value.Value, EnumConvert.Plain ) );
 			}
 
 			obj.Add( "bools", boolsObj );
@@ -298,7 +298,7 @@ public sealed partial class SkinnedModelRenderer
 			{
 				foreach ( var o in vectorsObj )
 				{
-					Set( o.Key, JsonSerializer.Deserialize<Vector3>( o.Value ) );
+					Set( o.Key, JsonSerializer.Deserialize<Vector3>( o.Value, EnumConvert.Plain ) );
 				}
 			}
 
@@ -306,7 +306,7 @@ public sealed partial class SkinnedModelRenderer
 			{
 				foreach ( var o in rotationsObj )
 				{
-					Set( o.Key, JsonSerializer.Deserialize<Rotation>( o.Value ) );
+					Set( o.Key, JsonSerializer.Deserialize<Rotation>( o.Value, EnumConvert.Plain ) );
 				}
 			}
 		}

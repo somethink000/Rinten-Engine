@@ -443,7 +443,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 		AllowTrailingCommas = true,
 		IncludeFields = true,
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(), new ModelDefinition.ModelGraph.Skim() },
+		Converters = { new EnumConvert(), new ModelDefinition.ModelGraph.Skim() },
 	};
 
 	//The meshes, imported and named. Null if there was nothing in them.

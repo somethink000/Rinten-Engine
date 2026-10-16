@@ -328,7 +328,7 @@ public partial class StandaloneExporter
 	{
 		PropertyNameCaseInsensitive = true,
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+		Converters = { new EnumConvert() },
 	};
 
 	private void QueueAddonFiles( string baseDir, BuildStep type )

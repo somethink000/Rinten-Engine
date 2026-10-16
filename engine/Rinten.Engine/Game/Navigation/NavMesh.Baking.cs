@@ -293,7 +293,7 @@ public sealed partial class NavMesh
 		//Store reference to the baked data file as a RawFileReference
 		if ( !string.IsNullOrWhiteSpace( _bakedDataPath ) )
 		{
-			jso["BakedDataPath"] = JsonSerializer.SerializeToNode( FileReference.FromPath( _bakedDataPath ) );
+			jso["BakedDataPath"] = JsonSerializer.SerializeToNode( FileReference.FromPath( _bakedDataPath ), EnumConvert.Plain );
 		}
 
 		return jso;

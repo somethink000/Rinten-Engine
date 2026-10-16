@@ -338,7 +338,7 @@ public sealed class TextRenderer : Renderer, Component.ExecuteInEditor
 		ts.FontName = obj.GetPropertyValue( "FontFamily", ts.FontName );
 		ts.Text = obj.GetPropertyValue( "Text", ts.Text );
 
-		obj["TextScope"] = JsonSerializer.SerializeToNode( ts );
+		obj["TextScope"] = JsonSerializer.SerializeToNode( ts, EnumConvert.Plain );
 	}
 
 	[Expose, JsonUpgrader( typeof( TextRenderer ), 2 )]

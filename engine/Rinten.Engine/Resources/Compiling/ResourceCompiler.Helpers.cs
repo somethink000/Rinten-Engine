@@ -17,7 +17,7 @@ public abstract partial class ResourceCompiler
 		var resource = await generator.CreateAsync( new ResourceGenerator.Options { ForDisk = true, Compiler = this }, default );
 		if ( resource is null ) return false;
 
-		Context.Data.Write( JsonSerializer.Serialize( resource ) );
+		Context.Data.Write( JsonSerializer.Serialize( resource, EnumConvert.Plain ) );
 
 		return true;
 	}
@@ -34,7 +34,7 @@ public abstract partial class ResourceCompiler
 
 		try
 		{
-			var parsed = JsonSerializer.Deserialize<EmbeddedResource>( json );
+			var parsed = JsonSerializer.Deserialize<EmbeddedResource>( json, EnumConvert.Plain );
 			if ( string.IsNullOrEmpty( parsed.ResourceGenerator ) ) return false;
 			resource = parsed;
 			return true;
@@ -78,7 +78,7 @@ public abstract partial class ResourceCompiler
 		//generate a filename for the resource
 		var child = Context.CreateChild( absPath );
 
-		child.SetInputData( JsonSerializer.Serialize( embed ) );
+		child.SetInputData( JsonSerializer.Serialize( embed, EnumConvert.Plain ) );
 		child.Compile();
 
 		//store it in the json, so the compiled json will load the resource

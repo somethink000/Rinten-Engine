@@ -56,70 +56,70 @@ public partial class PolygonMesh
 				//Legacy: Position/Rotation are no longer written. They were world-space values that got overwritten by MeshComponent
 				//on enable. Kept for backward compat with old data that may not have TextureCoord and needs these to reconstruct UVs.
 				else if ( propertyName == "Position" )
-					mesh._transform = mesh.Transform.WithPosition( JsonSerializer.Deserialize<Vector3>( ref reader ) );
+					mesh._transform = mesh.Transform.WithPosition( JsonSerializer.Deserialize<Vector3>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == "Rotation" )
-					mesh._transform = mesh.Transform.WithRotation( JsonSerializer.Deserialize<Rotation>( ref reader ) );
+					mesh._transform = mesh.Transform.WithRotation( JsonSerializer.Deserialize<Rotation>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( Positions ) )
-					mesh.Positions.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader ) );
+					mesh.Positions.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( Blends ) )
-					mesh.Blends.CopyFrom( JsonSerializer.Deserialize<Color32[]>( ref reader ) );
+					mesh.Blends.CopyFrom( JsonSerializer.Deserialize<Color32[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( Colors ) )
-					mesh.LoadColors( JsonSerializer.Deserialize<Color32[]>( ref reader ) );
+					mesh.LoadColors( JsonSerializer.Deserialize<Color32[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == "TextureOrigin" )
 				{
 					if ( reader.TokenType == JsonTokenType.StartArray )
 					{
-						mesh.TextureOriginUnused.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader ) );
+						mesh.TextureOriginUnused.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
 					}
 					else
 					{
-						JsonSerializer.Deserialize<Vector3>( ref reader );
+						JsonSerializer.Deserialize<Vector3>( ref reader, EnumConvert.Plain );
 					}
 				}
 
 				else if ( propertyName == nameof( TextureCoord ) )
 				{
-					mesh.TextureCoord.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader ) );
+					mesh.TextureCoord.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
 					hasTextureCoords = true;
 				}
 
 				else if ( propertyName == "TextureRotation" )
-					mesh.TextureRotationUnused.CopyFrom( JsonSerializer.Deserialize<Rotation[]>( ref reader ) );
+					mesh.TextureRotationUnused.CopyFrom( JsonSerializer.Deserialize<Rotation[]>( ref reader, EnumConvert.Plain ) );
 
 				//Legacy: Texture parameters are no longer written. They are world-space derived values recomputed at runtime from TextureCoord
 				//via ComputeFaceTextureParametersFromCoordinates(). Kept for backward compat with old data that lacks TextureCoord.
 				else if ( propertyName == nameof( TextureUAxis ) )
-					mesh.TextureUAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader ) );
+					mesh.TextureUAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( TextureVAxis ) )
-					mesh.TextureVAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader ) );
+					mesh.TextureVAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( TextureScale ) )
-					mesh.TextureScale.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader ) );
+					mesh.TextureScale.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( TextureOffset ) )
-					mesh.TextureOffset.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader ) );
+					mesh.TextureOffset.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == "TextureAngle" )
-					mesh.TextureAngleUnused.CopyFrom( JsonSerializer.Deserialize<float[]>( ref reader ) );
+					mesh.TextureAngleUnused.CopyFrom( JsonSerializer.Deserialize<float[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( MaterialIndex ) )
-					mesh.MaterialIndex.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader ) );
+					mesh.MaterialIndex.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( EdgeSmoothing ) )
-					mesh.EdgeSmoothing.CopyFrom( JsonSerializer.Deserialize<bool[]>( ref reader ) );
+					mesh.EdgeSmoothing.CopyFrom( JsonSerializer.Deserialize<bool[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == nameof( EdgeFlags ) )
-					mesh.EdgeFlags.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader ) );
+					mesh.EdgeFlags.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader, EnumConvert.Plain ) );
 
 				else if ( propertyName == "Materials" )
 				{
-					var materials = JsonSerializer.Deserialize<string[]>( ref reader );
+					var materials = JsonSerializer.Deserialize<string[]>( ref reader, EnumConvert.Plain );
 
 					mesh._materialsById.Clear();
 					mesh._materialNamesById.Clear();
@@ -185,7 +185,7 @@ public partial class PolygonMesh
 		{
 			writer.WritePropertyName( "Materials" );
 			JsonSerializer.Serialize( writer, Enumerable.Range( 0, mesh._materialNamesById.Count )
-				.Select( x => mesh._materialNamesById[x] ) );
+				.Select( x => mesh._materialNamesById[x] ), EnumConvert.Plain );
 		}
 
 		writer.WriteEndObject();

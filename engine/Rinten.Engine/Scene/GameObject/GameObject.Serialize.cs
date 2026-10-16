@@ -1092,7 +1092,7 @@ public partial class GameObject
 	{
 		if ( reader.TokenType == JsonTokenType.StartObject )
 		{
-			var goRef = JsonSerializer.Deserialize<GameObjectReference>( ref reader );
+			var goRef = JsonSerializer.Deserialize<GameObjectReference>( ref reader, EnumConvert.Plain );
 
 			return goRef.Resolve( Game.ActiveScene, warn: true );
 		}

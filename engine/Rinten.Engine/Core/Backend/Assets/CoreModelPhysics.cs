@@ -325,7 +325,7 @@ internal static unsafe class CoreModelPhysics
 
 		//The model's own graph, stepped over - see ModelDefinition.ModelGraph.Skim.
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(), new ModelDefinition.ModelGraph.Skim() },
+		Converters = { new EnumConvert(), new ModelDefinition.ModelGraph.Skim() },
 	};
 
 	static Dictionary<string, Transform> BoneRests( CoreAssets.ModelFile model )

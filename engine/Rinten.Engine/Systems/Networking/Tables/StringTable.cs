@@ -104,7 +104,7 @@ internal class StringTable
 		{
 			var json = ReadAsString();
 			if ( string.IsNullOrWhiteSpace( json ) ) return default;
-			return JsonSerializer.Deserialize<T>( json );
+			return JsonSerializer.Deserialize<T>( json, EnumConvert.Plain );
 		}
 	}
 
@@ -213,7 +213,7 @@ internal class StringTable
 
 	internal Entry SetJson<T>( string key, T value )
 	{
-		var json = JsonSerializer.Serialize( value );
+		var json = JsonSerializer.Serialize( value, EnumConvert.Plain );
 		return SetString( key, json );
 	}
 

@@ -81,7 +81,7 @@ public static partial class Storage
 				return;
 			}
 
-			Meta[key] = JsonValue.Create( value )?.ToJsonString();
+			Meta[key] = Json.Serialize( value );
 			SaveMeta();
 		}
 

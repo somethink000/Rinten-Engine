@@ -1,17 +1,15 @@
-﻿using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
-using System.Threading;
+﻿using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//One of our windows carried as a Wayland drag (xdg-toplevel-drag): the window follows the pointer as in a move, and the drag reports which
-//of our windows it is over and where it is put down. The one way a Wayland client learns where its window landed - as Chromium drags tabs out
+//One of our windows carried as a Wayland drag (xdg-toplevel-drag), the way Chromium drags tabs out: the window follows the pointer, and
+//SDL's data device reports where it is over and put down as drop events. A compositor serves one data device per client, so it is SDL's
 internal static unsafe partial class CoreWaylandDrag
 {
 	private const string Lib = "libwayland-client.so.0";
 
-	//What the drag offers: a kind only our own windows take, so nobody else's accepts it
-	private const string Mime = "application/x-rinten-window";
+	/// <summary>What the drag offers; our SDL build takes it as a carried window and reports its drop as text saying this.</summary>
+	internal const string Mime = "application/x-sdl3-window";
 
 	private const uint ActionMove = 2;
 	private const uint FlagDestroy = 1;
@@ -25,21 +23,9 @@ internal static unsafe partial class CoreWaylandDrag
 	[LibraryImport( Lib )] private static partial uint wl_proxy_get_version( IntPtr proxy );
 	[LibraryImport( Lib )] private static partial int wl_display_roundtrip_queue( IntPtr display, IntPtr queue );
 	[LibraryImport( Lib )] private static partial int wl_display_dispatch_queue_pending( IntPtr display, IntPtr queue );
-	[LibraryImport( Lib )] private static partial int wl_display_prepare_read_queue( IntPtr display, IntPtr queue );
-	[LibraryImport( Lib )] private static partial int wl_display_read_events( IntPtr display );
-	[LibraryImport( Lib )] private static partial void wl_display_cancel_read( IntPtr display );
 	[LibraryImport( Lib )] private static partial int wl_display_flush( IntPtr display );
-	[LibraryImport( Lib )] private static partial int wl_display_get_fd( IntPtr display );
 
-	[LibraryImport( "libc", EntryPoint = "poll" )] private static partial int Poll( PollFd* fds, ulong count, int timeout );
-
-	[StructLayout( LayoutKind.Sequential )]
-	private struct PollFd
-	{
-		public int Fd;
-		public short Events;
-		public short Returned;
-	}
+	[LibraryImport( "libc", EntryPoint = "close" )] private static partial int Close( int fd );
 
 	//libwayland's message and interface records, which the two interfaces it does not ship are written out as
 	[StructLayout( LayoutKind.Sequential )]
@@ -61,43 +47,32 @@ internal static unsafe partial class CoreWaylandDrag
 		public IntPtr Events;
 	}
 
-	/// <summary>What the drag said: over a surface of ours at a point, off all of them, dropped there, or over.</summary>
-	internal enum Heard { Over, Off, Dropped, Ended }
-
-	internal readonly record struct Report( Heard What, IntPtr Surface, float X, float Y );
-
 	private static bool tried;
-	private static IntPtr library, display, queue;
+	private static IntPtr library, display, queue, device;
 	private static IntPtr seat, pointer, devices, dragManager;
-	private static IntPtr pointerInterface, deviceInterface, sourceInterface, dragInterface;
+	private static IntPtr pointerInterface, sourceInterface, dragInterface;
 	private static uint seatName, seatVersion, devicesName, devicesVersion, dragManagerName;
-	private static uint seatCapabilities;
 	private static IntPtr mime;
 
 	//The serial of the last button pressed in one of our windows, which a drag has to be started with
-	private static volatile uint pressSerial;
+	private static uint pressSerial;
 
-	//The drag under way. Its data device lives only as long as the drag: the compositor talks to a client's newest device, and one
-	//kept for good would take the clipboard and every drop away from SDL's
-	private static IntPtr device, source, toplevelDrag;
-	private static IntPtr offer, overSurface;
-	private static float overX, overY;
+	//The drag under way, and whether it has finished since the last Ended
+	private static IntPtr source, toplevelDrag;
+	private static bool finished;
 
-	//What the reading thread heard, for the main thread to act on
-	private static readonly ConcurrentQueue<Report> heard = new();
-
-	/// <summary>Whether this desktop carries windows this way: Wayland, with xdg-toplevel-drag and a pointer to drag with.</summary>
+	/// <summary>Whether this desktop carries windows this way: Wayland, with xdg-toplevel-drag, SDL's data device and a pointer.</summary>
 	internal static bool Available => display != IntPtr.Zero && dragManager != IntPtr.Zero && pointer != IntPtr.Zero;
 
 	/// <summary>Binds what a drag needs on SDL's own connection, once; nothing happens where the desktop lacks any of it.</summary>
-	internal static void Start( IntPtr sdlDisplay )
+	internal static void Start( IntPtr sdlDisplay, IntPtr sdlDevice )
 	{
-		if ( tried || sdlDisplay == IntPtr.Zero ) return;
+		if ( tried || sdlDisplay == IntPtr.Zero || sdlDevice == IntPtr.Zero ) return;
 		tried = true;
 
 		try
 		{
-			Bind( sdlDisplay );
+			Bind( sdlDisplay, sdlDevice );
 		}
 		catch ( System.Exception e )
 		{
@@ -106,7 +81,7 @@ internal static unsafe partial class CoreWaylandDrag
 		}
 	}
 
-	private static void Bind( IntPtr sdlDisplay )
+	private static void Bind( IntPtr sdlDisplay, IntPtr sdlDevice )
 	{
 		if ( !NativeLibrary.TryLoad( Lib, out library ) ) return;
 
@@ -115,14 +90,13 @@ internal static unsafe partial class CoreWaylandDrag
 		var registryInterface = Export( "wl_registry_interface" );
 
 		pointerInterface = Export( "wl_pointer_interface" );
-		deviceInterface = Export( "wl_data_device_interface" );
 		sourceInterface = Export( "wl_data_source_interface" );
 
 		var dragManagerInterface = MakeDragInterfaces();
 
 		mime = Marshal.StringToCoTaskMemUTF8( Mime );
 
-		//Our own queue, read on our own thread, so SDL's queue and ours never wait on each other
+		//Our own queue, read by whoever reads the connection and dispatched on the main thread by Ended
 		queue = wl_display_create_queue( sdlDisplay );
 
 		var wrapper = wl_proxy_create_wrapper( sdlDisplay );
@@ -145,90 +119,59 @@ internal static unsafe partial class CoreWaylandDrag
 		devices = BindGlobal( registry, devicesName, devicesInterface, devicesVersion );
 		dragManager = BindGlobal( registry, dragManagerName, dragManagerInterface, 1 );
 
-		wl_display_roundtrip_queue( sdlDisplay, queue );
-
-		//The pointer is ours only to learn the serial a press was given; SDL's own does everything else
-		if ( (seatCapabilities & 1) != 0 )
-		{
-			pointer = Request( seat, 0, pointerInterface, seatVersion, 0, 0 );
-
-			wl_proxy_add_listener( pointer, Listener( Nothing, Nothing, Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, uint, uint, uint, uint, void>)&Button,
-				Nothing, Nothing, Nothing, Nothing, Nothing ), IntPtr.Zero );
-		}
-
 		display = sdlDisplay;
+		device = sdlDevice;
 
-		new Thread( Read ) { IsBackground = true, Name = "Wayland drags" }.Start();
+		wl_display_roundtrip_queue( sdlDisplay, queue );
 	}
 
 	/// <summary>Carries a window: it follows the pointer, held where it was grabbed, until it is put down. False where it cannot be.</summary>
 	internal static bool Carry( IntPtr surface, IntPtr toplevel, int grabX, int grabY )
 	{
-		if ( !Available || source != IntPtr.Zero || surface == IntPtr.Zero || toplevel == IntPtr.Zero || pressSerial == 0 ) return false;
+		if ( !Available || source != IntPtr.Zero || surface == IntPtr.Zero || toplevel == IntPtr.Zero ) return false;
 
-		device = Request( devices, 1, deviceInterface, devicesVersion, 0, 0, seat );
+		//The press this carry follows may still be waiting in our queue
+		wl_display_dispatch_queue_pending( display, queue );
 
-		wl_proxy_add_listener( device, Listener( (nint)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&Offered,
-			(nint)(delegate* unmanaged<IntPtr, IntPtr, uint, IntPtr, int, int, IntPtr, void>)&Entered, (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Left,
-			(nint)(delegate* unmanaged<IntPtr, IntPtr, uint, int, int, void>)&Moved, (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Dropped, Nothing ), IntPtr.Zero );
+		if ( pressSerial == 0 ) return false;
 
 		source = Request( devices, 0, sourceInterface, devicesVersion, 0, 0 );
 
-		wl_proxy_add_listener( source, Listener( Nothing, Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Finished,
-			Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Finished, Nothing ), IntPtr.Zero );
+		wl_proxy_add_listener( source, Listener( Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, byte*, int, void>)&Send,
+			(nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Finished, Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Finished, Nothing ), IntPtr.Zero );
 
 		Request( source, 0, IntPtr.Zero, devicesVersion, 0, mime );
 
 		if ( devicesVersion >= 3 ) Request( source, 2, IntPtr.Zero, devicesVersion, 0, (nint)ActionMove );
 
 		toplevelDrag = Request( dragManager, 1, dragInterface, 1, 0, 0, source );
-		Request( toplevelDrag, 1, IntPtr.Zero, 1, 0, toplevel, grabX, grabY );
 
-		Request( device, 0, IntPtr.Zero, devicesVersion, 0, source, surface, 0, (nint)pressSerial );
+		//The window is attached once the drag is under way: GNOME only moves a window whose drag it already knows
+		Request( device, 0, IntPtr.Zero, wl_proxy_get_version( device ), 0, source, surface, 0, (nint)pressSerial );
+		Request( toplevelDrag, 1, IntPtr.Zero, 1, 0, toplevel, grabX, grabY );
 
 		wl_display_flush( display );
 
+		finished = false;
 		return true;
 	}
 
-	/// <summary>What the drag said since the last call, on the main thread; an ending also lets the drag's objects go.</summary>
-	internal static bool Next( out Report report )
+	/// <summary>Whether the drag under way finished since the last call; its objects are let go then. On the main thread, each frame.</summary>
+	internal static bool Ended()
 	{
-		if ( !heard.TryDequeue( out report ) ) return false;
+		if ( display == IntPtr.Zero ) return false;
 
-		if ( report.What == Heard.Ended && source != IntPtr.Zero )
-		{
-			Request( toplevelDrag, 0, IntPtr.Zero, 1, FlagDestroy );
-			Request( source, 1, IntPtr.Zero, devicesVersion, FlagDestroy );
+		wl_display_dispatch_queue_pending( display, queue );
 
-			//Released, so the device the compositor talks to is SDL's again
-			if ( devicesVersion >= 2 ) Request( device, 1, IntPtr.Zero, devicesVersion, FlagDestroy );
+		if ( !finished || source == IntPtr.Zero ) return false;
 
-			source = toplevelDrag = device = IntPtr.Zero;
-		}
+		Request( toplevelDrag, 0, IntPtr.Zero, 1, FlagDestroy );
+		Request( source, 1, IntPtr.Zero, devicesVersion, FlagDestroy );
+
+		source = toplevelDrag = IntPtr.Zero;
+		finished = false;
 
 		return true;
-	}
-
-	//Reads the connection for our queue while SDL reads it for its own - libwayland's way for two readers to share one socket
-	private static void Read()
-	{
-		var fd = new PollFd { Fd = wl_display_get_fd( display ), Events = 1 };
-
-		while ( true )
-		{
-			while ( wl_display_prepare_read_queue( display, queue ) != 0 )
-				wl_display_dispatch_queue_pending( display, queue );
-
-			wl_display_flush( display );
-
-			fd.Returned = 0;
-
-			if ( Poll( &fd, 1, 100 ) > 0 ) wl_display_read_events( display );
-			else wl_display_cancel_read( display );
-
-			wl_display_dispatch_queue_pending( display, queue );
-		}
 	}
 
 	private static IntPtr Export( string name ) => NativeLibrary.GetExport( library, name );
@@ -286,7 +229,7 @@ internal static unsafe partial class CoreWaylandDrag
 		return (IntPtr)manager;
 	}
 
-	//-- events: on the reading thread, or the main one during the roundtrips above --------------
+	//Events, all on the main thread: in the roundtrips above or in Ended
 
 	private static readonly nint Nothing = (nint)(delegate* unmanaged<IntPtr, IntPtr, void>)&Ignore;
 
@@ -303,8 +246,27 @@ internal static unsafe partial class CoreWaylandDrag
 		else if ( called == "xdg_toplevel_drag_manager_v1" ) dragManagerName = name;
 	}
 
+	//The pointer is ours only to learn the serial a press was given; SDL's own does everything else. It comes and goes with the mouse
 	[UnmanagedCallersOnly]
-	private static void Capabilities( IntPtr data, IntPtr seat, uint capabilities ) => seatCapabilities = capabilities;
+	private static void Capabilities( IntPtr data, IntPtr seat, uint capabilities )
+	{
+		var has = (capabilities & 1) != 0;
+
+		if ( has && pointer == IntPtr.Zero )
+		{
+			pointer = Request( seat, 0, pointerInterface, seatVersion, 0, 0 );
+
+			wl_proxy_add_listener( pointer, Listener( Nothing, Nothing, Nothing, (nint)(delegate* unmanaged<IntPtr, IntPtr, uint, uint, uint, uint, void>)&Button,
+				Nothing, Nothing, Nothing, Nothing, Nothing ), IntPtr.Zero );
+		}
+		else if ( !has && pointer != IntPtr.Zero )
+		{
+			if ( seatVersion >= 3 ) Request( pointer, 1, IntPtr.Zero, seatVersion, FlagDestroy );
+
+			pointer = IntPtr.Zero;
+			pressSerial = 0;
+		}
+	}
 
 	[UnmanagedCallersOnly]
 	private static void Button( IntPtr data, IntPtr pointer, uint serial, uint time, uint button, uint state )
@@ -312,65 +274,10 @@ internal static unsafe partial class CoreWaylandDrag
 		if ( state == 1 ) pressSerial = serial;
 	}
 
+	//Nothing is read from a carried window; the descriptor is only closed
 	[UnmanagedCallersOnly]
-	private static void Offered( IntPtr data, IntPtr device, IntPtr id ) => offer = id;
-
-	//Over one of our surfaces: our own drag is taken, as a move
-	[UnmanagedCallersOnly]
-	private static void Entered( IntPtr data, IntPtr device, uint serial, IntPtr surface, int x, int y, IntPtr id )
-	{
-		offer = id;
-		overSurface = surface;
-
-		if ( id != IntPtr.Zero )
-		{
-			Request( id, 0, IntPtr.Zero, devicesVersion, 0, (nint)serial, mime );
-
-			if ( devicesVersion >= 3 ) Request( id, 4, IntPtr.Zero, devicesVersion, 0, (nint)ActionMove, (nint)ActionMove );
-		}
-
-		Over( x, y );
-	}
+	private static void Send( IntPtr data, IntPtr source, byte* type, int fd ) => Close( fd );
 
 	[UnmanagedCallersOnly]
-	private static void Moved( IntPtr data, IntPtr device, uint time, int x, int y ) => Over( x, y );
-
-	[UnmanagedCallersOnly]
-	private static void Left( IntPtr data, IntPtr device )
-	{
-		Forget();
-		overSurface = IntPtr.Zero;
-
-		heard.Enqueue( new Report( Heard.Off, IntPtr.Zero, 0, 0 ) );
-	}
-
-	[UnmanagedCallersOnly]
-	private static void Dropped( IntPtr data, IntPtr device )
-	{
-		heard.Enqueue( new Report( Heard.Dropped, overSurface, overX, overY ) );
-
-		//Taken, which is what lets the source hear the drag is done
-		if ( offer != IntPtr.Zero && devicesVersion >= 3 ) Request( offer, 3, IntPtr.Zero, devicesVersion, 0 );
-
-		Forget();
-	}
-
-	[UnmanagedCallersOnly]
-	private static void Finished( IntPtr data, IntPtr source ) => heard.Enqueue( new Report( Heard.Ended, IntPtr.Zero, 0, 0 ) );
-
-	//Fixed point, eight bits of fraction
-	private static void Over( int x, int y )
-	{
-		overX = x / 256.0f;
-		overY = y / 256.0f;
-
-		heard.Enqueue( new Report( Heard.Over, overSurface, overX, overY ) );
-	}
-
-	private static void Forget()
-	{
-		if ( offer != IntPtr.Zero ) Request( offer, 2, IntPtr.Zero, devicesVersion, FlagDestroy );
-
-		offer = IntPtr.Zero;
-	}
+	private static void Finished( IntPtr data, IntPtr source ) => finished = true;
 }

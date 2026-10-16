@@ -27,7 +27,7 @@ if [ "$1" = "fresh" ]; then
 fi
 
 # SDL, which the engine opens by name at runtime. There is no binary release for this platform, so it is built
-# from the pinned source once and left in place - see build-sdl.sh, which does nothing when it is already there.
+# from the pinned source once and left in place - see build-sdl.sh, which builds it again only when its patches change.
 "$SRC/build-sdl.sh"
 
 # And the OpenXR loader, the same way and for the same reason - see

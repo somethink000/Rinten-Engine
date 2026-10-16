@@ -1,11 +1,18 @@
-﻿namespace Rinten;
+﻿using System.Runtime.InteropServices;
 
-//A window carried by its caption so another window of ours can take it - see CoreWaylandDrag, whose drag says which
-//of our windows the carried one is over and which it was put down on
+namespace Rinten;
+
+//A window carried by its caption so another window of ours can take it - see CoreWaylandDrag. SDL's drop events
+//say which of our windows the carried one is over and which it was put down on
 internal sealed unsafe partial class CoreWindow
 {
 	//How far a caption press is pulled before it is a carry, in window units
 	private const float CarryStarts = 4.0f;
+
+	private const uint SDL_EVENT_DROP_FILE = 0x1000;
+	private const uint SDL_EVENT_DROP_TEXT = 0x1001;
+	private const uint SDL_EVENT_DROP_COMPLETE = 0x1003;
+	private const uint SDL_EVENT_DROP_POSITION = 0x1004;
 
 	/// <summary>Whether pulling this window's caption carries it as a drag another of our windows can take, where the desktop can.</summary>
 	public bool CarriesItself
@@ -16,7 +23,8 @@ internal sealed unsafe partial class CoreWindow
 			carriesItself = value;
 
 			//What a carry needs, bound on SDL's own connection the first time a window wants it
-			if ( value && WindowKind == Kind.Wayland ) CoreWaylandDrag.Start( (IntPtr)NativeDisplay );
+			if ( value && WindowKind == Kind.Wayland )
+				CoreWaylandDrag.Start( (IntPtr)NativeDisplay, SDL_GetPointerProperty( SDL_GetGlobalProperties(), "SDL.video.wayland.wl_data_device", IntPtr.Zero ) );
 		}
 	}
 
@@ -85,32 +93,38 @@ internal sealed unsafe partial class CoreWindow
 		CarryStarted?.Invoke( this );
 	}
 
-	//What the drag said since the last frame
+	//The drag ends after the events that said where it was put down
 	private static void PumpCarry()
 	{
-		while ( CoreWaylandDrag.Next( out var report ) )
+		if ( CoreWaylandDrag.Ended() ) EndCarry();
+	}
+
+	//SDL's drop events while a window is carried: over a window of ours, off it, or put down on it
+	private static bool HearDrop( uint type, byte* buffer )
+	{
+		if ( Carried is null ) return false;
+
+		var window = Find( *(uint*)(buffer + 16) );
+		var at = new Vector2( *(float*)(buffer + 20), *(float*)(buffer + 24) );
+
+		switch ( type )
 		{
-			switch ( report.What )
-			{
-				case CoreWaylandDrag.Heard.Over:
-					CarriedOver = OfSurface( report.Surface );
-					CarriedAt = new Vector2( report.X, report.Y );
-					break;
+			case SDL_EVENT_DROP_POSITION:
+				CarriedOver = window;
+				CarriedAt = at;
+				break;
 
-				case CoreWaylandDrag.Heard.Off:
-					CarriedOver = null;
-					break;
+			case SDL_EVENT_DROP_TEXT when Marshal.PtrToStringUTF8( *(IntPtr*)(buffer + 40) ) == CoreWaylandDrag.Mime:
+				droppedOn = window;
+				droppedAt = CarriedAt;
+				break;
 
-				case CoreWaylandDrag.Heard.Dropped:
-					droppedOn = OfSurface( report.Surface );
-					droppedAt = new Vector2( report.X, report.Y );
-					break;
-
-				case CoreWaylandDrag.Heard.Ended:
-					EndCarry();
-					break;
-			}
+			case SDL_EVENT_DROP_COMPLETE:
+				CarriedOver = null;
+				break;
 		}
+
+		return true;
 	}
 
 	private static void EndCarry()
@@ -123,18 +137,5 @@ internal sealed unsafe partial class CoreWindow
 		droppedOn = null;
 
 		if ( carried is not null ) CarryEnded?.Invoke( carried, on, droppedAt );
-	}
-
-	//The window of ours a Wayland surface is
-	private static CoreWindow OfSurface( IntPtr surface )
-	{
-		if ( surface == IntPtr.Zero ) return null;
-
-		foreach ( var window in live )
-		{
-			if ( window.WindowKind == Kind.Wayland && (IntPtr)window.NativeWindow == surface ) return window;
-		}
-
-		return null;
 	}
 }

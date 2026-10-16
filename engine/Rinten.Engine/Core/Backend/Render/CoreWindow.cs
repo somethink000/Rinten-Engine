@@ -117,6 +117,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	[LibraryImport( SDL, EntryPoint = "SDL_GetWindowProperties" )]
 	private static partial uint SDL_GetWindowProperties( IntPtr window );
 
+	[LibraryImport( SDL, EntryPoint = "SDL_GetGlobalProperties" )]
+	private static partial uint SDL_GetGlobalProperties();
+
 	[LibraryImport( SDL, EntryPoint = "SDL_GetPointerProperty", StringMarshalling = StringMarshalling.Utf8 )]
 	private static partial IntPtr SDL_GetPointerProperty( uint properties, string name, IntPtr fallback );
 
@@ -1632,6 +1635,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	//One event, to whoever it is about.
 	private static void Route( uint type, byte* buffer )
 	{
+		if ( type is >= SDL_EVENT_DROP_FILE and <= SDL_EVENT_DROP_POSITION && HearDrop( type, buffer ) ) return;
+
 		if ( type == SDL_EVENT_MOUSE_MOTION ) MotionEvents++;
 		if ( type is SDL_EVENT_MOUSE_BUTTON_DOWN or SDL_EVENT_MOUSE_BUTTON_UP ) ButtonEvents++;
 

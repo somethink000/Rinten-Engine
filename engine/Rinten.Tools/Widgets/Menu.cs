@@ -147,6 +147,8 @@ namespace Editor
 			option.Order = ++added;
 
 			Options.Add( option );
+			ContentsChanged();
+
 			return option;
 		}
 
@@ -159,6 +161,7 @@ namespace Editor
 			//A widget in a menu is a row of the menu that draws itself.
 			widget.SetPanelParent( this );
 			Widgets.Add( widget );
+			ContentsChanged();
 
 			return widget;
 		}
@@ -169,8 +172,7 @@ namespace Editor
 			widget.SetPanelParent( this );
 
 			Widgets.Insert( Math.Clamp( position, 0, Widgets.Count ), widget );
-
-			MarkNeedsArrange();
+			ContentsChanged();
 
 			return widget;
 		}
@@ -268,6 +270,7 @@ namespace Editor
 			menu.ParentMenu = this;
 			menu.DeleteOnClose = false;
 			menu.Order = ++added;
+			ContentsChanged();
 
 			return menu;
 		}
@@ -290,8 +293,7 @@ namespace Editor
 		public void RemoveOption( Option option )
 		{
 			Options.Remove( option );
-
-			return;
+			ContentsChanged();
 		}
 
 		public void RemoveWidget( Widget widget )
@@ -299,14 +301,14 @@ namespace Editor
 			if ( !Widgets.Remove( widget ) ) return;
 
 			widget.SetPanelParent( null );
-
-			MarkNeedsArrange();
+			ContentsChanged();
 		}
 
 		/// <summary>Remove all options</summary>
 		public void RemoveOptions()
 		{
 			Options.Clear();
+			ContentsChanged();
 		}
 
 		/// <summary>Remove all menus</summary>
@@ -318,6 +320,7 @@ namespace Editor
 			}
 
 			Menus.Clear();
+			ContentsChanged();
 		}
 
 		/// <summary>Remove all widgets</summary>
@@ -326,6 +329,7 @@ namespace Editor
 			foreach ( var widget in Widgets ) widget.SetPanelParent( null );
 
 			Widgets.Clear();
+			ContentsChanged();
 		}
 
 		/// <summary>A line between groups of options: an option with nothing on it.</summary>
@@ -396,6 +400,7 @@ namespace Editor
 		{
 			Options.Clear();
 			Menus.Clear();
+			ContentsChanged();
 		}
 
 		public Option SelectedOption

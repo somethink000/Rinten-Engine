@@ -7,6 +7,7 @@ public partial class DockWidget
 {
 	private DockManager manager;
 	private Widget content;
+	private Widget header;
 	private string title = string.Empty;
 	private string icon;
 
@@ -64,6 +65,24 @@ public partial class DockWidget
 	static string DockClass( Widget widget ) => "dock-" + widget.GetType().Name.ToLowerInvariant();
 
 	//The widget this dock is showing.
+
+	/// <summary>What stands over the content, whatever the content is set to - the document tabs over an editor's central view.</summary>
+	internal Widget Header
+	{
+		get => header;
+		set
+		{
+			if ( header == value ) return;
+
+			if ( header.IsValid() )
+				header.SetPanelParent( null );
+
+			header = value;
+			header?.SetPanelParent( this );
+
+			MarkNeedsArrange();
+		}
+	}
 	internal Widget WidgetManaged
 	{
 		get => content;
@@ -94,10 +113,21 @@ public partial class DockWidget
 	{
 		base.OnArrange();
 
-		if ( !OnPanels || content is null ) return;
+		if ( !OnPanels ) return;
 
-		content.Position = 0;
-		content.Size = Size;
+		var top = 0.0f;
+
+		if ( header.IsValid() )
+		{
+			top = header.MinimumHeight;
+			header.Position = 0;
+			header.Size = new Vector2( Size.x, top );
+		}
+
+		if ( content is null ) return;
+
+		content.Position = new Vector2( 0, top );
+		content.Size = new Vector2( Size.x, Size.y - top );
 	}
 
 	protected override void OnPaint()

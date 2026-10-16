@@ -546,6 +546,18 @@ public partial class Menu
 		if ( DeleteOnClose ) Destroy();
 	}
 
+	//Whether what is in the menu changed while it was up - a filter typed into it - so its rows are made again
+	private bool stale;
+
+	//Rows are made again on the next frame, once however much changed; a menu that is not up builds them when it opens
+	private protected void ContentsChanged()
+	{
+		if ( !OnPanels || leaving || !openMenus.Contains( this ) ) return;
+
+		stale = true;
+		RequestFrame();
+	}
+
 	//While it arrives and while it leaves - the frames it asks for then, see FramesOnDemandAttribute:
 	//letting go of where the menu arrived from, and taking one that has left off the layer.
 	private protected override void OnWidgetFrame()
@@ -553,6 +565,12 @@ public partial class Menu
 		base.OnWidgetFrame();
 
 		if ( !OnPanels ) return;
+
+		if ( stale && !leaving )
+		{
+			stale = false;
+			Build();
+		}
 
 		if ( arriving > 0 )
 		{

@@ -118,23 +118,19 @@ internal sealed class DocumentTabWidget : StackedHost
 		return document;
 	}
 
-	//The strip goes over the editor's central view, where the scene tabs stand over the scene; an editor without one has it over everything
+	//The strip goes over the editor's central view, where the scene tabs stand over the scene: in the central dock's header, which stays
+	//whatever the editor puts in the dock. An editor with no central dock has it over everything
 	static Widget WithStrip( Widget editor, Widget content, EditorTabStrip strip )
 	{
-		var frame = new Widget( null ) { Name = "DocumentView" };
-		frame.Layout = Layout.Column();
-		frame.Layout.Add( strip );
-
-		if ( editor is DockWindow window && window.DockManager.FindDockWidget( "CentralWidget" ) is { } central && central.Widget.IsValid() )
+		if ( editor is DockWindow window && window.DockManager.FindDockWidget( "CentralWidget" ) is { } central )
 		{
-			var view = central.Widget;
-
-			central.Widget = frame;
-			frame.Layout.Add( view, 1 );
-
+			central.Header = strip;
 			return content;
 		}
 
+		var frame = new Widget( null ) { Name = "DocumentView" };
+		frame.Layout = Layout.Column();
+		frame.Layout.Add( strip );
 		frame.Layout.Add( content, 1 );
 
 		return frame;

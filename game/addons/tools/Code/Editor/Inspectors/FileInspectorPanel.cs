@@ -5,6 +5,7 @@ using System.Linq;
 namespace Editor.Inspectors;
 
 /// <summary>Inspector page for widget editors found by extension ([CanEdit("asset:ext")]), saved here</summary>
+[StyleSheet( "GameResourceInspectorPanel.cs.scss" )]
 public sealed class FileInspectorPanel : InspectorPanel
 {
 	private readonly Asset _asset;
@@ -65,7 +66,8 @@ public sealed class FileInspectorPanel : InspectorPanel
 			_resource = resource;
 
 		//On a card of its own, as everything under an asset's header is; the widget is drawn as it always was, inside it.
-		var card = AddChild( new InspectorCard( asset.AssetType?.FriendlyName ?? "File", "tune" ) );
+		//In the page's scroll, so an editor taller than the dock can be scrolled through
+		var card = AddChild<Panel>( "scroll" ).AddChild( new InspectorCard( asset.AssetType?.FriendlyName ?? "File", "tune" ) );
 		var host = card.Body.AddChild<WidgetPanel>();
 		host.AddClass( "resource-editor-host" );
 		host.WidthFromLayout = true;

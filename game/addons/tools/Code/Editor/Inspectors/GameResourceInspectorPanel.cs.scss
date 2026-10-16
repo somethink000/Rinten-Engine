@@ -1,5 +1,8 @@
-//Laid out like a GameObject: ungrouped properties in the header, a card per group, scrolling
-GameResourceInspectorPanel
+//Laid out like a GameObject: ungrouped properties in the header, a card per group, scrolling. The pages that
+//host a widget editor scroll the same way - see ResourceEditorInspectorPanel and FileInspectorPanel
+GameResourceInspectorPanel,
+ResourceEditorInspectorPanel,
+FileInspectorPanel
 {
 	flex-direction: column;
 	min-height: 0;

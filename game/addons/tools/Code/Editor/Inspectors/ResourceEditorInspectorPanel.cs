@@ -5,6 +5,7 @@ using System.Linq;
 namespace Editor.Inspectors;
 
 /// <summary>The inspector dock's page for a resource whose editor is still a widget.</summary>
+[StyleSheet( "GameResourceInspectorPanel.cs.scss" )]
 public sealed class ResourceEditorInspectorPanel : InspectorPanel
 {
 	private readonly Asset _asset;
@@ -69,7 +70,8 @@ public sealed class ResourceEditorInspectorPanel : InspectorPanel
 		}
 
 		//On a card of its own, as everything under an asset's header is; the widget is drawn as it always was, inside it.
-		var card = AddChild( new InspectorCard( resource.GetType().Name.ToTitleCase(), "tune" ) );
+		//In the page's scroll, so an editor taller than the dock can be scrolled through
+		var card = AddChild<Panel>( "scroll" ).AddChild( new InspectorCard( resource.GetType().Name.ToTitleCase(), "tune" ) );
 		var host = card.Body.AddChild<WidgetPanel>();
 
 		//The column says how wide, the widget says how tall. Left to size itself both ways it took its width from an inspector widget's size

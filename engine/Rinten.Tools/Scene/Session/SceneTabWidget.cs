@@ -128,7 +128,7 @@ sealed class SceneTabWidget : Widget
 
 		public string Title => Session.SceneDock?.WindowTitle ?? "Untitled";
 		public string Icon => Session.IsPlaying ? "play_arrow" : Session.IsPrefabSession ? "home_repair_service" : "grid_4x4";
-		public Color? Accent => Session.IsPlaying ? Theme.Green : null;
+		public Color? Accent => Session.IsPlaying ? Theme.Green : (Color?)null;
 		public bool Unsaved => false;
 
 		public void Select() => Session.MakeActive();

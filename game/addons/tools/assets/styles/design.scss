@@ -1311,7 +1311,9 @@ $viewport-bar-control: 26px;
 
 	//Every button on the bar the height of the dropdown beside it, on the editor's black - a field's ground and edge - and a step up under the
 	//pointer, the way a field that is pressed does (10-07: the buttons were glyphs on a grey veil, a different size from everything else on the bar).
+	//The build menu's button stands in a panel of its own, and wears the same box
 	.group > .toolbarbutton,
+	.group > .build-menu-button > .toolbarbutton,
 	.snap-step,
 	.resolution-mode,
 	.tool-mode-picker
@@ -1322,12 +1324,14 @@ $viewport-bar-control: 26px;
 		border-radius: $control-radius;
 	}
 
-	.group > .toolbarbutton
+	.group > .toolbarbutton,
+	.group > .build-menu-button > .toolbarbutton
 	{
 		width: $viewport-bar-control;
 	}
 
 	.group > .toolbarbutton:hover,
+	.group > .build-menu-button > .toolbarbutton:hover,
 	.snap-step:hover,
 	.resolution-mode:hover
 	{
@@ -1336,7 +1340,8 @@ $viewport-bar-control: 26px;
 	}
 
 	//On is still the picked plate, the same as everywhere else.
-	.group > .toolbarbutton.active
+	.group > .toolbarbutton.active,
+	.group > .build-menu-button > .toolbarbutton.active
 	{
 		background-color: $picked;
 		border-color: rgba( $accent, 0.6 );

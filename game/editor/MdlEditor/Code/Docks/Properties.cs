@@ -587,15 +587,9 @@ internal sealed class PropertiesPanel : EditorPanel
 			_miniCamera.ZFar = 15000f;
 			_miniCamera.ZNear = 0.1f;
 
-			var ambGo = new GameObject( true, "ambient" );
-			var amb = ambGo.AddComponent<AmbientLight>();
-			amb.Color = Color.Cyan * 0.05f;
-
-			var sunGo = new GameObject( true, "sun" );
-			var sun = sunGo.AddComponent<DirectionalLight>();
-			sun.Shadows = true;
-			sun.WorldRotation = new Angles( 50, 45, 0 );
-			sun.LightColor = Color.White * 0.6f;
+			//Lit from the view the camera is put at - see FrameMiniModel
+			PreviewLighting.HideSky( _miniCamera );
+			PreviewLighting.Light( _miniScene, new Angles( 20, 225, 0 ) );
 		}
 	}
 

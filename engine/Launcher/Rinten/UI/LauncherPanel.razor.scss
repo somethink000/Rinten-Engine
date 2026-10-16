@@ -1,5 +1,14 @@
 //Launcher laid out at 1.3x scale; colours come from the editor tokens
 
+//A card as the inspector draws a component: darker than its pane, a hairline round it and a lit top edge
+@mixin card
+{
+	background-color: $card;
+	border: 1px solid $edge;
+	border-top-color: $edge-lit;
+	border-radius: $radius-1;
+}
+
 LauncherPanel
 {
 	flex-grow: 1;
@@ -52,7 +61,7 @@ LauncherPanel
 		background-image: linear-gradient( to bottom, transparent, rgba( 0, 0, 0, 0.1 ) );
 	}
 
-	//The side: the page's own dark, and rows on it a breath lighter.
+	//The side: the inspector's grey, with rows on it in the near-black of the editor's fields.
 
 	.side
 	{
@@ -65,7 +74,8 @@ LauncherPanel
 
 		padding: 14px 16px 16px 18px;
 
-		background-color: $window-ground;
+		background-color: $panel-ground;
+		border-right: 1px solid $edge;
 	}
 
 	.brand
@@ -100,8 +110,7 @@ LauncherPanel
 		padding: 0px 10px 0px 12px;
 		margin-bottom: 3px;
 
-		border-radius: $radius-2;
-		background-color: $ground-plate;
+		@include well;
 
 		.caption
 		{
@@ -125,23 +134,25 @@ LauncherPanel
 
 		&:hover
 		{
-			background-color: $ground-plate-hover;
+			background-color: $card-down;
+			border-color: $edge-lit;
 
 			i, .caption { color: $ink; }
 			.out { color: $ink-dim; }
 		}
 
-		&:active { background-color: $ground-plate; }
+		&:active { background-color: $sunken; }
 	}
 
 	//Where the window is: the green-grey plate, the words and glyph on it white.
 	.nav.on
 	{
 		background-color: $picked;
+		border-color: $picked;
 
 		i, .caption { color: $ink; }
 
-		&:hover { background-color: $picked; }
+		&:hover { background-color: $picked; border-color: $picked; }
 	}
 
 	//Between what the window shows and what it opens elsewhere.
@@ -152,10 +163,10 @@ LauncherPanel
 
 		margin: 10px 0px 12px 0px;
 
-		background-color: $ground-plate;
+		background-color: $edge;
 	}
 
-	//A square: a button with a glyph on it and nothing else. On a card it is a step up from the card; in the side's corner, a step up from the side.
+	//A square: a button with only a glyph on it
 
 	.square
 	{
@@ -183,6 +194,14 @@ LauncherPanel
 		&:active { transform: scale( 0.92 ); }
 	}
 
+	//On a card the squares are bare glyphs, as the buttons on an inspector card's bar are
+	.card .square
+	{
+		background-color: transparent;
+
+		&:hover { background-color: $veil-down; }
+	}
+
 	//On: the green-grey, the way the pin is on a project kept at the top.
 	.square.on
 	{
@@ -206,9 +225,9 @@ LauncherPanel
 
 	.community > .link
 	{
-		background-color: $ground-plate;
+		@include well;
 
-		&:hover { background-color: $ground-plate-hover; }
+		&:hover { background-color: $card-down; border-color: $edge-lit; }
 	}
 
 	//The links as squares the size of the mark beside them
@@ -236,7 +255,7 @@ LauncherPanel
 
 		padding: 14px 16px 0px 16px;
 
-		background-color: $panel-ground;
+		background-color: $window-ground;
 	}
 
 	.head
@@ -259,9 +278,8 @@ LauncherPanel
 
 		padding: 0px 8px;
 
-		background-color: $tile;
-		border-color: transparent;
-		border-radius: $radius-2;
+		@include well;
+		background-color: $card-down;
 
 		font-size: $type-small;
 
@@ -273,14 +291,14 @@ LauncherPanel
 
 		&:hover
 		{
-			background-color: $tile-hover;
-			border-color: transparent;
+			background-color: $card-down;
+			border-color: $edge-lit;
 		}
 	}
 
 	.search.focused
 	{
-		background-color: $tile;
+		background-color: $card-down;
 		border-color: $edge-focus;
 	}
 
@@ -319,7 +337,7 @@ LauncherPanel
 		height: 28px;
 		margin-right: 10px;
 
-		background-color: $tile;
+		@include card;
 
 		animation-name: editor-fade;
 		animation-duration: $normal;
@@ -329,7 +347,7 @@ LauncherPanel
 
 		&:hover
 		{
-			background-color: $tile-hover;
+			background-color: $card-hover;
 
 			i { transform: translateX( -1px ); }
 		}
@@ -370,10 +388,10 @@ LauncherPanel
 
 	.channel.on
 	{
-		background-color: $tile;
+		background-color: $chip;
 		color: $ink;
 
-		&:hover { background-color: $tile-hover; }
+		&:hover { background-color: $chip-hover; }
 	}
 
 	.button
@@ -540,11 +558,7 @@ LauncherPanel
 		height: 46px;
 		padding: 0px 8px;
 
-		background-color: $tile;
-		border-radius: $radius-2;
-
-		//design.scss's .card is a plate with a hairline round it. Not here.
-		border-width: 0px;
+		@include card;
 
 		cursor: pointer;
 
@@ -557,9 +571,9 @@ LauncherPanel
 
 		transition: background-color $fast $ease;
 
-		&:hover { background-color: $tile-hover; }
+		&:hover { background-color: $card-hover; }
 
-		&:active { background-color: $tile-down; }
+		&:active { background-color: $card-down; }
 
 		.thumb
 		{
@@ -739,9 +753,9 @@ LauncherPanel
 
 		cursor: default;
 
-		&:hover { background-color: $tile; }
+		&:hover { background-color: $card; }
 
-		&:active { background-color: $tile; }
+		&:active { background-color: $card; }
 
 		.working .sweep
 		{
@@ -868,8 +882,7 @@ LauncherPanel
 
 		padding: 16px;
 
-		background-color: $tile;
-		border-radius: $radius-2;
+		@include card;
 
 		animation-name: editor-rise;
 		animation-duration: $slow;
@@ -935,25 +948,23 @@ LauncherPanel
 
 		&:hover
 		{
-			background-color: $tile-hover;
+			background-color: $card-hover;
 
 			.glyph { background-color: $chip-hover; }
 			.pick { opacity: 1; }
 		}
 
-		&:active { background-color: $tile-down; }
+		&:active { background-color: $card-down; }
 	}
 
-	//The one that makes nothing: a way to get a project rather than a kind of one, so it is the side's darker plate and stands a little apart.
+	//The one that makes nothing: a way to get a project rather than a kind of one, so it is a field rather than a card and stands a little apart.
 	.type.existing
 	{
 		margin-right: 10px;
 
-		background-color: $ground-plate;
+		@include well;
 
-		.glyph { background-color: $tile; }
-
-		&:hover { background-color: $ground-plate-hover; }
+		&:hover { background-color: $card-down; border-color: $edge-lit; }
 	}
 
 	//The questions about the one being made, and what happens when they are answered at the foot of them.
@@ -1135,7 +1146,7 @@ LauncherPanel
 		padding-top: 13px;
 		margin-bottom: 16px;
 
-		border-top: 1px solid $tile;
+		border-top: 1px solid $edge;
 
 		//Where it ends up, in the same monospace a path is written in anywhere else - it is the same thing, said about a project that does not exist yet.
 		.where
@@ -1195,8 +1206,7 @@ LauncherPanel
 		padding: 0px 8px;
 		flex-shrink: 0;
 
-		background-color: $tile;
-		border-radius: $radius-2;
+		@include card;
 
 		//The track runs along the very edge, and would stand past the corners.
 		overflow: hidden;
@@ -1333,7 +1343,7 @@ LauncherPanel
 
 		padding: 10px 0px;
 
-		border-top: 1px solid $tile;
+		border-top: 1px solid $edge;
 
 		font-size: $type-small;
 		color: $ink-off;

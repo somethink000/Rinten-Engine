@@ -152,12 +152,9 @@ public sealed class MaterialPreviewScene : IDisposable
 			Camera.ZFar = 2540f;
 			Camera.ZNear = 0.00254f;
 
-			new GameObject( true, "ambient" ).AddComponent<AmbientLight>().Color = Color.Cyan * 0.05f;
-
-			var sun = new GameObject( true, "sun" ).AddComponent<DirectionalLight>();
-			sun.Shadows = true;
-			sun.WorldRotation = new Angles( 50, 45, 0 );
-			sun.LightColor = Color.White * 0.6f;
+			//Lit from the view ResetView starts at
+			PreviewLighting.HideSky( Camera );
+			PreviewLighting.Light( Scene, new Angles( 20, 225, 0 ) );
 
 			_renderer = new GameObject( true, "shape" ).AddComponent<ModelRenderer>();
 			_renderer.Model = ModelFor( Worn );

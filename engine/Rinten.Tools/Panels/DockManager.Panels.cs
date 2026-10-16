@@ -226,6 +226,9 @@ public partial class DockManager
 	//The dock being carried to another edge, if one is.
 	private DockWidget carrying;
 
+	//A floating window of this layout being carried by its caption, which can be put down on this layout - see CoreWindow.Carry
+	private FloatingDock arriving;
+
 	//Where it would land if it were let go now.
 	private DockArea landing = DockArea.Hidden;
 
@@ -892,10 +895,20 @@ public partial class DockManager
 		foreach ( var side in sides )
 		{
 			var rect = StripOf( side );
-
-			if ( rect.Width <= 0 ) continue;
-
 			var strip = tabStrips.FirstOrDefault( x => x.Side == side );
+
+			//Nothing open to name - every panel in the group closed or floating - is no strip. One left standing keeps where it last was,
+			//over whatever is there now: made before the group was placed, that is the top left of the window, over the menus
+			if ( rect.Width <= 0 )
+			{
+				if ( strip is not null )
+				{
+					strip.Destroy();
+					tabStrips.Remove( strip );
+				}
+
+				continue;
+			}
 
 			if ( !strip.IsValid() )
 			{
@@ -1142,6 +1155,9 @@ public partial class DockManager
 				PaintTarget( OuterOf( area ), area, landingOuter && area == landing );
 			}
 
+			//A window carried in is its own picture of what is moving
+			if ( arriving is not null ) return;
+
 			//The tab itself, under the pointer: what is being moved has to be visible while it is
 			//in the air, or the highlight is an answer to a question nobody can see being asked.
 			var at = Application.CursorPosition - ScreenPosition;
@@ -1278,6 +1294,8 @@ public partial class DockManager
 		//Rescue docks from floating windows closed outside FloatingDock (window system, crashes)
 		SweepFloating();
 
+		if ( FollowArriving() ) return;
+
 		//A drag in progress - an edge, or a tab pressed or carried - is followed on the frames it asks for, and it keeps asking until the button goes up.
 		if ( dragging is not null || pressed.IsValid() || carrying.IsValid() ) RequestFrame();
 
@@ -1340,36 +1358,91 @@ public partial class DockManager
 		{
 			//Onto whatever was lit, rather than working the answer out a second time: the two are the same, and only one of them is what somebody was looking
 			//at when they let go. Nothing lit means the pointer was over no group at all, which is the gap between two of them or outside the window entirely.
-			if ( landing == DockArea.Hidden )
-			{
-				//Carried right out of the window: it becomes a window of its own.
-				if ( !LocalRect.IsInside( local ) ) FloatManaged( carrying );
-			}
-			else if ( landingOuter || over is null )
-			{
-				PlaceManaged( carrying, landing );
-			}
-			else if ( landing == DockArea.Center )
-			{
-				PlaceManaged( carrying, over, landingSlot );
-			}
-			else
-			{
-				SplitManaged( carrying, over, landing );
-			}
+			if ( landing != DockArea.Hidden ) Land( carrying );
+
+			//Carried right out of the window: it becomes a window of its own.
+			else if ( !LocalRect.IsInside( local ) ) FloatManaged( carrying );
 
 			Cursor = CursorShape.None;
 			Update();
 		}
 
-		carrying = null;
 		pressed = null;
+		EndCarry();
+	}
+
+	//Puts a dock where the lit target says
+	private void Land( DockWidget dock )
+	{
+		if ( landingOuter || over is null ) PlaceManaged( dock, landing );
+		else if ( landing == DockArea.Center ) PlaceManaged( dock, over, landingSlot );
+		else SplitManaged( dock, over, landing );
+	}
+
+	private void EndCarry()
+	{
+		carrying = null;
+		arriving = null;
 		landing = DockArea.Hidden;
 		landingOuter = false;
 		landingSlot = -1;
 		over = null;
 
 		ShowCarryLayer( false );
+	}
+
+	//A floating window of this layout carried by its caption: the targets show while it is over the window this layout is in.
+	//Its position is what the drag reports, the pointer being the drag's rather than any window's while it lasts
+	private bool FollowArriving()
+	{
+		var carried = floating.Values.FirstOrDefault( x => x.IsValid() && x.IsCarried );
+
+		if ( carried is null )
+		{
+			if ( arriving is null ) return false;
+
+			EndCarry();
+			Update();
+			return false;
+		}
+
+		arriving = carried;
+		carrying = carried.Dock;
+
+		RequestFrame();
+
+		if ( CoreUiWindow.Holding( Surface ) is not { } mine || CoreUiWindow.Of( CoreWindow.CarriedOver ) != mine )
+		{
+			landing = DockArea.Hidden;
+			over = null;
+			ShowCarryLayer( false );
+			return true;
+		}
+
+		landing = AimAt( CoreWindow.CarriedAt - ScreenPosition, out landingOuter );
+
+		ShowCarryLayer( true );
+		return true;
+	}
+
+	//A carried floating window was put down: on a lit target of this layout's window, it docks there; anywhere else it stays where it was put
+	private void Landed( FloatingDock window, CoreUiWindow on, Vector2 at )
+	{
+		var dock = window.Dock;
+
+		if ( on is not null && on == CoreUiWindow.Holding( Surface ) && dock.IsValid() )
+		{
+			landing = AimAt( at - ScreenPosition, out landingOuter );
+
+			if ( landing != DockArea.Hidden )
+			{
+				window.DockBack();
+				Land( dock );
+			}
+		}
+
+		EndCarry();
+		Update();
 	}
 
 	//Docks in windows of their own. Dragged out of the window, they stay on the list of the edge they came from - that
@@ -1403,6 +1476,9 @@ public partial class DockManager
 		floating[dock] = window;
 
 		window.Show();
+
+		//Pulled by its caption it is carried, and put down on this layout it docks
+		if ( window.Shell is { } shell ) shell.CarriesItself = true;
 
 		MarkNeedsArrange();
 		Update();
@@ -1447,28 +1523,85 @@ public partial class DockManager
 		foreach ( var dock in lost ) ReturnManaged( dock );
 	}
 
-	//A window holding one dock that was dragged out of the editor. Closing it is not closing the dock - it is putting it back. A panel that
-	//vanished because its window was closed would be a panel somebody has to go and find in a menu, and they did not close it, they put it down.
+	//Closes the window a floating dock is in, which puts the dock away. False where it is not floating
+	internal bool CloseFloating( DockWidget dock )
+	{
+		if ( !floating.TryGetValue( dock, out var window ) || !window.IsValid() ) return false;
+
+		window.Close();
+		return true;
+	}
+
+	//A window holding one dock of this layout: no tab, only the panel. Pulled by its caption it is carried, and put down on the layout
+	//it docks there - see Landed. Its close puts the panel away, as a tab's cross does
 	private sealed class FloatingDock : Window
 	{
+		private static readonly List<FloatingDock> living = new();
+
 		private readonly DockManager docks;
 		private DockWidget dock;
+		private bool goingBack;
+
+		static FloatingDock()
+		{
+			CoreWindow.CarryStarted += Lifted;
+			CoreWindow.CarryEnded += Put;
+		}
+
+		//Its layout follows the carry from here, frame by frame
+		private static void Lifted( CoreWindow carried )
+		{
+			var shell = CoreUiWindow.Of( carried );
+
+			if ( living.FirstOrDefault( x => x.IsValid() && x.Shell == shell ) is { } window )
+				window.docks?.RequestFrame();
+		}
 
 		public FloatingDock( DockManager docks, DockWidget dock )
 		{
 			this.docks = docks;
 			this.dock = dock;
+
+			living.Add( this );
 		}
+
+		internal DockWidget Dock => dock;
+
+		//Whether this is the window being carried
+		internal bool IsCarried => Shell is { } shell && CoreUiWindow.Of( CoreWindow.Carried ) == shell;
+
+		private static void Put( CoreWindow carried, CoreWindow on, Vector2 at )
+		{
+			var shell = CoreUiWindow.Of( carried );
+
+			if ( living.FirstOrDefault( x => x.IsValid() && x.Shell == shell ) is { } window )
+				window.docks?.Landed( window, CoreUiWindow.Of( on ), at );
+		}
+
+		//Back into the layout, open; the caller places it
+		internal void DockBack()
+		{
+			goingBack = true;
+			Close();
+		}
+
+		//The cross asks the panel first, as a tab's does - see DockWidget.CanClose
+		protected override bool OnClose() => goingBack || dock is null || dock.MayPutAway();
 
 		protected override void OnClosed()
 		{
+			var closing = !goingBack ? dock : null;
+
 			Return();
+
+			if ( closing.IsValid() ) closing.ToggleViewManaged( false );
 
 			base.OnClosed();
 		}
 
 		public override void OnDestroyed()
 		{
+			living.Remove( this );
 			Return();
 
 			base.OnDestroyed();

@@ -1,9 +1,8 @@
 ﻿using System.IO;
-using System.Security;
 
 namespace Editor;
 
-/// <summary>Information about selected asset(s) when opening a context menu in <see cref="Editor.AssetList"/>.</summary>
+/// <summary>The selected assets an asset context menu acts on.</summary>
 public struct AssetContextMenu
 {
 	/// <summary>List of selected assets when the context menu was opened. These are the assets context menu should be affecting.</summary>
@@ -14,12 +13,9 @@ public struct AssetContextMenu
 
 	/// <summary>The menu to add context menu options to.</summary>
 	public Menu Menu;
-
-	/// <summary>The panel that opened the context menu.</summary>
-	public AssetList AssetList;
 }
 
-/// <summary>Information about selected directory/folder when opening a context menu in <see cref="Editor.AssetList"/> or in <see cref="Editor.AssetLocations"/>.</summary>
+/// <summary>The folder a folder context menu acts on.</summary>
 public struct FolderContextMenu
 {
 	/// <summary>The folder we should be acting upon via context menu options.</summary>
@@ -145,42 +141,13 @@ internal class MenuWidgetOption : Widget
 	}
 }
 
-public partial class AssetList
+//The asset and folder menu options every browser gets through asset.contextmenu and folder.contextmenu
+internal static class AssetMenus
 {
 	#region Asset context menu
 
-	private void OpenItemContextMenu( object item )
-	{
-		var selection = SelectedItems.OfType<AssetEntry>().ToList();
-		var directories = SelectedItems.OfType<DirectoryEntry>().ToList();
-
-		if ( directories.Any() )
-		{
-			var dir = directories.First();
-
-			OpenFolderContextMenu( dir.DirectoryInfo.FullName, false );
-
-			return;
-		}
-
-		var ac = new AssetContextMenu
-		{
-			SelectedList = selection,
-			ScreenPosition = Application.CursorPosition,
-			Menu = new ContextMenu( this ) { Searchable = true },
-			AssetList = this
-		};
-
-		EditorEvent.Run( "asset.contextmenu", ac );
-
-		if ( !ac.Menu.HasOptions )
-			return;
-
-		ac.Menu.OpenAt( ac.ScreenPosition, false );
-	}
-
 	[Event( "asset.nativecontextmenu" )]
-	private protected static void OnNativeAssetContextMenu( Menu menu, Asset asset )
+	private static void OnNativeAssetContextMenu( Menu menu, Asset asset )
 	{
 		if ( asset is null )
 			return;
@@ -189,15 +156,14 @@ public partial class AssetList
 		{
 			SelectedList = new List<AssetEntry>() { new AssetEntry( asset ) },
 			ScreenPosition = Application.CursorPosition,
-			Menu = menu,
-			AssetList = null //hope this doesn't break everything for no reason
+			Menu = menu
 		};
 
 		EditorEvent.Run( "asset.contextmenu", ac );
 	}
 
 	[Event( "asset.contextmenu", Priority = 1 )]
-	private protected static void OnAssetContextMenu_OpenSection( AssetContextMenu e )
+	private static void OnAssetContextMenu_OpenSection( AssetContextMenu e )
 	{
 		var entry = e.SelectedList.First();
 		var count = e.SelectedList.Count;
@@ -262,7 +228,7 @@ public partial class AssetList
 	}
 
 	[Event( "asset.contextmenu", Priority = 50 )]
-	private protected static void OnMeshFileAssetContext( AssetContextMenu e )
+	private static void OnMeshFileAssetContext( AssetContextMenu e )
 	{
 		var meshes = e.SelectedList
 			.Where( x => x.Asset is not null && x.AssetType == AssetType.Mesh )
@@ -325,7 +291,7 @@ public partial class AssetList
 	}
 
 	[Event( "asset.contextmenu", Priority = 150 )]
-	private protected static void OnAssetContextMenu_Tags( AssetContextMenu e )
+	private static void OnAssetContextMenu_Tags( AssetContextMenu e )
 	{
 		var assets = e.SelectedList.Where( x => x.Asset is not null ).ToList();
 		if ( assets.Count <= 0 ) return;
@@ -340,140 +306,8 @@ public partial class AssetList
 		RebuildTagMenu( tag_menu, assets );
 	}
 
-	//Open a generic flyout with a message and a confirm button. Use onLayout to add
-	//more widgets, and onSubmit to do something when the confirm button is pressed.
-	private static void OpenFlyout( string message, Vector2? position, Action<PopupWidget, Button> onLayout = null, Action onSubmit = null )
-	{
-		var popup = new PopupWidget( null );
-		popup.Layout = Layout.Column();
-		popup.Layout.Margin = 16;
-		popup.Layout.Spacing = 8;
-
-		popup.Layout.Add( new Label( message ) );
-
-		var button = new Button.Primary( "Confirm" );
-
-		button.MouseClick += () =>
-		{
-			onSubmit?.Invoke();
-			popup.Close();
-		};
-
-		onLayout?.Invoke( popup, button );
-
-		var bottomBar = popup.Layout.AddRow();
-		bottomBar.AddStretchCell();
-		bottomBar.Add( button );
-		popup.Position = position ?? Application.CursorPosition;
-		popup.ConstrainToScreen();
-		popup.Visible = true;
-	}
-
-	private static void OpenErrorFlyout( string title, string message, Vector2? position )
-	{
-		OpenFlyout( $"<h3>{title}</h3><p>{message}</p>", position );
-	}
-
-	private static void OpenErrorFlyout( Exception ex, Vector2? position )
-	{
-		OpenErrorFlyout( "Error", SecurityElement.Escape( ex.Message ), position );
-	}
-
-	//Open a flyout with a line edit, and an action to perform on submit.
-	private static void OpenLineEditFlyout( string value, string message, Vector2? position, Action<string> onSubmit )
-	{
-		LineEdit entry = null;
-
-		OpenFlyout( message, position,
-			( popup, button ) =>
-			{
-				entry = new LineEdit( popup ) { Text = value };
-				entry.ReturnPressed += () => button.MouseClick?.Invoke();
-
-				int length = value.LastIndexOf( '.' );
-				entry.SetSelection( 0, length > 0 ? length : value.Length );
-
-				popup.Layout.Add( entry );
-				entry.Focus();
-			},
-			() =>
-			{
-				try
-				{
-					onSubmit( entry.Value );
-				}
-				catch ( Exception ex )
-				{
-					OpenErrorFlyout( ex, position );
-				}
-			} );
-	}
-
-	public static void OpenCreateFlyout( string resourceType, string defaultName, string extension, Action<string> onCreated, Vector2? position = null )
-	{
-		OpenLineEditFlyout( defaultName, $"What do you want to name {resourceType}?", position,
-			name =>
-			{
-				if ( string.IsNullOrWhiteSpace( name ) ) return;
-				onCreated( $"{name}{extension}" );
-			} );
-	}
-
-	public void OpenRenameFlyout( IAssetListEntry item, Vector2? position = null )
-	{
-		bool exactRename = item is AssetEntry ae && ae.Asset is null;
-
-		var fileName = exactRename ? item.Name : Path.GetFileNameWithoutExtension( item.Name );
-		var fileExt = exactRename ? "" : Path.GetExtension( item.Name );
-
-		OpenLineEditFlyout( fileName, $"What do you want to rename \"{fileName}\" to?", position,
-			name =>
-			{
-				if ( string.IsNullOrWhiteSpace( name ) ) return;
-
-				//rename WILL change the hashcode, but since selection's collection caches those we need to make sure it's updated - otherwise we'll get dupes!
-				bool wasSelected = Selection.Remove( item );
-				item.Rename( $"{name}{fileExt}" );
-				if ( wasSelected ) Selection.Add( item );
-			} );
-	}
-
-	public static void OpenRenameFlyout( DirectoryInfo directoryInfo, Vector2? position = null )
-	{
-		OpenLineEditFlyout( directoryInfo.Name, $"What do you want to rename \"{directoryInfo.Name}\" to?", position,
-			name =>
-			{
-				if ( string.IsNullOrWhiteSpace( name ) ) return;
-				var oldPath = directoryInfo.FullName;
-				var newPath = Path.Combine( directoryInfo.Parent.FullName, name );
-				if ( string.Compare( oldPath, newPath, true ) == 0 )
-				{
-					EditorUtility.RenameDirectory( oldPath, newPath + "_temp" );
-					DirectoryEntry.RenameMetadata( oldPath, newPath + "_temp" );
-					oldPath = newPath + "_temp";
-				}
-				EditorUtility.RenameDirectory( oldPath, newPath );
-				DirectoryEntry.RenameMetadata( oldPath, newPath );
-			} );
-	}
-
-	private static void OpenDuplicateFlyout( IAssetListEntry item, Vector2? position = null )
-	{
-		bool exactRename = item is AssetEntry ae && ae.Asset is null;
-
-		var fileName = exactRename ? item.Name : Path.GetFileNameWithoutExtension( item.Name );
-		var fileExt = exactRename ? "" : Path.GetExtension( item.Name );
-
-		OpenLineEditFlyout( fileName, $"What do you want to name the copy of \"{fileName}\"?", position,
-			name =>
-			{
-				if ( string.IsNullOrWhiteSpace( name ) ) return;
-				item.Duplicate( $"{name}{fileExt}" );
-			} );
-	}
-
 	[Event( "asset.contextmenu", Priority = 100 )]
-	private protected static void OnAssetContextMenu_CopySection( AssetContextMenu e )
+	private static void OnAssetContextMenu_CopySection( AssetContextMenu e )
 	{
 		if ( e.SelectedList.Count <= 0 ) return;
 
@@ -482,27 +316,6 @@ public partial class AssetList
 		var asset = entry.Asset;
 
 		e.Menu.AddSeparator();
-
-		//Duplicate, delete and rename are the list's own - a browser that raises this event without one puts its own on the menu.
-		if ( e.AssetList is not null )
-		{
-			if ( count == 1 && (entry.Asset is null || !string.IsNullOrEmpty( entry.Asset.GetSourceFile() )) )
-			{
-				e.Menu.AddOption( $"Duplicate", "file_copy", action: () => OpenDuplicateFlyout( entry, e.ScreenPosition ), shortcut: "editor.duplicate" );
-			}
-
-			if ( asset is null || !asset.IsProcedural )
-			{
-				e.Menu.AddOption( count > 1 ? $"Delete ({count})" : "Delete", "delete", () =>
-					{
-						e.AssetList.DeleteAsset();
-					},
-				"editor.delete"
-				);
-
-				e.Menu.AddOption( $"Rename", "edit", action: () => e.AssetList.OpenRenameFlyout( entry, e.ScreenPosition ), shortcut: "editor.rename" );
-			}
-		}
 
 		if ( asset is not null )
 		{
@@ -525,45 +338,6 @@ public partial class AssetList
 	#endregion
 
 	#region Folder context menu
-
-	FolderContextMenu OpenFolderContextMenu( string path, bool isThisFolder )
-	{
-		var directoryInfo = new DirectoryInfo( path );
-		var fcm = new FolderContextMenu
-		{
-			Target = directoryInfo,
-			ScreenPosition = Application.CursorPosition,
-			Menu = new ContextMenu() { Searchable = true },
-			ThisFolder = isThisFolder,
-			Context = this
-		};
-
-		if ( fcm.ThisFolder )
-		{
-			//Right-clicking on empty space in the folder
-			fcm.Menu.AddOption( "Refresh", "refresh", () => Refresh() );
-
-			if ( Items.OfType<Asset>().Count() > 0 )
-			{
-				fcm.Menu.AddOption( "Rebuild Icons Here", "collections", () => BuildAllIcons() );
-				fcm.Menu.AddOption( "Recompile Assets Here", "restart_alt", () => RecompileAllAssets() );
-			}
-		}
-		else
-		{
-			//Right-clicking on a specific folder/directory entry
-			fcm.Menu.AddSeparator();
-
-			fcm.Menu.AddOption( "Delete", "delete", DeleteAsset, "editor.delete" ).Enabled = directoryInfo.Exists;
-			fcm.Menu.AddOption( "Rename", "edit", () => OpenRenameFlyout( directoryInfo, fcm.ScreenPosition ), "editor.rename" ).Enabled = directoryInfo.Exists;
-		}
-
-		EditorEvent.Run( "folder.contextmenu", fcm );
-
-		fcm.Menu.OpenAt( fcm.ScreenPosition, false );
-
-		return fcm;
-	}
 
 	static void BuildAllIconsR( List<Asset> assets )
 	{
@@ -590,16 +364,9 @@ public partial class AssetList
 		if ( location.Type is AssetBrowser.LocationType.Assets or AssetBrowser.LocationType.Code or AssetBrowser.LocationType.Localization )
 		{
 			var menu = e.Menu.AddMenu( "New", "note_add" );
-			CreateAsset.AddOptions( menu, location );
+			CreateAsset.AddOptions( menu, location.Path );
 			e.Menu.AddSeparator();
 		}
-	}
-
-	[Event( "folder.contextmenu", Priority = 50 )]
-	private static void OnFolderContextMenu_Pins( FolderContextMenu e )
-	{
-		if ( e.ThisFolder || !e.Target.Exists ) return;
-
 	}
 
 	[Event( "folder.contextmenu", Priority = 75 )]
@@ -621,7 +388,7 @@ public partial class AssetList
 	[Event( "folder.contextmenu", Priority = 100 )]
 	private static void OnFolderContextMenu_BottomSection( FolderContextMenu e )
 	{
-		//only for folders that exist on disk
+		//Only for folders that exist on disk
 		if ( e.Target is null || !e.Target.Exists )
 			return;
 

@@ -81,31 +81,28 @@ public sealed partial class UiEditorWindow : DockWindow, IFileEditor
 		Register();
 	}
 
-	/// <summary>Opens a .razor in the UI editor's workspace tab, replacing any file already open there</summary>
+	/// <summary>Opens a .razor in the UI editor, in a document tab of its own, and gives back the editor holding it</summary>
 	public static UiEditorWindow Open( string razorPath )
 	{
 		if ( string.IsNullOrEmpty( razorPath ) ) return null;
 
-		var full = Path.GetFullPath( razorPath );
-
-		var app = EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == typeof( UiEditorWindow ) );
-
-		//Makes the workspace and the window in it, or brings the one there is to the front; either way the window registers itself first in Editors.
-		app?.Open();
-
-		var window = Editors.FirstOrDefault( x => x.IsValid() ) ?? new UiEditorWindow();
-
-		if ( window._document is null || !string.Equals( window._document.RazorPath, full, StringComparison.OrdinalIgnoreCase ) )
-			window.OpenDocument( new RazorDocument( full ) );
-
-		window.Show();
-
-		return window;
+		return EditorAppAttribute.For( typeof( UiEditorWindow ) )?.OpenFile( Path.GetFullPath( razorPath ) ) as UiEditorWindow;
 	}
 
-	//A razor file chosen on the Apps menu's modal - see EditorAppAttribute.OpenFile.
-	void IFileEditor.OpenFile( string path ) => Open( path );
+	//A razor file put in this editor - by its document tab, or File > Open - see EditorAppAttribute.OpenFile
+	void IFileEditor.OpenFile( string path )
+	{
+		var full = Path.GetFullPath( path );
+
+		if ( _document is null || !string.Equals( _document.RazorPath, full, StringComparison.OrdinalIgnoreCase ) )
+			OpenDocument( new RazorDocument( full ) );
+
+		//A workspace tab is this editor with the window left hidden behind it
+		if ( !IsEmbedded )
+			Show();
+	}
+
+	void IFileEditor.NewFile() => NewFile();
 
 	//Open a file here, in place of whatever was open.
 	internal void OpenDocument( RazorDocument document )

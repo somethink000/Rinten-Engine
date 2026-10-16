@@ -117,6 +117,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	[LibraryImport( SDL, EntryPoint = "SDL_GetWindowProperties" )]
 	private static partial uint SDL_GetWindowProperties( IntPtr window );
 
+	[LibraryImport( SDL, EntryPoint = "SDL_GetGlobalProperties" )]
+	private static partial uint SDL_GetGlobalProperties();
+
 	[LibraryImport( SDL, EntryPoint = "SDL_GetPointerProperty", StringMarshalling = StringMarshalling.Utf8 )]
 	private static partial IntPtr SDL_GetPointerProperty( uint properties, string name, IntPtr fallback );
 
@@ -447,6 +450,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	//Keeps this window's own story straight - where its pointer is and what is being typed into it - out of one event that is known to be its own.
 	private void Read( uint type, byte* buffer )
 	{
+		if ( type is SDL_EVENT_MOUSE_BUTTON_DOWN or SDL_EVENT_MOUSE_BUTTON_UP or SDL_EVENT_MOUSE_MOTION )
+			FollowCaption( type, buffer );
+
 		switch ( type )
 		{
 			case SDL_EVENT_KEY_DOWN:
@@ -756,6 +762,15 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			if ( bottom ) return HitResizeBottom;
 		}
 
+		//A window that carries itself takes the caption's pull as its own - see CoreWindow.Carry
+		if ( CarriesNow ) return HitNormal;
+
+		return InStrip( x, y ) ? HitDraggable : HitNormal;
+	}
+
+	//Whether a point is on the caption's free strip
+	private bool InStrip( int x, int y )
+	{
 		//Read whole: the setter swaps the array rather than editing it.
 		var here = strips;
 
@@ -766,10 +781,10 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			if ( x < strip.X || x >= strip.X + strip.Width ) continue;
 			if ( y < strip.Y || y >= strip.Y + strip.Height ) continue;
 
-			return HitDraggable;
+			return true;
 		}
 
-		return HitNormal;
+		return false;
 	}
 
 	private static void SaidDriver()
@@ -1595,6 +1610,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 				}
 			}
 		}
+
+		PumpCarry();
 	}
 
 	//What the window system actually said, counted by kind. A window that does not answer the mouse is either not
@@ -1618,6 +1635,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	//One event, to whoever it is about.
 	private static void Route( uint type, byte* buffer )
 	{
+		if ( type is >= SDL_EVENT_DROP_FILE and <= SDL_EVENT_DROP_POSITION && HearDrop( type, buffer ) ) return;
+
 		if ( type == SDL_EVENT_MOUSE_MOTION ) MotionEvents++;
 		if ( type is SDL_EVENT_MOUSE_BUTTON_DOWN or SDL_EVENT_MOUSE_BUTTON_UP ) ButtonEvents++;
 

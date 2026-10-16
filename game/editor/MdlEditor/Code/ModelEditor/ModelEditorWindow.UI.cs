@@ -11,8 +11,8 @@ public sealed partial class ModelEditorWindow
 	{
 		BuildWorkspace();
 
-		//The editor's own asset browser, under a name of its own so its panels are not the main window's.
-		var assets = new TreeAssetBrowser( this, id: "ModelEditor" )
+		//The editor's own asset browser, the tree alone; it stays on the same folder as every other browser
+		var assets = new TreeAssetBrowser( this, treeOnly: true )
 		{
 			Name = "Assets",
 			WindowTitle = "Assets",
@@ -162,38 +162,6 @@ public sealed partial class ModelEditorWindow
 		if ( _asset is null || _definition is null ) return;
 
 		global::Editor.MdlEditor.Window.OpenGraphOf( _asset );
-	}
-
-	[Shortcut( "editor.open", "CTRL+O" )]
-	private void Open()
-	{
-		var fd = new FileDialog( null )
-		{
-			Title = "Open Model",
-			Directory = LastDialogDirectory( "mdl" )
-		};
-
-		fd.SetNameFilter( "Model (*.mdl)" );
-
-		if ( !fd.Execute() )
-			return;
-
-		SetLastDialogDirectory( "mdl", fd.SelectedFile );
-
-		if ( AssetSystem.FindByPath( fd.SelectedFile ) is { } asset )
-			AssetOpen( asset );
-	}
-
-	private static string LastDialogDirectory( string extension )
-	{
-		var dir = ProjectCookie.GetString( $"LastSaveLocation.{extension}", "" );
-		return System.IO.Directory.Exists( dir ) ? dir : Project.Current.GetAssetsPath();
-	}
-
-	private static void SetLastDialogDirectory( string extension, string file )
-	{
-		if ( System.IO.Path.GetDirectoryName( file ) is { Length: > 0 } dir )
-			ProjectCookie.SetString( $"LastSaveLocation.{extension}", dir );
 	}
 
 	//Reveal the open file in the OS file browser.

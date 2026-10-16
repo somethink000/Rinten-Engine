@@ -9,14 +9,6 @@ namespace Editor.TreeBrowser;
 public partial class TreeAssetBrowserPanel
 {
 	const float DefaultTreeWidth = 220f;
-	const int LayoutVersion = 3;
-
-	string CookiePrefix => Options.ResolveCookiePrefix( InstanceId );
-
-	string BrowserStateCookieKey => $"{CookiePrefix}.State";
-	string TypeFilterCookieKey => $"{CookiePrefix}.TypeFilter";
-	string ScopeCookieKey => $"{CookiePrefix}.Scope";
-	string SectionCookieKey => $"{CookiePrefix}.Section";
 
 	readonly List<IBrowserPanel> _panels = new();
 	readonly List<BrowserPanelSplitter> _splitters = new();
@@ -28,10 +20,8 @@ public partial class TreeAssetBrowserPanel
 
 	int _activeTabIndex;
 	bool _isTabMode;
-	bool _layoutRestorePending;
-	bool _deferredTabMode;
-	List<float> _deferredWidths;
 	bool _panelsMounted;
+	int _placeSeen;
 	BrowserSettingsPopup _settingsPopup;
 
 	/// <summary>The asset types the user has narrowed this browser down to.</summary>
@@ -41,11 +31,11 @@ public partial class TreeAssetBrowserPanel
 	public IAssetFilter Filter => _filter ??= new CompositeAssetFilter( Options, TypeFilter );
 
 	/// <summary>Project content or mounted games.</summary>
-	public AssetTreeScope Scope => _scope ??= RestoreScope();
+	public AssetTreeScope Scope => _scope ??= AssetTreeScope.Project;
 
 	AssetTypeFilter CreateTypeFilter()
 	{
-		var filter = AssetTypeFilter.Load( TypeFilterCookieKey );
+		var filter = new AssetTypeFilter();
 		filter.Changed += OnTypeFilterChanged;
 		return filter;
 	}
@@ -58,21 +48,12 @@ public partial class TreeAssetBrowserPanel
 		StateHasChanged();
 	}
 
-	AssetTreeScope RestoreScope()
-	{
-		var saved = ProjectCookie.Get( ScopeCookieKey, nameof( AssetTreeScope.Project ) );
-		return saved == nameof( AssetTreeScope.Mounts ) && Options.EnableMounts
-			? AssetTreeScope.Mounts
-			: AssetTreeScope.Project;
-	}
-
 	/// <summary>Switches every panel over to the other body of content.</summary>
 	public void SetScope( AssetTreeScope scope )
 	{
 		if ( Scope == scope ) return;
 
 		_scope = scope;
-		ProjectCookie.Set( ScopeCookieKey, scope.ToString() );
 
 		foreach ( var panel in _panels )
 			panel.SetScope( scope );
@@ -81,10 +62,11 @@ public partial class TreeAssetBrowserPanel
 	}
 
 	/// <summary>Which section the strip has picked. See AssetTreeSection.</summary>
-	public AssetTreeSection Section => Project.Current is null ? RestoreSection() : _section ??= RestoreSection();
+	public AssetTreeSection Section => Project.Current is null ? SharedSection() : _section ??= SharedSection();
 
-	AssetTreeSection RestoreSection()
-		=> AssetTreeSections.Restore( ProjectCookie.Get( SectionCookieKey, "" ), Options );
+	//The section the other browsers are on; a picker starts on the default
+	AssetTreeSection SharedSection()
+		=> AssetTreeSections.Resolve( Options.IsPickerMode ? null : AssetBrowserPlace.Section, Options );
 
 	/// <summary>The sections this project has, which is what the strip draws.</summary>
 	public IReadOnlyList<AssetTreeSections.Entry> Sections => AssetTreeSections.For( Options );
@@ -95,7 +77,9 @@ public partial class TreeAssetBrowserPanel
 		if ( Section == section ) return;
 
 		_section = section;
-		ProjectCookie.Set( SectionCookieKey, section.ToString() );
+
+		if ( !Options.IsPickerMode )
+			AssetBrowserPlace.MoveTo( section );
 
 		foreach ( var panel in _panels )
 			panel.SetSection( section );
@@ -103,73 +87,16 @@ public partial class TreeAssetBrowserPanel
 		StateHasChanged();
 	}
 
-	public bool RestoreBrowserState()
-	{
-		var state = ProjectCookie.Get<BrowserState>( BrowserStateCookieKey, null );
-		if ( state?.PanelTypes is null || state.PanelTypes.Count == 0 )
-			return false;
-
-		if ( state.LayoutVersion < LayoutVersion )
-			return false;
-
-		foreach ( var panelType in state.PanelTypes )
-		{
-			switch ( panelType )
-			{
-				case "Tree":
-					AddTreePanel( saveState: false );
-					break;
-				case "IconGrid":
-					AddIconGridPanel( saveState: false );
-					break;
-			}
-		}
-
-		_activeTabIndex = Math.Clamp( state.ActiveTabIndex, 0, Math.Max( 0, _panels.Count - 1 ) );
-
-		_layoutRestorePending = true;
-		_deferredTabMode = state.IsTabMode && _panels.Count > 1;
-		_deferredWidths = state.IsTabMode ? null : state.PanelWidths;
-
-		return _panels.Count > 0;
-	}
-
-	public void SaveBrowserState()
-	{
-		var state = new BrowserState
-		{
-			LayoutVersion = LayoutVersion,
-			IsTabMode = _isTabMode,
-			ActiveTabIndex = _activeTabIndex,
-			PanelTypes = _panels.Select( GetPanelTypeName ).ToList(),
-			PanelWidths = _panels.Select( p => p.Root.Box.Rect.Width ).ToList()
-		};
-
-		ProjectCookie.Set( BrowserStateCookieKey, state );
-
-		if ( Options.IsPickerMode )
-			return;
-
-		var savedIds = ProjectCookie.Get<List<string>>( TreeAssetBrowser.AllBrowserIdsCookieKey, new List<string>() );
-		if ( !savedIds.Contains( InstanceId ) )
-		{
-			savedIds.Add( InstanceId );
-			ProjectCookie.Set( TreeAssetBrowser.AllBrowserIdsCookieKey, savedIds );
-		}
-	}
-
 	public void CreateDefaultPanels()
 	{
-		AddTreePanel( saveState: false );
-		AddIconGridPanel( saveState: false );
+		AddTreePanel();
+		AddIconGridPanel();
 		PinDefaultTreeWidth();
-		SaveBrowserState();
 	}
 
-	public void AddTreePanel( bool saveState = true )
+	public void AddTreePanel()
 	{
-		var panelId = $"{InstanceId}_Panel{_panels.Count}";
-		var panel = new AssetBrowserPanel { PanelId = panelId, Options = Options, Filter = Filter };
+		var panel = new AssetBrowserPanel { Options = Options, Filter = Filter };
 		panel.SetScope( Scope );
 		panel.SetSection( Section );
 		WireTreePanel( panel );
@@ -180,12 +107,9 @@ public partial class TreeAssetBrowserPanel
 
 		if ( _isTabMode )
 			SelectTab( _activeTabIndex );
-
-		if ( saveState )
-			SaveBrowserState();
 	}
 
-	public void AddIconGridPanel( bool saveState = true )
+	public void AddIconGridPanel()
 	{
 		var panel = new IconGridPanel { Options = Options, Filter = Filter };
 		WireGridPanel( panel );
@@ -197,9 +121,6 @@ public partial class TreeAssetBrowserPanel
 
 		if ( _isTabMode )
 			SelectTab( _activeTabIndex );
-
-		if ( saveState )
-			SaveBrowserState();
 	}
 
 	void WireTreePanel( AssetBrowserPanel panel )
@@ -281,21 +202,6 @@ public partial class TreeAssetBrowserPanel
 
 			_panelsMounted = true;
 		}
-
-		ApplyDeferredLayout();
-	}
-
-	void ApplyDeferredLayout()
-	{
-		if ( !_layoutRestorePending )
-			return;
-
-		_layoutRestorePending = false;
-
-		if ( _deferredTabMode )
-			SwitchToTabMode();
-		else if ( _deferredWidths is not null )
-			RestorePanelWidths( _deferredWidths );
 	}
 
 	//Every panel but the last keeps the width it was given; the last takes the rest.
@@ -340,7 +246,6 @@ public partial class TreeAssetBrowserPanel
 		}
 
 		UpdatePanelButtons();
-		SaveBrowserState();
 	}
 
 	public void MovePanelLeft( IBrowserPanel panel ) => SwapAdjacent( panel, -1 );
@@ -359,8 +264,6 @@ public partial class TreeAssetBrowserPanel
 
 		if ( _isTabMode )
 			RebuildTabBar();
-
-		SaveBrowserState();
 	}
 
 	void RebuildPanelsLayout()
@@ -388,7 +291,7 @@ public partial class TreeAssetBrowserPanel
 					continue;
 
 				var splitter = new BrowserPanelSplitter();
-				splitter.Init( left, root, SaveBrowserState );
+				splitter.Init( left, root );
 				panelsHost.AddChild( splitter );
 				_splitters.Add( splitter );
 
@@ -427,12 +330,18 @@ public partial class TreeAssetBrowserPanel
 
 	void OnFolderSelectedInTree( string folderPath )
 	{
+		if ( !Options.IsPickerMode )
+			AssetBrowserPlace.MoveTo( folderPath );
+
 		foreach ( var panel in _panels.OfType<IconGridPanel>() )
 			panel.ShowFolder( folderPath );
 	}
 
 	void OnBrowseLocationSelectedInTree( AssetBrowser.Location location )
 	{
+		if ( !Options.IsPickerMode )
+			AssetBrowserPlace.MoveTo( location );
+
 		foreach ( var panel in _panels.OfType<IconGridPanel>() )
 			panel.ShowBrowseLocation( location );
 	}
@@ -495,12 +404,12 @@ public partial class TreeAssetBrowserPanel
 			panel.Refresh();
 	}
 
-	//Points the panels at the section saved for this project, where they were built before it was open and so were given the fallback.
+	//Points the panels at the shared section, where they were built before the project was open and so were given the fallback
 	void SyncSection()
 	{
 		if ( Project.Current is null ) return;
 
-		var section = RestoreSection();
+		var section = SharedSection();
 		_section = section;
 
 		foreach ( var panel in _panels )
@@ -538,8 +447,6 @@ public partial class TreeAssetBrowserPanel
 			SwitchToNormalMode();
 		else
 			SwitchToTabMode();
-
-		SaveBrowserState();
 	}
 
 	void SwitchToTabMode()
@@ -631,27 +538,6 @@ public partial class TreeAssetBrowserPanel
 		root.SetClass( "fixed", true );
 	}
 
-	void RestorePanelWidths( List<float> widths )
-	{
-		if ( widths is null || widths.Count != _panels.Count ) return;
-
-		for ( var i = 0; i < _panels.Count - 1; i++ )
-		{
-			if ( widths[i] <= 0 ) continue;
-
-			var root = _panels[i].Root;
-			root.Style.Width = Length.Pixels( widths[i] );
-			root.SetClass( "fixed", true );
-		}
-	}
-
-	static string GetPanelTypeName( IBrowserPanel panel ) => panel switch
-	{
-		AssetBrowserPanel => "Tree",
-		IconGridPanel => "IconGrid",
-		_ => "Unknown"
-	};
-
 	static string GetPanelTabName( IBrowserPanel panel ) => panel switch
 	{
 		AssetBrowserPanel => "Tree",
@@ -665,6 +551,45 @@ public partial class TreeAssetBrowserPanel
 		IconGridPanel => "grid_view",
 		_ => "tab"
 	};
+
+	/// <summary>Brings this browser to where the others are - see AssetBrowserPlace.</summary>
+	public void FollowPlace()
+	{
+		if ( Options.IsPickerMode || _placeSeen == AssetBrowserPlace.Version ) return;
+
+		_placeSeen = AssetBrowserPlace.Version;
+		AssetBrowserPlace.Following = true;
+
+		try
+		{
+			if ( AssetBrowserPlace.Section is { } section && Project.Current is not null )
+				SetSection( AssetTreeSections.Resolve( section, Options ) );
+
+			if ( AssetBrowserPlace.Folder is { } folder )
+			{
+				foreach ( var tree in _panels.OfType<AssetBrowserPanel>() )
+					tree.Follow( folder );
+
+				foreach ( var grid in _panels.OfType<IconGridPanel>() )
+				{
+					if ( !AssetBrowserPlace.Same( grid.Folder, folder ) )
+						grid.ShowFolder( folder );
+				}
+			}
+			else if ( AssetBrowserPlace.Location is { } location )
+			{
+				foreach ( var grid in _panels.OfType<IconGridPanel>() )
+				{
+					if ( !Equals( grid.Location, location ) )
+						grid.ShowBrowseLocation( location );
+				}
+			}
+		}
+		finally
+		{
+			AssetBrowserPlace.Following = false;
+		}
+	}
 
 	public IEnumerable<IBrowserPanel> Panels => _panels;
 }

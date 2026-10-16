@@ -53,7 +53,7 @@ public sealed partial class SpriteEditorWindow : DockWindow, IAssetEditor
 
 	public void AssetOpen( Asset asset )
 	{
-		OpenAsset( asset );
+		PromptSave( () => OpenAsset( asset ) );
 
 		//A workspace tab is this editor with the window left hidden behind it; showing the husk would put an empty frame on the desktop.
 		if ( !IsEmbedded )

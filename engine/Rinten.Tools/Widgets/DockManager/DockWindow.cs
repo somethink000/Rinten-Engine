@@ -115,7 +115,7 @@ public partial class DockWindow : Window
 		{
 			var title = dock.Title;
 
-			//Opened into a window of its own rather than into the layout - see DockManager.OpenPanelWindow. A
+			//Floated in a window of its own rather than put into the layout - see DockManager.OpenPanelWindow. A
 			//panel already docked here is raised where it is instead, because that is where somebody put it.
 			var o = menu.AddOption( title, dock.Icon );
 			o.Checkable = true;

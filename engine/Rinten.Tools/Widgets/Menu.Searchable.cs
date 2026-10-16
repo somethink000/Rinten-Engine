@@ -71,7 +71,7 @@ namespace Editor
 					.Where( x => x.Menu.Title?.Contains( searchText, StringComparison.OrdinalIgnoreCase ) ?? false ) );
 			}
 
-			Build();
+			ContentsChanged();
 		}
 
 		//Add options and menus from cached menu

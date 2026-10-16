@@ -44,6 +44,15 @@
 			<TextField @ref="Field" class="field" />
 		}
 
+		@if ( Folder is not null )
+		{
+			<div class="folder">
+				<i>folder</i>
+				<div class="path">@FolderText</div>
+				<div class="btn" onclick="@BrowseFolder">Browse..</div>
+			</div>
+		}
+
 		<div class="actions">
 			@if ( !string.IsNullOrWhiteSpace( CancelText ) )
 			{
@@ -102,6 +111,25 @@
 		};
 
 		modal.Choices.Add( new Choice( okay, () => onSubmit?.Invoke( modal.Text ), NeedsText: true ) );
+
+		return Open( from, modal );
+	}
+
+	//A name and the folder it goes in, the folder changed with Browse; what File > New asks.
+	public static EditorModal PromptInFolder( Panel from, string title, string folder, Action<string, string> onSubmit,
+		string okay = "Create", string initial = "", string icon = null, Pixmap image = null )
+	{
+		var modal = new EditorModal
+		{
+			Title = title,
+			WantsText = true,
+			Text = initial ?? "",
+			Folder = folder ?? "",
+			Icon = icon,
+			Picture = image?.picture?.ToTexture( mips: false ),
+		};
+
+		modal.Choices.Add( new Choice( okay, () => onSubmit?.Invoke( modal.Text, modal.Folder ), NeedsText: true ) );
 
 		return Open( from, modal );
 	}
@@ -167,6 +195,36 @@
 
 	//The answers, in the order they are offered - the way out is drawn before them.
 	public List<Choice> Choices { get; } = new();
+
+	/// <summary>The folder row's absolute path; null shows no folder row.</summary>
+	public string Folder { get; set; }
+
+	//The folder as the project names it, or whole where it is outside the project.
+	string FolderText
+	{
+		get
+		{
+			var root = Project.Current?.GetRootPath();
+
+			if ( string.IsNullOrEmpty( root ) || !Folder.StartsWith( root, StringComparison.OrdinalIgnoreCase ) ) return Folder;
+
+			var inside = Folder.Substring( root.Length ).TrimStart( '/', '\\' );
+			return inside.Length == 0 ? "/" : inside;
+		}
+	}
+
+	void BrowseFolder()
+	{
+		var dialog = new FileDialog( null ) { Title = "Choose Folder" };
+		dialog.SetFindDirectory();
+
+		if ( System.IO.Directory.Exists( Folder ) ) dialog.Directory = Folder;
+
+		if ( !dialog.Execute() || string.IsNullOrEmpty( dialog.SelectedFile ) ) return;
+
+		Folder = dialog.SelectedFile;
+		StateHasChanged();
+	}
 
 	TextField Field { get; set; }
 
@@ -283,5 +341,5 @@
 	//Everything the card shows is set after it is made, and the buttons turn on what has been typed - so the markup is built again when any of it moves.
 	protected override int BuildHash()
 		=> HashCode.Combine( Title, Message, CancelText, WantsText, Text, Choices.Count,
-			Choices.Any( Refused ), HashCode.Combine( Icon, Picture ) );
+			Choices.Any( Refused ), HashCode.Combine( Icon, Picture, Folder ) );
 }

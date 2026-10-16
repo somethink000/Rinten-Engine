@@ -20,9 +20,6 @@ public class DirectoryEntry : IAssetListEntry
 		Metadata = GetMetadata( Path );
 	}
 
-	//Events
-	public bool OnDoubleClicked( AssetList list ) => true;
-
 	//List rendering
 	private string GetUniqueIcon() => GetUniqueIcon( Name.ToLowerInvariant() );
 

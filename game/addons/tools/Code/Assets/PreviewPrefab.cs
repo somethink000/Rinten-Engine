@@ -41,28 +41,11 @@ class PreviewPrefab : AssetPreview
 				SceneCenter = PrimaryObject.GetBounds().Center;
 				SceneSize = PrimaryObject.GetBounds().Size;
 
-				TryAddDefaultLighting( Scene );
+				PreviewLighting.Light( Scene, Camera.WorldRotation.Angles() );
 			}
 		}
 
 		return Task.CompletedTask;
 	}
 
-	static void TryAddDefaultLighting( Scene scene )
-	{
-		if ( scene.Components.GetInDescendantsOrSelf<DirectionalLight>( true ).IsValid() ) return;
-		if ( scene.Components.GetInDescendantsOrSelf<SpotLight>( true ).IsValid() ) return;
-		if ( scene.Components.GetInDescendantsOrSelf<PointLight>( true ).IsValid() ) return;
-
-		var go = scene.CreateObject();
-		go.Name = "Directional Light";
-
-		go.WorldRotation = Rotation.From( 90, 0, 0 );
-		var light = go.Components.Create<DirectionalLight>();
-		light.LightColor = Color.White;
-
-		//The ambient a scene with no sky is lit by from the sides, as the prefab editor's own light carries
-		//it. Said to the world directly it was written over by the scene's components before anything drew.
-		light.SkyColor = "#557685";
-	}
 }

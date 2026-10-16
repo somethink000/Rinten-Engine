@@ -12,15 +12,13 @@ public sealed class BrowserPanelSplitter : Panel
 
 	Panel _left;
 	Panel _right;
-	Action _onResized;
 	float _dragStartScreenX;
 	float _leftStartWidth;
 
-	public void Init( Panel left, Panel right, Action onResized )
+	public void Init( Panel left, Panel right )
 	{
 		_left = left;
 		_right = right;
-		_onResized = onResized;
 	}
 
 	protected override void OnMouseDown( MousePanelEvent e )
@@ -38,7 +36,6 @@ public sealed class BrowserPanelSplitter : Panel
 		if ( !HasClass( "dragging" ) ) return;
 
 		SetClass( "dragging", false );
-		_onResized?.Invoke();
 	}
 
 	protected override void OnMouseMove( MousePanelEvent e )

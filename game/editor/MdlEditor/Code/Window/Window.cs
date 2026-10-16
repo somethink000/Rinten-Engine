@@ -108,19 +108,13 @@ public partial class Window : DockWindow, IAssetEditor, IPreviewHost, ILinkedEdi
 		Show();
 	}
 
-	//Brings the graph editor up on the graph a model carries: the model page's graph button, and the model editor's. Through the
-	//app rather than the asset: a .mdl opened as an asset is the model editor's, and there is no graph file here to open instead.
+	//Brings the graph editor up on the graph a model carries, in a tab of its own: the model page's graph button, and the model
+	//editor's. Through the app rather than the asset: a .mdl opened as an asset is the model editor's
 	internal static void OpenGraphOf( Asset model )
 	{
-		if ( model is null ) return;
+		if ( model?.AbsolutePath is not { } path ) return;
 
-		EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == typeof( global::Editor.MdlEditor.Window ) )?
-			.Open();
-
-		//The one on screen now, which the line above made so. Following may have put it on this model already, and then this is nothing.
-		if ( EditorLink.Of( LinkedKind.Graph ).OfType<global::Editor.MdlEditor.Window>().FirstOrDefault() is { } editor )
-			editor.ShowModelGraph( model );
+		EditorAppAttribute.For( typeof( global::Editor.MdlEditor.Window ) )?.OpenFile( path );
 	}
 
 	//Show the graph a model carries, unless that is what is up already.
@@ -297,40 +291,6 @@ public partial class Window : DockWindow, IAssetEditor, IPreviewHost, ILinkedEdi
 		{
 			Log.Warning( $"AnimGraph: Could not read parameters from '{asset.Path}': {exception.Message}" );
 		}
-	}
-
-	//Open the graph of a model picked from the disk. A model, because that is where a
-	//graph is kept. There is no New: a graph is started by opening a model that has none.
-	[Shortcut( "editor.open", "CTRL+O" )]
-	private void Open()
-	{
-		var fd = new FileDialog( null )
-		{
-			Title = "Open a Model's Graph",
-			Directory = LastDialogDirectory( "mdl" )
-		};
-
-		fd.SetNameFilter( "Model (*.mdl)" );
-
-		if ( !fd.Execute() )
-			return;
-
-		SetLastDialogDirectory( "mdl", fd.SelectedFile );
-
-		if ( AssetSystem.FindByPath( fd.SelectedFile ) is { } asset )
-			AssetOpen( asset );
-	}
-
-	private static string LastDialogDirectory( string extension )
-	{
-		var dir = ProjectCookie.GetString( $"LastSaveLocation.{extension}", "" );
-		return System.IO.Directory.Exists( dir ) ? dir : Project.Current.GetAssetsPath();
-	}
-
-	private static void SetLastDialogDirectory( string extension, string file )
-	{
-		if ( System.IO.Path.GetDirectoryName( file ) is { Length: > 0 } dir )
-			ProjectCookie.SetString( $"LastSaveLocation.{extension}", dir );
 	}
 
 	private const string RecentFilesCookie = "animgraph.recentfiles";

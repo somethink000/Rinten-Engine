@@ -20,13 +20,13 @@ ControlSheetRow.hidden,
 	display: none;
 }
 
-//Name column: same share in every row so fields align; 2/5 of the row, max 132px, tooltip has all
+//Name column: same share in every row so fields align; a third of the row, so the field always has two thirds or more
 ControlSheetRow > .left,
 .controlsheetrow > .left
 {
 	flex-grow: 0;
 	flex-shrink: 1;
-	width: 40%;
+	width: 33%;
 	max-width: 132px;
 	min-width: 40px;
 

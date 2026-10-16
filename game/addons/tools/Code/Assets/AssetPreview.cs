@@ -60,7 +60,7 @@ public class AssetPreview : IDisposable
 		Scene = default;
 	}
 
-	/// <summary>Create the world, camera, lighting</summary>
+	/// <summary>Create the world, camera and the shared preview light</summary>
 	public virtual Task InitializeScene()
 	{
 		Scene = Scene.CreateEditorScene();
@@ -78,24 +78,8 @@ public class AssetPreview : IDisposable
 				cc.ZNear = 0.00254f;
 			}
 
-			{
-				var go = new GameObject( true, "ambient" );
-				var c = go.AddComponent<AmbientLight>();
-				c.Color = Color.Cyan * 0.05f;
-			}
-
-			//lighting
-			var right = Scene.Camera.WorldRotation.Right;
-
-			{
-				var go = new GameObject( true, "sun" );
-				var sun = go.AddComponent<DirectionalLight>();
-				sun.Shadows = true;
-				//Turned the way the camera looks - yaw 225, above - and a little to one side. A light travels along its forward (the renderer takes
-				//-Forward as the way to it), so at yaw 45 it lit the side of every model facing away from the camera, and every thumbnail was black.
-				sun.WorldRotation = new Angles( 50, 180 + 45 - 35, 0 );
-				sun.LightColor = Color.White * 0.6f;
-			}
+			PreviewLighting.HideSky( Scene.Camera );
+			PreviewLighting.Light( Scene, Scene.Camera.WorldRotation.Angles() );
 		}
 
 		return Task.CompletedTask;

@@ -89,39 +89,6 @@ public sealed partial class ParticleEditorWindow
 			DockManager.SetSplitterProportions( dock, first, 1.0f - first );
 	}
 
-	[Shortcut( "editor.open", "CTRL+O" )]
-	void Open()
-	{
-		var dialog = new FileDialog( null )
-		{
-			Title = "Open Effect",
-			Directory = LastDirectory()
-		};
-
-		dialog.SetNameFilter( "Particle Effect (*.fx)" );
-
-		if ( !dialog.Execute() )
-			return;
-
-		RememberDirectory( dialog.SelectedFile );
-
-		if ( AssetSystem.FindByPath( dialog.SelectedFile ) is { } asset )
-			AssetOpen( asset );
-	}
-
-	static string LastDirectory()
-	{
-		var directory = ProjectCookie.GetString( "LastSaveLocation.fx", "" );
-
-		return System.IO.Directory.Exists( directory ) ? directory : Project.Current.GetAssetsPath();
-	}
-
-	static void RememberDirectory( string file )
-	{
-		if ( System.IO.Path.GetDirectoryName( file ) is { Length: > 0 } directory )
-			ProjectCookie.SetString( "LastSaveLocation.fx", directory );
-	}
-
 	//Reveal the open file in the OS file browser.
 	void ShowInExplorer()
 	{

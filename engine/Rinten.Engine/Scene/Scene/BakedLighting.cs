@@ -202,17 +202,14 @@ public sealed class BakedLighting
 
 		internal LightmapSettings( BakedLighting owner ) => this.owner = owner;
 
-		/// <summary>How long a bake takes against how clean it comes out.</summary>
-		public enum Qualities
+		/// <summary>The sizes an atlas can be, which are what the baker packs to.</summary>
+		public enum Sizes
 		{
-			/// <summary>A quarter of Standard's rays: noisy, for laying out lights.</summary>
-			Preview,
-
-			/// <summary>What a level is worked on with.</summary>
-			Standard,
-
-			/// <summary>Four times Standard's rays, for the bake that ships.</summary>
-			Final,
+			[Title( "512" )] Size512 = 512,
+			[Title( "1024" )] Size1024 = 1024,
+			[Title( "2048" )] Size2048 = 2048,
+			[Title( "4096" )] Size4096 = 4096,
+			[Title( "8192" )] Size8192 = 8192,
 		}
 
 		/// <summary>Whether the scene's bake bakes them.</summary>
@@ -220,12 +217,8 @@ public sealed class BakedLighting
 		public bool Bake { get; set; } = true;
 
 		/// <summary>The widest the atlas may be; a scene needing more at its density gets less, evenly.</summary>
-		[Property, Order( -3 ), Range( 256, 8192 ), Step( 256 )]
-		public int Resolution { get; set; } = 2048;
-
-		/// <summary>How many rays each texel and volume point sends - see Qualities.</summary>
-		[Property, Order( -2 )]
-		public Qualities Quality { get; set; } = Qualities.Standard;
+		[Property, Order( -3 ), EnumButtonGroup]
+		public Sizes Resolution { get; set; } = Sizes.Size2048;
 
 		/// <summary>The asset the lightmaps are kept in and read from; a bake with none makes one beside the scene.</summary>
 		[Property, Order( -1 ), Title( "Lightmap" )]
@@ -269,9 +262,9 @@ public sealed class BakedLighting
 		[Property, Group( "Sky and Sun", StartFolded = true ), Order( 2 ), Range( 0, 10 )]
 		public float SunWidth { get; set; } = 0.53f;
 
-		//Paths a texel traces and rays a volume point sends, at the quality asked for
-		internal int TexelSamples => Quality switch { Qualities.Preview => 128, Qualities.Final => 2048, _ => 512 };
-		internal int VolumeSamples => Quality switch { Qualities.Preview => 256, Qualities.Final => 2048, _ => 1024 };
+		//Paths a texel traces and rays a volume point sends
+		internal const int TexelSamples = 512;
+		internal const int VolumeSamples = 1024;
 	}
 
 	/// <summary>Whether the Baked envmap probes bake, and the asset they are kept in.</summary>

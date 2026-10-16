@@ -237,6 +237,42 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 		Bump();
 	}
 
+	/// <summary>How far the rows are scrolled.</summary>
+	public float ScrollY => body.ScrollOffset.y;
+
+	/// <summary>Whether the pointer is over the rows.</summary>
+	public bool PointerOverRows => body.HasHovered;
+
+	/// <summary>The node whose row is at the top of the view, and how far into that row the view starts.</summary>
+	public (T Node, float Into)? TopRow()
+	{
+		var scroll = body.ScrollOffset.y;
+
+		foreach ( var row in Rows )
+		{
+			var height = row.Box.Rect.Height;
+			if ( height <= 0 ) return null;
+
+			var top = RowTop( row );
+			if ( top + height > scroll ) return (row.Node, scroll - top);
+		}
+
+		return null;
+	}
+
+	/// <summary>Scrolls a node's row that far above the top, as far as there is room. False until the row is laid out.</summary>
+	public bool ScrollToRow( Func<T, bool> match, float into )
+	{
+		var row = Rows.FirstOrDefault( x => match( x.Node ) );
+		if ( row is null || row.Box.Rect.Height <= 0 ) return false;
+
+		body.ScrollOffset = new Vector2( 0, ( RowTop( row ) + into ).Clamp( 0, Math.Max( 0f, body.ScrollSize.y ) ) );
+		return true;
+	}
+
+	//Where a row starts in the scrolled content
+	float RowTop( Panel row ) => row.Box.Rect.Top - body.Box.Rect.Top + body.ScrollOffset.y;
+
 	/// <summary>Scrolls the body so the node's row is in view.</summary>
 	public void ScrollTo( T node )
 	{

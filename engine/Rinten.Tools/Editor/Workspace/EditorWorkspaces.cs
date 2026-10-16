@@ -4,14 +4,13 @@ using System;
 namespace Editor;
 
 //Everything below the menu bar; shows one workspace (a whole dock layout) at a time
-internal sealed class WorkspaceArea : Widget
+internal sealed class WorkspaceArea : StackedHost
 {
 	internal static WorkspaceArea Current { get; private set; }
 
 	readonly List<EditorWorkspace> _workspaces = new();
 
 	EditorWorkspace _currentWorkspace;
-	Widget _currentContent;
 
 	//The strip the tabs are drawn in, which is not in here at all.
 	internal WorkspaceTabBar TabBar { get; }
@@ -36,7 +35,7 @@ internal sealed class WorkspaceArea : Widget
 	internal static bool InCurrentLayout( Widget widget )
 	{
 		if ( Current is not { } area || !area.IsValid() ) return true;
-		if ( area._currentContent is not { } current || !current.IsValid() ) return true;
+		if ( area.Shown is not { } current || !current.IsValid() ) return true;
 
 		for ( var w = widget; w.IsValid(); w = w.Parent )
 		{
@@ -116,6 +115,15 @@ internal sealed class WorkspaceArea : Widget
 			return existing;
 		}
 
+		//An editor of files opens as documents, starting with a blank one that the first file it is given goes into
+		if ( IsDocumentEditor( type ) )
+		{
+			var documents = OpenDocuments( type, title, icon );
+			documents.Documents.Open( null, null, () => EditorTypeLibrary.Create<Widget>( type ), null );
+
+			return documents;
+		}
+
 		var editor = EditorTypeLibrary.Create<Widget>( type );
 		if ( !editor.IsValid() )
 			return null;
@@ -127,7 +135,7 @@ internal sealed class WorkspaceArea : Widget
 			return null;
 		}
 
-		var workspace = new EditorWorkspace( this, title, icon, content ) { EditorType = type, Editor = editor };
+		var workspace = new EditorWorkspace( this, title, icon, content ) { EditorType = type, OwnEditor = editor };
 
 		_workspaces.Add( workspace );
 		content.Parent = this;
@@ -139,8 +147,10 @@ internal sealed class WorkspaceArea : Widget
 		return workspace;
 	}
 
-	//Open an asset in its workspace editor - the double-click path. The editor type gets one workspace tab; every asset opened into it gets a document
-	//tab inside, each a full editor instance of its own. The model editor tabs models, the map editor tabs scenes, and neither has to know how.
+	//Whether an editor works on files, and so opens as tabs of documents
+	static bool IsDocumentEditor( Type type ) => type.IsAssignableTo( typeof( IAssetEditor ) ) || type.IsAssignableTo( typeof( IFileEditor ) );
+
+	//Open an asset in its workspace editor - the double-click path - as a document tab of the editor registered for it
 	internal static bool OpenAsset( Asset asset, string extension, out IAssetEditor editor )
 	{
 		editor = null;
@@ -157,36 +167,33 @@ internal sealed class WorkspaceArea : Widget
 			return false;
 
 		//Only editors that declared themselves whole-workspace apps route here; everything else keeps opening the way it always has
-		var app = EditorTypeLibrary.GetAttributes<EditorAppAttribute>()
-			.FirstOrDefault( x => x.TargetType == found.TargetType );
+		var app = EditorAppAttribute.For( found.TargetType );
 
 		if ( app is not { Workspace: true } )
 			return false;
 
-		editor = Current.OpenAssetInEditor( found.TargetType, app.Title, app.Icon, asset );
+		editor = Current.OpenDocument( found.TargetType, app.Title, app.Icon, asset.AbsolutePath, asset.Name,
+			opened => ( opened as IAssetEditor )?.AssetOpen( asset ) ) as IAssetEditor;
+
 		return editor is not null;
 	}
 
-	IAssetEditor OpenAssetInEditor( Type type, string title, string icon, Asset asset )
+	/// <summary>Brings up a file in its editor's workspace, as a document tab of its own, and gives back the editor holding it.</summary>
+	internal Widget OpenDocument( Type type, string title, string icon, string path, string name, Action<Widget> load )
+	{
+		var workspace = OpenDocuments( type, title, icon );
+
+		return workspace.Documents.Open( path, name, () => EditorTypeLibrary.Create<Widget>( type ), load );
+	}
+
+	//The documents workspace of this editor type, made if it is not open, and brought up
+	EditorWorkspace OpenDocuments( Type type, string title, string icon )
 	{
 		var workspace = _workspaces.FirstOrDefault( x => x.EditorType == type );
 
-		//Already here, but opened blank from the Apps menu rather than by an asset: that workspace is one editor, not a strip of document
-		//tabs, so the asset goes into the editor that is on screen. Without this the document path went looking for tabs that were never built.
-		if ( workspace is { Documents: null } )
-		{
-			MakeCurrent( workspace );
-
-			if ( workspace.Editor is not IAssetEditor opened )
-				return null;
-
-			opened.AssetOpen( asset );
-			return opened;
-		}
-
 		if ( workspace is null )
 		{
-			var documents = new DocumentTabWidget( this );
+			var documents = new DocumentTabWidget( this, title );
 
 			workspace = new EditorWorkspace( this, title, icon, documents ) { EditorType = type, Documents = documents };
 			documents.OnEmpty = () => Close( workspace );
@@ -199,28 +206,11 @@ internal sealed class WorkspaceArea : Widget
 
 		MakeCurrent( workspace );
 
-		return workspace.Documents.Open( asset, () =>
-		{
-			var widget = EditorTypeLibrary.Create<Widget>( type );
-
-			if ( !widget.IsValid() )
-				return default;
-
-			var content = Embed( widget );
-
-			//AssetOpen after the embed, so anything it builds lands in the right parents. Editors
-			//written as windows call Show() in there - put the husk away again before it ever paints.
-			(widget as IAssetEditor)?.AssetOpen( asset );
-
-			if ( widget is Window window )
-				window.Visible = false;
-
-			return (widget, content);
-		} );
+		return workspace;
 	}
 
 	//Takes an editor window and returns just its docks for a workspace; the window itself is never shown
-	static Widget Embed( Widget editor )
+	internal static Widget Embed( Widget editor )
 	{
 		if ( editor is not DockWindow window )
 		{
@@ -247,6 +237,15 @@ internal sealed class WorkspaceArea : Widget
 	{
 		if ( !workspace.CanClose ) return;
 
+		if ( _workspaces.IndexOf( workspace ) < 0 ) return;
+
+		//Each document through its editor's own close, which writes what is unsaved; one that asks first keeps the workspace open
+		if ( workspace.Documents is { } documents && !documents.CloseAll() )
+			return;
+
+		if ( workspace.OwnEditor is { } own && own.IsValid() && !own.AskClose() )
+			return;
+
 		var index = _workspaces.IndexOf( workspace );
 		if ( index < 0 ) return;
 
@@ -265,7 +264,7 @@ internal sealed class WorkspaceArea : Widget
 		try
 		{
 			workspace.Content?.Destroy();
-			workspace.Editor?.Destroy();
+			workspace.OwnEditor?.Destroy();
 		}
 		catch ( Exception e )
 		{
@@ -304,7 +303,7 @@ internal sealed class WorkspaceArea : Widget
 		_currentWorkspace?.Left?.Invoke();
 
 		_currentWorkspace = workspace;
-		ShowContent( workspace.Content );
+		Show( workspace.Content );
 
 		workspace.Entered?.Invoke();
 
@@ -344,7 +343,7 @@ internal sealed class WorkspaceArea : Widget
 			if ( _currentWorkspace?.Editor is DockWindow window && window.DockManager.IsValid() )
 				return window.DockManager;
 
-			return FindDocks( _currentContent );
+			return FindDocks( Shown );
 		}
 	}
 
@@ -367,66 +366,6 @@ internal sealed class WorkspaceArea : Widget
 	}
 
 	void RebuildTabBar() => TabBar.SetTabs( _workspaces );
-
-	//Brings one workspace's content up. They are stacked on top of each other, so switching doesn't relayout anything. Same arrangement the scene
-	//tabs use, and for the same reason - the outgoing widget stays up until the end of the frame, by which point the incoming viewport has presented.
-	void ShowContent( Widget widget )
-	{
-		if ( _currentContent == widget ) return;
-
-		var outgoing = _currentContent;
-		_currentContent = widget;
-
-		widget.Position = 0;
-		widget.Size = Size;
-		widget.Visible = true;
-
-		//Everything else stacked in here, now - not just the one this remembers handing over from. The outgoing
-		//one is left for the frame end, because it has to cover the incoming layout until that has painted.
-		HideTheRest( except: outgoing );
-
-		if ( !outgoing.IsValid() || !outgoing.Visible )
-			return;
-
-		widget.Lower();
-
-		EngineLoop.DisposeAtFrameEnd( new Rinten.Utility.DisposeAction( () =>
-		{
-			if ( outgoing.IsValid() && outgoing != _currentContent )
-				outgoing.Visible = false;
-
-			if ( _currentContent.IsValid() )
-				_currentContent.Raise();
-		} ) );
-	}
-
-	//Hide every layout except the shown one and the outgoing one, so no stale layout shows through
-	void HideTheRest( Widget except = null )
-	{
-		foreach ( var child in Children )
-		{
-			if ( child == _currentContent || child == except ) continue;
-			if ( !child.IsValid() || !child.Visible ) continue;
-
-			child.Visible = false;
-		}
-	}
-
-	protected override void OnPaint()
-	{
-		//Paint nothing: the window's own background (or blurred desktop) must show through
-	}
-
-	protected override void OnResize()
-	{
-		foreach ( var child in Children )
-		{
-			if ( !child.Visible ) continue;
-
-			child.Position = 0;
-			child.Size = Size;
-		}
-	}
 }
 
 //Host for WorkspaceStrip in the right half of the menu bar
@@ -466,8 +405,11 @@ internal sealed class EditorWorkspace : Widget
 	/// <summary>The layout filling the window while this workspace is current.</summary>
 	public Widget Content { get; }
 
-	/// <summary>The editor this was built from, if it came from one.</summary>
-	public Widget Editor { get; init; }
+	/// <summary>The editor on screen in this workspace: the document in front, or the one editor it was built from.</summary>
+	public Widget Editor => Documents?.CurrentEditor ?? OwnEditor;
+
+	/// <summary>The editor a workspace that is not documents was built from.</summary>
+	public Widget OwnEditor { get; init; }
 
 	/// <summary>Type of that editor, so we don't open a second of the same kind.</summary>
 	public Type EditorType { get; init; }

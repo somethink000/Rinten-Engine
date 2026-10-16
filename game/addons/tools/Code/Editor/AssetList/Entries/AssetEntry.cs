@@ -189,25 +189,6 @@ public class AssetEntry : IAssetListEntry
 		FileInfo.CopyTo( FileInfo.GetNewPath( newName ?? FileInfo.GetDefaultDuplicateName() ) );
 	}
 
-	public bool OnDoubleClicked( AssetList list )
-	{
-		if ( Asset is not null )
-		{
-			Asset.OpenInEditor();
-			return true;
-		}
-
-		if ( EditorUtility.IsCodeFile( FileInfo.FullName ) )
-			CodeEditor.OpenFile( FileInfo.FullName );
-
-		return true;
-	}
-
-	public bool OnClicked( AssetList list )
-	{
-		return true;
-	}
-
 	public override bool Equals( object obj )
 	{
 		if ( obj is not AssetEntry ae )

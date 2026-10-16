@@ -81,9 +81,8 @@ public sealed class MaterialEditorWindow : DockWindow, IAssetEditor
 	{
 		BuildWorkspace();
 
-		//The editor's own browser, under a name of its own so that it is not the one at the foot of the main
-		//window being dragged about behind the user's back. The same browser otherwise, and a dock like the rest.
-		_assets = new TreeAssetBrowser( this, id: "MaterialEditor" )
+		//The editor's own browser, the tree alone; it stays on the same folder as every other browser
+		_assets = new TreeAssetBrowser( this, treeOnly: true )
 		{
 			Name = "Assets",
 			WindowTitle = AssetsDock,

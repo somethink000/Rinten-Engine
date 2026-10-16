@@ -12,11 +12,11 @@ internal sealed class MappingWorkspace : SceneWorkspace
 
 		var hierarchy = OpenPanel( "Hierarchy", "list", "SceneTreeWidget", DockArea.Left );
 
-		//Asset browser as a tab, made by name (addon type) and flagged as the mapping one: tree, no grid
+		//Asset browser as a tab, made by name (addon type) with the tree alone
 		Widget assets;
 		try
 		{
-			assets = EditorTypeLibrary.Create<Widget>( "TreeAssetBrowser", new object[] { this, "Mapping" } );
+			assets = EditorTypeLibrary.Create<Widget>( "TreeAssetBrowser", new object[] { this, true } );
 		}
 		catch ( Exception e )
 		{

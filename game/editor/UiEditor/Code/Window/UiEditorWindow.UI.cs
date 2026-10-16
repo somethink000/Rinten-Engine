@@ -139,9 +139,9 @@ public sealed partial class UiEditorWindow
 			return;
 		}
 
-		//Beside the open document, else where the last one was, else Code/UI.
+		//Beside the open document, else Code/UI.
 		var root = Project.Current?.GetRootPath() ?? "";
-		var folder = _document is not null ? Path.GetDirectoryName( _document.RazorPath ) : LastDirectory();
+		var folder = _document is not null ? Path.GetDirectoryName( _document.RazorPath ) : null;
 		if ( string.IsNullOrEmpty( folder ) || string.Equals( folder, root, StringComparison.OrdinalIgnoreCase ) ) folder = Path.Combine( root, "Code", "UI" );
 		if ( folder.StartsWith( root, StringComparison.OrdinalIgnoreCase ) ) folder = folder.Substring( root.Length ).TrimStart( '/', '\\' );
 
@@ -244,25 +244,6 @@ public sealed partial class UiEditorWindow
 		}
 	}
 
-	[Shortcut( "editor.open", "CTRL+O", ShortcutType.Window )]
-	void OpenFile()
-	{
-		var dialog = new FileDialog( null )
-		{
-			Title = "Open Razor",
-			Directory = LastDirectory()
-		};
-
-		dialog.SetNameFilter( "Razor Panel (*.razor)" );
-
-		if ( !dialog.Execute() )
-			return;
-
-		RememberDirectory( dialog.SelectedFile );
-
-		OpenDocument( new RazorDocument( dialog.SelectedFile ) );
-	}
-
 	//Build the panel again from its type - for when something outside the editor changed it.
 	[Shortcut( "editor.reload", "F5", ShortcutType.Window )]
 	void Reload()
@@ -283,19 +264,6 @@ public sealed partial class UiEditorWindow
 
 	[Shortcut( "ui.actual", "CTRL+1", ShortcutType.Window )]
 	void ActualShortcut() => CanvasPanel?.ActualSize();
-
-	static string LastDirectory()
-	{
-		var directory = ProjectCookie.GetString( "LastOpenLocation.razor", "" );
-
-		return Directory.Exists( directory ) ? directory : Project.Current.GetRootPath();
-	}
-
-	static void RememberDirectory( string file )
-	{
-		if ( Path.GetDirectoryName( file ) is { Length: > 0 } directory )
-			ProjectCookie.SetString( "LastOpenLocation.razor", directory );
-	}
 
 	static void OpenInCode( string path )
 	{

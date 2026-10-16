@@ -35,7 +35,7 @@ public static class AssetContextMenuHelper
         {
             //Named the same as the folder menu's, which is the same command asked of the folder this file is in.
             var createMenu = menu.AddMenu("New", "note_add");
-            AssetCreator.AddOptions(createMenu, parentFolder);
+            CreateAsset.AddOptions(createMenu, parentFolder);
             menu.AddSeparator();
         }
 
@@ -88,18 +88,14 @@ public static class AssetContextMenuHelper
         }
     }
 
-    //The one event every asset menu option hangs off - the open section, Create Material/Texture/Decal/Sound Event/Model,
-    //tags, recompile - so that an addon adding an option gets it here too rather than only in the old browser.
+    //Every asset menu option hangs off this one event, so an addon's options show here too
     private static void RunAssetContextMenu(Menu menu, List<AssetEntry> entries)
     {
         EditorEvent.Run("asset.contextmenu", new AssetContextMenu
         {
             SelectedList = entries,
             ScreenPosition = global::Editor.Application.CursorPosition,
-            Menu = menu,
-
-            //Nothing here is a row in that list; the handlers that need one leave their options out.
-            AssetList = null
+            Menu = menu
         });
     }
 
@@ -153,7 +149,7 @@ public static class AssetContextMenuHelper
     public static void BuildEmptySpaceMenu(Menu menu, string folder, Action onRefresh)
     {
         var create = menu.AddMenu("Create", "add");
-        AssetCreator.AddOptions(create, folder);
+        CreateAsset.AddOptions(create, folder);
 
         if (WindowsClipboard.HasFiles())
         {

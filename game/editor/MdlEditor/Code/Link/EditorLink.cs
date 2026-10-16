@@ -128,11 +128,7 @@ internal static class EditorLink
 		//Nothing on disk to open: bring the other editor up and hand it what we have.
 		var other = Other( from.Kind );
 
-		if ( _kinds.FirstOrDefault( x => x.Value == other ).Key is { } type
-			&& EditorTypeLibrary.GetAttributes<EditorAppAttribute>().FirstOrDefault( x => x.TargetType == type ) is { } app )
-		{
-			app.Open();
-		}
+		EditorAppAttribute.For( _kinds.FirstOrDefault( x => x.Value == other ).Key )?.Open();
 
 		Of( other ).FirstOrDefault( x => x.IsOnScreen )?.AdoptCounterpart( current );
 	}

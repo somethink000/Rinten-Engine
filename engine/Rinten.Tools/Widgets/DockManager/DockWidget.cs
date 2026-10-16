@@ -79,14 +79,10 @@ public partial class DockWidget : Frame
 	//Whether the person may put this dock away now.
 	internal bool MayPutAway() => CanClose?.Invoke() ?? true;
 
-	/// <summary>Puts the dock away the way the person would, without asking <see cref="CanClose"/>: the window it was opened into is closed where it has one of its own, and a tab in a layout is hidden.</summary>
+	/// <summary>Puts the dock away the way the person would, without asking <see cref="CanClose"/>: floating, its window goes; docked, its tab is hidden.</summary>
 	public void PutAway()
 	{
-		if ( manager?.Window is DockManager.PanelWindow window )
-		{
-			window.Close();
-			return;
-		}
+		if ( manager?.CloseFloating( this ) == true ) return;
 
 		ToggleViewManaged( false );
 	}

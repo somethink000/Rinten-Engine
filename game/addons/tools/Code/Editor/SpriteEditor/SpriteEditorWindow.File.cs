@@ -1,6 +1,6 @@
 namespace Editor.SpriteEditor;
 
-/// <summary>New, open, save, and the question asked before an edit is lost.</summary>
+/// <summary>New, save, and the question asked before an edit is lost.</summary>
 public sealed partial class SpriteEditorWindow
 {
 	[Shortcut( "editor.new", "CTRL+N", ShortcutType.Window )]
@@ -12,24 +12,6 @@ public sealed partial class SpriteEditorWindow
 		if ( path is null ) return;
 
 		_document.CreateNew( path );
-	}
-
-	[Shortcut( "editor.open", "CTRL+O", ShortcutType.Window )]
-	private void Open()
-	{
-		var dialog = new FileDialog( null )
-		{
-			Title = "Open Sprite",
-			DefaultSuffix = ".sprite"
-		};
-
-		dialog.SetNameFilter( "Sprite (*.sprite)" );
-
-		if ( !dialog.Execute() ) return;
-
-		var path = dialog.SelectedFile;
-
-		PromptSave( () => OpenAsset( AssetSystem.FindByPath( path ) ) );
 	}
 
 	private void OpenAsset( Asset asset )

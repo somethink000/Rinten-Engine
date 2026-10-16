@@ -93,9 +93,8 @@ public partial class Window
 
 		var history = new History( this );
 		_compileLog = new CompileLog( this );
-		//The editor's own asset browser, under a name of its own so its panels are not the main
-		//window's. No wrapper of ours around it: what this window wants from it is a title and an icon.
-		var assets = new TreeAssetBrowser( this, id: "MdlEditor" )
+		//The editor's own asset browser, the tree alone; it stays on the same folder as every other browser
+		var assets = new TreeAssetBrowser( this, treeOnly: true )
 		{
 			Name = "Assets",
 			WindowTitle = "Assets",

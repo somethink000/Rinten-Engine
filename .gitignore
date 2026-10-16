@@ -58,6 +58,7 @@
 !/engine/Core/extern/basisu/**/*.inc
 !/engine/Core/extern/basisu/**/*.hh
 !/engine/Core/src/*.def
+!/engine/Core/sdl-patches/*.patch
 !/engine/Launcher/RintenWeb/wwwroot/basis_transcoder.wasm
 !/engine/Launcher/RintenWeb/wwwroot/basis_transcoder.NOTICE.txt
 

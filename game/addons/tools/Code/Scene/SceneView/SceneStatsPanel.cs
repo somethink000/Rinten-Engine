@@ -8,8 +8,7 @@ namespace Editor;
 [StyleSheet( "SceneStatsPanel.cs.scss" )]
 internal sealed class SceneStatsPanel : EditorPanel
 {
-	/// <summary>Whether the stats are being shown at all - the tick in the Settings menu. Remembered between sessions: somebody watching what a scene costs is not done watching when they close the editor.</summary>
-	[Menu( "Editor", "Settings/Show Stats", "speed" )]
+	/// <summary>Whether the stats are shown - the button on the scene view's toolbar; remembered between sessions.</summary>
 	public static bool Showing
 	{
 		get => showing ??= EditorCookie.Get( "SceneView.ShowStats", false );

@@ -132,6 +132,9 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 		SceneDock = default;
 	}
 
+	/// <summary>Whether this session's tab is the one in front, or there is no tab strip to be in front of.</summary>
+	public bool IsFrontTab => EditorWindow?.SceneTabs is not { } tabs || tabs.IsCurrent( this );
+
 	/// <summary>Makes this scene active and brings it to the front</summary>
 	public void MakeActive( bool bringToFront = true )
 	{
@@ -210,8 +213,6 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 				SceneDock.SetWindowIcon( "grid_4x4" );
 				SceneDock.WindowTitle = name;
 			}
-
-			EditorWindow?.SceneTabs?.UpdateTitle( this );
 		}
 	}
 

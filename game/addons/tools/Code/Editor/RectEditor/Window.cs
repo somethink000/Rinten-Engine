@@ -347,36 +347,6 @@ public partial class Window : DockWindow, IAssetEditor
 		OnDocumentModified();
 	}
 
-	[Shortcut( "editor.open", "CTRL+O" )]
-	private void Open()
-	{
-		var fd = new FileDialog( null )
-		{
-			Title = "Open Rect",
-			DefaultSuffix = $".rect"
-		};
-
-		fd.SetNameFilter( "Rect (*.rect)" );
-
-		if ( !fd.Execute() )
-			return;
-
-		Open( fd.SelectedFile );
-	}
-
-	public void Open( string path )
-	{
-		var asset = AssetSystem.FindByPath( path );
-		if ( asset is null )
-			return;
-
-		if ( asset.AssetType.FileExtension != "rect" )
-			return;
-
-		AssetOpen( asset );
-	}
-
-
 	[Shortcut( "editor.save", "CTRL+S" )]
 	private void Save()
 	{

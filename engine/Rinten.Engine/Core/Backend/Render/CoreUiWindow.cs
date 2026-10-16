@@ -718,6 +718,28 @@ internal sealed class CoreUiWindow : IDisposable
 		}
 	}
 
+	/// <summary>Whether pulling the caption carries this window as a drag another of ours can take - see CoreWindow.Carry.</summary>
+	internal bool CarriesItself
+	{
+		set
+		{
+			if ( window is not null ) window.CarriesItself = value;
+		}
+	}
+
+	//The open window around a native one, if it is one of these
+	internal static CoreUiWindow Of( CoreWindow native )
+	{
+		if ( native is null ) return null;
+
+		foreach ( var candidate in open )
+		{
+			if ( ReferenceEquals( candidate.window, native ) ) return candidate;
+		}
+
+		return null;
+	}
+
 	//Pointer in the pixels of the window it is in, the same value panels are hit-tested against
 	internal static Vector2 Pointer
 	{

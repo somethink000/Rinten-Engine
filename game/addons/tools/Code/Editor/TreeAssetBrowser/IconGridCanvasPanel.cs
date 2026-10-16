@@ -696,6 +696,43 @@ public sealed class IconGridCanvasPanel : EditorPanel, AssetSystem.IEventListene
 		return true;
 	}
 
+	//Made on first use: a grid already open across a hotload never runs a field's initializer
+	ScrollFollower scroll;
+
+	/// <summary>Keeps this grid scrolled with the other browsers' grids - see ScrollFollower.</summary>
+	public void SyncScroll() => ( scroll ??= new( AssetBrowserPlace.GridScroll ) ).Tick( body.HasHovered, body.ScrollOffset.y, TopItem, ScrollToItem, () => body.ScrollOffset.y );
+
+	//The file at the top of the view, and how far into its row the view starts
+	(string Key, float Into)? TopItem()
+	{
+		var width = content?.Box.Rect.Width ?? 0f;
+		if ( width <= 1f || _items.Count == 0 ) return null;
+
+		var metrics = GridMetrics.For( BrowserSettings.ViewMode, width );
+		var row = (int)( body.ScrollOffset.y / metrics.Step );
+		var index = row * metrics.Columns;
+
+		if ( index < 0 || index >= _items.Count ) return null;
+
+		return (_items[index].Path, body.ScrollOffset.y - ( row * metrics.Step ));
+	}
+
+	//Puts a file's row that far above the top, as far as there is room. False until the grid has it and is laid out
+	bool ScrollToItem( string path, float into )
+	{
+		var width = content?.Box.Rect.Width ?? 0f;
+		if ( width <= 1f ) return false;
+
+		var index = _items.FindIndex( x => string.Equals( x.Path, path, StringComparison.OrdinalIgnoreCase ) );
+		if ( index < 0 ) return false;
+
+		var metrics = GridMetrics.For( BrowserSettings.ViewMode, width );
+		var top = metrics.TopOf( index ) + into;
+
+		body.ScrollOffset = new Vector2( 0, top.Clamp( 0, Math.Max( 0f, body.ScrollSize.y ) ) );
+		return true;
+	}
+
 	void ScrollToIndex( int index )
 	{
 		if ( index < 0 || index >= _items.Count || content is null ) return;

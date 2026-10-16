@@ -471,18 +471,19 @@ i,
 	}
 }
 
-//A menu. A widget, but it draws nothing: the slab, the shadow and the arrival are from here, the rows are .menu-row panels below. A
-//context menu, a combo box drop-down and a toolbar drop-down are all the one Menu widget, so what is written here is true of all three.
+//Every menu - context, combo drop-down, toolbar drop-down - is one Menu widget; its slab and arrival are styled here
+//and its rows are the .menu-row panels below
 .menu
 {
 	//Over a sheet, if one is up - see .modal-sheet.
 	z-index: 100;
 
-	//Solid rounded menu slab with hairline edge and shadow; rows inset 5px inside the corners
+	//Solid rounded menu slab with hairline edge; rows inset 5px inside the corners
 	background-color: $popup-background;
 
-	//The window frame, one pixel of band deep - see frame-thin in the tokens.
+	//The window frame without its shadow: around the corner at the pointer it reads as a dark smudge
 	@include frame-thin;
+	box-shadow: 0px 0px 0px 1px $frame-line;
 	border-radius: $slab-radius;
 
 	//Fade/scale transitions via classes from Menu.Panels.cs, since menus are reshown, not recreated
@@ -1311,7 +1312,9 @@ $viewport-bar-control: 26px;
 
 	//Every button on the bar the height of the dropdown beside it, on the editor's black - a field's ground and edge - and a step up under the
 	//pointer, the way a field that is pressed does (10-07: the buttons were glyphs on a grey veil, a different size from everything else on the bar).
+	//The build menu's button stands in a panel of its own, and wears the same box
 	.group > .toolbarbutton,
+	.group > .build-menu-button > .toolbarbutton,
 	.snap-step,
 	.resolution-mode,
 	.tool-mode-picker
@@ -1322,12 +1325,14 @@ $viewport-bar-control: 26px;
 		border-radius: $control-radius;
 	}
 
-	.group > .toolbarbutton
+	.group > .toolbarbutton,
+	.group > .build-menu-button > .toolbarbutton
 	{
 		width: $viewport-bar-control;
 	}
 
 	.group > .toolbarbutton:hover,
+	.group > .build-menu-button > .toolbarbutton:hover,
 	.snap-step:hover,
 	.resolution-mode:hover
 	{
@@ -1336,7 +1341,8 @@ $viewport-bar-control: 26px;
 	}
 
 	//On is still the picked plate, the same as everywhere else.
-	.group > .toolbarbutton.active
+	.group > .toolbarbutton.active,
+	.group > .build-menu-button > .toolbarbutton.active
 	{
 		background-color: $picked;
 		border-color: rgba( $accent, 0.6 );

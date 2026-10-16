@@ -21,6 +21,9 @@ partial class ViewportToolsPanel
 			group.Items.Add( new Item { ViewSettingsMenu = true } );
 
 			AddButton( group, "Toggle Fullscreen", "crop_free", ToggleFullscreen );
+
+			AddButton( group, "Show Stats", "speed", () => SceneStatsPanel.Showing = !SceneStatsPanel.Showing )
+				.IsActive = () => SceneStatsPanel.Showing;
 		}
 	}
 }

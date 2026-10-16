@@ -1,0 +1,137 @@
+diff -ruN a/include/SDL3/SDL_video.h b/include/SDL3/SDL_video.h
+--- a/include/SDL3/SDL_video.h
++++ b/include/SDL3/SDL_video.h
+@@ -101,6 +101,7 @@
+  * \since This macro is available since SDL 3.2.0.
+  */
+ #define SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DISPLAY_POINTER "SDL.video.wayland.wl_display"
++#define SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DATA_DEVICE_POINTER "SDL.video.wayland.wl_data_device"
+ 
+ /**
+  * System theme.
+diff -ruN a/src/video/wayland/SDL_waylanddatamanager.h b/src/video/wayland/SDL_waylanddatamanager.h
+--- a/src/video/wayland/SDL_waylanddatamanager.h
++++ b/src/video/wayland/SDL_waylanddatamanager.h
+@@ -32,6 +32,8 @@
+ #define FILE_MIME "text/uri-list"
+ #define FILE_PORTAL_MIME "application/vnd.portal.filetransfer"
+ #define SDL_DATA_ORIGIN_MIME "application/x-sdl3-source-id"
++// A window of the application carried by an xdg_toplevel_drag; dropping it is reported as SDL_EVENT_DROP_TEXT with this text
++#define WINDOW_MIME "application/x-sdl3-window"
+ 
+ typedef struct SDL_WaylandDataDevice SDL_WaylandDataDevice;
+ typedef struct SDL_WaylandPrimarySelectionDevice SDL_WaylandPrimarySelectionDevice;
+@@ -96,7 +98,7 @@
+     SDL_WaylandDataOffer *drag_offer;
+     SDL_WaylandDataOffer *selection_offer;
+     const char *mime_type;
+-    bool has_mime_file, has_mime_text;
++    bool has_mime_file, has_mime_text, has_mime_window;
+     SDL_Window *dnd_window;
+ 
+     // Clipboard and Primary Selection
+diff -ruN a/src/video/wayland/SDL_waylandevents.c b/src/video/wayland/SDL_waylandevents.c
+--- a/src/video/wayland/SDL_waylandevents.c
++++ b/src/video/wayland/SDL_waylandevents.c
+@@ -2753,6 +2753,7 @@
+     SDL_WindowData *window = surface ? Wayland_GetWindowDataForOwnedSurface(surface) : NULL;
+     data_device->has_mime_file = false;
+     data_device->has_mime_text = false;
++    data_device->has_mime_window = false;
+ 
+     data_device->drag_serial = serial;
+ 
+@@ -2761,7 +2762,18 @@
+         data_device->drag_offer = wl_data_offer_get_user_data(id);
+     }
+ 
+-    if (data_device->drag_offer && window && window->accepts_drag_and_drop) {
++    if (data_device->drag_offer && window && Wayland_data_offer_has_mime(data_device->drag_offer, WINDOW_MIME)) {
++        data_device->has_mime_window = true;
++        data_device->mime_type = WINDOW_MIME;
++        wl_data_offer_accept(id, serial, WINDOW_MIME);
++        if (wl_data_offer_get_version(data_device->drag_offer->offer) >= WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION) {
++            wl_data_offer_set_actions(data_device->drag_offer->offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE, WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
++        }
++        data_device->dnd_window = window->sdlwindow;
++        SDL_SendDropPosition(data_device->dnd_window,
++                             (float)(wl_fixed_to_double(x) * window->pointer_scale.x),
++                             (float)(wl_fixed_to_double(y) * window->pointer_scale.y));
++    } else if (data_device->drag_offer && window && window->accepts_drag_and_drop) {
+         // TODO: SDL Support more mime types
+ #ifdef SDL_USE_LIBDBUS
+         if (Wayland_data_offer_has_mime(data_device->drag_offer, FILE_PORTAL_MIME)) {
+@@ -2849,6 +2861,7 @@
+         }
+         Wayland_data_offer_destroy(data_device->drag_offer);
+         data_device->drag_offer = NULL;
++        data_device->dnd_window = NULL;
+     } else {
+         SDL_LogTrace(SDL_LOG_CATEGORY_INPUT,
+                      ". In wl_data_device_listener . data_device_handle_leave on data_offer 0x%08x for serial %d",
+@@ -2856,6 +2869,7 @@
+     }
+     data_device->has_mime_file = false;
+     data_device->has_mime_text = false;
++    data_device->has_mime_window = false;
+ }
+ 
+ static void data_device_handle_motion(void *data, struct wl_data_device *wl_data_device,
+@@ -2863,7 +2877,7 @@
+ {
+     SDL_WaylandDataDevice *data_device = data;
+ 
+-    if (data_device->drag_offer && data_device->dnd_window && (data_device->has_mime_file || data_device->has_mime_text)) {
++    if (data_device->drag_offer && data_device->dnd_window && (data_device->has_mime_file || data_device->has_mime_text || data_device->has_mime_window)) {
+         const float dx = (float)(wl_fixed_to_double(x) * data_device->dnd_window->internal->pointer_scale.x);
+         const float dy = (float)(wl_fixed_to_double(y) * data_device->dnd_window->internal->pointer_scale.y);
+ 
+@@ -2888,7 +2902,14 @@
+ {
+     SDL_WaylandDataDevice *data_device = data;
+ 
+-    if (data_device->drag_offer && data_device->dnd_window && (data_device->has_mime_file || data_device->has_mime_text)) {
++    if (data_device->drag_offer && data_device->dnd_window && data_device->has_mime_window) {
++        // Nothing to read: the window itself is what was carried
++        SDL_SendDropText(data_device->dnd_window, WINDOW_MIME);
++        SDL_SendDropComplete(data_device->dnd_window);
++        if (wl_data_offer_get_version(data_device->drag_offer->offer) >= WL_DATA_OFFER_FINISH_SINCE_VERSION) {
++            wl_data_offer_finish(data_device->drag_offer->offer);
++        }
++    } else if (data_device->drag_offer && data_device->dnd_window && (data_device->has_mime_file || data_device->has_mime_text)) {
+         SDL_LogTrace(SDL_LOG_CATEGORY_INPUT,
+                      ". In wl_data_device_listener . data_device_handle_drop on data_offer 0x%08x in window %d serial %d",
+                      WAYLAND_wl_proxy_get_id((struct wl_proxy *)data_device->drag_offer->offer),
+@@ -2975,6 +2996,8 @@
+ 
+     Wayland_data_offer_destroy(data_device->drag_offer);
+     data_device->drag_offer = NULL;
++    data_device->dnd_window = NULL;
++    data_device->has_mime_window = false;
+ }
+ 
+ static void data_device_handle_selection(void *data, struct wl_data_device *wl_data_device,
+@@ -3173,6 +3196,12 @@
+         wl_data_device_add_listener(data_device->data_device,
+                                     &data_device_listener, data_device);
+         seat->data_device = data_device;
++
++        // The data device an application starts its own drags on; a compositor serves one per client
++        SDL_PropertiesID props = SDL_GetGlobalProperties();
++        if (!SDL_GetPointerProperty(props, SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DATA_DEVICE_POINTER, NULL)) {
++            SDL_SetPointerProperty(props, SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DATA_DEVICE_POINTER, data_device->data_device);
++        }
+     }
+ }
+ 
+@@ -3666,6 +3695,10 @@
+             Wayland_data_offer_destroy(seat->data_device->drag_offer);
+         }
+         if (seat->data_device->data_device) {
++            SDL_PropertiesID props = SDL_GetGlobalProperties();
++            if (SDL_GetPointerProperty(props, SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DATA_DEVICE_POINTER, NULL) == seat->data_device->data_device) {
++                SDL_ClearProperty(props, SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DATA_DEVICE_POINTER);
++            }
+             if (wl_data_device_get_version(seat->data_device->data_device) >= WL_DATA_DEVICE_RELEASE_SINCE_VERSION) {
+                 wl_data_device_release(seat->data_device->data_device);
+             } else {

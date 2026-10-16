@@ -72,7 +72,7 @@
 		yield return new Tool( "Mapping", "hardware", "The scene laid out for building it", () => EditorMainWindow.Current?.OpenMapping() );
 
 		foreach ( var app in EditorTypeLibrary.GetAttributes<EditorAppAttribute>().OrderBy( x => x.Title ) )
-			yield return new Tool( app.Title, app.Icon, app.Description, app.OpenFromMenu );
+			yield return new Tool( app.Title, app.Icon, app.Description, () => app.Open() );
 	}
 
 	static string Tip( string title, string description ) => string.IsNullOrWhiteSpace( description ) ? title : $"{title} - {description}";

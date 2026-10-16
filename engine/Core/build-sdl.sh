@@ -1,6 +1,6 @@
 #!/bin/bash
-# Builds libSDL3 from the pinned source release and installs it into game/bin/<platform>. ./build-sdl.sh              this machine's platform, skip if already there ./build-sdl.sh force        build it again even if it is Why this exists rather than a line in engine/natives.json: SDL publishes no Linux binary at all, and its only macOS asset is a .dmg, which fetch-natives cannot open - it reads .zip and .tar.gz. So the two Unixes build the one library they need from source, pinned to the same release win64 downloads, and nothing drifts between platforms. It used to be a sentence in Bootstrap.sh telling
-# a person to do this by hand. Nobody did: the library in a long-lived checkout was put there once, years of commits ago, and a fresh clone had no SDL and could not open a window. Needs cmake, ninja and the development packages SDL's own README-linux lists - X11 or Wayland, xkbcommon, DBus and one of the audio stacks: sudo apt install cmake ninja-build libx11-dev libxext-dev libwayland-dev \ libxkbcommon-dev libdbus-1-dev libasound2-dev libpulse-dev On macOS the frameworks come with the Xcode command line tools and there is nothing else to install. Keep LF line endings or Linux will not execute this.
+# Builds the pinned SDL release with sdl-patches/ applied into game/bin/<platform>; "force" rebuilds it
+# Needs cmake, ninja and the X11/Wayland/xkbcommon/DBus/audio dev packages SDL's README-linux lists. Keep LF endings
 
 set -e
 
@@ -27,9 +27,14 @@ esac
 DEST="$SRC/../../game/bin/$PLATFORM"
 WORK="$SRC/build/sdl/$PLATFORM"
 
+sum() { if command -v sha256sum >/dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi; }
+
+# Which patches a build carries, so one built before a patch changed is built again
+PATCHES="$(cat "$SRC"/sdl-patches/*.patch | sum)"
+
 # Already there is the common case, and rebuilding SDL on every engine build
 # would add minutes to it for nothing.
-if [ "$1" != "force" ] && [ -f "$DEST/$LIBNAME" ]; then
+if [ "$1" != "force" ] && [ -f "$DEST/$LIBNAME" ] && [ "$(cat "$DEST/libSDL3.patches" 2>/dev/null)" = "$PATCHES" ]; then
 	echo "SDL3 $SDL_VERSION already in $DEST"
 	exit 0
 fi
@@ -53,11 +58,7 @@ fi
 
 # Checked every time, not only after a download: a half-written file from an
 # interrupted build looks exactly like a good one to the line above.
-if command -v sha256sum >/dev/null; then
-	GOT="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
-else
-	GOT="$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)"
-fi
+GOT="$(sum < "$ARCHIVE")"
 
 if [ "$GOT" != "$SDL_SHA256" ]; then
 	echo "ERROR: $ARCHIVE is not the pinned release." >&2
@@ -69,8 +70,15 @@ fi
 
 UNPACKED="$WORK/SDL3-$SDL_VERSION"
 
-if [ ! -d "$UNPACKED" ]; then
+if [ "$(cat "$UNPACKED/.patches" 2>/dev/null)" != "$PATCHES" ]; then
+	rm -rf "$UNPACKED" "$WORK/build"
 	tar -xzf "$ARCHIVE" -C "$WORK"
+
+	for one in "$SRC"/sdl-patches/*.patch; do
+		patch -d "$UNPACKED" -p1 < "$one"
+	done
+
+	echo "$PATCHES" > "$UNPACKED/.patches"
 fi
 
 # Shared only. The engine opens SDL by name at runtime through its own resolver,
@@ -107,6 +115,8 @@ if [ "$copied" -eq 0 ]; then
 	echo "ERROR: the build produced no libSDL3 to install." >&2
 	exit 1
 fi
+
+echo "$PATCHES" > "$DEST/libSDL3.patches"
 
 echo
 echo "libSDL3 $SDL_VERSION -> $DEST"

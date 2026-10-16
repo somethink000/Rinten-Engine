@@ -32,6 +32,30 @@ namespace Topten.RichTextKit
 			return $"{Start} - {End} - {Direction}";
 		}
 
+		//The runs of equal level, into a list the caller keeps - the iterator below made itself and a list each layout
+		public static void CoalescLevels( Slice<sbyte> levels, List<BidiRun> into )
+		{
+			into.Clear();
+
+			if ( levels.Length == 0 )
+				return;
+
+			int startRun = 0;
+			sbyte runLevel = levels[0];
+			for ( int i = 1; i < levels.Length; i++ )
+			{
+				if ( levels[i] == runLevel )
+					continue;
+
+				into.Add( new BidiRun() { Direction = (runLevel & 0x01) == 0 ? Directionality.L : Directionality.R, Start = startRun, Length = i - startRun } );
+
+				startRun = i;
+				runLevel = levels[i];
+			}
+
+			into.Add( new BidiRun() { Direction = (runLevel & 0x01) == 0 ? Directionality.L : Directionality.R, Start = startRun, Length = levels.Length - startRun } );
+		}
+
 		public static IEnumerable<BidiRun> CoalescLevels( Slice<sbyte> levels )
 		{
 			if ( levels.Length == 0 )

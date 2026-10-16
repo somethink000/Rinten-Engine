@@ -1,22 +1,34 @@
 ﻿using System;
-using System.Collections.Immutable;
 
 namespace Rinten.UI
 {
 	[SkipHotload]
 	public partial struct PanelTransform
 	{
-		//Considering how many entries these are gonna have in reality we might be best to just hardcode like 6 entries
-		public ImmutableList<Entry> List;
+		//The entries, in an array never written once made: an animated transform is made again every frame, and as an immutable list
+		//it was a builder, a node an entry and the list itself each time
+		Entry[] entries;
+
+		/// <summary>The functions of the transform, in order.</summary>
+		public readonly IReadOnlyList<Entry> List => entries ?? Array.Empty<Entry>();
+
+		//A new array with one more on the end - only as a transform is written, never per frame
+		void Add( in Entry entry )
+		{
+			var grown = new Entry[( entries?.Length ?? 0 ) + 1];
+			entries?.CopyTo( grown, 0 );
+			grown[^1] = entry;
+			entries = grown;
+		}
 
 		public Matrix BuildTransform( float width, float height, Vector2 perspectiveOrigin )
 		{
 			var tx = Matrix.Identity;
 
-			if ( List == null )
+			if ( entries == null )
 				return tx;
 
-			foreach ( var e in List )
+			foreach ( var e in entries )
 			{
 				Matrix m = Matrix.Identity;
 				if ( e.Type == EntryType.Perspective )
@@ -42,21 +54,21 @@ namespace Rinten.UI
 			return Entries == 0;
 		}
 
-		public readonly int Entries => List?.Count ?? 0;
+		public readonly int Entries => entries?.Length ?? 0;
 
 		readonly Entry GetEntry( int i )
 		{
 			if ( i >= Entries ) return new Entry { Type = EntryType.Invalid };
 
-			return List[i];
+			return entries[i];
 		}
 
 		readonly Entry GetEntry( EntryType type )
 		{
-			if ( List == null )
+			if ( entries == null )
 				return new Entry { Type = EntryType.Invalid };
 
-			foreach ( var e in List )
+			foreach ( var e in entries )
 			{
 				if ( e.Type == type )
 					return e;
@@ -70,10 +82,7 @@ namespace Rinten.UI
 			if ( !lengthX.HasValue || !lengthY.HasValue )
 				return false;
 
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Translate, X = lengthX.Value, Y = lengthY.Value, Z = lengthZ ?? new Length() } );
+			Add( new Entry { Type = EntryType.Translate, X = lengthX.Value, Y = lengthY.Value, Z = lengthZ ?? new Length() } );
 			return true;
 		}
 
@@ -82,10 +91,7 @@ namespace Rinten.UI
 			if ( !length.HasValue )
 				return false;
 
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Translate, X = length.Value } );
+			Add( new Entry { Type = EntryType.Translate, X = length.Value } );
 			return true;
 		}
 
@@ -94,10 +100,7 @@ namespace Rinten.UI
 			if ( !length.HasValue )
 				return false;
 
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Translate, Y = length.Value } );
+			Add( new Entry { Type = EntryType.Translate, Y = length.Value } );
 			return true;
 		}
 
@@ -106,46 +109,31 @@ namespace Rinten.UI
 			if ( !length.HasValue )
 				return false;
 
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Translate, Z = length.Value } );
+			Add( new Entry { Type = EntryType.Translate, Z = length.Value } );
 			return true;
 		}
 
 		public bool AddScale( float scale )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Scale, Data = Vector3.One * scale } );
+			Add( new Entry { Type = EntryType.Scale, Data = Vector3.One * scale } );
 			return true;
 		}
 
 		public bool AddScale( Vector3 scale )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Scale, Data = scale } );
+			Add( new Entry { Type = EntryType.Scale, Data = scale } );
 			return true;
 		}
 
 		public bool AddSkew( float x, float y, float z )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Skew, Data = new Vector3( x, y, z ) } );
+			Add( new Entry { Type = EntryType.Skew, Data = new Vector3( x, y, z ) } );
 			return true;
 		}
 
 		public bool AddRotation( float x, float y, float z )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Rotation, Data = new Vector3( x, y, z ) } );
+			Add( new Entry { Type = EntryType.Rotation, Data = new Vector3( x, y, z ) } );
 			return true;
 		}
 
@@ -153,19 +141,13 @@ namespace Rinten.UI
 
 		public bool AddMatrix3D( Matrix matrix )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Matrix, Matrix = matrix } );
+			Add( new Entry { Type = EntryType.Matrix, Matrix = matrix } );
 			return true;
 		}
 
 		public bool AddPerspective( Length d )
 		{
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
-
-			List = List.Add( new Entry { Type = EntryType.Perspective, X = d } );
+			Add( new Entry { Type = EntryType.Perspective, X = d } );
 			return true;
 		}
 
@@ -176,7 +158,16 @@ namespace Rinten.UI
 			var entries = Math.Max( ma.Entries, mb.Entries );
 			if ( entries <= 0 ) return new PanelTransform();
 
-			var builder = ImmutableList.CreateBuilder<Entry>();
+			//Counted first, so the result is the one array: every entry of a, and those of b whose kind a has not
+			var count = ma.Entries;
+
+			for ( int i = 0; i < mb.Entries; i++ )
+			{
+				if ( ma.GetEntry( mb.GetEntry( i ).Type ).Type == EntryType.Invalid ) count++;
+			}
+
+			var built = new Entry[count];
+			var at = 0;
 
 			for ( int i = 0; i < ma.Entries; i++ )
 			{
@@ -186,10 +177,7 @@ namespace Rinten.UI
 				if ( to.Type == EntryType.Invalid )
 					to = from.GetDefault();
 
-				if ( dimensions != null )
-					builder.Add( Entry.Lerp( from, to, delta, dimensions.Value ) );
-				else
-					builder.Add( Entry.Lerp( from, to, delta ) );
+				built[at++] = dimensions != null ? Entry.Lerp( from, to, delta, dimensions.Value ) : Entry.Lerp( from, to, delta );
 			}
 
 			for ( int i = 0; i < mb.Entries; i++ )
@@ -199,23 +187,17 @@ namespace Rinten.UI
 				if ( from.Type != EntryType.Invalid )
 					continue;
 
-				if ( dimensions != null )
-					builder.Add( Entry.Lerp( to.GetDefault(), to, delta, dimensions.Value ) );
-				else
-					builder.Add( Entry.Lerp( to.GetDefault(), to, delta ) );
+				built[at++] = dimensions != null ? Entry.Lerp( to.GetDefault(), to, delta, dimensions.Value ) : Entry.Lerp( to.GetDefault(), to, delta );
 			}
 
-			var o = new PanelTransform();
-			o.List = builder.ToImmutable();
-
-			return o;
+			return new PanelTransform { entries = built };
 		}
 
 		internal readonly PanelTransform GetScaled( float scale )
 		{
 			if ( Entries <= 0 ) return new PanelTransform();
 
-			var builder = ImmutableList.CreateBuilder<Entry>();
+			var built = new Entry[Entries];
 
 			for ( int i = 0; i < Entries; i++ )
 			{
@@ -225,24 +207,20 @@ namespace Rinten.UI
 				Length.Scale( ref e.Y, scale );
 				Length.Scale( ref e.Z, scale );
 
-				builder.Add( e );
+				built[i] = e;
 			}
 
-			var o = new PanelTransform();
-			o.List = builder.ToImmutable();
-
-			return o;
+			return new PanelTransform { entries = built };
 		}
 
 		public override bool Equals( object obj )
 		{
-			return obj is PanelTransform transform &&
-				   EqualityComparer<ImmutableList<Entry>>.Default.Equals( List, transform.List );
+			return obj is PanelTransform transform && ReferenceEquals( entries, transform.entries );
 		}
 
 		public readonly override int GetHashCode()
 		{
-			return HashCode.Combine( List );
+			return HashCode.Combine( entries );
 		}
 
 		public static bool operator ==( PanelTransform a, PanelTransform b )

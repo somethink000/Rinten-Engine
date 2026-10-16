@@ -51,6 +51,27 @@ public static partial class TextRendering
 
 	static ConcurrentDictionary<int, TextBlock> Dictionary = new();
 
+	//The cached block of this text where it has been drawn, without making one - see GetOrCreateTextBlock
+	internal static bool TryGetTextBlock( in Scope scope, TextFlag flag, Vector2 clip, out TextBlock block )
+	{
+		var hc = new HashCode();
+		hc.Add( scope );
+		hc.Add( new Vector2( clip ) );
+		hc.Add( flag );
+
+		return Dictionary.TryGetValue( hc.ToHashCode(), out block );
+	}
+
+	[ThreadStatic] static TextBlock scratch;
+
+	//A block on this thread for text measured or drawn once and let go, shaped in the same RichTextKit block every time - see TextBlock.Reuse
+	internal static TextBlock Scratch( in Scope scope, TextFlag flags )
+	{
+		var block = scratch ??= new TextBlock();
+		block.Reuse( scope, flags );
+		return block;
+	}
+
 	//One shaped run of text, kept so the next frame does not shape it again.
 	internal sealed class Shaping
 	{

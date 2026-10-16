@@ -765,7 +765,7 @@ internal sealed class CoreSceneTables
 		}
 		else
 		{
-			System.Threading.Tasks.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
+			Rinten.Utility.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
 		}
 
 		for ( var i = 0; i < heldMarks.Count; i++ )

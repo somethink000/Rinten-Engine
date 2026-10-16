@@ -19,6 +19,8 @@ internal static class TextStats
 		public long MaxRebuildsInFrame, MaxTicksInFrame, FramesWithRebuild;
 		//scope cache path
 		public long ScopeRasters, ScopeTicks, ScopeBytes;
+		//managed bytes each path allocated - the garbage text makes
+		public long LabelGarbage, ScopeGarbage;
 		public long Frames;                          //FrameProfiler frames seen by the counter
 	}
 
@@ -29,6 +31,18 @@ internal static class TextStats
 	static int firstFrame = -1, lastFrame = -1;
 
 	public static double Ms( long ticks ) => ticks * 1000.0 / Stopwatch.Frequency;
+
+	/// <summary>What this thread has allocated so far - read before and after a piece of text work, see LabelGarbage.</summary>
+	public static long Allocated => System.GC.GetAllocatedBytesForCurrentThread();
+
+	public static void Garbage( long bytes, bool label )
+	{
+		lock ( Gate )
+		{
+			if ( label ) s.LabelGarbage += bytes;
+			else s.ScopeGarbage += bytes;
+		}
+	}
 
 	static void Frame( long ticks, bool rebuild )
 	{
@@ -107,6 +121,7 @@ internal static class TextStats
 			$"new {a.NewTextures} / reused {a.ReusedTextures}, uploaded {a.UploadBytes / 1024.0:F0} KB, " +
 			$"live {a.LiveTextures} pictures {a.LiveBytes / 1048576.0:F2} MB, frames with a rebuild {a.FramesWithRebuild}, " +
 			$"worst frame {a.MaxRebuildsInFrame} rebuilds / {Ms( a.MaxTicksInFrame ):F2} ms of text; " +
-			$"scope cache: rasters {a.ScopeRasters} ({Ms( a.ScopeTicks ):F2} ms, {a.ScopeBytes / 1024.0:F0} KB)";
+			$"scope cache: rasters {a.ScopeRasters} ({Ms( a.ScopeTicks ):F2} ms, {a.ScopeBytes / 1024.0:F0} KB); " +
+			$"garbage: label path {a.LabelGarbage / 1024.0:F0} KB, scope cache {a.ScopeGarbage / 1024.0:F0} KB";
 	}
 }

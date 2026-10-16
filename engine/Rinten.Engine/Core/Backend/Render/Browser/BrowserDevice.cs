@@ -260,7 +260,7 @@ internal static class BrowserDevice
 
 	//A bind group naming resources by handle. Made when a texture, a material or a frame's
 	//scratch is made and kept for as long as they are - nothing on the per-draw path builds one.
-	internal static int MakeBindGroup( int layout, params Bind[] entries )
+	internal static int MakeBindGroup( int layout, params ReadOnlySpan<Bind> entries )
 	{
 		if ( layout == 0 ) return 0;
 

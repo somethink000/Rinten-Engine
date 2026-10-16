@@ -150,7 +150,7 @@ public abstract class Scatterer
 		var physicsWorld = scene.PhysicsWorld;
 
 		//even though this is on the main thread, it's safe to do since nothing will change the physics world between now and when this completes
-		Parallel.For( 0, positions.Count, i =>
+		Rinten.Utility.Parallel.For( 0, positions.Count, i =>
 		{
 			var position = positions[i];
 			var traceStart = position.WithY( sceneBounds.Maxs.y );

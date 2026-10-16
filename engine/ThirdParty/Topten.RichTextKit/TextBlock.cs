@@ -411,12 +411,13 @@ namespace Topten.RichTextKit
 			// Ensure layout done
 			Layout();
 
-			// Create context
-			var ctx = new PaintTextContext()
-			{
-				Canvas = canvas,
-				Options = options,
-			};
+			// Create context - one a thread, set up again for each paint
+			var ctx = _paintContext ??= new PaintTextContext();
+			ctx.Canvas = canvas;
+			ctx.Options = options;
+			ctx.PaintSelectionBackground = null;
+			ctx.PaintSelectionHandle = null;
+			ctx.SelectionHandleScale = 1.0f;
 
 			ctx.Shader = options.TextGradient?.CreateShader( MeasuredWidth, MeasuredHeight, MeasuredPadding.Left );
 
@@ -461,7 +462,11 @@ namespace Topten.RichTextKit
 
 			// Clean up
 			ctx.PaintSelectionBackground?.Dispose();
+			ctx.PaintSelectionHandle?.Dispose();
 			ctx.Shader?.Dispose();
+			ctx.Canvas = null;
+			ctx.Options = null;
+			ctx.Shader = null;
 		}
 
 		/// <summary>
@@ -1170,7 +1175,8 @@ namespace Topten.RichTextKit
 				}
 
 				// Get the list of directional runs
-				var bidiRuns = BidiRun.CoalescLevels( resolvedLevels ).ToList();
+				var bidiRuns = _bidiRuns;
+				BidiRun.CoalescLevels( resolvedLevels, bidiRuns );
 
 				// Split...
 				var pos = 0;
@@ -1344,7 +1350,10 @@ namespace Topten.RichTextKit
 			var codePointsSlice = _codePoints.SubSlice( start, length );
 
 			// Split into font fallback runs
-			foreach ( var fontRun in FontFallback.GetFontRuns( codePointsSlice, typeface, style.ReplacementCharacter ) )
+			_fallbackRuns.Clear();
+			FontFallback.GetFontRuns( codePointsSlice, typeface, _fallbackRuns, style.ReplacementCharacter );
+
+			foreach ( var fontRun in _fallbackRuns )
 			{
 				AddFontRun( styleRun, start + fontRun.Start, fontRun.Length, direction, style, fontRun.Typeface, typeface );
 			}
@@ -1428,7 +1437,14 @@ namespace Topten.RichTextKit
 
 		List<UnshapedRun> _unshapedRuns = new List<UnshapedRun>();
 
-		class UnshapedRun
+		//Kept between layouts rather than made for each - see BuildFontRuns and AddDirectionalRun
+		[ThreadStatic] static PaintTextContext _paintContext;
+
+		List<BidiRun> _bidiRuns = new List<BidiRun>();
+		List<LineBreak> _lineBreaks = new List<LineBreak>();
+		List<FontFallback.Run> _fallbackRuns = new List<FontFallback.Run>();
+
+		struct UnshapedRun
 		{
 			public StyleRun styleRun;
 			public int start;
@@ -1487,7 +1503,7 @@ namespace Topten.RichTextKit
 			fontRun.Descent = shaped.Descent;
 			fontRun.Leading = shaped.Leading;
 			fontRun.Width = shaped.EndXCoord.X;
-			fontRun.SpaceWidth = typeface.ToFont( fontRun.Style.FontSize ).MeasureText( spaceCharacter );
+			fontRun.SpaceWidth = shaper.SpaceWidth( fontRun.Style.FontSize );
 
 			return fontRun;
 		}
@@ -1501,7 +1517,8 @@ namespace Topten.RichTextKit
 			_lineBreaker.Reset( _codePoints.AsSlice() );
 
 			var mandatoryOnly = !_maxWidth.HasValue || _breakMode == WordBreakMode.Character;
-			var lineBreakPositions = _lineBreaker.GetBreaks( mandatoryOnly );
+			var lineBreakPositions = _lineBreaks;
+			_lineBreaker.GetBreaks( mandatoryOnly, lineBreakPositions );
 
 			int frIndexStartOfLine = 0;     // Index of the first font run in the current line
 			int frIndex = 0;                // Index of the current font run

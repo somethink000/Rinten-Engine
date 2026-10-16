@@ -73,16 +73,38 @@ namespace Topten.RichTextKit
 		public List<LineBreak> GetBreaks( bool mandatoryOnly = false )
 		{
 			var list = new List<LineBreak>();
-			if ( mandatoryOnly )
-			{
-				list.AddRange( FindMandatoryBreaks() );
-			}
-			else
+			GetBreaks( mandatoryOnly, list );
+			return list;
+		}
+
+		//The same into a list the caller keeps, and the mandatory ones without an iterator: both were made every layout
+		public void GetBreaks( bool mandatoryOnly, List<LineBreak> into )
+		{
+			into.Clear();
+
+			if ( !mandatoryOnly )
 			{
 				while ( NextBreak( out var lb ) )
-					list.Add( lb );
+					into.Add( lb );
+
+				return;
 			}
-			return list;
+
+			for ( int i = 0; i < _codePoints.Length; i++ )
+			{
+				switch ( UnicodeClasses.LineBreakClass( _codePoints[i] ) )
+				{
+					case LineBreakClass.BK:
+					case LineBreakClass.LF:
+						into.Add( new LineBreak( i, i + 1, true ) );
+						break;
+
+					case LineBreakClass.CR:
+						var crlf = i + 1 < _codePoints.Length && UnicodeClasses.LineBreakClass( _codePoints[i + 1] ) == LineBreakClass.LF;
+						into.Add( new LineBreak( i, crlf ? i + 2 : i + 1, true ) );
+						break;
+				}
+			}
 		}
 
 		LineBreakClass mapClass( LineBreakClass c )

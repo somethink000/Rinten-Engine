@@ -193,7 +193,7 @@ public partial class Terrain
 
 		var readBefore = TerrainBakeCache.Hits;
 
-		System.Threading.Tasks.Parallel.ForEach( jobs, job =>
+		Rinten.Utility.Parallel.ForEach( jobs, job =>
 		{
 			try { TerrainChunkBaker.Build( job ); }
 			catch ( Exception e ) { Log.Warning( e, $"Terrain chunk {job.Chunk} did not bake" ); }

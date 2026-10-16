@@ -2006,9 +2006,11 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.DestroyTexture( whiteTexture );
 
 		foreach ( var entry in textCache.Values ) CoreRenderDevice.DestroyTexture( entry.Texture );
+		foreach ( var spare in textSpare ) CoreRenderDevice.DestroyTexture( spare.Texture );
 		foreach ( var uploaded in uiTextures.Values ) CoreRenderDevice.DestroyTexture( uploaded );
 
 		textCache.Clear();
+		textSpare.Clear();
 		uiTextures.Clear();
 
 		linePipeline = 0;
@@ -4355,6 +4357,9 @@ internal sealed partial class CoreSceneDrawer
 	internal static long textMade;
 	internal static long textGone;
 
+	//The keys a sweep lets go of, kept between sweeps
+	private static readonly System.Collections.Generic.List<int> textGoing = new();
+
 	private static void RetireOldText()
 	{
 		if ( textRetiredAt == textFrame ) return;
@@ -4362,49 +4367,96 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( textCache.Count == 0 ) return;
 
-		System.Collections.Generic.List<int> going = null;
+		var going = textGoing;
+		going.Clear();
 
 		foreach ( var (key, entry) in textCache )
 		{
 			if ( textFrame - entry.Used <= TextKeptFor ) continue;
 
-			going ??= new System.Collections.Generic.List<int>();
 			going.Add( key );
 		}
 
-		if ( going is null ) return;
+		if ( going.Count == 0 ) return;
 
 		foreach ( var key in going )
 		{
 			textGone++;
 
-			CoreRenderDevice.DestroyTexture( textCache[key].Texture );
+			//Kept for a string of the same size to be written into - text that changes is mostly the same size from one to the next
+			var gone = textCache[key];
+
+			if ( textSpare.Count < TextSpares ) textSpare.Add( (gone.Texture, (int)gone.Size.x, (int)gone.Size.y) );
+			else CoreRenderDevice.DestroyTexture( gone.Texture );
 			textCache.Remove( key );
 		}
 	}
+
+	//Textures of retired strings, kept to be written over rather than one made and one destroyed for each string - on a page a texture
+	//made is also its bind group described as text
+	private static readonly System.Collections.Generic.List<(ulong Texture, int Width, int Height)> textSpare = new();
+	private const int TextSpares = 64;
+
+	//A spare of exactly this size with these pixels written into it; nought where there is none
+	private static ulong ReuseText( ReadOnlySpan<byte> pixels, int width, int height )
+	{
+		for ( var i = 0; i < textSpare.Count; i++ )
+		{
+			var spare = textSpare[i];
+			if ( spare.Width != width || spare.Height != height ) continue;
+
+			textSpare[i] = textSpare[^1];
+			textSpare.RemoveAt( textSpare.Count - 1 );
+
+			if ( CoreRenderDevice.UpdateTextureRgba( spare.Texture, pixels, width, height ) ) return spare.Texture;
+
+			CoreRenderDevice.DestroyTexture( spare.Texture );
+			return 0;
+		}
+
+		return 0;
+	}
+
+	//What every string is shaped, drawn and read back in, kept: drawn on the render thread only
+	private static readonly TextRendering.TextBlock rasterBlock = new();
+	private static Bitmap rasterBitmap;
+	private static byte[] rasterPixels = [];
 
 	//Text into pixels by the engine's text machinery, uploaded once; the scope carries the colour
 	private static (ulong Texture, Vector2 Size) RasteriseText( in TextRendering.Scope scope )
 	{
 		var rasterStart = System.Diagnostics.Stopwatch.GetTimestamp();
+		var allocatedBefore = Rinten.UI.TextStats.Allocated;
 
 		//Measure with the block that draws it; MeasureText rasterised a second unused texture
 		const TextFlag flags = TextFlag.LeftTop | TextFlag.DontClip;
-		using var block = new TextRendering.TextBlock( scope, Vector2.Zero, flags );
+		var block = rasterBlock;
+		block.Reuse( scope, flags );
 		var measured = block.PictureSize();
 
 		var width = System.Math.Clamp( (int)System.MathF.Ceiling( measured.x ), 1, 1024 );
 		var height = System.Math.Clamp( (int)System.MathF.Ceiling( measured.y ), 1, 256 );
 
-		using var bitmap = new Bitmap( width, height );
+		//Into the top left of one bitmap kept for this, grown when a string is bigger than any before it
+		if ( rasterBitmap is null || rasterBitmap.Width < width || rasterBitmap.Height < height )
+		{
+			rasterBitmap?.Dispose();
+			rasterBitmap = new Bitmap( System.Math.Max( width, rasterBitmap?.Width ?? 0 ), System.Math.Max( height, rasterBitmap?.Height ?? 0 ) );
+		}
 
-		bitmap.Clear( new Color( 0, 0, 0, 0 ) );
-		bitmap.DrawText( block, bitmap.Rect );
+		rasterBitmap.ClearArea( width, height );
+		rasterBitmap.DrawText( block, new Rect( 0, 0, width, height ) );
 
-		//Straight out of the bitmap's own pixels, already eight-bit RGBA: no copy into an array of colours per string
-		var texture = CoreRenderDevice.CreateTextureRgba( bitmap.GetBuffer(), width, height, srgb: true );
+		var bytes = width * height * 4;
+		if ( rasterPixels.Length < bytes ) rasterPixels = new byte[System.Math.Max( bytes, rasterPixels.Length * 2 )];
+
+		rasterBitmap.CopyArea( width, height, rasterPixels );
+
+		var texture = ReuseText( rasterPixels.AsSpan( 0, bytes ), width, height );
+		if ( texture == 0 ) texture = CoreRenderDevice.CreateTextureRgba( rasterPixels.AsSpan( 0, bytes ), width, height, srgb: true );
 
 		Rinten.UI.TextStats.Scope( System.Diagnostics.Stopwatch.GetTimestamp() - rasterStart, (long)width * height * 4 );
+		Rinten.UI.TextStats.Garbage( Rinten.UI.TextStats.Allocated - allocatedBefore, label: false );
 
 		return (texture, new Vector2( width, height ));
 	}

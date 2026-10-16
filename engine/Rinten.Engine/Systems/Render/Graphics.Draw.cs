@@ -372,11 +372,15 @@ public static partial class Graphics
 	/// <summary>Measure how big some text will be, without having to render it</summary>
 	public static Rect MeasureText( in Rect position, in TextRendering.Scope scope, TextFlag flags = TextFlag.Center )
 	{
-		//Measure via the shaped text block only, without rasterising a texture
+		//Measure via the shaped text block only, without rasterising a texture: the cached one where this text was drawn, else a
+		//block kept for measuring - text measured every frame as it changes made a cache entry of each string just to measure it
 		var clip = position.Size == default ? new Vector2( 8096 ) : position.Size;
-		var block = TextRendering.GetOrCreateTextBlock( scope, flags, clip );
 
-		if ( block is null || block.IsEmpty )
+		if ( Application.IsHeadless ) return new Rect( position.Position, 0 );
+
+		if ( !TextRendering.TryGetTextBlock( scope, flags, clip, out var block ) ) block = TextRendering.Scratch( scope, flags );
+
+		if ( block.IsEmpty )
 		{
 			var picture = TextRendering.GetOrCreateTexture( scope, position.Size, flags );
 			return new Rect( position.Position, picture.Size );

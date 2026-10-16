@@ -162,7 +162,7 @@ namespace Topten.RichTextKit
 		/// <param name="ctx">The paint context</param>
 		internal void PaintBackground( PaintTextContext ctx )
 		{
-			foreach ( var r in Runs )
+			foreach ( var r in RunsInternal )
 			{
 				r.PaintBackground( ctx );
 			}
@@ -174,7 +174,7 @@ namespace Topten.RichTextKit
 		/// <param name="ctx">The paint context</param>
 		internal void Paint( PaintTextContext ctx )
 		{
-			foreach ( var r in Runs )
+			foreach ( var r in RunsInternal )
 			{
 				r.Paint( ctx );
 			}
@@ -391,7 +391,7 @@ namespace Topten.RichTextKit
 
 		internal void UpdateOverhang( float right, ref float leftOverhang, ref float rightOverhang )
 		{
-			foreach ( var r in Runs )
+			foreach ( var r in RunsInternal )
 			{
 				r.UpdateOverhang( right, ref leftOverhang, ref rightOverhang );
 			}

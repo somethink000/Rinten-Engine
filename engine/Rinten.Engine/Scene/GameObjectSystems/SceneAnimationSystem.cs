@@ -56,7 +56,7 @@ public sealed class SceneAnimationSystem : GameObjectSystem<SceneAnimationSystem
 
 		//A load-balanced partitioner: work per root is highly uneven (clothed characters have many
 		//bone-merged children), so static range partitioning would cause severe thread idle time.
-		System.Threading.Tasks.Parallel.ForEach( Partitioner.Create( renderers, loadBalance: true ), _animParallelOptions, body );
+		Rinten.Utility.Parallel.ForEach( renderers, _animParallelOptions, body );
 	}
 
 	public SceneAnimationSystem( Scene scene ) : base( scene )

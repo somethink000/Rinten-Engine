@@ -221,8 +221,7 @@ namespace Topten.RichTextKit
 				GlyphPositions[i].X += dx;
 				GlyphPositions[i].Y += dy;
 			}
-			_textBlob?.Dispose();
-			_textBlob = null;
+			FontCache.Release( ref _blob );
 		}
 
 		/// <summary>
@@ -378,8 +377,7 @@ namespace Topten.RichTextKit
 			this.Clusters = this.Clusters.SubSlice( 0, glyphSplitPos );
 			this.Width = sliceLeftWidth;
 			this.Length = codePointSplitPos;
-			this._textBlob?.Dispose();
-			this._textBlob = null;
+			FontCache.Release( ref _blob );
 
 			// Return the new run
 			return newRun;
@@ -439,8 +437,7 @@ namespace Topten.RichTextKit
 			this.Clusters = this.Clusters.SubSlice( glyphSplitPos );
 			this.Width = sliceRightWidth;
 			this.Length = codePointSplitPos;
-			this._textBlob?.Dispose();
-			this._textBlob = null;
+			FontCache.Release( ref _blob );
 
 			// Adjust code point positions
 			for ( int i = 0; i < this.RelativeCodePointXCoords.Length; i++ )
@@ -477,8 +474,6 @@ namespace Topten.RichTextKit
 			if ( Glyphs.Length == 0 )
 				return;
 
-			using ( var paint = new SKPaint() )
-			using ( var font = new SKFont() )
 			{
 				float glyphScale = 1;
 				if ( Style.FontVariant == FontVariant.SuperScript )
@@ -490,18 +485,21 @@ namespace Topten.RichTextKit
 					glyphScale = 0.65f;
 				}
 
-				font.Typeface = Typeface;
-				font.Size = Style.FontSize * glyphScale;
+				var font = FontCache.Get( Typeface, Style.FontSize * glyphScale );
 				font.Subpixel = true;
-				paint.IsAntialias = true;
 				font.Edging = SKFontEdging.SubpixelAntialias;
 
-				unsafe
+				//Into one array a thread rather than the pair a measure handed back each time
+				if ( _bounds == null || _bounds.Length < Glyphs.Length )
 				{
-					fixed ( ushort* pGlyphs = Glyphs.Underlying )
+					_bounds = new SKRect[Math.Max( Glyphs.Length, 64 ) * 2];
+					_widths = new float[_bounds.Length];
+				}
+
+				{
 					{
-						font.GetGlyphWidths( (IntPtr)(pGlyphs + Start), sizeof( ushort ) * Glyphs.Length, SKTextEncoding.GlyphId, out var bounds );
-						if ( bounds != null )
+						var bounds = new Span<SKRect>( _bounds, 0, Glyphs.Length );
+						font.GetGlyphWidths( Glyphs.AsSpan(), new Span<float>( _widths, 0, Glyphs.Length ), bounds );
 						{
 							for ( int i = 0; i < bounds.Length; i++ )
 							{
@@ -538,24 +536,16 @@ namespace Topten.RichTextKit
 					glyphVOffset = Style.FontSize * 0.1f;
 				}
 
-				// Create the font
-				if ( _font == null )
-				{
-					_font = new SKFont( this.Typeface, this.Style.FontSize * glyphScale );
-				}
+				//This thread's font of the face and size, set for this paint - made once, not for every run
+				_font = FontCache.Get( this.Typeface, this.Style.FontSize * glyphScale );
 				_font.Hinting = ctx.Options.Hinting;
 				_font.Edging = withEdging ? ctx.Options.Edging : SKFontEdging.Antialias;
 				_font.Subpixel = ctx.Options.SubpixelPositioning;
 
 				// Create the SKTextBlob (if necessary)
-				if ( _textBlob == null )
+				if ( _blob == IntPtr.Zero )
 				{
-					_textBlob = SKTextBlob.CreatePositioned(
-						(IntPtr)(pGlyphs + Glyphs.Start),
-						Glyphs.Length * sizeof( ushort ),
-						SKTextEncoding.GlyphId,
-						_font,
-						GlyphPositions.AsSpan() );
+					_blob = FontCache.NativeBlob( _font, Glyphs.AsSpan(), GlyphPositions.AsSpan() );
 				}
 
 				return glyphVOffset;
@@ -722,16 +712,16 @@ namespace Topten.RichTextKit
 			if ( RunKind == FontRunKind.TrailingWhitespace )
 				return;
 
-			_textBlob?.Dispose();
-			_textBlob = null;
+			FontCache.Release( ref _blob );
 			var glyphVOffset = CreateTextBlob( ctx );
 
-			using var paint = new SKPaint();
+			var paint = _runPaint ??= new SKPaint();
+			paint.Reset();
 
 			paint.Color = Style.TextColor;
 			paint.Shader = ctx.Shader;
 
-			ctx.Canvas.DrawText( _textBlob, 0, 0, paint );
+			FontCache.Draw( ctx.Canvas, _blob, 0, 0, paint );
 
 			PaintUnderline( ctx, paint );
 			PaintStrikeThrough( ctx, paint, glyphVOffset );
@@ -768,7 +758,7 @@ namespace Topten.RichTextKit
 			if ( (Style.Underline & UnderlineStyle.Gapped) != 0 )
 			{
 				var flUnderlineOffset = underlineYPos + Style.UnderlineOffset;
-				var interceptPositions = _textBlob.GetIntercepts( flUnderlineOffset - paint.StrokeWidth / 2, flUnderlineOffset + paint.StrokeWidth );
+				var interceptPositions = Style.StrokeInkSkip ? Intercepts( flUnderlineOffset - paint.StrokeWidth / 2, flUnderlineOffset + paint.StrokeWidth ) : null;
 				var x = XCoord;
 
 				if ( Style.StrokeInkSkip )
@@ -794,7 +784,7 @@ namespace Topten.RichTextKit
 			if ( (Style.Underline & UnderlineStyle.Overline) != 0 )
 			{
 				var flOverlineOffset = Line.YCoord + Style.OverlineOffset;
-				var interceptPositions = _textBlob.GetIntercepts( flOverlineOffset - paint.StrokeWidth / 2, flOverlineOffset + paint.StrokeWidth );
+				var interceptPositions = Style.StrokeInkSkip ? Intercepts( flOverlineOffset - paint.StrokeWidth / 2, flOverlineOffset + paint.StrokeWidth ) : null;
 				var x = XCoord;
 				if ( Style.StrokeInkSkip )
 				{
@@ -855,7 +845,7 @@ namespace Topten.RichTextKit
 				}
 			}
 
-			if ( Style.TextEffects == null || Style.TextEffects.Count() == 0 )
+			if ( Style.TextEffects is not IReadOnlyCollection<TextEffect> { Count: > 0 } effects )
 				return;
 
 			//
@@ -863,16 +853,21 @@ namespace Topten.RichTextKit
 			// otherwise we get issues with aliased fonts and things like
 			// text strokes.
 			//
-			_textBlob?.Dispose();
-			_textBlob = null;
+			FontCache.Release( ref _blob );
 			var glyphVOffset = CreateTextBlob( ctx, false );
 
-			if ( _textBlob == null )
+			if ( _blob == IntPtr.Zero )
 				return;
 
-			using var effectPaint = new SKPaint();
-			foreach ( var effect in Style.TextEffects )
+			var effectPaint = _effectPaint ??= new SKPaint();
+			effectPaint.Reset();
+
+			//Through the list itself where it is one: over the interface the loop made an enumerator every run
+			var list = effects as IReadOnlyList<TextEffect>;
+			for ( int e = 0; e < effects.Count; e++ )
 			{
+				var effect = list != null ? list[e] : System.Linq.Enumerable.ElementAt( effects, e );
+
 				// Aliased 1 pixel outline needs to be rendered in a different way to look good.
 				if ( ctx.Options.Edging == SKFontEdging.Alias &&
 					 effect.PaintStyle == SKPaintStyle.StrokeAndFill &&
@@ -888,9 +883,9 @@ namespace Topten.RichTextKit
 				effectPaint.StrokeJoin = effect.StrokeJoin;
 				effectPaint.StrokeMiter = effect.StrokeMiter;
 				effectPaint.Color = effect.Color;
-				effectPaint.ImageFilter = effect.BlurSize > 0 ? SKImageFilter.CreateDropShadow( effect.Offset.X, effect.Offset.Y, effect.BlurSize, effect.BlurSize, effect.Color ) : null;
+				effectPaint.ImageFilter = effect.BlurSize > 0 ? FontCache.DropShadow( effect.Offset.X, effect.Offset.Y, effect.BlurSize, effect.Color ) : null;
 
-				ctx.Canvas.DrawText( _textBlob, 0, 0, effectPaint );
+				FontCache.Draw( ctx.Canvas, _blob, 0, 0, effectPaint );
 				PaintUnderline( ctx, effectPaint );
 				PaintStrikeThrough( ctx, effectPaint, glyphVOffset );
 			}
@@ -920,27 +915,37 @@ namespace Topten.RichTextKit
 			var edging = _font.Edging;
 			_font.Edging = SKFontEdging.Alias;
 
-			fixed ( ushort* pGlyphs = Glyphs.Underlying )
 			{
-				using var textBlob = SKTextBlob.CreatePositioned(
-					(IntPtr)(pGlyphs + Glyphs.Start),
-					Glyphs.Length * sizeof( ushort ),
-					SKTextEncoding.GlyphId,
-					_font,
-					GlyphPositions.AsSpan() );
+				var textBlob = FontCache.NativeBlob( _font, Glyphs.AsSpan(), GlyphPositions.AsSpan() );
 
 				foreach ( var o in PixelOutlineOffsets )
 				{
-					ctx.Canvas.DrawText( textBlob, o.X, o.Y, pixelPaint );
+					FontCache.Draw( ctx.Canvas, textBlob, o.X, o.Y, pixelPaint );
 				}
+
+				FontCache.Release( ref textBlob );
 			}
 
 			// Restore font edging.
 			_font.Edging = edging;
 		}
 
-		SKTextBlob _textBlob;
+		//The run's glyphs as a native blob - see FontCache.NativeBlob
+		IntPtr _blob;
+
+		//Where glyphs cross a band, for an underline that skips the ink; the one place a managed blob is still made
+		float[] Intercepts( float upper, float lower )
+		{
+			using var blob = FontCache.Blob( _font, Glyphs.AsSpan(), GlyphPositions.AsSpan() );
+			return blob?.GetIntercepts( upper, lower ) ?? Array.Empty<float>();
+		}
 		SKFont _font;
+
+		//Painted with and measured into on each thread, reset for every run rather than made for it
+		[ThreadStatic] static SKPaint _runPaint;
+		[ThreadStatic] static SKPaint _effectPaint;
+		[ThreadStatic] static SKRect[] _bounds;
+		[ThreadStatic] static float[] _widths;
 
 		void Reset()
 		{
@@ -953,9 +958,9 @@ namespace Topten.RichTextKit
 			// Let go of here, not left for the finalizer: on a page that runs in the middle of
 			// whatever allocated, and Skia's handle table is a dictionary it can be inserting
 			// into at that moment - see SkiaLock in the web player.
-			_textBlob?.Dispose();
-			_textBlob = null;
-			_font?.Dispose();
+			FontCache.Release( ref _blob );
+
+			//The font is the cache's, kept for the next run of its face and size
 			_font = null;
 		}
 

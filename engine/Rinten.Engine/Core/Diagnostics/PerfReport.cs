@@ -146,6 +146,9 @@ internal static class PerfReport
 
 	//How many charts of the sun had been traced as the window opened, and how often the world was built for the rays.
 	private static long bakesAtArm;
+
+	//The text counters as the window opened - see the text lines of the report
+	private static Rinten.UI.TextStats.Snapshot textAtArm;
 	private static long pagesAtArm;
 	private static long lampFacesAtArm;
 
@@ -407,6 +410,8 @@ internal static class PerfReport
 
 			allocations = new Allocations.Scope();
 			allocations.Start();
+
+			textAtArm = Rinten.UI.TextStats.Take();
 
 			//Profiler tree records only with RINTEN_PERF_TREE=1; it slows the frame, so it's a map, not a timing
 			FrameProfiler.Reporting = WantsTree;
@@ -747,6 +752,13 @@ internal static class PerfReport
 		{
 			var ts = Rinten.UI.TextStats.Take();
 			report.AppendLine( $"  text over the run ({ts.Frames} frames): " + Rinten.UI.TextStats.Describe( ts ) );
+
+			//What text cost in the window alone, past the run's first shaping and loading of each face
+			var rasters = ts.ScopeRasters - textAtArm.ScopeRasters;
+			var changes = ts.Restyles - textAtArm.Restyles;
+			report.AppendLine( $"  text in the window: {rasters} rasters, {( ts.ScopeGarbage - textAtArm.ScopeGarbage ) / 1024.0:F1} KB garbage " +
+				$"({( rasters > 0 ? ( ts.ScopeGarbage - textAtArm.ScopeGarbage ) / rasters : 0 )} bytes each); {changes} label changes, " +
+				$"{( ts.LabelGarbage - textAtArm.LabelGarbage ) / 1024.0:F1} KB garbage ({( changes > 0 ? ( ts.LabelGarbage - textAtArm.LabelGarbage ) / changes : 0 )} bytes each)" );
 		}
 
 		if ( walk.Biggest is { } biggest )

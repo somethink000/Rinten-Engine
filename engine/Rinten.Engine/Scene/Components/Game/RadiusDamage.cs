@@ -119,7 +119,7 @@ public sealed class RadiusDamage : Component
 		{
 			var losTrace = scene.PhysicsWorld.Trace.WithTag( "map" ).WithoutTags( "trigger", "gib", "debris", "player" );
 
-			System.Threading.Tasks.Parallel.For( 0, traceCount, idx =>
+			Rinten.Utility.Parallel.For( 0, traceCount, idx =>
 			{
 				if ( ignore.IsValid() && ignore.IsDescendant( rootList[idx] ) )
 				{

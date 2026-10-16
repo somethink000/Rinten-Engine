@@ -115,6 +115,9 @@ internal sealed class TextBlock : IDisposable
 	Topten.RichTextKit.TextGradient Gradient;
 
 	int FontHash;
+
+	//The style the Style object was last set up for - see UpdateStyles
+	int builtStyleHash;
 	//int ParentHash;
 
 	float FontSize;
@@ -187,6 +190,7 @@ internal sealed class TextBlock : IDisposable
 		}
 
 		var measureStart = System.Diagnostics.Stopwatch.GetTimestamp();
+		var measureAllocated = TextStats.Allocated;
 
 		//Measured at its own width when it does not wrap, so the room it is given is not also the width it breaks itself into lines
 		//at - a field with less room than its text is one line that runs past the edge, not several that make the field taller.
@@ -203,6 +207,7 @@ internal sealed class TextBlock : IDisposable
 		if ( shareable ) TextPictures.PutSize( key, s );
 
 		TextStats.MeasureMiss( System.Diagnostics.Stopwatch.GetTimestamp() - measureStart );
+		TextStats.Garbage( TextStats.Allocated - measureAllocated, label: true );
 
 		return s;
 	}
@@ -342,13 +347,18 @@ internal sealed class TextBlock : IDisposable
 		Smooth = style.FontSmooth.Value;
 
 		var hash = HashCode.Combine( FontSize, fontColor, fontFamily, FontWeight, TextAlign, WhiteSpace, TextDecoration, FontStyle );
-		hash = HashCode.Combine( hash, LetterSpacing, TextTransform, Text, SelectionStart, SelectionEnd, ShouldDrawSelection, style.TextShadow );
+		hash = HashCode.Combine( hash, LetterSpacing, TextTransform, style.TextShadow );
 		hash = HashCode.Combine( hash, style.TextStrokeWidth, style.TextStrokeColor, style.TextDecorationColor, style.TextDecorationThickness, style.TextDecorationSkipInk, style.TextDecorationStyle );
 		hash = HashCode.Combine( hash, style.TextUnderlineOffset, style.TextOverlineOffset, style.TextLineThroughOffset, style.TextGradient, style.TextOverflow, style.WordBreak, style.LineHeight );
 		hash = HashCode.Combine( hash, style.WordSpacing );
 		//IsHtml too: the same string is a different block of text read as markup than read as words, and
 		//a label told to start reading it as markup would otherwise keep the one it had already built.
-		hash = HashCode.Combine( hash, Smooth, FontVariantNumeric, IsHtml );
+		hash = HashCode.Combine( hash, Smooth, FontVariantNumeric );
+
+		//What the style alone is: a label whose text changes and whose look does not is shaped again, its style and effects kept
+		var styleHash = hash;
+
+		hash = HashCode.Combine( hash, Text, SelectionStart, SelectionEnd, ShouldDrawSelection, IsHtml );
 
 		//And the faces there are: one that arrived since the text was set may be the one it asked for - see FontManager.Generation
 		hash = HashCode.Combine( hash, FontManager.Generation );
@@ -360,105 +370,111 @@ internal sealed class TextBlock : IDisposable
 
 		FontHash = hash;
 		var restyleStart = System.Diagnostics.Stopwatch.GetTimestamp();
+		var allocatedBefore = TextStats.Allocated;
 
-		Style ??= new Style();
-
-		Style.FontFamily = fontFamily;
-		Style.FontSize = FontSize;
-		Style.FontWeight = FontWeight ?? 400;
-		Style.FontItalic = FontStyle != FontStyle.None;
-		Style.FontVariantNumeric = FontVariantNumeric ?? UI.FontVariantNumeric.Normal;
-		Style.TextColor = fontColor.ToSk();
-		Style.Underline = UnderlineStyle.None;
-		Style.StrokeInkSkip = style.TextDecorationSkipInk == TextSkipInk.All;
-		Style.UnderlineOffset = style.TextUnderlineOffset.Value.GetPixels( 100 );
-		Style.OverlineOffset = style.TextOverlineOffset.Value.GetPixels( 100 );
-		Style.StrikeThroughOffset = style.TextLineThroughOffset.Value.GetPixels( 100 );
-
-		switch ( style.TextDecorationStyle )
+		if ( Style is null || styleHash != builtStyleHash )
 		{
-			case TextDecorationStyle.Solid:
-				Style.UnderlineStrokeType = UnderlineType.Solid;
-				break;
-			case TextDecorationStyle.Double:
-				Style.UnderlineStrokeType = UnderlineType.Double;
-				break;
-			case TextDecorationStyle.Dotted:
-				Style.UnderlineStrokeType = UnderlineType.Dotted;
-				break;
-			case TextDecorationStyle.Dashed:
-				Style.UnderlineStrokeType = UnderlineType.Dashed;
-				break;
-			case TextDecorationStyle.Wavy:
-				Style.UnderlineStrokeType = UnderlineType.Wavy;
-				break;
-			default:
-				Style.UnderlineStrokeType = UnderlineType.Solid;
-				break;
-		}
+			builtStyleHash = styleHash;
 
-		Style.UnderlineColor = (style.TextDecorationColor ?? fontColor).ToSk();
-		Style.StrokeThickness = style.TextDecorationThickness?.GetPixels( 100.0f );
-		Style.Underline |= (TextDecoration & UI.TextDecoration.Underline) != 0 ? UnderlineStyle.Gapped : UnderlineStyle.None;
-		Style.Underline |= (TextDecoration & UI.TextDecoration.Overline) != 0 ? UnderlineStyle.Overline : UnderlineStyle.None;
-		Style.StrikeThrough = (TextDecoration & UI.TextDecoration.LineThrough) != 0 ? StrikeThroughStyle.Solid : StrikeThroughStyle.None;
-		Style.LetterSpacing = LetterSpacing.Value.GetPixels( 1000.0f );
-		Style.WordSpacing = WordSpacing.Value.GetPixels( 1000.0f );
-		Style.LineHeight = GetLineHeightMultiplier();
+			Style ??= new Style();
 
-		Style.ClearEffects();
-		Gradient = null;
+			Style.FontFamily = fontFamily;
+			Style.FontSize = FontSize;
+			Style.FontWeight = FontWeight ?? 400;
+			Style.FontItalic = FontStyle != FontStyle.None;
+			Style.FontVariantNumeric = FontVariantNumeric ?? UI.FontVariantNumeric.Normal;
+			Style.TextColor = fontColor.ToSk();
+			Style.Underline = UnderlineStyle.None;
+			Style.StrokeInkSkip = style.TextDecorationSkipInk == TextSkipInk.All;
+			Style.UnderlineOffset = style.TextUnderlineOffset.Value.GetPixels( 100 );
+			Style.OverlineOffset = style.TextOverlineOffset.Value.GetPixels( 100 );
+			Style.StrikeThroughOffset = style.TextLineThroughOffset.Value.GetPixels( 100 );
 
-		EffectMargin = default;
-
-		if ( !style.TextGradient.ColorOffsets.IsDefaultOrEmpty )
-		{
-			var colors = style.TextGradient.ColorOffsets.Select( x => SkiaCompat.ToSk( x.color ) ).ToArray();
-			var stops = style.TextGradient.ColorOffsets.Select( x => x.offset.Value ).ToArray();
-
-			if ( style.TextGradient.GradientType == GradientInfo.GradientTypes.Linear )
+			switch ( style.TextDecorationStyle )
 			{
-				Gradient = TextGradient.Linear( colors, stops, style.TextGradient.Angle );
+				case TextDecorationStyle.Solid:
+					Style.UnderlineStrokeType = UnderlineType.Solid;
+					break;
+				case TextDecorationStyle.Double:
+					Style.UnderlineStrokeType = UnderlineType.Double;
+					break;
+				case TextDecorationStyle.Dotted:
+					Style.UnderlineStrokeType = UnderlineType.Dotted;
+					break;
+				case TextDecorationStyle.Dashed:
+					Style.UnderlineStrokeType = UnderlineType.Dashed;
+					break;
+				case TextDecorationStyle.Wavy:
+					Style.UnderlineStrokeType = UnderlineType.Wavy;
+					break;
+				default:
+					Style.UnderlineStrokeType = UnderlineType.Solid;
+					break;
 			}
 
-			if ( style.TextGradient.GradientType == GradientInfo.GradientTypes.Radial )
-			{
-				Gradient = TextGradient.Radial( colors, stops, 0, new SKPoint( 0.5f, 0.5f ), (RadialSizeMode)style.TextGradient.SizeMode );
-			}
-		}
+			Style.UnderlineColor = (style.TextDecorationColor ?? fontColor).ToSk();
+			Style.StrokeThickness = style.TextDecorationThickness?.GetPixels( 100.0f );
+			Style.Underline |= (TextDecoration & UI.TextDecoration.Underline) != 0 ? UnderlineStyle.Gapped : UnderlineStyle.None;
+			Style.Underline |= (TextDecoration & UI.TextDecoration.Overline) != 0 ? UnderlineStyle.Overline : UnderlineStyle.None;
+			Style.StrikeThrough = (TextDecoration & UI.TextDecoration.LineThrough) != 0 ? StrikeThroughStyle.Solid : StrikeThroughStyle.None;
+			Style.LetterSpacing = LetterSpacing.Value.GetPixels( 1000.0f );
+			Style.WordSpacing = WordSpacing.Value.GetPixels( 1000.0f );
+			Style.LineHeight = GetLineHeightMultiplier();
 
-		if ( style.TextShadow != null && !style.TextShadow.IsNone )
-		{
-			foreach ( var shadow in style.TextShadow )
+			Style.ClearEffects();
+			Gradient = null;
+
+			EffectMargin = default;
+
+			if ( !style.TextGradient.ColorOffsets.IsDefaultOrEmpty )
 			{
-				var effect = TextEffect.DropShadow( shadow.Color.ToSk(), shadow.OffsetX, shadow.OffsetY, shadow.Blur );
-				effect.Width = 0;
-				effect.BlurSize = MathF.Max( effect.BlurSize, 0.01f );
+				var colors = style.TextGradient.ColorOffsets.Select( x => SkiaCompat.ToSk( x.color ) ).ToArray();
+				var stops = style.TextGradient.ColorOffsets.Select( x => x.offset.Value ).ToArray();
+
+				if ( style.TextGradient.GradientType == GradientInfo.GradientTypes.Linear )
+				{
+					Gradient = TextGradient.Linear( colors, stops, style.TextGradient.Angle );
+				}
+
+				if ( style.TextGradient.GradientType == GradientInfo.GradientTypes.Radial )
+				{
+					Gradient = TextGradient.Radial( colors, stops, 0, new SKPoint( 0.5f, 0.5f ), (RadialSizeMode)style.TextGradient.SizeMode );
+				}
+			}
+
+			if ( style.TextShadow != null && !style.TextShadow.IsNone )
+			{
+				foreach ( var shadow in style.TextShadow )
+				{
+					var effect = TextEffect.DropShadow( shadow.Color.ToSk(), shadow.OffsetX, shadow.OffsetY, shadow.Blur );
+					effect.Width = 0;
+					effect.BlurSize = MathF.Max( effect.BlurSize, 0.01f );
+					Style.AddEffect( effect );
+
+					var shadowSize = (effect.Width + shadow.Blur) * 2.0f;
+
+					EffectMargin.Left = MathF.Max( EffectMargin.Left, shadowSize + -shadow.OffsetX ).CeilToInt();
+					EffectMargin.Right = MathF.Max( EffectMargin.Right, shadowSize + shadow.OffsetX ).CeilToInt();
+					EffectMargin.Top = MathF.Max( EffectMargin.Top, shadowSize + -shadow.OffsetY ).CeilToInt();
+					EffectMargin.Bottom = MathF.Max( EffectMargin.Bottom, shadowSize + shadow.OffsetY ).CeilToInt();
+				}
+			}
+
+			if ( style.TextStrokeWidth.Value.Value > 0.0f )
+			{
+				var color = style.TextStrokeColor ?? style.FontColor ?? Color.Black;
+
+				var size = style.TextStrokeWidth.Value.GetPixels( 1.0f );
+				var effect = TextEffect.Outline( color.ToSk(), size );
+				effect.StrokeMiter = 2.0f;
+				effect.StrokeJoin = SKStrokeJoin.Round;
 				Style.AddEffect( effect );
 
-				var shadowSize = (effect.Width + shadow.Blur) * 2.0f;
-
-				EffectMargin.Left = MathF.Max( EffectMargin.Left, shadowSize + -shadow.OffsetX ).CeilToInt();
-				EffectMargin.Right = MathF.Max( EffectMargin.Right, shadowSize + shadow.OffsetX ).CeilToInt();
-				EffectMargin.Top = MathF.Max( EffectMargin.Top, shadowSize + -shadow.OffsetY ).CeilToInt();
-				EffectMargin.Bottom = MathF.Max( EffectMargin.Bottom, shadowSize + shadow.OffsetY ).CeilToInt();
+				EffectMargin.Left = MathF.Max( EffectMargin.Left, size ).CeilToInt();
+				EffectMargin.Right = MathF.Max( EffectMargin.Right, size ).CeilToInt();
+				EffectMargin.Top = MathF.Max( EffectMargin.Top, size ).CeilToInt();
+				EffectMargin.Bottom = MathF.Max( EffectMargin.Bottom, size ).CeilToInt();
 			}
-		}
-
-		if ( style.TextStrokeWidth.Value.Value > 0.0f )
-		{
-			var color = style.TextStrokeColor ?? style.FontColor ?? Color.Black;
-
-			var size = style.TextStrokeWidth.Value.GetPixels( 1.0f );
-			var effect = TextEffect.Outline( color.ToSk(), size );
-			effect.StrokeMiter = 2.0f;
-			effect.StrokeJoin = SKStrokeJoin.Round;
-			Style.AddEffect( effect );
-
-			EffectMargin.Left = MathF.Max( EffectMargin.Left, size ).CeilToInt();
-			EffectMargin.Right = MathF.Max( EffectMargin.Right, size ).CeilToInt();
-			EffectMargin.Top = MathF.Max( EffectMargin.Top, size ).CeilToInt();
-			EffectMargin.Bottom = MathF.Max( EffectMargin.Bottom, size ).CeilToInt();
 		}
 
 		if ( Block == null )
@@ -541,6 +557,7 @@ internal sealed class TextBlock : IDisposable
 		ReleaseTexture();
 
 		TextStats.Restyle( System.Diagnostics.Stopwatch.GetTimestamp() - restyleStart );
+		TextStats.Garbage( TextStats.Allocated - allocatedBefore, label: true );
 
 		return true;
 	}
@@ -648,7 +665,14 @@ internal sealed class TextBlock : IDisposable
 	Task TextureRebuild;
 
 	//Actually recreate the texture
-	unsafe void RebuildTexture( float maxwidth, float maxheight )
+	void RebuildTexture( float maxwidth, float maxheight )
+	{
+		var allocatedBefore = TextStats.Allocated;
+		Rebuild( maxwidth, maxheight );
+		TextStats.Garbage( TextStats.Allocated - allocatedBefore, label: true );
+	}
+
+	unsafe void Rebuild( float maxwidth, float maxheight )
 	{
 		if ( !ui_rendertext )
 			return;
@@ -709,26 +733,29 @@ internal sealed class TextBlock : IDisposable
 			Gradient.Center = new SKPoint( centerX, centerY );
 		}
 
+		//The picture a step of 32 bigger than the text, the rest clear, drawn the same: changing text is mostly a few pixels wider or
+		//narrower, and at the same step its picture is written over rather than a new one made - the garbage a changing label made
+		width = ( width + 31 ) & ~31;
+		height = ( height + 31 ) & ~31;
+
 		using var perfScope = Performance.Scope( "TextBlock.RebuildTexture" );
 		var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
 		long t2 = 0;
 
-		//RGBA for a chain: that is the one layout the device builds levels for.
-		using ( var bitmap = new SKBitmap( width, height, Mipped ? SKColorType.Rgba8888 : SKColorType.Bgra8888, SKAlphaType.Premul ) )
-		using ( var canvas = new SKCanvas( bitmap ) )
+		//Into the top left of one bitmap kept for it, grown when a label is bigger than any before it, and read out row by row - a bitmap
+		//and a canvas made for every change of text was its garbage
+		var scratch = Scratch( width, height );
+		var canvas = scratch.Canvas;
+
 		{
-			var o = new Topten.RichTextKit.TextPaintOptions
-			{
-				Edging = Smooth switch
-				{
-					FontSmooth.Never => SKFontEdging.Alias,
-					_ => SKFontEdging.Antialias,
-				},
+			var o = paintOptions ??= new Topten.RichTextKit.TextPaintOptions();
+			o.Edging = Smooth == FontSmooth.Never ? SKFontEdging.Alias : SKFontEdging.Antialias;
+			o.Hinting = SKFontHinting.Full;
+			o.TextGradient = Gradient;
+			o.Selection = null;
 
-				Hinting = SKFontHinting.Full,
-				TextGradient = Gradient
-			};
-
+			canvas.Save();
+			canvas.ClipRect( new SKRect( 0, 0, width, height ) );
 			canvas.Clear( Style.TextColor.WithAlpha( 0 ) );
 
 			if ( ShouldDrawSelection && (SelectionStart > 0 || SelectionEnd > 0) )
@@ -738,11 +765,10 @@ internal sealed class TextBlock : IDisposable
 			}
 
 			Block.Paint( canvas, new SKPoint( EffectMargin.Left - Block.MeasuredPadding.Left, EffectMargin.Top ), o );
+			canvas.Restore();
 			t2 = System.Diagnostics.Stopwatch.GetTimestamp();
 
-			var debugName = Text;
-			if ( debugName.Length > 10 ) debugName = $"{debugName.Substring( 0, 8 )}..";
-			if ( debugName.Contains( ':' ) ) debugName = debugName.Replace( ':', '-' );
+			var pixels = scratch.Read( width, height );
 
 			//A world label's picture carries its smaller levels (a quarter as much again).
 			var bytes = (long)width * height * 4 * ( Mipped ? 4 : 3 ) / 3;
@@ -758,11 +784,11 @@ internal sealed class TextBlock : IDisposable
 
 				if ( reused )
 				{
-					spare.Update( new ReadOnlySpan<byte>( bitmap.GetPixels().ToPointer(), width * height * bitmap.BytesPerPixel ), 0, 0, width, height );
+					spare.Update( pixels, 0, 0, width, height );
 				}
 				else
 				{
-					spare = NewPicture( bitmap, width, height, debugName );
+					spare = NewPicture( pixels, width, height );
 				}
 
 				held = TextPictures.Add( key, spare, blockSize, IsTruncated );
@@ -778,8 +804,7 @@ internal sealed class TextBlock : IDisposable
 				//we already have a texture that is the right size, lets just use that (LastTexture is always of this block's Mipped - changing it lets it go)
 				if ( LastTexture.Size == new Vector2( width, height ) )
 				{
-					var span = new Span<byte>( bitmap.GetPixels().ToPointer(), width * height * bitmap.BytesPerPixel );
-					LastTexture.Update( span, 0, 0, width, height );
+					LastTexture.Update( pixels, 0, 0, width, height );
 					Texture = LastTexture;
 					LastTexture = null;
 					TextStats.Rebuild( t1 - t0, t2 - t1, System.Diagnostics.Stopwatch.GetTimestamp() - t2, bytes, reused: true );
@@ -790,7 +815,7 @@ internal sealed class TextBlock : IDisposable
 				DisposeLast();
 			}
 
-			Texture = NewPicture( bitmap, width, height, debugName );
+			Texture = NewPicture( pixels, width, height );
 
 			TextStats.Rebuild( t1 - t0, t2 - t1, System.Diagnostics.Stopwatch.GetTimestamp() - t2, bytes, reused: false );
 
@@ -798,19 +823,73 @@ internal sealed class TextBlock : IDisposable
 		}
 	}
 
-	//A new picture of what was just painted: BGRA for a screen label, RGBA with its
-	//levels for a world label (that is the one layout the device builds chains for).
-	Texture NewPicture( SKBitmap bitmap, int width, int height, string debugName )
+	[ThreadStatic] static Topten.RichTextKit.TextPaintOptions paintOptions;
+
+	//A bitmap a label's text is painted into, kept and grown, and the bytes its top left is read out into
+	sealed class ScratchPicture
 	{
-		var builder = Texture.Create( width, height, Mipped ? ImageFormat.RGBA8888 : ImageFormat.BGRA8888 )
+		public SKBitmap Bitmap;
+		public SKCanvas Canvas;
+		public byte[] Bytes = [];
+
+		//The top left, row after row, nothing between - what an upload of that much reads
+		public unsafe ReadOnlySpan<byte> Read( int width, int height )
+		{
+			var row = width * 4;
+			var count = row * height;
+			if ( Bytes.Length < count ) Bytes = new byte[Math.Max( count, Bytes.Length * 2 )];
+
+			var pixels = (byte*)Bitmap.GetPixels();
+			for ( var y = 0; y < height; y++ )
+				new ReadOnlySpan<byte>( pixels + ( y * Bitmap.RowBytes ), row ).CopyTo( Bytes.AsSpan( y * row, row ) );
+
+			return Bytes.AsSpan( 0, count );
+		}
+	}
+
+	[ThreadStatic] static ScratchPicture scratchPicture;
+
+	static ScratchPicture Scratch( int width, int height )
+	{
+		var kept = scratchPicture ??= new ScratchPicture();
+
+		if ( kept.Bitmap is null || kept.Bitmap.Width < width || kept.Bitmap.Height < height )
+		{
+			var w = Math.Max( width, kept.Bitmap?.Width ?? 0 );
+			var h = Math.Max( height, kept.Bitmap?.Height ?? 0 );
+
+			kept.Canvas?.Dispose();
+			kept.Bitmap?.Dispose();
+
+			kept.Bitmap = new SKBitmap( w, h, SKColorType.Rgba8888, SKAlphaType.Premul );
+			kept.Canvas = new SKCanvas( kept.Bitmap );
+		}
+
+		return kept;
+	}
+
+	//A new picture of what was just painted, RGBA8, with its levels for a world label.
+	unsafe Texture NewPicture( ReadOnlySpan<byte> pixels, int width, int height )
+	{
+		var debugName = Text;
+		if ( debugName.Length > 10 ) debugName = $"{debugName.Substring( 0, 8 )}..";
+		if ( debugName.Contains( ':' ) ) debugName = debugName.Replace( ':', '-' );
+
+		//RGBA8 for both: it goes to the device as the bytes it is, where any other order was converted into a new array at every upload
+		var builder = Texture.Create( width, height, ImageFormat.RGBA8888 )
 			.WithName( $"skiatextblock[{debugName}]" );
 
 		if ( Mipped ) builder = builder.WithMips();
 
-		var texture = builder
-			.WithData( bitmap.GetPixels(), width * height * bitmap.BytesPerPixel )
-			.WithDynamicUsage()
-			.Finish();
+		Texture texture;
+
+		fixed ( byte* data = pixels )
+		{
+			texture = builder
+				.WithData( (IntPtr)data, pixels.Length )
+				.WithDynamicUsage()
+				.Finish();
+		}
 
 		//The colours in there are already multiplied by their own transparency, in the space they were drawn in - so our renderer takes
 		//the bytes as written and does that arithmetic itself, and a chain's levels are plain averages - see CoreTexture.BuildLevels.
@@ -827,6 +906,8 @@ internal sealed class TextBlock : IDisposable
 		return Block.CaretIndicies[caretPos];
 	}
 
+	const string ParagraphSeparator = "\u2029";
+
 	string FixedText( string text )
 	{
 		if ( string.IsNullOrEmpty( text ) ) return ".";
@@ -834,7 +915,7 @@ internal sealed class TextBlock : IDisposable
 		//TODO - if starts with #, look up localized string
 
 		//text = text.Replace( "\r", "" );
-		text = text.Replace( "\r\n", new string( (char)0x2029, 1 ) );
+		text = text.Replace( "\r\n", ParagraphSeparator );
 		text = text.Replace( '\n', (char)0x2029 ); //replace newlines with paragraph, makes them not render as a square with a cross in it
 
 		if ( TextTransform.HasValue )

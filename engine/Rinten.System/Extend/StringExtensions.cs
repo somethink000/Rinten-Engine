@@ -44,10 +44,28 @@ public static partial class RintenSystemExtensions
 	{
 		if ( string.IsNullOrEmpty( str ) ) return str;
 
+		//The usual case, nothing to collapse, answered without the regex: every lone space is one of its matches, and text with any made a new string
+		if ( !HasWhiteSpaceToCollapse( str ) ) return str;
+
 		str = CollapseWhiteSpaceRegex().Replace( str, " " );
 		str = str.Trim();
 
 		return str;
+	}
+
+	//Whether a run of spaces or tabs, a tab, or white space at either end is there to change
+	private static bool HasWhiteSpaceToCollapse( string str )
+	{
+		if ( char.IsWhiteSpace( str[0] ) || char.IsWhiteSpace( str[^1] ) ) return true;
+
+		for ( var i = 0; i < str.Length; i++ )
+		{
+			var c = str[i];
+			if ( c == '\t' ) return true;
+			if ( c == ' ' && i + 1 < str.Length && ( str[i + 1] == ' ' || str[i + 1] == '\t' ) ) return true;
+		}
+
+		return false;
 	}
 
 	[GeneratedRegex( "[ \t]+" )]

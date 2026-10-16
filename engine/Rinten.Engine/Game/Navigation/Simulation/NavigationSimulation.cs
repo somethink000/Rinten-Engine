@@ -27,7 +27,7 @@ internal sealed class NavigationSimulation
 	private const int ParallelOverlapAgents = 256;
 
 	//A browser runs on one thread: a fork there is only the allocation.
-	private static readonly bool serialOnly = OperatingSystem.IsBrowser();
+	private static bool serialOnly => Rinten.Utility.Parallel.InOrder;
 	internal int Count { get { lock ( Gate ) return agents.Count; } }
 
 	internal NavigationSimulation( NavMeshGraph mesh, object gate, float radius, float height )

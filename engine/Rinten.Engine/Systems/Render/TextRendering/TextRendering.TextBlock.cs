@@ -118,6 +118,21 @@ public static partial class TextRendering
 		private sealed record Built( int Key, Topten.RichTextKit.TextBlock Block );
 		private Built lastBuilt;
 
+		//A block reused for one string after another (see Reuse) shapes into these, kept, rather than into new ones for the table
+		bool reusing;
+		Topten.RichTextKit.TextBlock own;
+		Topten.RichTextKit.Style ownStyle;
+		int ownKey;
+
+		//Set up for another string, shaped in the same RichTextKit block as the last: one that is drawn once and let go has no use for the
+		//table of shaped text, and a block made for each string was its buffers made and thrown away each time - the garbage changing text made
+		internal void Reuse( in Scope scope, TextFlag flags )
+		{
+			reusing = true;
+			Flags = flags;
+			Initialize( scope );
+		}
+
 		private Topten.RichTextKit.TextBlock Build( Rect targetRect )
 		{
 			var clipped = !Flags.Contains( TextFlag.DontClip );
@@ -132,6 +147,8 @@ public static partial class TextRendering
 			hash.Add( height );
 
 			var key = hash.ToHashCode();
+
+			if ( reusing ) return Reshape( key, clipped, width, height );
 
 			//This block's own last answer first: a measure and then a paint of the same text ask twice, and the shared
 			//table below stops keeping anything once it is full - which is exactly when text is changing fastest.
@@ -172,6 +189,28 @@ public static partial class TextRendering
 			return block;
 		}
 
+		private Topten.RichTextKit.TextBlock Reshape( int key, bool clipped, int width, int height )
+		{
+			if ( own is not null && ownKey == key ) return own;
+
+			own ??= new Topten.RichTextKit.TextBlock { FontMapper = FontManager.Instance };
+			own.Clear();
+
+			own.Alignment = GetAlignment();
+			own.MaxLines = Flags.Contains( TextFlag.SingleLine ) ? 1 : null;
+			own.MaxWidth = clipped ? width : null;
+			own.MaxHeight = clipped ? height : null;
+
+			ownStyle ??= new Topten.RichTextKit.Style();
+			ownStyle.ClearEffects();
+			_scope.ToStyle( ownStyle );
+
+			own.AddText( _scope.Text, ownStyle );
+			ownKey = key;
+
+			return own;
+		}
+
 		//The size of the picture MakeReady would make - the text, its negative letter spacing and the room its shadows and
 		//outlines take - without making it. Shaped through Build, so a Render of the same block after it is not shaped again.
 		internal Vector2 PictureSize() => PictureSize( new Rect( 0 ) );
@@ -194,6 +233,8 @@ public static partial class TextRendering
 			return new Vector2( width + margin.x.CeilToInt(), height + margin.y.CeilToInt() );
 		}
 
+		[ThreadStatic] static Topten.RichTextKit.TextPaintOptions paintOptions;
+
 		public void Render( SKCanvas canvas, Rect targetRect )
 		{
 			if ( IsEmpty )
@@ -201,17 +242,11 @@ public static partial class TextRendering
 
 			var block = Build( targetRect );
 
-			var o = new Topten.RichTextKit.TextPaintOptions
-			{
-				Edging = _scope.FontSmooth switch
-				{
-					FontSmooth.Never => SKFontEdging.Alias,
-					_ => SKFontEdging.SubpixelAntialias,
-				},
-
-				Hinting = SKFontHinting.Normal,
-				SubpixelPositioning = true
-			};
+			//One a thread, set for each paint - only these three are ever set on it
+			var o = paintOptions ??= new Topten.RichTextKit.TextPaintOptions();
+			o.Edging = _scope.FontSmooth == FontSmooth.Never ? SKFontEdging.Alias : SKFontEdging.SubpixelAntialias;
+			o.Hinting = SKFontHinting.Normal;
+			o.SubpixelPositioning = true;
 
 			if ( !IsEmpty )
 			{

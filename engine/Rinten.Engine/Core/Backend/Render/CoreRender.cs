@@ -359,12 +359,9 @@ internal static unsafe class CoreRender
 
 	//Opens a frame picture for the next draws; the portable frame only has the sky table
 	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear )
-		=> web || ( Portable && target != VkDevice.TargetSkyTable )
-			? 0
+		=> Portable && target != VkDevice.TargetSkyTable ? 0
+			: web ? BrowserSwapchain.TargetBegin( target, r, g, b, a, clear )
 			: VkFrame.TargetBegin( target, r, g, b, a, clear );
-
-	//Whether this device draws the sky table from the sky shader; WebGPU can't bind and attach at once
-	internal static bool DrawsSkyTable => !web;
 
 	//-- the frame's pictures - see VkPictures; the browser's are one level, drawn into without depth --------
 
@@ -538,18 +535,11 @@ internal static unsafe class CoreRender
 	internal static ulong SkyTableTexture()
 		=> Portable ? 0 : VkDevice.SkyTableTexture();
 
-	//A table made on the CPU bound in place of the drawn one; the page is sent its bytes instead - see SendSkyTable
+	//A panorama's table in place of the drawn one; the page copies it over the table its frame groups hold
 	internal static void UseSkyTable( ulong texture )
 	{
-		if ( !web ) VkTextures.portableSkyTable = texture;
-	}
-
-	//The portable frame's sky table onto the device - see CoreSkyTable.
-	internal static void SendSkyTable( byte* texels, int side )
-	{
-		if ( !Portable || texels is null || side <= 0 ) return;
-
-		if ( web ) BrowserSwapchain.SendSkyTable( texels, side );
+		if ( web ) BrowserSwapchain.UseSkyTable( texture );
+		else VkTextures.portableSkyTable = texture;
 	}
 
 	internal static int PyramidBuild( ulong pipeline, ulong pyramid, int lod, int count,

@@ -73,10 +73,16 @@ internal static unsafe class BrowserSwapchain
 		/// <summary>The second eye's frame block (SecondFrameBinding); holds the first eye's copy until written.</summary>
 		public int Second;
 
-		/// <summary>A frame block and group for draws into the sun's map, the light's view in the camera's place.</summary>
+		/// <summary>Frame blocks for draws through another view - a light's, in the camera's place - a slot a put, and a group a slot.</summary>
 		public int Aside;
-		public int AsideGroup;
+		public int[] AsideGroups = [];
+		public int AsideUsed;
 	}
+
+	//A page writes every buffer before anything the frame recorded runs, so each view put this frame needs a slot of its
+	//own or every pass reads the last one; the stride is what a storage binding's offset must be a multiple of
+	private const int AsideSlots = 64;
+	private const int AsideStride = ( BrowserDevice.FrameBlockSize + 255 ) & ~255;
 
 	private sealed class Viewport
 	{
@@ -139,8 +145,8 @@ internal static unsafe class BrowserSwapchain
 		public readonly byte[] LastPush = new byte[BrowserDevice.PushConstantSize];
 		public int LastPushOffset = -1;
 
-		/// <summary>Whether the draws read the light's frame block - see FrameUse.</summary>
-		public bool UsingAside;
+		/// <summary>Which put frame block the draws read, one past its slot; nought for the frame's own - see FrameUse.</summary>
+		public int AsideSlot;
 	}
 
 	private static Viewport placeholder = new();
@@ -216,7 +222,7 @@ internal static unsafe class BrowserSwapchain
 			BrowserDevice.BufferUse.Storage | BrowserDevice.BufferUse.Uniform | BrowserDevice.BufferUse.CopyDst );
 		scratch.Dynamic = BrowserDevice.MakeBuffer( BrowserDevice.DynamicScratch,
 			BrowserDevice.BufferUse.Vertex | BrowserDevice.BufferUse.CopyDst );
-		scratch.Aside = BrowserDevice.MakeBuffer( BrowserDevice.FrameBlockSize,
+		scratch.Aside = BrowserDevice.MakeBuffer( (long)AsideStride * AsideSlots,
 			BrowserDevice.BufferUse.Storage | BrowserDevice.BufferUse.CopyDst );
 		scratch.Second = BrowserDevice.MakeBuffer( BrowserDevice.FrameBlockSize,
 			BrowserDevice.BufferUse.Storage | BrowserDevice.BufferUse.CopyDst );
@@ -228,14 +234,23 @@ internal static unsafe class BrowserSwapchain
 		Array.Fill( scratch.GroupShadows, BrowserDevice.shadowView );
 		scratch.GroupSheet = scratch.GroupVolume = BrowserDevice.noBakeView;
 		scratch.BonesGroup = MakeBonesGroup( scratch, scratch.Frame, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
-		scratch.AsideGroup = MakeBonesGroup( scratch, scratch.Aside, scratch.GroupShadows, BrowserDevice.noBakeView, BrowserDevice.noBakeView );
-		return scratch.BonesGroup != 0 && scratch.AsideGroup != 0;
+		scratch.AsideGroups = new int[AsideSlots];
+
+		for ( var slot = 0; slot < AsideSlots; slot++ )
+		{
+			scratch.AsideGroups[slot] = MakeBonesGroup( scratch, scratch.Aside, scratch.GroupShadows, BrowserDevice.noBakeView,
+				BrowserDevice.noBakeView, slot * AsideStride );
+
+			if ( scratch.AsideGroups[slot] == 0 ) return false;
+		}
+
+		return scratch.BonesGroup != 0;
 	}
 
-	private static int MakeBonesGroup( FrameScratch scratch, int frame, ReadOnlySpan<int> shadows, int sheet, int volume )
+	private static int MakeBonesGroup( FrameScratch scratch, int frame, ReadOnlySpan<int> shadows, int sheet, int volume, int frameAt = 0 )
 		=> BrowserDevice.MakeBindGroup( BrowserDevice.boneSetLayout,
 			BrowserDevice.Bind.Buffer( 0, scratch.Bones, BrowserDevice.BoneBlockSize ),
-			BrowserDevice.Bind.Buffer( 1, frame, BrowserDevice.FrameBlockSize ),
+			BrowserDevice.Bind.Buffer( 1, frame, BrowserDevice.FrameBlockSize, frameAt ),
 			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[0], shadows[0] ),
 			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[1], shadows[1] ),
 			BrowserDevice.Bind.View( BrowserDevice.ShadowBindings[2], shadows[2] ),
@@ -259,7 +274,7 @@ internal static unsafe class BrowserSwapchain
 		foreach ( var scratch in viewport.Scratch )
 		{
 			if ( scratch.BonesGroup != 0 ) BrowserNative.Release( scratch.BonesGroup );
-			if ( scratch.AsideGroup != 0 ) BrowserNative.Release( scratch.AsideGroup );
+			foreach ( var group in scratch.AsideGroups ) if ( group != 0 ) BrowserNative.Release( group );
 			if ( scratch.Aside != 0 ) BrowserNative.Release( scratch.Aside );
 			if ( scratch.Second != 0 ) BrowserNative.Release( scratch.Second );
 			if ( scratch.Frame != 0 ) BrowserNative.Release( scratch.Frame );
@@ -270,7 +285,8 @@ internal static unsafe class BrowserSwapchain
 			scratch.Bones = 0;
 			scratch.Dynamic = 0;
 			scratch.BonesGroup = 0;
-			scratch.AsideGroup = 0;
+			scratch.AsideGroups = [];
+			scratch.AsideUsed = 0;
 			scratch.Aside = 0;
 			scratch.Second = 0;
 			Array.Clear( scratch.GroupShadows );
@@ -719,7 +735,7 @@ internal static unsafe class BrowserSwapchain
 		}
 
 		var scratch = Current.Scratch[Current.Frame];
-		var frameGroup = Current.UsingAside ? scratch.AsideGroup : FrameGroup( scratch );
+		var frameGroup = Current.AsideSlot != 0 ? scratch.AsideGroups[Current.AsideSlot - 1] : FrameGroup( scratch );
 
 		if ( frameGroup != Current.BoundFrameGroup || bonesAt != Current.BoundFrameOffset )
 		{
@@ -783,16 +799,29 @@ internal static unsafe class BrowserSwapchain
 
 	//-- the portable frame's sun ----------------------------------------------------------
 
-	//The portable frame's sky table onto the device (CoreSkyTable, g_skyTable); the picture is already in
-	//every frame group, so a send is only the write
-	internal static void SendSkyTable( byte* texels, int side )
+	//A panorama's table copied over the one every frame group samples, once while it stays up; nought for the drawn one
+	internal static void UseSkyTable( ulong texture )
 	{
-		if ( !BrowserDevice.Ready || BrowserDevice.skyTableImage == 0 ) return;
-		if ( side != BrowserDevice.SkyTableSide ) return;
+		if ( texture == 0 || texture == BrowserDevice.skyTableFrom || !Current.Recording ) return;
 
-		BrowserNative.WriteTexture( BrowserDevice.skyTableImage, 0, 0, 0, side, side, side * 8,
-			new Span<byte>( texels, side * side * 8 ) );
+		var image = BrowserTextures.ImageOf( texture );
+		if ( image == 0 ) return;
+
+		EndPass();
+		CopySkyTable( image );
+		BrowserDevice.skyTableFrom = texture;
 	}
+
+	private static void CopySkyTable( int image )
+	{
+		if ( Current.Encoder == 0 || BrowserDevice.skyTableImage == 0 ) return;
+
+		BrowserNative.CopyTextureToTexture( Current.Encoder, image, 0, BrowserDevice.skyTableImage, 0,
+			BrowserDevice.SkyTableSide, BrowserDevice.SkyTableSide );
+	}
+
+	//Whether the pass open is the sky table's, which TargetEnd copies over the sampled one.
+	private static bool skyTableOpen;
 
 	//A drawer's shadow map - see CoreSunPages: its layers read as one array, and each drawn into through its own view
 	private sealed class ShadowMap
@@ -1052,16 +1081,27 @@ internal static unsafe class BrowserSwapchain
 		var scratch = Current.Scratch[Current.Frame];
 		if ( scratch.Aside == 0 ) return 0;
 
+		//Past the last slot the last is written again: the views put before it this frame read the wrong one
+		if ( scratch.AsideUsed == AsideSlots && !saidAsideFull )
+		{
+			saidAsideFull = true;
+			Console.WriteLine( $"more than {AsideSlots} views put in one frame - the shadows drawn past that read the last" );
+		}
+
+		var slot = Math.Min( scratch.AsideUsed++, AsideSlots - 1 );
+
 		var bytes = Math.Min( floatCount * sizeof( float ), BrowserDevice.FrameBlockSize );
-		BrowserNative.WriteBuffer( scratch.Aside, 0, new Span<byte>( data, bytes ) );
-		return 1;
+		BrowserNative.WriteBuffer( scratch.Aside, slot * AsideStride, new Span<byte>( data, bytes ) );
+		return (ulong)slot + 1;
 	}
+
+	private static bool saidAsideFull;
 
 	//Which block the draws read from here on - nought the frame's own - and which they read before.
 	internal static ulong FrameUse( ulong which )
 	{
-		var was = Current.UsingAside ? 1ul : 0ul;
-		Current.UsingAside = which != 0;
+		var was = (ulong)Current.AsideSlot;
+		Current.AsideSlot = (int)Math.Min( which, AsideSlots );
 		return was;
 	}
 
@@ -1216,7 +1256,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Recording = true;
 		viewport.WorldBegun = false;
 		viewport.AsideWorldOn = viewport.AsideWorldBegun = false;
-		viewport.UsingAside = false;
+		viewport.AsideSlot = 0;
 		viewport.CurrentTarget = BrowserDevice.Target.Screen;
 		viewport.Clear[0] = r;
 		viewport.Clear[1] = g;
@@ -1226,6 +1266,7 @@ internal static unsafe class BrowserSwapchain
 		viewport.Scratch[viewport.Frame].PushUsed = 0;
 		viewport.LastPushOffset = -1;
 		viewport.Scratch[viewport.Frame].BonesUsed = 0;
+		viewport.Scratch[viewport.Frame].AsideUsed = 0;
 		return viewport.Encoder != 0 ? 1 : 0;
 	}
 
@@ -1280,23 +1321,29 @@ internal static unsafe class BrowserSwapchain
 		return 1;
 	}
 
+	//Only the sky table opens here: drawn into a picture of its own, as the one sampled is in every frame group
 	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear )
 	{
-		if ( !Current.Recording || Current.WorldBegun ) return 0;
+		if ( !Current.Recording || target != BrowserDevice.Target.SkyTable || BrowserDevice.skyTableDrawnView == 0 ) return 0;
+
+		Span<float> colour = [r, g, b, a];
+		if ( !BeginPass( BrowserDevice.skyTableDrawnView, 0, 0, colour, clear != 0, false ) ) return 0;
 
 		Current.CurrentTarget = target;
-		Span<float> colour = [r, g, b, a];
-
-		if ( target == BrowserDevice.Target.Scene )
-			return BeginPass( Current.Scene.View, Current.SceneNormal.View, Current.Depth.View,
-				colour, clear != 0, clear != 0 ) ? 1 : 0;
-		if ( target == BrowserDevice.Target.Depth )
-			return BeginPass( 0, 0, Current.Depth.View, colour, false, clear != 0 ) ? 1 : 0;
-
-		return 0;
+		skyTableOpen = true;
+		return 1;
 	}
 
-	internal static void TargetEnd() => EndPass();
+	internal static void TargetEnd()
+	{
+		EndPass();
+
+		if ( !skyTableOpen ) return;
+
+		skyTableOpen = false;
+		CopySkyTable( BrowserDevice.skyTableDrawn );
+		BrowserDevice.skyTableFrom = 0;
+	}
 
 	//Ends the pass so the depth it wrote can be read; this backend needs no barrier for that
 	internal static int DepthReadable()
@@ -1457,6 +1504,8 @@ internal static unsafe class BrowserSwapchain
 		viewport.Scratch[viewport.Frame].PushUsed = 0;
 		viewport.LastPushOffset = -1;
 		viewport.Scratch[viewport.Frame].BonesUsed = 0;
+		viewport.Scratch[viewport.Frame].AsideUsed = 0;
+		viewport.AsideSlot = 0;
 		return viewport.Encoder != 0 ? 1 : 0;
 	}
 

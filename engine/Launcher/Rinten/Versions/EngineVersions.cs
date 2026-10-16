@@ -64,7 +64,7 @@ internal static class EngineVersions
 		var zipPath = await api.DownloadAsync( artifact, staging, progress );
 
 		var extractDir = Path.Combine( staging, "extract" );
-		ZipFile.ExtractToDirectory( zipPath, extractDir );
+		Extract( zipPath, extractDir );
 		File.Delete( zipPath );
 
 		//Zips often wrap everything in a single top folder; the install shouldn't care which way the archive was rolled
@@ -89,6 +89,46 @@ internal static class EngineVersions
 
 		if ( Directory.Exists( staging ) )
 			Directory.Delete( staging, true );
+	}
+
+	//ZipFile.ExtractToDirectory writes a link entry as a file holding the target's name, and a
+	//libSkiaSharp.so that is 23 bytes of text fails FontManager's type initializer at startup
+	static void Extract( string zipPath, string into )
+	{
+		var root = Path.GetFullPath( into ) + Path.DirectorySeparatorChar;
+
+		using var archive = ZipFile.OpenRead( zipPath );
+
+		foreach ( var entry in archive.Entries )
+		{
+			var path = Path.GetFullPath( Path.Combine( into, entry.FullName ) );
+
+			if ( !path.StartsWith( root, StringComparison.Ordinal ) )
+				throw new InvalidDataException( $"{entry.FullName} unpacks outside the install" );
+
+			if ( entry.FullName.EndsWith( '/' ) )
+			{
+				Directory.CreateDirectory( path );
+				continue;
+			}
+
+			Directory.CreateDirectory( Path.GetDirectoryName( path ) );
+
+			//S_IFLNK in the upper half of the external attributes; the entry's content is the target, a file beside it
+			if ( !OperatingSystem.IsWindows() && ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000 )
+			{
+				using var reader = new StreamReader( entry.Open() );
+				var target = reader.ReadToEnd();
+
+				if ( target.Contains( '/' ) || target.Contains( '\\' ) )
+					throw new InvalidDataException( $"{entry.FullName} links outside its folder ({target})" );
+
+				File.CreateSymbolicLink( path, target );
+				continue;
+			}
+
+			entry.ExtractToFile( path, overwrite: true );
+		}
 	}
 
 	public static void Uninstall( string version )

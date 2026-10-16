@@ -1147,9 +1147,6 @@ internal static unsafe class CoreSceneRenderer
 			sun is null ? default : -sun.WorldRotation.Forward.Normal,
 			//The light's own colour at world strength; the sky derives its brightness from the light the world gets
 			sun is null ? default : sun.EmittedColor );
-
-		if ( panorama?.Table is not null && !CoreRenderDevice.DrawsSkyTable && CoreRenderDevice.PortableFrame )
-			CoreSkyTable.Send( panorama.Table );
 	}
 
 	//Whether this frame's sky is a panorama, whose table is laid out by direction and made from the picture
@@ -1212,8 +1209,6 @@ internal static unsafe class CoreSceneRenderer
 			//are all paths no pixel takes - and a pipeline told so does not carry them. See SkySpecialize.
 			NightOn = false;
 			SunDiscOn = false;
-
-			FillSkyTable( frame );
 			return;
 		}
 
@@ -1248,25 +1243,7 @@ internal static unsafe class CoreSceneRenderer
 		//nought, sun below one, both through dusk
 		NightOn = frame[SunLightAt + 3] > 0.0f;
 		SunDiscOn = frame[SunLightAt + 3] < 1.0f;
-
-		FillSkyTable( frame );
 	}
-
-	//Bakes the CPU sky table for the browser from the block's colours; only resent when the sky changes
-	private static void FillSkyTable( float[] frame )
-	{
-		if ( CoreRenderDevice.DrawsSkyTable || !CoreRenderDevice.PortableFrame || HasPanorama( frame ) ) return;
-
-		var air = new CoreSkyTable.Air(
-			Read3( frame, SkyAt + 0 ), Read3( frame, SkyAt + 4 ), Read3( frame, SkyAt + 8 ),
-			Read3( frame, SunAt + 0 ), Read3( frame, SunLightAt + 0 ),
-			frame[SunLightAt + 3], frame[SunAt + 3] > 0.0f );
-
-		CoreSkyTable.Send( air );
-	}
-
-	private static System.Numerics.Vector3 Read3( float[] frame, int at )
-		=> new( frame[at + 0], frame[at + 1], frame[at + 2] );
 
 	private static void WriteColour( float[] frame, int at, Color colour )
 	{

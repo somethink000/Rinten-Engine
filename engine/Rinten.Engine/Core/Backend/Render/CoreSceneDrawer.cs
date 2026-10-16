@@ -1406,14 +1406,15 @@ internal sealed partial class CoreSceneDrawer
 		return alone;
 	}
 
-	//Point effects the world's shading can carry instead of a compose; null if anything else is hung
-	private string FoldChain( CameraComponent camera )
+	//Point effects the world's shading or the portable finish can carry instead of a compose; null if anything else
+	//is hung - other than, with passes, what the portable frame draws as passes before its finish (RunPortablePasses)
+	private string FoldChain( CameraComponent camera, bool passes )
 	{
 		foldPoints.Clear();
 
 		if ( camera?.PostProcess is null ) return null;
 
-		foreach ( var stage in unfolded )
+		foreach ( var stage in passes ? System.Array.Empty<Rinten.Rendering.Stage>() : unfolded )
 		{
 			foldLists.Clear();
 			camera.PostProcess.ListsAt( stage, foldLists );
@@ -1435,8 +1436,13 @@ internal sealed partial class CoreSceneDrawer
 			foreach ( var (order, _, list) in foldLists )
 			{
 				if ( list.IsEmpty ) continue;
-				if ( !list.OnlyApply( out var material, out var attributes ) ) return null;
-				if ( material?.core?.Shader is not { } shader || !CorePointChain.IsPoint( shader ) ) return null;
+
+				if ( !list.OnlyApply( out var material, out var attributes ) ||
+					material?.core?.Shader is not { } shader || !CorePointChain.IsPoint( shader ) )
+				{
+					if ( passes ) continue;
+					return null;
+				}
 
 				foldPoints.Add( new CorePointChain.Point( material, attributes, null, shader, stage, order ) );
 			}
@@ -1450,6 +1456,73 @@ internal sealed partial class CoreSceneDrawer
 	}
 
 	//The stages that must hold nothing for a run to be carried, and the ones it is laid at.
+	//Whether anything the portable frame draws as a pass over the world is hung before the compose; a point effect is carried
+	private bool PortablePasses( CameraComponent camera )
+	{
+		if ( camera?.PostProcess is null ) return false;
+
+		foreach ( var stage in portableStages )
+		{
+			foldLists.Clear();
+			camera.PostProcess.ListsAt( stage, foldLists );
+			camera.CommandListsAt( stage, foldLists );
+
+			foreach ( var (_, _, list) in foldLists )
+			{
+				if ( list.IsEmpty ) continue;
+				if ( list.OnlyApply( out var material, out _ ) && material?.core?.Shader is { } shader && CorePointChain.IsPoint( shader ) ) continue;
+
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	//The portable frame's passes over the world drawn aside, between the glow's two pictures: what the finish reads, and whether it is light
+	private (ulong Reads, bool Light) RunPortablePasses( CameraComponent camera, float near, float far )
+	{
+		var (width, height) = glow.PassSize;
+
+		//The world's pass closed: the passes read what it drew
+		CoreRenderDevice.WorldAside( false, out _, out _ );
+
+		CorePostBlit.BeginPortable( new CorePostBlit.Frame( CoreRender.TargetKind.Picture, 1, 0, 0, 0,
+			width, height, near, far, 0.0f, viewport ), glow.World, glow.Passes );
+
+		try
+		{
+			CoreRenderDevice.ZoneBegin( "post pass" );
+
+			foreach ( var stage in portableStages )
+			{
+				if ( !Hung( camera, stage ) ) continue;
+
+				CorePostBlit.PortableStage( stage );
+				RunLists( camera, stage );
+			}
+
+			return CorePostBlit.PortableSettled;
+		}
+		catch ( System.Exception e )
+		{
+			Log.Warning( e, "a post-process in the portable frame" );
+			return CorePostBlit.PortableSettled;
+		}
+		finally
+		{
+			CoreRenderDevice.ZoneEnd();
+			CorePostBlit.End();
+		}
+	}
+
+	//What the portable frame runs over the world before its finish: the stages before the compose, and the compose's own
+	private static readonly Rinten.Rendering.Stage[] portableStages =
+	{
+		Rinten.Rendering.Stage.AfterTransparent, Rinten.Rendering.Stage.AfterViewmodel,
+		Rinten.Rendering.Stage.BeforePostProcess, Rinten.Rendering.Stage.Tonemapping,
+	};
+
 	private static readonly Rinten.Rendering.Stage[] unfolded =
 	{
 		Rinten.Rendering.Stage.AfterDepthPrepass, Rinten.Rendering.Stage.AfterPostProcess,
@@ -1532,18 +1605,15 @@ internal sealed partial class CoreSceneDrawer
 	//The sky's light on the card for this drawing's views - see CoreSkyLight
 	private readonly CoreSkyLight skyLight = new();
 
-	//The portable frame's bloom, and whether this frame draws it - see CorePortableGlow
+	//The portable frame's bloom and passes, and whether this frame draws the world aside for them - see CorePortableGlow
 	private readonly CorePortableGlow glow = new();
-	private bool glowing;
+	private bool aside;
 
 	//The sky table's bindless index, one as a flag in the portable frame, nought for none
 	private int SkyTableSlot()
 	{
 		if ( skyPanorama?.Table is { } )
 		{
-			//The page is sent the table's bytes instead - see CoreSceneRenderer.SetSky
-			if ( !CoreRenderDevice.DrawsSkyTable ) return 1;
-
 			var table = CorePanoramaSky.TableTexture( skyPanorama );
 			CoreRenderDevice.UseSkyTable( table );
 
@@ -2178,17 +2248,22 @@ internal sealed partial class CoreSceneDrawer
 		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
 		skyLight.Lay( frame );
 
-		//The portable frame's bloom: the world drawn aside and kept past white, its curve left to the glow's compose
-		glowing = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
-			camera.PostProcess?.Glow is { } wantedGlow && glow.Open( wantedGlow, exposure );
+		//The portable frame's bloom and passes: the world drawn aside and kept past white, its curve left to the finish
+		var passes = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes && PortablePasses( camera );
 
-		//Upload the point effects the world's shading may carry, whichever way the frame ends up drawn
-		foldKey = glowing ? null : FoldChain( camera );
+		aside = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
+			glow.Open( camera.PostProcess?.Glow, passes, exposure );
+
+		//While an export writes down the runs it bakes, the one the portable frame carries beside its passes too
+		if ( CorePointChain.Recording && !CoreRenderDevice.PortableFrame ) FoldChain( camera, passes: true );
+
+		//Upload the point effects the world's shading or the finish may carry, whichever way the frame ends up drawn
+		foldKey = FoldChain( camera, passes: aside && passes );
 
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
 
-		CoreSceneRenderer.SetFinish( frame, exposure, glowing ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
+		CoreSceneRenderer.SetFinish( frame, exposure, aside ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
 
 		//Next frame's exposure, taken here since the compose may not run when shading straight to screen
 		exposure = Rinten.Rendering.DrawSettings.Exposure;
@@ -2438,7 +2513,7 @@ internal sealed partial class CoreSceneDrawer
 		var fills = !overlayOnly && ( skyShown || backgroundPipeline != 0 );
 
 		//Whether the world's shading carries the point effects instead of the compose (see FoldChain)
-		var folding = foldKey is not null && !softening && !carryingUp && !stretching && !upscaling && !inspecting &&
+		var folding = foldKey is not null && !aside && !softening && !carryingUp && !stretching && !upscaling && !inspecting &&
 			( !blending || CoreRenderDevice.PortableFrame ) &&
 			skyShown && !CorePointChain.Refused( foldKey );
 
@@ -2691,7 +2766,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			//No sky and nothing to fill what the world left: the clear its own picture would have had
 			CoreRenderDevice.ZoneBegin( "background" );
-			DrawBackground( camera, glowing ? CorePortableGlow.KeepCurve : frameCurve );
+			DrawBackground( camera, aside ? CorePortableGlow.KeepCurve : frameCurve );
 			CoreRenderDevice.ZoneEnd();
 		}
 
@@ -2736,7 +2811,11 @@ internal sealed partial class CoreSceneDrawer
 		DrawLayer( overlayLayer );
 		CoreRenderDevice.ZoneEnd();
 
-		if ( glowing ) glow.Finish( frameCurve );
+		if ( aside )
+		{
+			var (reads, light) = passes ? RunPortablePasses( camera, near, far ) : ( 0ul, false );
+			glow.Finish( frameCurve, foldKey, reads, light );
+		}
 
 		if ( offscreen )
 		{

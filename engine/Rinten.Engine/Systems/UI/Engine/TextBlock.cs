@@ -350,6 +350,9 @@ internal sealed class TextBlock : IDisposable
 		//a label told to start reading it as markup would otherwise keep the one it had already built.
 		hash = HashCode.Combine( hash, Smooth, FontVariantNumeric, IsHtml );
 
+		//And the faces there are: one that arrived since the text was set may be the one it asked for - see FontManager.Generation
+		hash = HashCode.Combine( hash, FontManager.Generation );
+
 		if ( FontHash == hash && Block != null )
 			return false;
 

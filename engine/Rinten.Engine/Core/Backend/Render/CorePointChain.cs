@@ -914,6 +914,17 @@ internal static partial class CorePointChain
 				}
 			}
 
+			//And the finishes of a frame drawn aside, which carry the run beside bloom or passes - see CorePortableGlow
+			foreach ( var finish in CorePortableGlow.ChainRequests( ScreenKeyFor( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( chain ) ) ) )
+			{
+				if ( CoreShaderCache.Words( finish.Source, finish.Directory, finish.Entry, finish.Stage, CoreShaderCache.Target, "point effects in the finish" ) is null )
+				{
+					failed++;
+					log.Warning( $"the glow's {finish.Entry} with the point effects did not compile for {CoreShaderCache.Target}: {CoreRenderDevice.ShaderError}" );
+				}
+				else stages++;
+			}
+
 			runs++;
 		}
 

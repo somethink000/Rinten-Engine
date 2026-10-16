@@ -11,7 +11,7 @@ cbuffer Push
 	//Width, height, and one over each.
 	float4 g_vFrameSize;
 
-	//The near and far planes, then which stage this is. The last is spare.
+	//The near and far planes, then which stage this is; then, in the portable frame, whether the colour is kept - see FramePicture.
 	float4 g_vFrameRange;
 
 	//Where the frame's pictures are in the indexed table: the colour, the world normals, the depth, and the motion. Zero for one this frame does not have.
@@ -36,6 +36,34 @@ float2 ScreenUv( float4 position )
 	return position.xy * g_vFrameSize.zw;
 }
 
+#ifdef PORTABLE
+
+//No table here: the frame as it stands is in the colour slot, named by one, and the rest are absent - see CorePostBlit.
+//Where g_vFrameRange.w says so it holds the world as drawn aside, x / (1 + x) after exposure, given back as light
+float4 FramePicture( float slot, float2 uv )
+{
+	if ( int( slot ) != 1 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+#ifdef WEBGL
+	//GL keeps a drawn picture's rows bottom first - see ShadowCompare in frame.slang
+	uv.y = 1.0 - uv.y;
+#endif
+
+	//Held half a texel inside: the material's sampler repeats, and an edge read would wrap to the far side
+	float2 inside = g_vFrameSize.zw * 0.5;
+	float4 colour = g_color.SampleLevel( clamp( uv, inside, 1.0 - inside ), 0.0 );
+
+	if ( g_vFrameRange.w < 0.5 ) return colour;
+
+	float3 kept = min( colour.rgb, 254.0 / 255.0 );
+	return float4( kept / ( 1.0 - kept ) / max( Exposure(), 1e-4 ), colour.a );
+}
+
+//No levels either: the top one
+float4 FrameMip( float slot, float2 uv, float level ) { return FramePicture( slot, uv ); }
+
+#else
+
 //A frame picture's top mip, or black if absent; use FrameMip for blurred levels
 float4 FramePicture( float slot, float2 uv )
 {
@@ -57,6 +85,8 @@ float4 FrameMip( float slot, float2 uv, float level )
 
 	return g_textures[uint( index )].SampleLevel( uv, level );
 }
+
+#endif
 
 //What has been drawn so far, before this pass.
 float3 SceneColour( float2 uv ) { return FramePicture( g_vFramePictures.x, uv ).rgb; }

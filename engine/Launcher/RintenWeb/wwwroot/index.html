@@ -371,7 +371,7 @@ function chooseRenderer() {
 	var order = query.has("webgl") ? [backends.webgl2]
 		: query.has("webgpu") ? [backends.webgpu]
 		: globalThis.RintenWantsXr ? [backends.webgl2]
-		: navigator.gpu ? [backends.webgpu, backends.webgl2]
+		: navigator.gpu && !webgpuBroke() ? [backends.webgpu, backends.webgl2]
 		: [backends.webgl2];
 
 	var chosen = {};
@@ -384,6 +384,8 @@ function chooseRenderer() {
 		for (var table of order) {
 			if (await table.init(validation)) {
 				take(table);
+				// Asked for by name, it stays whatever happens: that is a test of it.
+				if (table === backends.webgpu && !query.has("webgpu")) watchWebgpu(table);
 				return 1;
 			}
 		}
@@ -393,6 +395,41 @@ function chooseRenderer() {
 	};
 
 	globalThis.RintenRender = chosen;
+}
+
+// What a WebGPU that failed this build is remembered under: the module's hash, so
+// the next build - which may well have fixed it - is given its chance again.
+function webgpuBrokeKey() {
+	return "rinten.webgpu.broke." + (manifest && manifest.Module ? manifest.Module : "");
+}
+
+function webgpuBroke() {
+	try { return !!localStorage.getItem(webgpuBrokeKey()); } catch (e) { return false; }
+}
+
+// A device lost, or a pipeline it would not build - a driver's compiler refusing
+// what another's took - and the game is opened again on WebGL2, and stays there
+// for this build. Watched over the first minute, which is when they all build.
+function watchWebgpu(table) {
+	var started = Date.now();
+	var timer = setInterval(function () {
+		var why = table.broken ? table.broken() : "";
+		if (!why) {
+			if (Date.now() - started > 60000) clearInterval(timer);
+			return;
+		}
+		clearInterval(timer);
+		console.error("WebGPU cannot draw this game here (" + why + ") - opening it on WebGL2");
+		try {
+			localStorage.setItem(webgpuBrokeKey(), why);
+			location.reload();
+		} catch (e) {
+			// Nowhere to remember it - a private window - so the address says it instead.
+			var again = new URL(location.href);
+			again.searchParams.set("webgl", "");
+			location.replace(again);
+		}
+	}, 1000);
 }
 
 (async function () {

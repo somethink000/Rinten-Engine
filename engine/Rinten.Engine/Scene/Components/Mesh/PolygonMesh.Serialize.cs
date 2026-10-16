@@ -14,7 +14,6 @@ public partial class PolygonMesh
 			throw new JsonException();
 
 		var mesh = new PolygonMesh();
-		var topology = mesh.Topology;
 		var hasTextureCoords = false;
 
 		while ( reader.Read() )
@@ -35,132 +34,102 @@ public partial class PolygonMesh
 				return mesh;
 			}
 
-			if ( reader.TokenType == JsonTokenType.PropertyName )
-			{
-				var propertyName = reader.GetString();
-				reader.Read();
+			if ( reader.TokenType != JsonTokenType.PropertyName ) continue;
 
-				if ( propertyName == "Data" )
-				{
-					var blob = reader.TokenType == JsonTokenType.String
-						? MeshBlob.FromBytes( reader.GetBytesFromBase64() )
-						: Json.Deserialize<MeshBlob>( ref reader );
+			var propertyName = reader.GetString();
+			reader.Read();
 
-					if ( blob is not null )
-					{
-						blob.ApplyTo( mesh );
-						hasTextureCoords = blob.TextureCoord.Length > 0;
-					}
-				}
-
-				//Legacy: Position/Rotation are no longer written. They were world-space values that got overwritten by MeshComponent
-				//on enable. Kept for backward compat with old data that may not have TextureCoord and needs these to reconstruct UVs.
-				else if ( propertyName == "Position" )
-					mesh._transform = mesh.Transform.WithPosition( JsonSerializer.Deserialize<Vector3>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == "Rotation" )
-					mesh._transform = mesh.Transform.WithRotation( JsonSerializer.Deserialize<Rotation>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( Positions ) )
-					mesh.Positions.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( Blends ) )
-					mesh.Blends.CopyFrom( JsonSerializer.Deserialize<Color32[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( Colors ) )
-					mesh.LoadColors( JsonSerializer.Deserialize<Color32[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == "TextureOrigin" )
-				{
-					if ( reader.TokenType == JsonTokenType.StartArray )
-					{
-						mesh.TextureOriginUnused.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
-					}
-					else
-					{
-						JsonSerializer.Deserialize<Vector3>( ref reader, EnumConvert.Plain );
-					}
-				}
-
-				else if ( propertyName == nameof( TextureCoord ) )
-				{
-					mesh.TextureCoord.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
-					hasTextureCoords = true;
-				}
-
-				else if ( propertyName == "TextureRotation" )
-					mesh.TextureRotationUnused.CopyFrom( JsonSerializer.Deserialize<Rotation[]>( ref reader, EnumConvert.Plain ) );
-
-				//Legacy: Texture parameters are no longer written. They are world-space derived values recomputed at runtime from TextureCoord
-				//via ComputeFaceTextureParametersFromCoordinates(). Kept for backward compat with old data that lacks TextureCoord.
-				else if ( propertyName == nameof( TextureUAxis ) )
-					mesh.TextureUAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( TextureVAxis ) )
-					mesh.TextureVAxis.CopyFrom( JsonSerializer.Deserialize<Vector3[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( TextureScale ) )
-					mesh.TextureScale.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( TextureOffset ) )
-					mesh.TextureOffset.CopyFrom( JsonSerializer.Deserialize<Vector2[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == "TextureAngle" )
-					mesh.TextureAngleUnused.CopyFrom( JsonSerializer.Deserialize<float[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( MaterialIndex ) )
-					mesh.MaterialIndex.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( EdgeSmoothing ) )
-					mesh.EdgeSmoothing.CopyFrom( JsonSerializer.Deserialize<bool[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == nameof( EdgeFlags ) )
-					mesh.EdgeFlags.CopyFrom( JsonSerializer.Deserialize<int[]>( ref reader, EnumConvert.Plain ) );
-
-				else if ( propertyName == "Materials" )
-				{
-					var materials = JsonSerializer.Deserialize<string[]>( ref reader, EnumConvert.Plain );
-
-					mesh._materialsById.Clear();
-					mesh._materialNamesById.Clear();
-					mesh._materialIdsByName.Clear();
-					mesh._materialId = 0;
-
-					//One slot per entry, in the order they were written, whether or not the file behind the name is here to load. The faces index
-					//this list by position: skipping an entry renumbers every material after it and the mesh comes back wearing somebody else's.
-					foreach ( var material in materials )
-						mesh.AddMaterial( material, Material.Load( material ) );
-				}
-
-				else if ( propertyName == nameof( mesh.Topology ) )
-				{
-					if ( reader.TokenType != JsonTokenType.String )
-						throw new JsonException( $"Expected a string for the '{nameof( mesh.Topology )}' property." );
-
-					try
-					{
-						using var ms = new MemoryStream( Convert.FromBase64String( reader.GetString() ) );
-						using var zs = new GZipStream( ms, CompressionMode.Decompress );
-						using var outStream = new MemoryStream();
-						zs.CopyTo( outStream );
-						outStream.Position = 0;
-
-						using var br = new BinaryReader( outStream );
-						topology.Deserialize( br );
-					}
-					catch
-					{
-						throw new JsonException( $"Failed to deserialize the '{nameof( mesh.Topology )}' property." );
-					}
-				}
-				else
-				{
-					throw new JsonException( $"Unrecognized property: {propertyName}" );
-				}
-			}
+			ReadProperty( mesh, propertyName, ref reader, ref hasTextureCoords );
 		}
 
 		throw new JsonException( "JSON object did not end correctly." );
+	}
+
+	//One property of a written mesh. Position, Rotation and the texture parameters are no longer written: they are read for old data that
+	//has no TextureCoord, and the parameters are otherwise worked out again from it - see ComputeFaceTextureParametersFromCoordinates
+	private static void ReadProperty( PolygonMesh mesh, string propertyName, ref Utf8JsonReader reader, ref bool hasTextureCoords )
+	{
+		switch ( propertyName )
+		{
+			case "Data":
+				var blob = reader.TokenType == JsonTokenType.String
+					? MeshBlob.FromBytes( reader.GetBytesFromBase64() )
+					: Json.Deserialize<MeshBlob>( ref reader );
+
+				if ( blob is null ) break;
+
+				blob.ApplyTo( mesh );
+				hasTextureCoords = blob.TextureCoord.Length > 0;
+				break;
+
+			case "Position": mesh._transform = mesh.Transform.WithPosition( Read<Vector3>( ref reader ) ); break;
+			case "Rotation": mesh._transform = mesh.Transform.WithRotation( Read<Rotation>( ref reader ) ); break;
+			case nameof( Positions ): mesh.Positions.CopyFrom( Read<Vector3[]>( ref reader ) ); break;
+			case nameof( Blends ): mesh.Blends.CopyFrom( Read<Color32[]>( ref reader ) ); break;
+			case nameof( Colors ): mesh.LoadColors( Read<Color32[]>( ref reader ) ); break;
+
+			//An array in newer data, one vector in the oldest
+			case "TextureOrigin":
+				if ( reader.TokenType == JsonTokenType.StartArray ) mesh.TextureOriginUnused.CopyFrom( Read<Vector3[]>( ref reader ) );
+				else reader.Skip();
+				break;
+
+			case nameof( TextureCoord ):
+				mesh.TextureCoord.CopyFrom( Read<Vector2[]>( ref reader ) );
+				hasTextureCoords = true;
+				break;
+
+			case "TextureRotation": mesh.TextureRotationUnused.CopyFrom( Read<Rotation[]>( ref reader ) ); break;
+			case nameof( TextureUAxis ): mesh.TextureUAxis.CopyFrom( Read<Vector3[]>( ref reader ) ); break;
+			case nameof( TextureVAxis ): mesh.TextureVAxis.CopyFrom( Read<Vector3[]>( ref reader ) ); break;
+			case nameof( TextureScale ): mesh.TextureScale.CopyFrom( Read<Vector2[]>( ref reader ) ); break;
+			case nameof( TextureOffset ): mesh.TextureOffset.CopyFrom( Read<Vector2[]>( ref reader ) ); break;
+			case "TextureAngle": mesh.TextureAngleUnused.CopyFrom( Read<float[]>( ref reader ) ); break;
+			case nameof( MaterialIndex ): mesh.MaterialIndex.CopyFrom( Read<int[]>( ref reader ) ); break;
+			case nameof( EdgeSmoothing ): mesh.EdgeSmoothing.CopyFrom( Read<bool[]>( ref reader ) ); break;
+			case nameof( EdgeFlags ): mesh.EdgeFlags.CopyFrom( Read<int[]>( ref reader ) ); break;
+			case "Materials": ReadMaterials( mesh, Read<string[]>( ref reader ) ); break;
+			case nameof( Topology ): ReadTopology( mesh, ref reader ); break;
+
+			default: throw new JsonException( $"Unrecognized property: {propertyName}" );
+		}
+	}
+
+	private static T Read<T>( ref Utf8JsonReader reader ) => JsonSerializer.Deserialize<T>( ref reader, EnumConvert.Plain );
+
+	//One slot per entry, in the order they were written, whether or not the file behind the name is here to load. The faces index
+	//this list by position: skipping an entry renumbers every material after it and the mesh comes back wearing somebody else's.
+	private static void ReadMaterials( PolygonMesh mesh, string[] materials )
+	{
+		mesh._materialsById.Clear();
+		mesh._materialNamesById.Clear();
+		mesh._materialIdsByName.Clear();
+		mesh._materialId = 0;
+
+		foreach ( var material in materials )
+			mesh.AddMaterial( material, Material.Load( material ) );
+	}
+
+	private static void ReadTopology( PolygonMesh mesh, ref Utf8JsonReader reader )
+	{
+		if ( reader.TokenType != JsonTokenType.String )
+			throw new JsonException( $"Expected a string for the '{nameof( Topology )}' property." );
+
+		try
+		{
+			using var ms = new MemoryStream( Convert.FromBase64String( reader.GetString() ) );
+			using var zs = new GZipStream( ms, CompressionMode.Decompress );
+			using var outStream = new MemoryStream();
+			zs.CopyTo( outStream );
+			outStream.Position = 0;
+
+			using var br = new BinaryReader( outStream );
+			mesh.Topology.Deserialize( br );
+		}
+		catch
+		{
+			throw new JsonException( $"Failed to deserialize the '{nameof( Topology )}' property." );
+		}
 	}
 
 	public static void JsonWrite( object value, Utf8JsonWriter writer )

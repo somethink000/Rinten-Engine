@@ -320,9 +320,17 @@ public sealed class EventModule : ParticleModule, IParticleModuleStep, IParticle
 public sealed class ParticleEventRelay : ParticleController
 {
 	readonly ConcurrentQueue<Pending> _pending = new();
-	readonly Dictionary<EventModule, List<(GameObject Object, Particle Particle)>> _spawned = new();
+	readonly Dictionary<EventModule, List<Child>> _spawned = new();
 	readonly List<EventModule> _events = new();
 
+	//Spawned effects that have played through, kept to be played again rather than built again - an effect is a tree
+	//of objects and components, and a burst of sparks on every bounce is that tree made and thrown away each time
+	readonly Dictionary<EventModule, Stack<ParticlePlayer>> _idle = new();
+
+	//A spawned effect, the particle it follows, and the frame it began - it is not over before it has stepped once.
+	record struct Child( GameObject Object, ParticlePlayer Player, Particle Particle, long Began );
+
+	//The context rows' values come from a shared pool and go back once spawned: an event is often, and each wanted an array of its own.
 	readonly record struct Pending( EventModule Event, Vector3 Position, Vector3 Velocity, Vector4[] Context, Particle Particle, float Scale );
 
 	//An event module of this emitter, told so death can reach it.
@@ -335,11 +343,13 @@ public sealed class ParticleEventRelay : ParticleController
 	{
 		//The facts read now, on this thread, while the particle is what the event saw: by the time the spawn happens it may have moved or gone.
 		var rows = module.Context;
-		var values = new Vector4[rows.Count];
+		var values = rows.Count == 0 ? System.Array.Empty<Vector4>() : System.Buffers.ArrayPool<Vector4>.Shared.Rent( rows.Count );
 
 		for ( var i = 0; i < rows.Count; i++ )
 		{
 			var row = rows[i];
+			values[i] = Vector4.Zero;
+
 			if ( !row.Enabled ) continue;
 
 			if ( row.FromSlot )
@@ -363,21 +373,42 @@ public sealed class ParticleEventRelay : ParticleController
 		base.OnUpdate();
 
 		while ( _pending.TryDequeue( out var pending ) )
+		{
 			Spawn( pending );
+
+			if ( pending.Context.Length > 0 ) System.Buffers.ArrayPool<Vector4>.Shared.Return( pending.Context );
+		}
 
 		//Carried along: a spawned effect that follows its particle goes where it goes, and is let go where it dies.
 		foreach ( var (module, list) in _spawned )
 		{
-			list.RemoveAll( x => !x.Object.IsValid() );
-
-			if ( !module.Follow ) continue;
-
-			foreach ( var (go, particle) in list )
+			for ( var i = list.Count - 1; i >= 0; i-- )
 			{
-				if ( particle is null ) continue;
-				go.WorldPosition = particle.Position;
+				var child = list[i];
+
+				if ( !child.Object.IsValid() || !child.Player.IsValid() )
+				{
+					list.RemoveAt( i );
+					continue;
+				}
+
+				//Played through: kept for the next spawn of this event
+				if ( child.Began < EngineLoop.LoopFrames && !child.Player.IsActive )
+				{
+					list.RemoveAt( i );
+					Idle( module ).Push( child.Player );
+					continue;
+				}
+
+				if ( module.Follow && child.Particle is not null ) child.Object.WorldPosition = child.Particle.Position;
 			}
 		}
+	}
+
+	Stack<ParticlePlayer> Idle( EventModule module )
+	{
+		if ( !_idle.TryGetValue( module, out var idle ) ) _idle[module] = idle = new Stack<ParticlePlayer>();
+		return idle;
 	}
 
 	void Spawn( in Pending pending )
@@ -387,9 +418,7 @@ public sealed class ParticleEventRelay : ParticleController
 		if ( module.Effect is null || !Scene.IsValid() ) return;
 
 		if ( !_spawned.TryGetValue( module, out var list ) )
-			_spawned[module] = list = new List<(GameObject, Particle)>();
-
-		list.RemoveAll( x => !x.Object.IsValid() );
+			_spawned[module] = list = new List<Child>();
 
 		if ( list.Count >= module.MaxAlive ) return;
 
@@ -397,21 +426,27 @@ public sealed class ParticleEventRelay : ParticleController
 			? Rotation.LookAt( pending.Velocity.Normal )
 			: Rotation.Identity;
 
-		var go = new GameObject( false, $"{module.Effect.ResourceName} (event)" );
+		var player = Reused( module );
+		var go = player?.GameObject;
+
+		if ( player is null )
+		{
+			go = new GameObject( false, $"{module.Effect.ResourceName} (event)" );
+
+			go.Flags = go.Flags
+				.WithFlag( GameObjectFlags.Hidden, true )
+				.WithFlag( GameObjectFlags.NotSaved, true )
+				.WithFlag( GameObjectFlags.NotNetworked, true );
+
+			player = go.AddComponent<ParticlePlayer>();
+
+			player.Definition = module.Effect;
+			player.PlayOnce = true;
+		}
 
 		go.WorldPosition = pending.Position;
 		go.WorldRotation = rotation;
 		go.WorldScale = pending.Scale;
-		go.Flags = go.Flags
-			.WithFlag( GameObjectFlags.Hidden, true )
-			.WithFlag( GameObjectFlags.NotSaved, true )
-			.WithFlag( GameObjectFlags.NotNetworked, true );
-
-		var player = go.AddComponent<ParticlePlayer>();
-
-		player.Definition = module.Effect;
-		player.DestroyOnEnd = true;
-		player.PlayOnce = true;
 
 		//The parent's facts as the child's parameters, by the row's kind: a float parameter takes one channel, a vector three, a colour four.
 		var rows = module.Context;
@@ -424,17 +459,42 @@ public sealed class ParticleEventRelay : ParticleController
 
 			var v = pending.Context[i] * row.Scale;
 
-			if ( definition.ColorParameters.Any( p => string.Equals( p.Name, row.Parameter, StringComparison.OrdinalIgnoreCase ) ) )
+			if ( Declares( definition.ColorParameters, row.Parameter ) )
 				player.Set( row.Parameter, new Color( v.x, v.y, v.z, row.Scale == 1.0f ? v.w : pending.Context[i].w ) );
-			else if ( definition.VectorParameters.Any( p => string.Equals( p.Name, row.Parameter, StringComparison.OrdinalIgnoreCase ) ) )
+			else if ( Declares( definition.VectorParameters, row.Parameter ) )
 				player.Set( row.Parameter, new Vector3( v.x, v.y, v.z ) );
 			else
 				player.Set( row.Parameter, ParticleFloatBinding.Channel( v, row.Channel ) );
 		}
 
-		go.Enabled = true;
+		if ( go.Enabled ) player.Restart();
+		else go.Enabled = true;
 
-		list.Add( (go, module.Follow ? pending.Particle : null) );
+		list.Add( new Child( go, player, module.Follow ? pending.Particle : null, EngineLoop.LoopFrames ) );
+	}
+
+	//A played-through effect of this event still standing, or null
+	ParticlePlayer Reused( EventModule module )
+	{
+		if ( !_idle.TryGetValue( module, out var idle ) ) return null;
+
+		while ( idle.TryPop( out var player ) )
+		{
+			if ( player.IsValid() && player.GameObject.IsValid() && player.Definition == module.Effect ) return player;
+			if ( player.GameObject.IsValid() ) player.GameObject.Destroy();
+		}
+
+		return null;
+	}
+
+	static bool Declares<T>( List<T> parameters, string name ) where T : ParticleDefinition.Parameter
+	{
+		for ( var i = 0; i < parameters.Count; i++ )
+		{
+			if ( string.Equals( parameters[i].Name, name, StringComparison.OrdinalIgnoreCase ) ) return true;
+		}
+
+		return false;
 	}
 
 	protected override void OnParticleDestroyed( Particle p )
@@ -444,7 +504,7 @@ public sealed class ParticleEventRelay : ParticleController
 		{
 			for ( var i = 0; i < list.Count; i++ )
 			{
-				if ( ReferenceEquals( list[i].Particle, p ) ) list[i] = (list[i].Object, null);
+				if ( ReferenceEquals( list[i].Particle, p ) ) list[i] = list[i] with { Particle = null };
 			}
 		}
 
@@ -466,12 +526,21 @@ public sealed class ParticleEventRelay : ParticleController
 
 		foreach ( var list in _spawned.Values )
 		{
-			foreach ( var (go, _) in list )
+			foreach ( var child in list )
 			{
-				if ( go.IsValid() ) go.Destroy();
+				if ( child.Object.IsValid() ) child.Object.Destroy();
+			}
+		}
+
+		foreach ( var idle in _idle.Values )
+		{
+			foreach ( var player in idle )
+			{
+				if ( player.IsValid() && player.GameObject.IsValid() ) player.GameObject.Destroy();
 			}
 		}
 
 		_spawned.Clear();
+		_idle.Clear();
 	}
 }

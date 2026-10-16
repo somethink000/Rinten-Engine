@@ -426,6 +426,41 @@ internal static class CoreResources
 		return made;
 	}
 
+	//A pass's materials with a picture of the frame in the colour slot, by material and picture - see LiveReading
+	private static readonly Dictionary<(Material Material, ulong Picture), (int Revision, int Values, ulong Handle)> reading = new();
+
+	/// <summary>A pass's material with a picture of the frame in its colour slot, for a frame with no table to read it from.</summary>
+	internal static ulong LiveReading( Material material, ulong picture )
+	{
+		var core = material?.core;
+		if ( core is null || picture == 0 ) return 0;
+
+		if ( reading.TryGetValue( (material, picture), out var had ) )
+		{
+			if ( had.Revision == core.Revision && had.Values == core.ValuesRevision ) return had.Handle;
+			if ( had.Handle != 0 ) CoreRenderDevice.DestroyTexture( had.Handle );
+		}
+
+		System.Span<float> numbers = stackalloc float[CoreRenderDevice.MaterialParamFloats];
+		var third = Numbers( core, 0.0f, numbers );
+
+		var handle = CoreRenderDevice.CreateMaterial( picture, DefaultNormal, third, DefaultEmission, numbers );
+		reading[(material, picture)] = ( core.Revision, core.ValuesRevision, handle );
+
+		return handle;
+	}
+
+	/// <summary>Lets go of every material LiveReading made, as the pictures they read are given back.</summary>
+	internal static void ForgetReading()
+	{
+		foreach ( var (_, had) in reading )
+		{
+			if ( had.Handle != 0 ) CoreRenderDevice.DestroyTexture( had.Handle );
+		}
+
+		reading.Clear();
+	}
+
 	//Read after Live, which works this out
 	/// <summary>The build of its shader a live material asks for, as of its last build.</summary>
 	public static string LiveCombo( Material material )
@@ -1572,6 +1607,7 @@ internal static class CoreResources
 		materials.Clear();
 		liveByMaterial.Clear();
 		liveColours.Clear();
+		reading.Clear();
 		textures.Clear();
 		fallback = 0;
 		missingMaterial = 0;

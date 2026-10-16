@@ -54,7 +54,7 @@ internal sealed unsafe class Box2DShapeBackend : IPhysicsShapeBackend
 
 	internal IReadOnlyList<Box2DPart> Parts => parts;
 	internal IReadOnlyList<b2ShapeId> Ids => ids;
-	internal IReadOnlyCollection<uint> Tags => tags;
+	internal HashSet<uint> Tags => tags;
 
 	//Its tags as the bits of the compiled collision rules - what the world filters it by.
 	internal ulong TagMask => tagMask;

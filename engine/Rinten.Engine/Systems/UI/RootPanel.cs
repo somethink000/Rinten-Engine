@@ -179,8 +179,22 @@ public partial class RootPanel : Panel
 
 		PushRootValues();
 
+		//A face came since: on a page, one still downloading when text was first set in a stand-in - every label sets its text again
+		if ( fontGeneration != FontManager.Generation )
+		{
+			fontGeneration = FontManager.Generation;
+
+			foreach ( var panel in Descendants )
+			{
+				if ( panel is Label ) panel.SetNeedsPreLayout();
+			}
+		}
+
 		PreLayout( cascade );
 	}
+
+	//The faces this tree's labels were last set in - see FontManager.Generation.
+	int fontGeneration = -1;
 
 	internal void CalculateLayout()
 	{

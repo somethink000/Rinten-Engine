@@ -543,6 +543,9 @@ internal static unsafe class BrowserTextures
 	internal static int ViewOf( ulong texture )
 		=> textures.TryGetValue( texture, out var found ) ? found.BindView : 0;
 
+	internal static int ImageOf( ulong texture )
+		=> textures.TryGetValue( texture, out var found ) ? found.Image : 0;
+
 	//Every level unpacked to RGBA8 and put up as one chain.
 	private static ulong CreateUnpacked( CoreBlockCompression.Kind kind, byte* pixelData, ReadOnlySpan<MipSlice> mips, string format )
 	{

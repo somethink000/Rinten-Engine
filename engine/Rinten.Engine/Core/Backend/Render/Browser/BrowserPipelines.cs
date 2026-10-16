@@ -320,6 +320,8 @@ internal static class BrowserPipelines
 				if ( blend != 0 ) json.Append( ",\"blend\":" ).Append( BlendJson );
 				json.Append( '}' );
 			}
+			else if ( target == BrowserDevice.Target.SkyTable )
+				json.Append( BrowserDevice.FormatRgba16Float ).Append( "\",\"writeMask\":15}" );
 			else if ( target == BrowserDevice.Target.Scene )
 			{
 				//The scene pass writes colour and the thin g-buffer beside it.
@@ -346,7 +348,7 @@ internal static class BrowserPipelines
 			.Append( "\",\"frontFace\":\"ccw\"}" );
 
 		//A picture's pass has no depth, and a pipeline naming one would not draw in it
-		if ( target != BrowserDevice.Target.Picture )
+		if ( target is not ( BrowserDevice.Target.Picture or BrowserDevice.Target.SkyTable ) )
 		{
 			//Stencil is left at the browser's defaults, which are always/keep.
 			json.Append( ",\"depthStencil\":{\"format\":\"" ).Append( BrowserDevice.FormatDepth32 )

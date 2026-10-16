@@ -158,8 +158,8 @@ partial class StandaloneExporter
 		{
 			if ( CoreShaderFile.IsForeign( file ) ) continue;
 
-			//A pass over the frame's pictures, in a frame that has none.
-			if ( portable && !CoreResources.IsSurface( file ) ) continue;
+			//Neither a surface nor a pass over the frame, which the portable frame draws between two pictures - see CorePostBlit.
+			if ( portable && !CoreResources.IsSurface( file ) && !CoreShaderFile.IncludesFile( file, "postprocess.slang" ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( file ) is { } doubt ) Logger.Warning( doubt );
@@ -174,12 +174,12 @@ partial class StandaloneExporter
 				continue;
 			}
 
-			//The entries below are passes' own, and the portable frame has none.
-			if ( portable ) { shaders++; continue; }
-
 			//And the entries of its own beyond MainPs and MainCs - a pass over the frame whose file holds several. See CoreShaderFile.EntryWords.
+			//The portable frame has no compute to run one of those with.
 			foreach ( var (entry, kind) in CoreShaderFile.EntriesOf( file ) )
 			{
+				if ( portable && kind == CoreShaderCompiler.Stage.Compute ) continue;
+
 				if ( CoreShaderFile.EntryWords( file, null, entry, kind ) is null )
 					Logger.Warning( $"{relative} {entry} did not compile - {CoreRenderDevice.ShaderError}" );
 			}

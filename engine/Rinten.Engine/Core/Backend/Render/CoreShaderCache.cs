@@ -80,8 +80,12 @@ internal static class CoreShaderCache
 		return Convert.ToHexString( SHA256.HashData( bytes ) );
 	}
 
-	//Whether to say what each key was made of - RINTEN_SHADER_KEYS=1.
-	private static readonly bool Saying = Environment.GetEnvironmentVariable( "RINTEN_SHADER_KEYS" ) == "1";
+	//Whether to say what each key was made of - RINTEN_SHADER_KEYS=1, or -shaderkeys where there is no environment (a page);
+	//asked late, as a page's switches are read after the first shaders
+	private static bool Saying => saying ??= Environment.GetEnvironmentVariable( "RINTEN_SHADER_KEYS" ) == "1" ||
+		Rinten.Utility.CommandLine.HasSwitch( "-shaderkeys" );
+
+	private static bool? saying;
 
 	//What a key was made of, the two halves hashed apart, so a miss names which half moved
 	private static void Say( string name, string entry, CoreShaderCompiler.Stage stage, string source, string includes, string key )
@@ -105,6 +109,19 @@ internal static class CoreShaderCache
 		//no words to mean it is not drawn, which in that frame is right
 		if ( CoreShaderCompiler.IsPortable( format ) && !EngineShaders.InPortableFrame( file ) ) return null;
 
+		if ( PassText( file, defines ) is not { } made ) return null;
+
+		//Asked of the cache and of nobody else. A build with no compiler - a page, a phone - would
+		//otherwise say out loud that a shader is missing, about a run it is perfectly all right not to have.
+		if ( optional )
+			return Cached( made.Text, made.Directory, entry, stage, format, out _, out var baked ) ? baked : null;
+
+		return Words( made.Text, made.Directory, entry, stage, format, file );
+	}
+
+	//An engine pass's text with defines before it and text after it, and its folder; null where it is not there
+	internal static (string Text, string Directory)? PassText( string file, string defines = null, string after = null )
+	{
 		var path = CoreShaderFile.Source( file );
 
 		if ( path is null )
@@ -115,28 +132,16 @@ internal static class CoreShaderCache
 			return null;
 		}
 
-		string text;
-
 		try
 		{
 			//Through the seal: a shipped build's shaders are sealed, and the sealed bytes are not the text a key is made of
-			text = CompiledFile.TextOf( path );
+			return ( ( defines ?? "" ) + CompiledFile.TextOf( path ) + ( after ?? "" ), Path.GetDirectoryName( path ) );
 		}
 		catch ( IOException e )
 		{
 			log.Warning( $"{file} would not read: {e.Message}" );
 			return null;
 		}
-
-		var source = ( defines ?? "" ) + text;
-		var directory = Path.GetDirectoryName( path );
-
-		//Asked of the cache and of nobody else. A build with no compiler - a page, a phone - would
-		//otherwise say out loud that a shader is missing, about a run it is perfectly all right not to have.
-		if ( optional )
-			return Cached( source, directory, entry, stage, format, out _, out var baked ) ? baked : null;
-
-		return Words( source, directory, entry, stage, format, file );
 	}
 
 	/// <summary>The compiled words for one entry point, from the cache or else the compiler.</summary>
@@ -776,6 +781,7 @@ internal static class CoreShaderCache
 			{
 				Baking = format;
 				whole &= BakePasses( portable: true );
+				BakeShippedPasses();
 				project?.Invoke();
 			}
 
@@ -837,8 +843,8 @@ internal static class CoreShaderCache
 				continue;
 			}
 
-			//A pass over the frame's pictures, in a frame without them - see RenderTier
-			if ( portable && !CoreResources.IsSurface( shader ) ) continue;
+			//Neither a surface nor a pass over the frame that is more than a point effect, which the portable frame carries
+			if ( portable && !CoreResources.IsSurface( shader ) && !PortablePass( shader ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( shader ) is { } doubt ) log.Warning( doubt );
@@ -865,8 +871,10 @@ internal static class CoreShaderCache
 				}
 
 				//And each entry of its own beyond every file's - bloom's three in one file; see EntryWords
-				foreach ( var (entry, kind) in portable ? [] : CoreShaderFile.EntriesOf( shader ) )
+				foreach ( var (entry, kind) in CoreShaderFile.EntriesOf( shader ) )
 				{
+					if ( portable && kind == CoreShaderCompiler.Stage.Compute ) continue;
+
 					if ( CoreShaderFile.EntryWords( shader, null, entry, kind ) is not null ) continue;
 
 					log.Error( $"{shader} {entry} did not compile: {CoreRenderDevice.ShaderError}" );
@@ -903,6 +911,30 @@ internal static class CoreShaderCache
 		log.Info( $"wrote {( touchedOnly ? "the shader stages this run asked for" : $"{Count} shader stages" )} into {path}" );
 
 		return true;
+	}
+
+	//Whether a shipped shader is a pass over the frame the portable frame draws as one, rather than a point effect it carries
+	private static bool PortablePass( string shader )
+		=> CoreShaderFile.IsPass( shader ) && !CorePointChain.IsPoint( shader );
+
+	//The shipped passes a page draws as passes of their own, in Baking's language; one that will not is said and left out
+	private static void BakeShippedPasses()
+	{
+		foreach ( var shader in Shipped() )
+		{
+			if ( CoreShaderFile.IsForeign( shader ) || !PortablePass( shader ) ) continue;
+
+			if ( CoreShaderFile.Compile( shader ) is null )
+				log.Warning( $"{shader} is not in the portable frame: {CoreRenderDevice.ShaderError}" );
+
+			foreach ( var (entry, kind) in CoreShaderFile.EntriesOf( shader ) )
+			{
+				if ( kind == CoreShaderCompiler.Stage.Compute ) continue;
+
+				if ( CoreShaderFile.EntryWords( shader, null, entry, kind ) is null )
+					log.Warning( $"{shader} {entry} is not in the portable frame: {CoreRenderDevice.ShaderError}" );
+			}
+		}
 	}
 
 	//The .shader files under the engine's own shader folder.
@@ -1108,6 +1140,7 @@ internal static class EngineShaders
 		("DownPs", CoreShaderCompiler.Stage.Pixel),
 		("UpPs", CoreShaderCompiler.Stage.Pixel),
 		("ComposePs", CoreShaderCompiler.Stage.Pixel),
+		("FinishPs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =

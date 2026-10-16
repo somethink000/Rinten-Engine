@@ -392,9 +392,12 @@ internal static partial class CoreShaderFile
 		if ( !IncludesFile( path, "postprocess.slang" ) )
 			return ( features + CoreShaderParams.Declare( parameters ), features + CoreShaderParams.DeclarePush( parameters ) );
 
-		//What "compact" is on this device, for an output declared in it.
+		//What "compact" is on the device the stage is for - a page's is half floats, whatever the device baking it has
+		var compact = CompactName ?? ( CoreShaderCache.Target is CoreShaderCompiler.Format.Wgsl || CoreShaderCompiler.IsGlsl( CoreShaderCache.Target )
+			? "rgba16f" : CoreRenderDevice.CompactStorageName );
+
 		var pass = features + CoreShaderParams.DeclarePost( parameters ) +
-			$"#define ENGINE_COMPACT_FORMAT \"{CompactName ?? CoreRenderDevice.CompactStorageName}\"\n" +
+			$"#define ENGINE_COMPACT_FORMAT \"{compact}\"\n" +
 			CoreShaderParams.DeclareOutputs( CoreShaderParams.OutputsOf( path ) );
 
 		return ( pass, pass );

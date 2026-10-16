@@ -1,7 +1,8 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader is - includes
 //and all - and a project may put its own file of this name in its assets to replace it. See CoreShaderCache.Pass.
 
-//Bloom for the portable frame in pixel passes: kept, halved, carried back up, laid over the world - see CorePortableGlow
+//Bloom for the portable frame in pixel passes: kept, halved, carried back up, laid over the world; and the finish
+//onto the screen of a frame drawn aside without it - see CorePortableGlow
 
 #include "tonemap.slang"
 
@@ -16,12 +17,17 @@ cbuffer Push
 	float4 g_size;   //The written picture's 1/width, 1/height; the filtered read's 1/width, 1/height
 	float4 g_glow;   //Threshold, falloff, mode, the glow's share of each level's total
 	float4 g_tint;   //Strength times tint
-	float4 g_finish; //Exposure, curve
+	float4 g_finish; //Exposure, curve, one where the world read is light as it is rather than kept
 };
 
-//What the pass reads; the up pass and the compose read a second picture beside it
+//What the pass reads; the up pass and the compose read a second picture beside it. A compose carrying a run of
+//point effects reads them from the frame's block, whose file declares the two at the same places
+#ifdef ENGINE_SCREEN_CHAIN
+#include "frame.slang"
+#else
 [[vk::binding(0,0)]] Sampler2D g_color;
 [[vk::binding(1,0)]] Sampler2D g_normal;
+#endif
 
 [shader("vertex")]
 V2F MainVs( uint id : SV_VertexID )
@@ -50,6 +56,12 @@ float3 Decode( float3 kept )
 	return c / ( 1.0 - c );
 }
 
+//What the world picture holds as the light it was shaded in: kept, or a pass's picture of light as it is
+float3 Lit( float3 stored )
+{
+	return g_finish.z > 0.5 ? stored : Decode( stored ) / max( g_finish.x, 1e-4 );
+}
+
 float Brightest( float3 colour ) { return max( colour.r, max( colour.g, colour.b ) ); }
 
 //Soft knee half the threshold wide, as bloom.shader keeps it
@@ -66,7 +78,7 @@ float Keep( float brightness, float threshold )
 //One texel of the world in the light it was shaded in, and its Karis weight
 float3 Shaded( float2 uv, inout float weight )
 {
-	float3 colour = Decode( Read( g_color, uv ) ) / max( g_finish.x, 1e-4 );
+	float3 colour = Lit( Read( g_color, uv ) );
 	float w = 1.0 / ( 1.0 + Brightest( colour ) );
 
 	weight += w;
@@ -121,15 +133,25 @@ float4 UpPs( V2F i ) : SV_Target
 	return float4( g_color.SampleLevel( uv, 0.0 ).rgb + ( tent * g_glow.y ), 1.0 );
 }
 
-//The world with its glow, through exposure and the curve onto the screen
+//Light onto the screen through the run of point effects, or exposure and the curve; the world's own alpha is what
+//a see-through window shows the desktop by
+float4 Finished( float3 colour, float alpha, float2 uv )
+{
+#ifdef ENGINE_SCREEN_CHAIN
+	return float4( EngineScreenChain( colour, uv ), alpha );
+#else
+	return float4( EngineTonemap( colour * max( g_finish.x, 1e-4 ), g_finish.y ), alpha );
+#endif
+}
+
+//The world with its glow onto the screen
 [shader("fragment")]
 float4 ComposePs( V2F i ) : SV_Target
 {
 	float2 uv = Uv( i );
-	float exposure = max( g_finish.x, 1e-4 );
 
 	float4 world = g_color.SampleLevel( uv, 0.0 );
-	float3 colour = Decode( world.rgb ) / exposure;
+	float3 colour = Lit( world.rgb );
 	float3 glow = Read( g_normal, uv ) * g_tint.rgb * g_glow.w;
 
 	//Added; screened, which is src (1 - dst) + dst; or the glow alone - as bloom.shader's Apply
@@ -137,6 +159,15 @@ float4 ComposePs( V2F i ) : SV_Target
 	else if ( g_glow.z < 2.5 ) colour += glow * ( 1.0 - colour );
 	else colour = glow;
 
-	//The world's own alpha, which is what a see-through window shows the desktop by
-	return float4( EngineTonemap( colour * exposure, g_finish.y ), world.a );
+	return Finished( colour, world.a, uv );
+}
+
+//The world alone onto the screen, for a frame drawn aside for its passes and with no glow
+[shader("fragment")]
+float4 FinishPs( V2F i ) : SV_Target
+{
+	float2 uv = Uv( i );
+	float4 world = g_color.SampleLevel( uv, 0.0 );
+
+	return Finished( Lit( world.rgb ), world.a, uv );
 }

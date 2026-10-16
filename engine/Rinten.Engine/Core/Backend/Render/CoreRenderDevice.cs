@@ -950,20 +950,10 @@ internal static unsafe class CoreRenderDevice
 	/// <summary>The sky table by elevation and sun angle, as an indexed texture - see TargetKind.SkyTable.</summary>
 	public static ulong SkyTableTexture => CoreNative.Available ? CoreRender.SkyTableTexture() : 0;
 
-	/// <summary>Whether the device draws that table with the sky shader; else CoreSkyTable fills it.</summary>
-	public static bool DrawsSkyTable => CoreNative.Available && CoreRender.DrawsSkyTable;
-
-	/// <summary>A CPU-made sky table to bind instead of the drawn one; nought for the drawn one.</summary>
+	/// <summary>A panorama's sky table to bind instead of the drawn one; nought for the drawn one.</summary>
 	public static void UseSkyTable( ulong texture )
 	{
 		if ( CoreNative.Available ) CoreRender.UseSkyTable( texture );
-	}
-
-	//Half floats, four channels, side squared; the full frame draws its table on the card
-	/// <summary>The portable frame's sky table onto the device - see <see cref="CoreSkyTable" />.</summary>
-	public static void SendSkyTable( byte* texels, int side )
-	{
-		if ( CoreNative.Available && PortableFrame ) CoreRender.SendSkyTable( texels, side );
 	}
 
 	/// <summary>Records one depth pyramid level; with an args buffer the group count comes from the GPU</summary>

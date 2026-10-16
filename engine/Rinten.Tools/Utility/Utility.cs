@@ -146,10 +146,48 @@ public static partial class EditorUtility
 
 
 	/// <summary>Open given file's folder in OS file explorer and select given file.</summary>
-	public static void OpenFileFolder( string filepath )
+	public static void OpenFileFolder(string path)
 	{
-		filepath = System.IO.Path.GetFullPath( filepath );
-		System.Diagnostics.Process.Start( "explorer.exe", string.Format( "/select,\"{0}\"", filepath ) );
+    	path = System.IO.Path.GetFullPath(path);
+
+    	if (OperatingSystem.IsWindows())
+    	{
+    	    System.Diagnostics.Process.Start("explorer.exe", string.Format("/select,\"{0}\"", path));
+    	}
+    	else if ( OperatingSystem.IsLinux() )
+		{
+		    string directory = System.IO.Path.GetDirectoryName( path );
+
+		    try
+		    {
+		        // dbus-send splits array elements on commas, so escape them
+		        string uriPath = new Uri( path ).AbsoluteUri.Replace( ",", "%2C" );
+
+		        var psi = new System.Diagnostics.ProcessStartInfo( "dbus-send" )
+		        {
+		            UseShellExecute = false,
+		        };
+
+		        psi.ArgumentList.Add( "--session" );
+		        psi.ArgumentList.Add( "--print-reply" );
+		        psi.ArgumentList.Add( "--dest=org.freedesktop.FileManager1" );
+		        psi.ArgumentList.Add( "/org/freedesktop/FileManager1" );
+		        psi.ArgumentList.Add( "org.freedesktop.FileManager1.ShowItems" );
+		        psi.ArgumentList.Add( $"array:string:{uriPath}" );
+		        psi.ArgumentList.Add( "string:" );
+
+		        using var process = System.Diagnostics.Process.Start( psi );
+		        process.WaitForExit();
+
+		        if ( process.ExitCode != 0 )
+		            OpenFolder( directory );
+		    }
+		    catch ( Exception e )
+		    {
+		        Log.Warning( e.Message );
+		        OpenFolder( directory );
+		    }
+		}
 	}
 
 	private static string GetDestinationPath( string source, string directory )

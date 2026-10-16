@@ -233,8 +233,8 @@ public partial class AssetList
 			e.Menu.AddOption( $"Go to Location", "shortcut", () => AssetBrowser.OpenTo( entry ) );
 		}
 
-		var absolutePath = asset?.AbsolutePath ?? entry.AbsolutePath.Replace( '\\', '/' ).ToLower();
-		var relativePath = asset?.RelativePath ?? System.IO.Path.GetRelativePath( Project.Current.GetAssetsPath(), absolutePath ).Replace( '\\', '/' ).ToLower();
+		var absolutePath = asset?.AbsolutePath ?? entry.AbsolutePath.Replace( '\\', '/' );
+		var relativePath = asset?.RelativePath ?? System.IO.Path.GetRelativePath( Project.Current.GetAssetsPath(), absolutePath ).Replace( '\\', '/' );
 
 		if ( asset is null || !asset.IsProcedural )
 		{

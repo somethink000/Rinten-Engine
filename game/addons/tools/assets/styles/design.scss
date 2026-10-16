@@ -471,18 +471,19 @@ i,
 	}
 }
 
-//A menu. A widget, but it draws nothing: the slab, the shadow and the arrival are from here, the rows are .menu-row panels below. A
-//context menu, a combo box drop-down and a toolbar drop-down are all the one Menu widget, so what is written here is true of all three.
+//Every menu - context, combo drop-down, toolbar drop-down - is one Menu widget; its slab and arrival are styled here
+//and its rows are the .menu-row panels below
 .menu
 {
 	//Over a sheet, if one is up - see .modal-sheet.
 	z-index: 100;
 
-	//Solid rounded menu slab with hairline edge and shadow; rows inset 5px inside the corners
+	//Solid rounded menu slab with hairline edge; rows inset 5px inside the corners
 	background-color: $popup-background;
 
-	//The window frame, one pixel of band deep - see frame-thin in the tokens.
+	//The window frame without its shadow: around the corner at the pointer it reads as a dark smudge
 	@include frame-thin;
+	box-shadow: 0px 0px 0px 1px $frame-line;
 	border-radius: $slab-radius;
 
 	//Fade/scale transitions via classes from Menu.Panels.cs, since menus are reshown, not recreated

@@ -25,8 +25,7 @@ internal interface IOrientationGizmoHost
 //orbits. It takes the mouse before the scene does, so a click meant for it never also picks something behind it.
 internal sealed class OrientationGizmo
 {
-	//World directions for the six handles, ordered X+, X-, Y+, Y-, Z+, Z-. The engine's own axes: +X right, +Y up, +Z back. These were
-	//the old names for the axes - Forward as X, Left as Y, Up as Z - which in this basis put the "X" handle on -Z and the "Z" handle on +Y.
+	//World directions for the six handles, ordered X+, X-, Y+, Y-, Z+, Z-; +X right, +Y up, +Z back
 	private static readonly Vector3[] Axes =
 	{
 		new( 1, 0, 0 ), new( -1, 0, 0 ), //X+, X-
@@ -54,7 +53,7 @@ internal sealed class OrientationGizmo
 	private bool leftWasDown;
 	private bool cameraDragWasActive;
 	private Vector2 pressPos;
-	private Vector2 lockCursor;
+	private Vector2 pressCursor;
 
 	public OrientationGizmo( IOrientationGizmoHost host, ViewportCamera camera, ViewportState state )
 	{
@@ -129,7 +128,6 @@ internal sealed class OrientationGizmo
 
 		var overBody = Vector2.DistanceBetween( mouse, center ) <= radius + ballRadius;
 		var interacting = mouseDown || dragging;
-		//Masked rather than HasFlag, which boxed the buttons at every call in this code.
 		var cameraDragActive = SceneEditorExtensions.IsControllingCamera;
 		var suppressHover = cameraDragActive || cameraDragWasActive;
 		cameraDragWasActive = cameraDragActive;
@@ -144,7 +142,7 @@ internal sealed class OrientationGizmo
 			mouseDown = true;
 			dragging = false;
 			pressPos = mouse;
-			lockCursor = Application.UnscaledCursorPosition;
+			pressCursor = Application.UnscaledCursorPosition;
 		}
 
 		leftWasDown = leftDown;
@@ -156,13 +154,11 @@ internal sealed class OrientationGizmo
 				if ( !dragging && Vector2.DistanceBetween( mouse, pressPos ) > 4f * Dpi )
 					dragging = true;
 
+				//Hidden but not held in place: a warp every frame turns into relative mode on Wayland, and the delta goes to zero
 				if ( dragging )
 				{
 					OrbitAroundPivot();
-
-					//Lock the mouse cursor in place
 					host.SetCursor( CursorShape.Blank );
-					Application.UnscaledCursorPosition = lockCursor;
 				}
 			}
 			else
@@ -171,11 +167,11 @@ internal sealed class OrientationGizmo
 				if ( !dragging && hoveredAxis >= 0 )
 					SnapToAxis( hoveredAxis );
 
-				//Restore the cursor to where the drag began (over the gizmo) so hover resumes, and make it visible
+				//Shown again where the drag began, over the gizmo, so hover resumes
 				if ( dragging )
 				{
-					Application.UnscaledCursorPosition = lockCursor;
 					host.SetCursor( CursorShape.None );
+					Application.UnscaledCursorPosition = pressCursor;
 				}
 
 				mouseDown = false;
@@ -218,7 +214,7 @@ internal sealed class OrientationGizmo
 		}
 
 		var distance = (state.CameraPosition - gizmoPivot).Length;
-		//Metres: 400 was in inches, and put the camera 400 m out.
+		//Metres
 		if ( distance < 1f )
 			distance = 10f;
 
@@ -240,8 +236,7 @@ internal sealed class OrientationGizmo
 		var radius = Radius;
 		var ballRadius = BallRadius;
 
-		//Drawn straight through the gizmo scope, in call order: the screen shapes are caught and drawn in the order they are asked for, which is
-		//what this needs and what it used to keep its own list of primitives to get. Nothing is retained between frames, so nothing can go stale.
+		//Screen shapes draw in call order through the gizmo scope; nothing is kept between frames
 		using var scope = Gizmo.Scope( "orientation-gizmo" );
 
 		var draw = Gizmo.Draw;

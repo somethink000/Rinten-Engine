@@ -45,10 +45,15 @@ public sealed partial class SceneModel : SceneObject
 	private const float Audible = 0.01f;
 
 	//What was in the middle of being said at the last dispatch, so the same mark held across ten frames is one event rather than ten.
-	private readonly HashSet<string> saying = new();
+	private readonly HashSet<(GraphContext.SampledKind Kind, Rinten.CoreAnimation.AnimClipData Clip, int Index, string Id)> saying = new();
 
 	//Tags that were active at the last dispatch, for the same reason.
 	private readonly HashSet<string> tagged = new();
+
+	//This dispatch's own, kept between frames rather than made each time
+	private readonly HashSet<(GraphContext.SampledKind Kind, Rinten.CoreAnimation.AnimClipData Clip, int Index, string Id)> still = new();
+	private readonly HashSet<string> active = new();
+	private readonly List<string> gone = new();
 
 	/// <summary>Fires animation events that started since last frame; edge-triggered so a long mark fires once</summary>
 	public void RunPendingEvents()
@@ -61,16 +66,18 @@ public sealed partial class SceneModel : SceneObject
 			return;
 		}
 
-		var still = new HashSet<string>();
+		still.Clear();
 
-		foreach ( var mark in marks )
+		for ( var i = 0; i < marks.Count; i++ )
 		{
+			var mark = marks[i];
+
 			if ( mark.Weight < Audible ) continue;
 
 			if ( mark.Kind is not ( GraphContext.SampledKind.Generic or GraphContext.SampledKind.Foot ) )
 				continue;
 
-			var key = $"{(int)mark.Kind}:{mark.Clip}:{mark.Index}:{mark.Id}";
+			var key = ( mark.Kind, mark.Clip, mark.Index, mark.Id );
 
 			still.Add( key );
 
@@ -103,10 +110,12 @@ public sealed partial class SceneModel : SceneObject
 			return;
 		}
 
-		var active = new HashSet<string>();
+		active.Clear();
 
-		foreach ( var mark in marks )
+		for ( var i = 0; i < marks.Count; i++ )
 		{
+			var mark = marks[i];
+
 			if ( mark.Weight < Audible ) continue;
 			if ( mark.Kind != GraphContext.SampledKind.Tag ) continue;
 			if ( string.IsNullOrEmpty( mark.Id ) ) continue;
@@ -121,13 +130,15 @@ public sealed partial class SceneModel : SceneObject
 			OnAnimTagEvent?.Invoke( new AnimTagEvent( name, AnimTagStatus.Start ) );
 		}
 
-		//Gone since the last dispatch. Taken off a copy, because the callback is the game's and the game may well ask this object about its tags.
-		foreach ( var name in new List<string>( tagged ) )
-		{
-			if ( active.Contains( name ) ) continue;
+		//Gone since the last dispatch, listed before any is told: the callback is the game's, and it may ask this object about its tags
+		gone.Clear();
 
-			OnAnimTagEvent?.Invoke( new AnimTagEvent( name, AnimTagStatus.End ) );
+		foreach ( var name in tagged )
+		{
+			if ( !active.Contains( name ) ) gone.Add( name );
 		}
+
+		foreach ( var name in gone ) OnAnimTagEvent?.Invoke( new AnimTagEvent( name, AnimTagStatus.End ) );
 
 		tagged.Clear();
 

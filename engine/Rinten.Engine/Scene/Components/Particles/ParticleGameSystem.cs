@@ -52,6 +52,8 @@ sealed class ParticleGameSystem : GameObjectSystem
 
 		Asked += _effects.Count;
 
+		var before = Rinten.Diagnostics.FrameProfiler.Push( "particle prestep" );
+
 		foreach ( var p in _effects )
 		{
 			var delta = p.Timing switch
@@ -79,9 +81,13 @@ sealed class ParticleGameSystem : GameObjectSystem
 			stepped += p.Particles.Count;
 		}
 
+		before.Dispose();
+
 		Stepped += stepped;
 		Effects += _effects.Count;
 		Steps++;
+
+		var work = Rinten.Diagnostics.FrameProfiler.Push( "particle work" );
 
 		//Parallelise only with enough particles; Parallel.ForEach setup costs a few microseconds
 		if ( stepped >= ParallelParticles && !Rinten.Utility.Parallel.InOrder )
@@ -105,6 +111,10 @@ sealed class ParticleGameSystem : GameObjectSystem
 			StepTicks += Stopwatch.GetTimestamp() - began;
 			StepRuns++;
 		}
+
+		work.Dispose();
+
+		using var after = Rinten.Diagnostics.FrameProfiler.Push( "particle poststep" );
 
 		foreach ( var p in _effects )
 		{

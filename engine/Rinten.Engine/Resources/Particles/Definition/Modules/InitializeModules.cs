@@ -130,8 +130,8 @@ public sealed class InitializePositionModule : ParticleModule, IParticleModuleCo
 
 			if ( context.Player.IsValid() )
 			{
-				if ( Follows.HasFlag( ShapeTransform.Scale ) ) nudge *= context.Player.WorldScale;
-				if ( Follows.HasFlag( ShapeTransform.Rotation ) ) nudge = context.Player.WorldRotation * nudge;
+				if ( ( Follows & ShapeTransform.Scale ) != 0 ) nudge *= context.Player.WorldScale;
+				if ( ( Follows & ShapeTransform.Rotation ) != 0 ) nudge = context.Player.WorldRotation * nudge;
 			}
 
 			particle.Position = pose.Position + nudge;
@@ -156,10 +156,10 @@ public sealed class InitializePositionModule : ParticleModule, IParticleModuleCo
 
 		if ( context.Player.IsValid() )
 		{
-			if ( Follows.HasFlag( ShapeTransform.Scale ) )
+			if ( ( Follows & ShapeTransform.Scale ) != 0 )
 				offset *= context.Player.WorldScale;
 
-			if ( Follows.HasFlag( ShapeTransform.Rotation ) )
+			if ( ( Follows & ShapeTransform.Rotation ) != 0 )
 			{
 				offset = offset.RotateAround( Vector3.Zero, context.Player.WorldRotation );
 				normal = context.Player.WorldRotation * normal;

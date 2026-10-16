@@ -20,6 +20,9 @@ internal sealed unsafe class Box2DEvents
 	}
 
 	private readonly Dictionary<Pair, Touch> touching = new();
+
+	//The copy DispatchPersists walks, kept between steps
+	private readonly List<KeyValuePair<Pair, Touch>> walking = new();
 	private readonly HashSet<Pair> began = new();
 
 	public bool AreTouching( long a, long b ) => touching.ContainsKey( Pair.Of( a, b ) );
@@ -169,7 +172,10 @@ internal sealed unsafe class Box2DEvents
 	{
 		if ( touching.Count == 0 ) return;
 
-		foreach ( var (pair, touch) in touching.ToArray() )
+		walking.Clear();
+		walking.AddRange( touching );
+
+		foreach ( var (pair, touch) in walking )
 		{
 			if ( !Live( touch.A ) || !Live( touch.B ) )
 			{

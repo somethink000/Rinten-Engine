@@ -72,6 +72,35 @@ public partial class SceneObject
 				System.Threading.Interlocked.Increment( ref Version );
 				//No-op: nothing to hand it to.
 			}
+
+			//By token, and nothing at all where the two already agree - a pooled object takes its owner's tags every time it is handed out
+			public override void SetFrom( ITagSet set )
+			{
+				if ( set is null || set == this ) return;
+
+				var wanted = ITagSet.Copy( set.GetTokens() );
+
+				if ( wanted.Length == tokens.Count )
+				{
+					var same = true;
+
+					foreach ( var token in wanted )
+					{
+						if ( tokens.Contains( token ) ) continue;
+
+						same = false;
+						break;
+					}
+
+					if ( same ) return;
+				}
+
+				tokens.Clear();
+				foreach ( var token in wanted ) tokens.Add( token );
+
+				frozen = null;
+				System.Threading.Interlocked.Increment( ref Version );
+			}
 		}
 	}
 }

@@ -211,8 +211,12 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 		var world = WorldTransform;
 
 		//Apply overrides parent-first; each is resolved against its parent's current pose
-		foreach ( var body in Bodies.OrderBy( b => BoneDepth( b.Bone ) ) )
+		var bodies = Bodies;
+
+		foreach ( var index in ParentFirst() )
 		{
+			var body = bodies[index];
+
 			var rb = body.Component;
 			if ( !rb.IsValid() )
 				continue;
@@ -272,6 +276,34 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 	bool _warnedAboutOverride;
 
 	//How many bones up to the skeleton's root, so overrides can be applied parent-first.
+	//The bodies' indices, parents before children - worked out again only when the list or the model changes
+	int[] ParentFirst()
+	{
+		var bodies = Bodies;
+
+		if ( _parentFirst is not null && ReferenceEquals( _parentFirstOf, bodies ) && _parentFirst.Length == bodies.Count && ReferenceEquals( _parentFirstModel, Model ) )
+			return _parentFirst;
+
+		var order = new int[bodies.Count];
+		var depths = new int[bodies.Count];
+
+		for ( var i = 0; i < order.Length; i++ )
+		{
+			order[i] = i;
+			depths[i] = BoneDepth( bodies[i].Bone );
+		}
+
+		Array.Sort( depths, order );
+
+		_parentFirstOf = bodies;
+		_parentFirstModel = Model;
+		return _parentFirst = order;
+	}
+
+	int[] _parentFirst;
+	List<Body> _parentFirstOf;
+	Model _parentFirstModel;
+
 	int BoneDepth( int boneIndex )
 	{
 		var bones = Model?.Bones?.AllBones;

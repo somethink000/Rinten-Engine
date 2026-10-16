@@ -153,7 +153,7 @@ public sealed class ParticleFloatBinding
 		var parameter = player.GetFloat( ParameterName ) * Multiplier;
 
 		if ( Mode == ParticleBindingMode.Multiply )
-			return Scale( Value, parameter );
+			return Kept( Value, parameter );
 
 		return new ParticleFloat
 		{
@@ -221,13 +221,20 @@ public sealed class ParticleFloatBinding
 	/// <summary>This, with everything in it multiplied - constants, ranges and curves alike.</summary>
 	public ParticleFloat Scaled( ParticlePlayer player, float scale )
 	{
-		var value = Resolve( player );
+		//A multiplying parameter and the scale make one factor, so the curve is scaled - and kept - once
+		if ( IsBound && player is not null && Mode == ParticleBindingMode.Multiply )
+			return Kept( Value, player.GetFloat( ParameterName ) * Multiplier * scale );
 
+		return Kept( Resolve( player ), scale );
+	}
+
+	//Scale, with the last scaled curves kept by the frames they came from and the scale: a scaled curve is a new curve, asked for with
+	//every particle a module starts. One reference, written whole, so a step on another thread reads a matching pair
+	ParticleFloat Kept( ParticleFloat value, float scale )
+	{
 		if ( value.Type is not ( ParticleFloat.ValueType.Curve or ParticleFloat.ValueType.CurveRange ) )
 			return Scale( value, scale );
 
-		//A scaled curve is a new curve, asked for with every particle a module starts: the last one is kept, by the frames it was
-		//scaled from and the scale (plan В5). One reference, written whole, so a step on another thread reads a matching pair.
 		if ( scaledCurves is { } kept && kept.Scale == scale && kept.FromA == value.CurveA.Frames && kept.FromB == value.CurveB.Frames )
 		{
 			value.CurveA = kept.A;

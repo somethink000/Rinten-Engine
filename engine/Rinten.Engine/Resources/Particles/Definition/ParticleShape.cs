@@ -221,8 +221,8 @@ public sealed class ParticleShape
 
 		var tx = player.WorldTransform;
 
-		if ( !follows.HasFlag( InitializePositionModule.ShapeTransform.Rotation ) ) tx.Rotation = global::Rotation.Identity;
-		if ( !follows.HasFlag( InitializePositionModule.ShapeTransform.Scale ) ) tx.Scale = Vector3.One;
+		if ( ( follows & InitializePositionModule.ShapeTransform.Rotation ) == 0 ) tx.Rotation = global::Rotation.Identity;
+		if ( ( follows & InitializePositionModule.ShapeTransform.Scale ) == 0 ) tx.Scale = Vector3.One;
 
 		return tx;
 	}

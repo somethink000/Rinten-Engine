@@ -319,7 +319,7 @@ public partial class Scene : GameObject
 		LookForDetail();
 
 		using var timeScope = Time.ScopeInternal( TimeNow, TimeDelta );
-		using var gizmoScope = gizmoInstance?.Push();
+		using var gizmoScope = gizmoInstance?.PushInternal();
 
 		using ( PerformanceStats.Timings.Async.Scope() )
 		{

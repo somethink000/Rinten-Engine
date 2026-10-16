@@ -37,17 +37,27 @@ public abstract class Scatterer
 
 		hash.Add( GetType().Name );
 
-		foreach ( var property in typeDesc.Properties )
+		foreach ( var property in Hashed( typeDesc ) )
 		{
-			if ( !property.HasAttribute<PropertyAttribute>() )
-				continue;
-
-			var value = property.GetValue( this );
-			HashValue( ref hash, value );
+			HashValue( ref hash, property.GetValue( this ) );
 		}
 
 		return hash.ToHashCode();
 	}
+
+	//The [Property] members of each kind of scatterer, found once: the hash is how a clutter layer sees its settings change, asked every frame
+	private static PropertyDescription[] Hashed( TypeDescription type )
+	{
+		lock ( hashed )
+		{
+			if ( !hashed.TryGetValue( type, out var found ) )
+				hashed[type] = found = type.Properties.Where( x => x.HasAttribute<PropertyAttribute>() ).ToArray();
+
+			return found;
+		}
+	}
+
+	private static readonly Dictionary<TypeDescription, PropertyDescription[]> hashed = new();
 
 	private static void HashValue( ref HashCode hash, object value )
 	{

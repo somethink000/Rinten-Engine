@@ -49,11 +49,8 @@ public class SceneLineObject : SceneCustomObject
 		set => Attributes.Set( "EndCap", (int)value );
 	}
 
-	public FaceMode Face
-	{
-		get => (FaceMode)_csAttributes.GetInt( "FaceMode" );
-		set => _csAttributes.Set( "FaceMode", (int)value );
-	}
+	/// <summary>What the ribbon turns to face: the eye, or each point's own normal.</summary>
+	public FaceMode Face { get; set; }
 
 	public bool Wireframe
 	{
@@ -115,8 +112,7 @@ public class SceneLineObject : SceneCustomObject
 		}
 	}
 
-	private int _roundedCapSegments = 8;
-	private int _tessellationLevel = 1; //Number of subdivisions between left and right sides of each segment
+	private int _tessellationLevel = 1;
 
 	/// <summary>Number of tessellation subdivisions across the width of each line segment. 1 = no tessellation (just left and right), 2 = one subdivision in the middle, etc. Higher values create smoother curves and more detailed geometry but use more vertices.</summary>
 	public int TessellationLevel
@@ -125,9 +121,8 @@ public class SceneLineObject : SceneCustomObject
 		set => _tessellationLevel = Math.Max( 1, value );
 	}
 
-	private struct LinePoint( uint offset, in Vector3 position, in Vector3 normal, Color color, float width, float textureCoord )
+	private struct LinePoint( in Vector3 position, in Vector3 normal, Color color, float width, float textureCoord )
 	{
-		public uint Offset = offset;
 		public Vector3 Position = position;
 		public Vector3 Normal = normal;
 		public Color Color = color;
@@ -135,31 +130,12 @@ public class SceneLineObject : SceneCustomObject
 		public float TextureCoord = textureCoord;
 	}
 
-	private struct LineVertex()
-	{
-		[VertexLayout.Position] public Vector3 Position = default;
-		[VertexLayout.Normal] public Vector3 Normal = default;
-		[VertexLayout.Tangent] public Vector3 Tangent = default;
-		[VertexLayout.Color] public Color Color = default;
-		[VertexLayout.TexCoord] public Vector2 TextureCoord = default;
-	}
-
-	private static ComputeShader _cs => field ??= new( "line_cs" );
-	private RenderAttributes _csAttributes = new();
-	private GpuBuffer<LinePoint> _pointBuffer;
-	private GpuBuffer<LineVertex> _vertexBuffer;
-	private GpuBuffer<uint> _indexBuffer;
 	private static readonly SamplerState WrapSampler = new() { Filter = FilterMode.Anisotropic, MaxAnisotropy = 8, AddressModeU = TextureAddressMode.Wrap, AddressModeV = TextureAddressMode.Wrap };
 	private static readonly SamplerState ClampSampler = new() { Filter = FilterMode.Anisotropic, MaxAnisotropy = 8, AddressModeU = TextureAddressMode.Clamp, AddressModeV = TextureAddressMode.Clamp };
 	private LinePoint[] _points = [];
-	private readonly CommandList _commandList = new( "SceneLine" );
 	private BBox _bounds;
 
 	private int _pointCount;
-	private int _pointCapacity;
-
-	private int _indexCapacity;
-	private int _vertexCapacity;
 
 	public SceneLineObject( SceneWorld sceneWorld ) : base( sceneWorld )
 	{
@@ -195,176 +171,29 @@ public class SceneLineObject : SceneCustomObject
 			Array.Resize( ref _points, Math.Max( 8, _points.Length * 2 ) );
 		}
 
-		_points[_pointCount] = new LinePoint( 0, pos, normal, color, width, textureCoord );
+		_points[_pointCount] = new LinePoint( pos, normal, color, width, textureCoord );
 
 		_pointCount++;
 		_bounds = _bounds.AddPoint( pos );
 	}
 
-	//Calculate the number of vertices needed for a specific cap type
-	private int GetCapVertexCount( CapStyle capStyle )
-	{
-		return capStyle switch
-		{
-			CapStyle.None => 0,
-			CapStyle.Triangle => 1, //1 additional vertex (center)
-			CapStyle.Arrow => 3, //Additional triangle
-			CapStyle.Rounded => _roundedCapSegments + 1 + 1, //Multiple vertices for the rounded cap
-			_ => 0
-		};
-	}
-
-	//Calculate the number of indices needed for a specific cap type
-	private int GetCapIndexCount( CapStyle capStyle )
-	{
-		return capStyle switch
-		{
-			CapStyle.None => 0,
-			CapStyle.Triangle => 3, //One triangle (3 indices)
-			CapStyle.Arrow => 3,    //One triangle (3 indices)
-			CapStyle.Rounded => _roundedCapSegments * 3, //Multiple triangles (3 indices each)
-			_ => 0
-		};
-	}
-
+	//The ribbon is made from the points when a view draws it - see RenderSceneObject
 	public void EndLine()
 	{
 		Bounds = _bounds;
-
-		if ( _pointCount == 0 )
-			return;
-
-		var startCap = StartCap;
-		var endCap = EndCap;
-
-		if ( _pointCount > _pointCapacity )
-		{
-			MainThread.QueueDispose( _pointBuffer );
-
-			_pointCapacity = (int)(_pointCount * 1.5);
-			_pointBuffer = new GpuBuffer<LinePoint>( _pointCapacity, GpuBuffer.UsageFlags.Structured );
-		}
-
-		if ( CalculateIndexCount() > _indexCapacity )
-		{
-			MainThread.QueueDispose( _indexBuffer );
-
-			_indexCapacity = (int)(CalculateIndexCount() * 1.5);
-			_indexBuffer = new GpuBuffer<uint>( _indexCapacity, GpuBuffer.UsageFlags.Index | GpuBuffer.UsageFlags.Structured );
-		}
-
-		if ( CalculateVertexCount() > _vertexCapacity )
-		{
-			MainThread.QueueDispose( _vertexBuffer );
-
-			_vertexCapacity = (int)(CalculateVertexCount() * 1.5);
-			_vertexBuffer = new GpuBuffer<LineVertex>( _vertexCapacity, GpuBuffer.UsageFlags.Vertex | GpuBuffer.UsageFlags.Structured );
-		}
-
-		if ( Face == FaceMode.Cylinder )
-		{
-			//Unsupported on Cylinder
-			_csAttributes.Set( "StartCap", 0 );
-			_csAttributes.Set( "EndCap", 0 );
-		}
-		else
-		{
-			_csAttributes.Set( "StartCap", (int)startCap );
-			_csAttributes.Set( "EndCap", (int)endCap );
-		}
-
-		_csAttributes.Set( "TessellationLevel", _tessellationLevel );
-		_csAttributes.Set( "RoundedCapSegments", _roundedCapSegments );
-
-		//Nothing to build here any more: the ribbon is made from the points when the view draws it - see RenderSceneObject.
 	}
 
+	/// <summary>Drop every point, keeping the room they took.</summary>
 	public void Clear()
 	{
 		_pointCount = 0;
-
-		_pointCapacity = 0;
-		_vertexCapacity = 0;
-		_indexCapacity = 0;
-
-		MainThread.QueueDispose( _pointBuffer );
-		MainThread.QueueDispose( _vertexBuffer );
-		MainThread.QueueDispose( _indexBuffer );
-
-		_pointBuffer = default;
-		_vertexBuffer = default;
-		_indexBuffer = default;
-
-		_commandList.Reset();
-	}
-
-	private int CalculateIndexCount()
-	{
-		//With tessellation, each segment creates tessellationLevel * 2 triangles (tessellationLevel quads, each quad = 2 triangles, each triangle = 3 indices)
-		int indicesPerSegment = _tessellationLevel * 2 * 3;
-		int lineIndices = (_pointCount - 1) * indicesPerSegment;
-
-		//Add indices for caps
-		int capIndices = GetCapIndexCount( StartCap ) + GetCapIndexCount( EndCap );
-
-		return lineIndices + capIndices;
-	}
-
-	private int CalculateVertexCount()
-	{
-		//Basic line vertices (tessellationLevel + 1 vertices per point to create tessellationLevel segments across width)
-		int lineVertices = _pointCount * (_tessellationLevel + 1);
-
-		//Add vertices for caps
-		int capVertices = GetCapVertexCount( StartCap ) + GetCapVertexCount( EndCap );
-
-		return lineVertices + capVertices;
-	}
-
-	private void BuildCommandList()
-	{
-		_commandList.Reset();
-
-		var indexCount = CalculateIndexCount();
-
-		if ( indexCount < 6 )
-			return;
-
-		if ( !_pointBuffer.IsValid() || !_vertexBuffer.IsValid() || !_indexBuffer.IsValid() )
-			return;
-
-		//Upload point data to GPU (deferred to render thread)
-		_commandList.SetBufferData( _pointBuffer, _points, 0, _pointCount );
-
-		//Compute shader attributes
-		_commandList.Attributes.Set( "PointBuffer", (GpuBuffer)_pointBuffer );
-		_commandList.Attributes.Set( "VertexBuffer", (GpuBuffer)_vertexBuffer );
-		_commandList.Attributes.Set( "IndexBuffer", (GpuBuffer)_indexBuffer );
-		_commandList.Attributes.Set( "PointCount", _pointCount );
-		_commandList.Attributes.Set( "FaceMode", _csAttributes.GetInt( "FaceMode" ) );
-		_commandList.Attributes.Set( "StartCap", _csAttributes.GetInt( "StartCap" ) );
-		_commandList.Attributes.Set( "EndCap", _csAttributes.GetInt( "EndCap" ) );
-		_commandList.Attributes.Set( "TessellationLevel", _csAttributes.GetInt( "TessellationLevel" ) );
-		_commandList.Attributes.Set( "RoundedCapSegments", _csAttributes.GetInt( "RoundedCapSegments" ) );
-		_commandList.DispatchCompute( _cs, _pointCount, 1, 1 );
-
-		_commandList.ResourceBarrierTransition( (GpuBuffer)_vertexBuffer, ResourceState.UnorderedAccess, ResourceState.VertexOrIndexBuffer );
-		_commandList.ResourceBarrierTransition( (GpuBuffer)_indexBuffer, ResourceState.UnorderedAccess, ResourceState.VertexOrIndexBuffer );
-
-		//Setup and draw using sceneobjects attributes... this needs a good refactor.
-		if ( Lighting )
-		{
-			_commandList.SetupLighting( this, Attributes );
-		}
-
-		_commandList.DrawIndexed( _vertexBuffer, (GpuBuffer)_indexBuffer, Material, 0, indexCount, Attributes );
 	}
 
 	public override void RenderSceneObject()
 	{
 		base.RenderSceneObject();
 
-		//Ribbon is built on the CPU per view and drawn via the immediate path; command lists are stubs here
+		//Built on the CPU per view, which is what the facing needs, and drawn through the immediate path
 		DrawRibbon();
 	}
 
@@ -408,7 +237,7 @@ public class SceneLineObject : SceneCustomObject
 			if ( across.IsNearlyZero() ) across = Vector3.Cross( along, Vector3.Up );
 			if ( across.IsNearlyZero() ) across = Vector3.Cross( along, Vector3.Right );
 
-			//A point's width is its half-extent - what the trail hands over having halved it already, and what their compute pass extruded by.
+			//A point's width is its half-extent - the trail hands it over halved already
 			across = across.Normal * point.Width;
 
 			var colour = point.Color.ToColor32();

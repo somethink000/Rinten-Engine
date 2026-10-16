@@ -21,12 +21,7 @@ internal class FontManager : FontMapper, ICharacterMatcher
 	/// <summary>The face for a character the style's own face doesn't have: the first loaded face that has it, then whatever the system's font manager finds.</summary>
 	public SKTypeface MatchCharacter( string familyName, int weight, int width, SKFontStyleSlant slant, string[] bcp47, int character )
 	{
-		Face[] faces;
-
-		lock ( LoadedFonts )
-		{
-			faces = LoadedFonts.Values.ToArray();
-		}
+		var faces = Faces();
 
 		//The faces already open first, then the rest - opening each, which on a page is a download, only when
 		//no open face has the character. What a face that is never opened costs is its line in the index.
@@ -47,6 +42,24 @@ internal class FontManager : FontMapper, ICharacterMatcher
 
 		return SKFontManager.Default.MatchCharacter( familyName, weight, width, slant, bcp47, character );
 	}
+
+	//The loaded faces as they stand, copied again only once Generation says they changed: asked for every character a fallback is looked for
+	private Face[] Faces()
+	{
+		lock ( LoadedFonts )
+		{
+			if ( snapshot is null || snapshotGeneration != Generation )
+			{
+				snapshotGeneration = Generation;
+				snapshot = LoadedFonts.Values.ToArray();
+			}
+
+			return snapshot;
+		}
+	}
+
+	private Face[] snapshot;
+	private int snapshotGeneration;
 
 	//The characters a search of the unopened faces has been said for.
 	private static readonly HashSet<int> saidOpening = new();

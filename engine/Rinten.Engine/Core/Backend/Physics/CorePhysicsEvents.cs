@@ -25,6 +25,9 @@ internal sealed unsafe partial class CorePhysicsEvents
 	}
 
 	private readonly HashSet<Pair> touching = new();
+
+	//The copy DispatchPersists walks, kept between steps
+	private readonly List<Pair> walking = new();
 	private readonly List<Pair> began = new();
 	private readonly CorePhysics.ContactEvent[] events = new CorePhysics.ContactEvent[MaxEvents];
 
@@ -117,7 +120,10 @@ internal sealed unsafe partial class CorePhysicsEvents
 		if ( touching.Count == 0 ) return;
 
 		//Handlers can destroy shapes, so walk a copy and prune as we go.
-		foreach ( var pair in touching.ToArray() )
+		walking.Clear();
+		walking.AddRange( touching );
+
+		foreach ( var pair in walking )
 		{
 			if ( began.Contains( pair ) ) continue;
 

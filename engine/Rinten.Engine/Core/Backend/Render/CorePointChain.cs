@@ -914,18 +914,48 @@ internal static partial class CorePointChain
 				}
 			}
 
-			//And the finishes of a frame drawn aside, which carry the run beside bloom or passes - see CorePortableGlow
-			foreach ( var finish in CorePortableGlow.ChainRequests( ScreenKeyFor( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( chain ) ) ) )
-			{
-				if ( CoreShaderCache.Words( finish.Source, finish.Directory, finish.Entry, finish.Stage, CoreShaderCache.Target, "point effects in the finish" ) is null )
-				{
-					failed++;
-					log.Warning( $"the glow's {finish.Entry} with the point effects did not compile for {CoreShaderCache.Target}: {CoreRenderDevice.ShaderError}" );
-				}
-				else stages++;
-			}
-
 			runs++;
+		}
+
+		//And the finishes of a frame drawn aside, which carry the run beside bloom or passes - see CorePortableGlow. For every run an
+		//effect switched off makes as well, as the compose is baked: a camera whose effect fades to nothing lays a shorter run, and
+		//two stages a run cost little against a page that would draw it with the curve alone
+		foreach ( var run in asked.Values.ToArray() )
+		{
+			if ( run.Length == 0 || run.Length > 30 ) continue;
+
+			var made = 0;
+
+			for ( var gone = 0; gone < run.Length && made < 64; gone++ )
+			{
+				for ( long mask = 0; mask < 1L << run.Length && made < 64; mask++ )
+				{
+					if ( System.Numerics.BitOperations.PopCount( (ulong)mask ) != gone ) continue;
+
+					var subset = new List<Point>( run.Length + 1 );
+
+					for ( var i = 0; i < run.Length; i++ )
+					{
+						if ( ( mask & ( 1L << i ) ) == 0 ) subset.Add( run[i] );
+					}
+
+					WithCurve( subset );
+
+					if ( !Foldable( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( subset ) ) ) continue;
+
+					made++;
+
+					foreach ( var finish in CorePortableGlow.ChainRequests( ScreenKeyFor( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( subset ) ) ) )
+					{
+						if ( CoreShaderCache.Words( finish.Source, finish.Directory, finish.Entry, finish.Stage, CoreShaderCache.Target, "point effects in the finish" ) is null )
+						{
+							failed++;
+							log.Warning( $"the glow's {finish.Entry} with the point effects did not compile for {CoreShaderCache.Target}: {CoreRenderDevice.ShaderError}" );
+						}
+						else stages++;
+					}
+				}
+			}
 		}
 
 		log.Info( $"{runs} of {asked.Count} runs of point effects compiled into {stages} surface stages for {CoreShaderCache.Target} ({failed} did not)" );

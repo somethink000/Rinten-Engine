@@ -127,10 +127,9 @@ class ImportHeightmapPopup : Dialog
 			heightmap = ResampleHeightmap( heightmap, Settings.Resolution, realResolution );
 		}
 
-		terrain.Storage.SetResolution( realResolution );
-		terrain.Storage.HeightMap = heightmap;
+		terrain.Storage.MakeFromHeights( heightmap, realResolution );
 
-		//Recreate GPU textures, mesh, and collider with the new heightmap data
+		//The chunks and collider made again from the new ground
 		terrain.Create();
 
 		Close();

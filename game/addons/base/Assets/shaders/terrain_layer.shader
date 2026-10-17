@@ -31,9 +31,6 @@ PARAMETERS
 	//What this layer's height counts for when the ground decides which of two layers takes a pixel. Only read where the terrain blends by height at all.
 	float g_flHeightBlend < Default( 1.0 ); Range( 0.1, 10.0 ); UiGroup( "Terrain" ); >;
 
-	//How far the ground is pushed out along its normal where this layer is painted. Nothing without a height map to push it by.
-	float g_flDisplacement < Default( 0.0 ); Range( 0.0, 10.0 ); UiGroup( "Terrain" ); >;
-
 	//Whether the tiling is broken up, for a layer whose repeat is obvious from the air - sand, gravel, anything without features to hide the seam.
 	bool g_bNoTiling < Default( 0 ); UiGroup( "Terrain" ); >;
 

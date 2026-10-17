@@ -31,8 +31,17 @@ V2F MainClusterVs( uint vid : SV_VertexID )
 	return o;
 }
 
+//The depth-only build writes no colour, as its pass has none: Shade runs for its cut-out alone - see CoreShaderFile.Stage.ClusterDepthPixel
+#ifdef DEPTH_ONLY
+#define CLUSTER_OUT void
+#define CLUSTER_RETURN( shaded ) shaded
+#else
+#define CLUSTER_OUT Out
+#define CLUSTER_RETURN( shaded ) return shaded
+#endif
+
 [shader("fragment")]
-Out MainClusterPs( V2F i, bool front : SV_IsFrontFace )
+CLUSTER_OUT MainClusterPs( V2F i, bool front : SV_IsFrontFace )
 {
 	ClusterInstance( i.depthId );
 
@@ -46,7 +55,7 @@ Out MainClusterPs( V2F i, bool front : SV_IsFrontFace )
 #endif
 #endif
 
-	return Shade( i, facing );
+	CLUSTER_RETURN( Shade( i, facing ) );
 }
 
 #ifdef VELOCITY

@@ -25,39 +25,6 @@ internal static class TerrainImportHelper
 		return newPixmap.GetPixelSpan<ushort>().ToArray();
 	}
 
-	//Nearest-neighbor resample of a packed uint control map. Must use nearest-neighbor to preserve the packed material bit fields.
-	internal static UInt32[] ResampleControlMap( UInt32[] original, int originalSize, int newSize )
-	{
-		var result = new UInt32[newSize * newSize];
-		for ( int y = 0; y < newSize; y++ )
-		{
-			int srcY = Math.Clamp( (int)MathF.Round( (float)y / Math.Max( newSize - 1, 1 ) * (originalSize - 1) ), 0, originalSize - 1 );
-			for ( int x = 0; x < newSize; x++ )
-			{
-				int srcX = Math.Clamp( (int)MathF.Round( (float)x / Math.Max( newSize - 1, 1 ) * (originalSize - 1) ), 0, originalSize - 1 );
-				result[y * newSize + x] = original[srcY * originalSize + srcX];
-			}
-		}
-		return result;
-	}
-
-	//Resamples a TerrainStorage to a new resolution in-place. HeightMap is bilinearly interpolated via SkiaSharp; ControlMap uses nearest-neighbor.
-	internal static void ResampleStorage( TerrainStorage storage, int newResolution )
-	{
-		if ( newResolution == storage.Resolution )
-			return;
-
-		var oldHeightMap = (ushort[])storage.HeightMap.Clone();
-		var oldControlMap = (UInt32[])storage.ControlMap.Clone();
-		int oldRes = storage.Resolution;
-
-		//SetResolution allocates fresh arrays and fixes the Resolution property (private set)
-		storage.SetResolution( newResolution );
-
-		storage.HeightMap = ResampleHeightmap( oldHeightMap, oldRes, newResolution );
-		storage.ControlMap = ResampleControlMap( oldControlMap, oldRes, newResolution );
-	}
-
 	internal static int RoundDownToPowerOfTwo( int value )
 	{
 		value = value | (value >> 1);

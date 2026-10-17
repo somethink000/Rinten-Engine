@@ -108,29 +108,19 @@ public record struct CompactTerrainMaterial
 [AssetType( Name = "Terrain", Extension = "terrain", Category = "World", Icon = "terrain" )]
 public partial class TerrainStorage : GameResource
 {
+	//The mesh, and in a file from before there was one the height and control maps it is made from once and never written again - see MakeMesh
 	[JsonInclude, JsonPropertyName( "Maps" )] private TerrainMapBlob Maps { get; set; } = new();
 
-	[JsonIgnore, Hide]
-	public ushort[] HeightMap
-	{
-		get => Maps.HeightMap;
-		set => Maps.HeightMap = value;
-	}
+	//How many cells a side such a file's maps are; nought once the mesh is made
+	[JsonInclude, JsonIgnore( Condition = JsonIgnoreCondition.WhenWritingDefault )] private int Resolution { get; set; }
 
-	[JsonIgnore, Hide]
-	public UInt32[] ControlMap
-	{
-		get => Maps.SplatMap;
-		set => Maps.SplatMap = value;
-	}
-
-	/// <summary>The ground itself. Made from the maps the first time it is asked for, in a terrain that has none of its own yet.</summary>
+	/// <summary>The ground itself. Made the first time it is asked for: from an old file's maps, or flat.</summary>
 	[JsonIgnore, Hide]
 	public TerrainMesh Mesh
 	{
 		get
 		{
-			if ( Maps.Mesh is null ) BuildMeshFromMaps();
+			if ( Maps.Mesh is null ) MakeMesh();
 			return Maps.Mesh;
 		}
 		set => Maps.Mesh = value;
@@ -142,21 +132,35 @@ public partial class TerrainStorage : GameResource
 	/// <summary>How long an edge of the ground is kept under a brush, in metres: longer ones are split and shorter ones folded as the ground is pulled about, so a cave's walls are as finely made as the hill it was dug into.</summary>
 	public float EdgeLength { get; set; } = 1.0f;
 
-	/// <summary>Makes the mesh again out of the height map and the control map - a new terrain, an imported height map, a file from before there was a mesh. Whatever was sculpted since is gone.</summary>
-	public void BuildMeshFromMaps()
+	/// <summary>The ground made again from a height map - <paramref name="side"/> by <paramref name="side"/> heights over the terrain's size, the full range its height - painted with its first layer. Whatever was sculpted is gone.</summary>
+	public void MakeFromHeights( ushort[] heights, int side )
 	{
-		if ( Resolution < 2 || HeightMap is null || HeightMap.Length < Resolution * Resolution
-			|| ControlMap is null || ControlMap.Length < Resolution * Resolution )
-		{
-			SetMaps( Resolution >= 2 ? Resolution : 512 );
-		}
-
-		Maps.Mesh = TerrainMesh.FromHeights( HeightMap, ControlMap, Resolution, TerrainSize, TerrainHeight );
-		EdgeLength = MathF.Max( TerrainSize / Math.Max( 1, Resolution ), 0.05f );
+		Maps.Mesh = TerrainMesh.FromHeights( heights, null, side, TerrainSize, TerrainHeight );
+		EdgeLength = MathF.Max( TerrainSize / Math.Max( 1, side ), 0.05f );
 	}
 
-	[JsonInclude]
-	public int Resolution { get; private set; }
+	//An old file's maps made into the mesh and let go of; anything else is a flat ground of edges the length the brush keeps
+	private void MakeMesh()
+	{
+		var side = Resolution;
+		var heights = Maps.HeightMap;
+		var control = Maps.SplatMap;
+
+		if ( side >= 2 && heights is not null && heights.Length >= side * side )
+		{
+			Maps.Mesh = TerrainMesh.FromHeights( heights, control, side, TerrainSize, TerrainHeight );
+			EdgeLength = MathF.Max( TerrainSize / side, 0.05f );
+		}
+		else
+		{
+			side = Math.Clamp( (int)MathF.Round( TerrainSize / MathF.Max( EdgeLength, 0.05f ) ), 2, 2048 );
+			Maps.Mesh = TerrainMesh.FromHeights( new ushort[side * side], null, side, TerrainSize, TerrainHeight );
+		}
+
+		Maps.HeightMap = Array.Empty<ushort>();
+		Maps.SplatMap = Array.Empty<uint>();
+		Resolution = 0;
+	}
 
 	/// <summary>Uniform world size of the width and length of the terrain.</summary>
 	public float TerrainSize { get; set; }
@@ -215,41 +219,9 @@ public partial class TerrainStorage : GameResource
 
 	public TerrainStorage()
 	{
-		//Half a kilometre across and a quarter of one tall, in metres. These were twenty and
-		//ten thousand, which is that same terrain in inches - read as metres it was a continent.
-		SetResolution( 512 );
+		//Half a kilometre across and a quarter of one tall, in metres.
 		TerrainSize = 500;
 		TerrainHeight = 250;
-	}
-
-	protected override void PostLoad()
-	{
-		//A terrain with a mesh has no use for maps; one without is made from them the first time the mesh is asked for.
-		if ( Maps.Mesh is not null ) return;
-
-		if ( Maps.HeightMap.Length == 0 || Maps.SplatMap.Length == 0 )
-		{
-			SetMaps( Resolution > 0 ? Resolution : 512 );
-		}
-	}
-
-	/// <summary>A flat terrain of so many cells a side, in place of whatever there was.</summary>
-	public void SetResolution( int resolution )
-	{
-		SetMaps( resolution );
-		Maps.Mesh = null;
-	}
-
-	private void SetMaps( int resolution )
-	{
-		Resolution = resolution;
-
-		HeightMap = new ushort[Resolution * Resolution];
-		ControlMap = new UInt32[Resolution * Resolution];
-
-		//Initialize compact control map with material 0
-		var compactMaterial = new CompactTerrainMaterial( 0 );
-		ControlMap.AsSpan().Fill( compactMaterial.Packed );
 	}
 
 	//Stores heightmaps and control maps. Serializes as a binary blob for efficiency,
@@ -267,6 +239,13 @@ public partial class TerrainStorage : GameResource
 		//BlobData — binary serialization into the _d sidecar / scene_d file
 		public override void Serialize( ref Writer writer )
 		{
+			//Nothing made yet: a flat ground, made again on load
+			if ( Mesh is null && HeightMap.Length == 0 )
+			{
+				writer.Stream.Write( 0 );
+				return;
+			}
+
 			//The mesh where there is one, and nothing else: the maps it was made from are not the
 			//terrain any more, and a terrain sculpted into caves cannot be put back into them.
 			if ( Mesh is not null )

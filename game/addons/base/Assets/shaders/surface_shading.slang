@@ -287,12 +287,20 @@ struct Surface
 #endif
 };
 
-//The colour, and how much of a mirror the surface is for the passes that come after and never saw it drawn.
+//The colour, and how much of a mirror the surface is and how rough, for the passes that come after and never saw it drawn.
 struct Shaded
 {
 	float3 colour;
 	float mirror;
+	float roughness;
 };
+
+//The world's second picture, eight bits a channel: the normal in rgb shortened by the roughness - so a mirror keeps the
+//normal's whole precision, and a writer that keeps a whole normal says a mirror - and the mirror weight in a. See SceneRoughness
+float4 SurfaceWord( float3 normal, float roughness, float mirror )
+{
+	return float4( ( normal * ( 1.0 - ( 0.8 * min( roughness, 0.625 ) ) ) ) * 0.5 + 0.5, mirror );
+}
 
 //Lays the frame's decals over the surface before lighting, in order, each by its own alpha
 void ApplyDecals( inout Surface s )
@@ -894,10 +902,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	Shaded o;
 	o.colour = shaded;
 
-	//Mirror weight for the SSR pass: the exact environment weight used here, gone by half rough
+	//Mirror weight for the SSR pass: the exact environment weight used here, gone by 0.625 rough, where its rays are GGX's - see reflection.shader
 	float mirror = LightStrength( reflectance ) * reach;
 
-	o.mirror = mirror * saturate( 1.0 - ( roughness * 2.0 ) );
+	o.mirror = mirror * saturate( 1.0 - ( roughness * 1.6 ) );
+	o.roughness = roughness;
 
 	return o;
 }

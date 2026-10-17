@@ -121,7 +121,8 @@ struct FrameData
 	//Area lamps' LTC tables by table index: inverse matrix x, magnitude and Fresnel y - see CoreAreaLights
 	float4 area;
 
-	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; spare yzw
+	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; one plus
+	//the frame's turn of hashed cut-outs y, nought where no temporal history gathers them (foliage.shader); spare zw
 	float4 shadow;
 
 	//The portable frame's bake (CoreBakedLighting.Portable): the sheet's light half wide x and high y, nought for none,

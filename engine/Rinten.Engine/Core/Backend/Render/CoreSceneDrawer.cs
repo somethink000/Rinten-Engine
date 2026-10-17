@@ -1629,6 +1629,9 @@ internal sealed partial class CoreSceneDrawer
 	//Where this viewport was looking the frame before, and whether there was one. Per drawer,
 	//which is per viewport: two views of one scene are two cameras and each has its own last frame.
 	private System.Numerics.Matrix4x4 previousViewProjection;
+
+	//Which turn of the hashed cut-outs this frame is - see SetHashedCut
+	private int hashedTurn;
 	private bool hasPrevious;
 
 	//Pipelines for viewport furniture (lines, gizmos, billboards, UI); static so previews reuse them
@@ -2334,8 +2337,15 @@ internal sealed partial class CoreSceneDrawer
 		CoreSceneRenderer.SetPrevious( frame, previousJittered );
 
 		if ( System.Numerics.Matrix4x4.Invert( drawnViewProjection, out var drawnToWorld ) )
+		{
 			upscaler.ClipToPrevious = drawnToWorld * previousJittered;
+			CoreRenderDevice.WorldBack( upscaler.ClipToPrevious );
+		}
 		CoreSceneRenderer.SetMipBias( frame, upscaler.MipBias );
+
+		//A turn of the cut-out threshold a frame, over as many frames as a history gathers - see foliage.shader
+		hashedTurn = ( hashedTurn + 1 ) & 63;
+		CoreSceneRenderer.SetHashedCut( frame, upscaler.Temporal ? 1 + hashedTurn : 0 );
 
 		debugView = camera.DebugMode != SceneCameraDebugMode.Normal
 			? camera.DebugMode
@@ -2906,6 +2916,16 @@ internal sealed partial class CoreSceneDrawer
 			readyChain = warmChain;
 
 		Between( camera, offscreen, near, far, Rinten.Rendering.Stage.AfterSkybox );
+
+		//What the upscaler's history must not trust is what is laid over the opaque world next: the world as it stands is kept to tell it by
+		if ( upscaling && offscreen && ( translucent.Count > 0 || CoreImmediate.Instanced.Length > 0 || CoreImmediate.Blocks.Length > 0 ) )
+		{
+			CoreRenderDevice.EndTarget();
+			upscaler.KeepOpaque( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene ) );
+
+			if ( !CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Scene, camera.BackgroundColor, clearFirst: false ) )
+				Log.Warning( $"the world's pass would not reopen for its glass: {CoreRenderDevice.Description}" );
+		}
 
 		CoreRenderDevice.ZoneBegin( "world glass" );
 		FurthestFirst( translucent, translucentOrder );

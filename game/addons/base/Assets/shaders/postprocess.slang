@@ -95,7 +95,10 @@ float3 SceneColour( float2 uv ) { return FramePicture( g_vFramePictures.x, uv ).
 //world's own picture - see surface_standard.slang - so a pass can tell a wall from a floor without working it out from the depth.
 float4 SceneSurface( float2 uv ) { return FramePicture( g_vFramePictures.y, uv ); }
 
-float3 SceneNormal( float2 uv ) { return SceneSurface( uv ).xyz * 2.0 - 1.0; }
+float3 SceneNormal( float2 uv ) { return normalize( SceneSurface( uv ).xyz * 2.0 - 1.0 ); }
+
+//How rough the surface is, up to where it stops being a mirror - see SurfaceWord in surface_shading.slang
+float SceneRoughness( float2 uv ) { return saturate( ( 1.0 - length( SceneSurface( uv ).xyz * 2.0 - 1.0 ) ) / 0.8 ); }
 
 //The depth as it was written: nought at the near plane, one at the far - and one where nothing was drawn, which is the sky.
 float SceneDepthRaw( float2 uv ) { return FramePicture( g_vFramePictures.z, uv ).r; }

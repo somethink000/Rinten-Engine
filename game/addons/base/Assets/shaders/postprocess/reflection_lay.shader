@@ -14,7 +14,7 @@ FEATURES
 
 PARAMETERS
 {
-	//What reflection.shader made, by its place in the table.
+	//What reflection.shader resolved, by its place in the table.
 	float g_flReflection < Attribute( "Reflection" ); >;
 
 	//How much of a mirror a mirror is.

@@ -750,13 +750,20 @@ internal static unsafe partial class VkFrame
 		}
 
 		if ( p?.Fovea is null ) return null;
-		if ( p.Extent.Width != p.ScreenExtent.Width || p.Extent.Height != p.ScreenExtent.Height ) return null;
+
+		//An adaptive map takes the world at its own size, smaller than the window under an upscaler - see LayRates
+		if ( !p.Fovea.Adaptive && ( p.Extent.Width != p.ScreenExtent.Width || p.Extent.Height != p.ScreenExtent.Height ) ) return null;
 
 		var layers = VkSwapchain.currentView?.Layers ?? 1u;
 		if ( layers > 1 && !bothEyes ) return null;
 
 		var map = VkFovea.Prepare( frame, p, p.Extent, layers );
-		if ( map is not null ) map.DrawnWith = true;
+
+		if ( map is not null )
+		{
+			map.DrawnWith = true;
+			map.Back = AdaptiveBack;
+		}
 
 		return map;
 	}

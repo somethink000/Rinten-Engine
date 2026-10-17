@@ -337,6 +337,12 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.WorldShades( surfaces ? 1 : 0 );
 	}
 
+	/// <summary>The world drawn next's clip space into its frame before's, which its adaptive rates follow the view by.</summary>
+	public static void WorldBack( in System.Numerics.Matrix4x4 clipToPrevious )
+	{
+		if ( CoreNative.Available ) CoreRender.WorldBack( clipToPrevious );
+	}
+
 	/// <summary>Says the world's drawing on the screen is over - see <see cref="InterruptScreen"/>.</summary>
 	public static void ResumeScreen()
 	{

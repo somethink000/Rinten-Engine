@@ -244,6 +244,9 @@ internal static unsafe class VkFovea
 		public ImageView View;
 		public ImageLayout Layout;
 
+		/// <summary>An adaptive map's world, clip space into the frame before's, as the frame drawn with it was - what its next rates follow the view by.</summary>
+		public System.Numerics.Matrix4x4 Back = System.Numerics.Matrix4x4.Identity;
+
 		/// <summary>The pixels it was made to cover, and how many layers.</summary>
 		public Extent2D For;
 		public uint Layers;

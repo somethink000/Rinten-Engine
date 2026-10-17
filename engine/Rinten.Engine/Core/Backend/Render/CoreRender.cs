@@ -484,6 +484,11 @@ internal static unsafe class CoreRender
 		if ( !Portable ) VkFrame.WorldShades( surfaces != 0 );
 	}
 
+	internal static void WorldBack( in System.Numerics.Matrix4x4 clipToPrevious )
+	{
+		if ( !Portable ) VkFrame.AdaptiveBack = clipToPrevious;
+	}
+
 	//The near end of the depth range the next draws are squeezed into - see VkFrame.SetDepthCeiling.
 	internal static void SetDepthCeiling( float ceiling )
 	{

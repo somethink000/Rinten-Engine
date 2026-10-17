@@ -1,14 +1,17 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader is - includes
 //and all - and a project may put its own file of this name in its assets to replace it. See CoreShaderCache.Pass.
 
-//Upscale passes: TemporalCs (TAA/upscaler), EasuCs (FSR1; its RCAS is in compose.slang), MotionCs (full motion)
+//Upscale passes: TemporalCs (TAA/upscaler), EasuCs (FSR1; its RCAS is in compose.slang), MotionCs (full motion),
+//ReactiveCs (where glass and sprites changed the world, which a history should not be trusted with)
 
 #include "postprocess.slang"
 
 //What is stored into: the motion pass's picture is two half floats, every other pass's four - and a stored picture
 //has to be declared in its own format, so the motion pass is its own build. See CoreUpscaler.MotionDefines.
-#ifdef UPSCALE_MOTION
+#if defined( UPSCALE_MOTION )
 [[vk::binding(0,2)]] [format("rg16f")] RWTexture2D<float4> g_out;
+#elif defined( UPSCALE_SINGLE )
+[[vk::binding(0,2)]] [format("r16f")] RWTexture2D<float4> g_out;
 #else
 [[vk::binding(0,2)]] [format("rgba16f")] RWTexture2D<float4> g_out;
 #endif
@@ -136,6 +139,24 @@ void CopyCs( uint3 id : SV_DispatchThreadID )
 	if ( any( float2( id.xy ) >= size ) ) return;
 
 	g_out[id.xy] = float4( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb, 1.0 );
+}
+
+//---- reactivity --------------------------------------------------------------
+
+//How much of a texel what was laid over the opaque world changed, as AMD's generated reactive mask: the largest channel's
+//step as the eye sees it, nothing under a small one, at most 0.9 so a texel never forgets its history whole
+[numthreads(8, 8, 1)]
+void ReactiveCs( uint3 id : SV_DispatchThreadID )
+{
+	float2 size = g_vFrameSize.xy;
+	if ( any( float2( id.xy ) >= size ) ) return;
+
+	float3 final = Squeeze( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb );
+	float3 opaque = Squeeze( Texel( g_vFramePictures.y, int2( id.xy ), size ).rgb );
+
+	float step = Max3( abs( final - opaque ) );
+
+	g_out[id.xy] = float4( saturate( ( step - 0.02 ) * 4.0 ) * 0.9, 0.0, 0.0, 0.0 );
 }
 
 //---- the temporal pass -------------------------------------------------------
@@ -315,6 +336,9 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 		//And a history carried a long way has been resampled every frame of the way: it keeps less of itself the faster the pixel goes.
 		float speed = length( backwards * outSize );
 		gathered *= 1.0 / ( 1.0 + speed * 0.05 );
+
+		//Glass, particles and sprites move over what the motion follows: where they changed the picture, the history counts less
+		if ( g_vFrameParams.w > 0.5 ) gathered *= 1.0 - Texel( g_vFrameParams.w, clamp( nearest, int2( 0, 0 ), last ), inSize ).r;
 
 		//This frame's samples count by how close they fell to this pixel - a sample right
 		//on it is a whole frame's worth, one between output pixels a fraction of one.

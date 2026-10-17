@@ -241,7 +241,7 @@ internal sealed class CoreFsr3
 	//-- the frame ----------------------------------------------------------------
 
 	//One frame of it: the world's picture, depth and motion in, the window's picture out. False where it could not, and the caller shows something else.
-	internal bool Run( ulong colour, ulong depth, ulong motion, ulong output,
+	internal bool Run( ulong colour, ulong depth, ulong motion, ulong reactive, ulong output,
 		(int Width, int Height) render, (int Width, int Height) display, Vector2 jitter,
 		float near, float far, float field, float delta, bool reset, float exposure )
 	{
@@ -380,7 +380,7 @@ internal sealed class CoreFsr3
 				( ( render.Width / 2 ) + 7 ) / 8, ( ( render.Height / 2 ) + 7 ) / 8 ) &&
 
 			Dispatch( Pass.PrepareReactivity,
-				[0, Texture( dilatedMotion ), Texture( dilatedDepth ), 0, 0, Texture( accumulationRead ),
+				[0, Texture( dilatedMotion ), Texture( dilatedDepth ), reactive, 0, Texture( accumulationRead ),
 					Texture( shadingChange ), Texture( currentLuma ), 0],
 				[dilatedReactive, newLocks, accumulationWrite, reconstructedDepth], null,
 				srcGroupsX, srcGroupsY ) &&

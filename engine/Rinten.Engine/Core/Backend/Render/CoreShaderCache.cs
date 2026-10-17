@@ -1079,6 +1079,7 @@ internal static class EngineShaders
 		//The upscalers' passes - see CoreUpscaler; full frame only, as they need the world's picture and compute
 		( Upscale, "", UpscaleRuns, false ),
 		( Upscale, CoreUpscaler.MotionDefines, MotionRuns, false ),
+		( Upscale, CoreUpscaler.SingleDefines, ReactiveRuns, false ),
 		//And FSR 3's, one build a pass - see CoreFsr3.
 		.. Fsr3Builds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
@@ -1148,4 +1149,7 @@ internal static class EngineShaders
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =
 		[("MotionCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] ReactiveRuns =
+		[("ReactiveCs", CoreShaderCompiler.Stage.Compute)];
 }

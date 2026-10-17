@@ -95,6 +95,11 @@ internal sealed class CoreUpscaler
 	//What an edge pass or FSR 3 wrote.
 	private ulong carried;
 
+	//The world before glass and sprites were laid over it this frame, whether it was kept, and how much they changed each texel - see ReactiveCs
+	private ulong opaque;
+	private bool opaqueKept;
+	private ulong reactive;
+
 	//Every pixel's motion, for the upscalers that are handed one - see MotionCs.
 	private ulong motion;
 
@@ -120,8 +125,11 @@ internal sealed class CoreUpscaler
 
 		CoreRenderDevice.ReleasePicture( carried );
 		CoreRenderDevice.ReleasePicture( motion );
+		CoreRenderDevice.ReleasePicture( opaque );
+		CoreRenderDevice.ReleasePicture( reactive );
 
-		carried = motion = 0;
+		carried = motion = opaque = reactive = 0;
+		opaqueKept = false;
 		historyWritten = false;
 		keptDisplay = default;
 		keptRender = default;
@@ -181,8 +189,45 @@ internal sealed class CoreUpscaler
 		}
 		finally
 		{
+			opaqueKept = false;
 			CoreRenderDevice.ZoneEnd();
 		}
+	}
+
+	//Keeps the world's picture as it stands before glass and sprites are laid over it, for the reactive mask - see Reactivity
+	internal void KeepOpaque( ulong colour )
+	{
+		if ( Kind is not ( CoreUpscale.Kind.Temporal or CoreUpscale.Kind.Fsr3 ) || colour == 0 || !EnsurePipelines() ) return;
+
+		var (width, height) = RenderSize;
+		if ( Keep( ref opaque, CoreRender.PictureKind.Hdr, width, height ) == 0 ) return;
+
+		CoreRenderDevice.ReadyToRead( colour );
+
+		Span<byte> push = stackalloc byte[128];
+		Push( push, RenderSize, RenderSize, colour, 0, 0, 0, 0, 0.0f, 0.0f );
+
+		CoreRenderDevice.ZoneBegin( "opaque kept" );
+		opaqueKept = Dispatch( copyPipeline, opaque, push, width, height );
+		CoreRenderDevice.ZoneEnd();
+	}
+
+	//How much what was laid over the opaque world changed each texel this frame, as a texture; nought where nothing was
+	private ulong Reactivity( ulong colour )
+	{
+		if ( !opaqueKept ) return 0;
+
+		var (width, height) = RenderSize;
+		if ( Keep( ref reactive, CoreRender.PictureKind.Single, width, height ) == 0 ) return 0;
+
+		Span<byte> push = stackalloc byte[128];
+		Push( push, RenderSize, RenderSize, colour, CoreRenderDevice.PictureTexture( opaque ), 0, 0, 0, 0.0f, 0.0f );
+
+		CoreRenderDevice.ZoneBegin( "reactive" );
+		var ran = Dispatch( reactivePipeline, reactive, push, width, height );
+		CoreRenderDevice.ZoneEnd();
+
+		return ran ? CoreRenderDevice.PictureTexture( reactive ) : 0;
 	}
 
 	//The last Run's picture as a texture, for a pass that reads it by its place in the table - see CoreSceneDrawer.
@@ -249,6 +294,10 @@ internal sealed class CoreUpscaler
 
 		var floats = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( push );
 
+		//Where glass and sprites changed the world - see ReactiveCs
+		var reacting = Reactivity( colour );
+		floats[15] = reacting == 0 ? 0.0f : CoreSceneDrawer.Indexed( reacting );
+
 		//How much a pixel may have gathered: more the more it is upscaled, since each frame then lands fewer samples near any one pixel.
 		var upscale = DisplaySize.Width / (float)RenderSize.Width;
 
@@ -288,7 +337,7 @@ internal sealed class CoreUpscaler
 		fsr3 ??= new CoreFsr3();
 
 		//Its RCAS in the compose, as the engine's own upscaler's - a pass of its own wrote and read the window's picture again
-		if ( !fsr3.Run( colour, depth, CoreRenderDevice.PictureTexture( motion ), output,
+		if ( !fsr3.Run( colour, depth, CoreRenderDevice.PictureTexture( motion ), Reactivity( colour ), output,
 			RenderSize, DisplaySize, Jitter, near, far, field, delta, Reset, exposure ) ) return 0;
 
 		var sharpness = Rinten.Rendering.DrawSettings.Fsr3Sharpness;
@@ -368,12 +417,16 @@ internal sealed class CoreUpscaler
 	private static ulong temporalPipeline;
 	private static ulong easuPipeline;
 	private static ulong motionPipeline;
+	private static ulong reactivePipeline;
 	private static ulong copyPipeline;
 	private static int pipelinesBuilt = -1;
 	private static bool pipelinesFailed;
 
 	//The motion pass's build: it stores into two half floats - see upscale.slang.
 	internal const string MotionDefines = "#define UPSCALE_MOTION 1\n";
+
+	//And the reactive mask's: one half float - see ReactiveCs.
+	internal const string SingleDefines = "#define UPSCALE_SINGLE 1\n";
 
 	//The four passes, built the first time a frame wants one and again when the shaders change.
 	private static bool EnsurePipelines()
@@ -387,9 +440,10 @@ internal sealed class CoreUpscaler
 		temporalPipeline = Build( "TemporalCs", null );
 		easuPipeline = Build( "EasuCs", null );
 		motionPipeline = Build( "MotionCs", MotionDefines );
+		reactivePipeline = Build( "ReactiveCs", SingleDefines );
 		copyPipeline = Build( "CopyCs", null );
 
-		pipelinesFailed = temporalPipeline == 0 || easuPipeline == 0 || motionPipeline == 0 || copyPipeline == 0;
+		pipelinesFailed = temporalPipeline == 0 || easuPipeline == 0 || motionPipeline == 0 || copyPipeline == 0 || reactivePipeline == 0;
 
 		if ( pipelinesFailed )
 			Log.Warning( $"the upscaler's passes did not build: {CoreRenderDevice.ShaderError}" );
@@ -406,10 +460,10 @@ internal sealed class CoreUpscaler
 	//Every pass let go of, for a device going away.
 	internal static void DestroyPipelines()
 	{
-		foreach ( var pipeline in new[] { temporalPipeline, easuPipeline, motionPipeline, copyPipeline } )
+		foreach ( var pipeline in new[] { temporalPipeline, easuPipeline, motionPipeline, copyPipeline, reactivePipeline } )
 			if ( pipeline != 0 ) CoreRenderDevice.DestroyPipeline( pipeline );
 
-		temporalPipeline = easuPipeline = motionPipeline = copyPipeline = 0;
+		temporalPipeline = easuPipeline = motionPipeline = copyPipeline = reactivePipeline = 0;
 		pipelinesBuilt = -1;
 		pipelinesFailed = false;
 	}

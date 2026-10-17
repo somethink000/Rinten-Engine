@@ -249,6 +249,19 @@ Out Shade( V2F i, bool front )
 			//once. A cutout with a hard edge crawls as the eye moves; this is the cheapest thing that stops it.
 			float edge = ( opacity - cutoff ) / max( slope, 0.001 ) + 0.5;
 
+			//Under a temporal history, far leaves are cut against a threshold that turns every pixel and frame (hashed alpha,
+			//Wyman & McGuire 2017): the history gathers their coverage, where a fixed cut drops a leaf thinner than a pixel whole
+			float turn = g_frame[0].shadow.y;
+
+			if ( turn > 0.5 )
+			{
+				float far = saturate( ( LevelOf( g_color, uv ) - 2.0 ) * 0.5 );
+				float2 at = i.position.xy + ( ( turn - 1.0 ) * 5.588238 );
+				float noise = frac( 52.9829189 * frac( dot( at, float2( 0.06711056, 0.00583715 ) ) ) );
+
+				edge = lerp( edge, opacity >= noise ? 1.0 : 0.0, far );
+			}
+
 			if ( edge < 0.5 ) discard;
 
 			alpha = saturate( edge );
@@ -330,7 +343,7 @@ Out Shade( V2F i, bool front )
 	o.colour = float4( lit.colour, albedo.a );
 
 #ifdef TARGET_SCENE
-	o.surface = float4( normal * 0.5 + 0.5, lit.mirror );
+	o.surface = SurfaceWord( normal, lit.roughness, lit.mirror );
 #endif
 
 	//Tonemap when drawing straight to screen; alpha must be opaque or the Linux window shows through

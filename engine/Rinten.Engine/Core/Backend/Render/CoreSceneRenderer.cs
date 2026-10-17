@@ -1570,6 +1570,14 @@ internal static unsafe class CoreSceneRenderer
 	}
 
 	//Texture mip bias for this frame (see CoreUpscale.MipBias), in viewInfo's spare fourth lane
+	//One plus the frame's turn of hashed cut-outs, nought where no temporal history gathers them - see foliage.shader
+	internal static void SetHashedCut( float[] block, int turn )
+	{
+		if ( block is null || block.Length < ShadowFilterAt + 4 ) return;
+
+		block[ShadowFilterAt + 1] = turn;
+	}
+
 	internal static void SetMipBias( float[] block, float bias )
 	{
 		if ( block is null || block.Length < ShadowAt + 4 ) return;

@@ -2,7 +2,7 @@ using Rinten.Rendering;
 
 namespace Rinten;
 
-//Traces mirror rays through a nearest-depth chain into "Reflection", before sky and glass
+//Traces mirror and GGX rays through a nearest-depth chain into "Reflection", gathers them into a resolve, before sky and glass
 /// <summary>Reflects what is on the screen in the surfaces that are mirrors, traced through the depth.</summary>
 [Title( "Screen-Space Reflections" )]
 [Category( "Post Processing" )]
@@ -44,6 +44,17 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 		}
 	}
 
+	//This one's two resolves, one written while the other is read - see ResolvePs - named for it alone, as every view gathers its own
+	private readonly string[] resolves = [$"ReflectionResolve{++made}a", $"ReflectionResolve{made}b"];
+	private static int made;
+
+	private int written;
+	private int turn;
+
+	//What the last resolve was made at and when, so one from another size or a while ago is not gathered from
+	private Vector2 resolvedAt;
+	private float resolvedWhen = -1.0f;
+
 	private static Material Trace => field ??= Material.FromShader( "shaders/postprocess/reflection.shader" );
 	private static Material Lay => field ??= Material.FromShader( "shaders/postprocess/reflection_lay.shader" );
 
@@ -65,18 +76,40 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 		var reflection = cl.GetPicture( "Reflection", PictureFormat.Hdr,
 			sizeFactor: Math.Clamp( DownsampleRatio, 1, 8 ) );
 
+		turn = ( turn + 1 ) & 63;
+
 		cl.Attributes.Set( "Depths", depths.ColorTexture );
 		cl.Attributes.Set( "Bias", 0.02f );
 		cl.Attributes.Set( "Steps", (float)ReflectionSteps );
+		cl.Attributes.Set( "Turn", (float)turn );
 		cl.SetRenderTarget( reflection );
 		cl.Blit( Trace );
+		cl.ClearRenderTarget();
+
+		//Gathered over its neighbours and the frames before, into the resolve not read this frame
+		var size = Screen.Size;
+		var now = RealTime.Now;
+		var gathers = size == resolvedAt && now - resolvedWhen < 0.25f;
+
+		resolvedAt = size;
+		resolvedWhen = now;
+
+		var before = cl.GetPicture( resolves[1 - written], PictureFormat.Hdr, sizeFactor: Math.Clamp( DownsampleRatio, 1, 8 ) );
+		var resolved = cl.GetPicture( resolves[written], PictureFormat.Hdr, sizeFactor: Math.Clamp( DownsampleRatio, 1, 8 ) );
+		written = 1 - written;
+
+		cl.Attributes.Set( "Reflection", reflection.ColorTexture );
+		cl.Attributes.Set( "History", before.ColorTexture );
+		cl.Attributes.Set( "Accumulate", gathers ? 1.0f : 0.0f );
+		cl.SetRenderTarget( resolved );
+		cl.Blit( Trace, entry: "ResolvePs" );
 		cl.ClearRenderTarget();
 
 		InsertCommandList( cl, Stage.AfterOpaque, 50, "Reflections" );
 
 		var lay = NextList( "Reflections lay" );
 
-		lay.Attributes.Set( "Reflection", reflection.ColorTexture );
+		lay.Attributes.Set( "Reflection", resolved.ColorTexture );
 		lay.Attributes.Set( "Strength", 1.0f );
 		lay.Blit( Lay );
 

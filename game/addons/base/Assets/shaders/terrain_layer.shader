@@ -170,7 +170,7 @@ Out Shade( V2F i, bool front )
 	o.colour = float4( lit.colour, 1.0 );
 
 #ifdef TARGET_SCENE
-	o.surface = float4( normal * 0.5 + 0.5, lit.mirror );
+	o.surface = SurfaceWord( normal, lit.roughness, lit.mirror );
 #endif
 
 	//Tonemap here when this is the last pass; alpha is forced to 1 as Linux composites the window

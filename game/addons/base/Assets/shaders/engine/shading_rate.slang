@@ -26,6 +26,10 @@ cbuffer RatePush
 
 	//The largest change between neighbours a coarse fragment may hide, in the display's own units, nought to one.
 	float g_step;
+	uint3 g_pad;
+
+	//The world's clip space into the frame before's, the x, y and w columns - see VkFrame.LayRates
+	float4 g_back[3];
 };
 
 //Sixteen pixels square a group, whichever the map's square is: four squares of eight or one of sixteen. A group a square of eight was thirty-five
@@ -40,11 +44,23 @@ groupshared uint g_rough[8];
 static const uint TileSide = GroupPixels + 2;
 groupshared float g_luma[TileSide * TileSide];
 
-float Luma( int2 at )
+//Where what is at uv now was a frame before, at the far plane: the view's turn, which is most of what moves a picture
+float2 Back( float2 uv )
+{
+	float4 clip = float4( ( uv * 2.0 ) - 1.0, 1.0, 1.0 );
+	float3 before = float3( dot( clip, g_back[0] ), dot( clip, g_back[1] ), dot( clip, g_back[2] ) );
+
+	return before.z > 1e-6 ? ( ( ( before.xy / before.z ) * 0.5 ) + 0.5 ) - uv : float2( 0.0, 0.0 );
+}
+
+//A pixel of the world, g_width by g_height, read from the picture shown at whatever size it was shown, where it will be next
+//frame if the view keeps turning as it did: a step back there is a step on from here
+float Luma( int2 at, float2 ahead )
 {
 	at = clamp( at, int2( 0, 0 ), int2( int( g_width ) - 1, int( g_height ) - 1 ) );
 
-	float3 c = g_textures[g_picture].Load( int3( at, 0 ) ).rgb;
+	float2 uv = saturate( ( ( float2( at ) + 0.5 ) / float2( g_width, g_height ) ) + ahead );
+	float3 c = g_textures[g_picture].SampleLevel( uv, 0.0 ).rgb;
 	float y = dot( c, float3( 0.299, 0.587, 0.114 ) );
 
 	//Back into the display's steps where the view decoded them - of the brightness rather than of each channel, which is one
@@ -60,8 +76,11 @@ void main( uint3 group : SV_GroupID, uint3 lane : SV_GroupThreadID, uint flat : 
 
 	if ( flat < 8 ) g_rough[flat] = 0;
 
+	//Once for the group, about its middle: the turn moves sixteen pixels alike
+	float2 ahead = Back( ( float2( origin ) + ( GroupPixels * 0.5 ) ) / float2( g_width, g_height ) );
+
 	for ( uint i = flat; i < TileSide * TileSide; i += 64u )
-		g_luma[i] = Luma( origin + int2( i % TileSide, i / TileSide ) );
+		g_luma[i] = Luma( origin + int2( i % TileSide, i / TileSide ), ahead );
 
 	GroupMemoryBarrierWithGroupSync();
 

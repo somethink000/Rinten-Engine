@@ -2109,6 +2109,8 @@ internal sealed partial class CoreSceneDrawer
 		//The frame this thread is inside, for the commands a project records - see Drawing, and CommandList.
 		Drawing = this;
 
+		CoreRenderDevice.ZoneBegin( "frame setup" );
+
 		//The components that asked to be called at the render stages, as the scene has them
 		//now - see RunLists - and nothing left over from a frame that stopped half way.
 		CorePasses.EndFrame();
@@ -2176,7 +2178,11 @@ internal sealed partial class CoreSceneDrawer
 		//centimetres by default - cut them off. Five at most there; closer than that an eye cannot focus anyway.
 		if ( field is not null ) near = System.MathF.Min( near, 0.05f );
 
-		var far = System.MathF.Max( near + 0.001f, eyeView.ZFar );
+		var reach = System.MathF.Max( near + 0.001f, eyeView.ZFar );
+
+		//The far plane is flat, so ZFar on the axis is nearer than ZFar at a corner: pushed out until the corners
+		//reach it, so what is in reach stays drawn wherever it turns on screen
+		var far = field is null && !camera.Orthographic ? reach * CornerStretch( camera.RenderFieldOfView( aspect ), aspect ) : reach;
 
 		var projection = field is { } eyeFov
 			? eyeFov.Projection( near, far )
@@ -2211,6 +2217,8 @@ internal sealed partial class CoreSceneDrawer
 
 		//And whether it casts: a sun told to cast nothing has its pages neither baked nor read - see CoreSunPages
 		var sunCasts = hasSun && sunLight.Shadows;
+
+		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "frame block" );
 
@@ -2324,7 +2332,9 @@ internal sealed partial class CoreSceneDrawer
 		}
 
 		//What the camera hides by tag, for the cull and classic draws, once the tables are this frame's
+		CoreRenderDevice.ZoneBegin( "hidden" );
 		UpdateHidden( camera );
+		CoreRenderDevice.ZoneEnd();
 
 		//The classic draws: loose instances, ground, hand-drawn models; everything for a bake or edges
 		var everything = wireframe != 0;
@@ -2362,7 +2372,7 @@ internal sealed partial class CoreSceneDrawer
 			? new Vector3( frame[CoreSceneRenderer.SunAt], frame[CoreSceneRenderer.SunAt + 1], frame[CoreSceneRenderer.SunAt + 2] )
 			: Vector3.Up;
 
-		sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, far,
+		sunPages.Plan( frame, sunCasts && !overlayOnly, towards, sunLight?.ShadowDetail ?? 256.0f, position, reach,
 			Rinten.Rendering.DrawSettings.MeshLodPixels );
 
 		lampMaps.Plan( frame, CoreSceneRenderer.LightBlock, CoreSceneRenderer.FrameLights, CoreSceneRenderer.LightsInFrame,
@@ -2456,6 +2466,8 @@ internal sealed partial class CoreSceneDrawer
 		{
 			meshes = false;
 		}
+
+		CoreRenderDevice.ZoneBegin( "frame plan" );
 
 		var drawn = meshes && meshRender.Ready;
 
@@ -2582,6 +2594,8 @@ internal sealed partial class CoreSceneDrawer
 		//Let the pre-pass write the screen's depth directly when the frame shades onto the window
 		CoreRenderDevice.DepthOnScreen( viewport,
 			worldFinishes && CoreRenderDevice.DepthOnScreenPossible( viewport ) );
+
+		CoreRenderDevice.ZoneEnd();
 
 		//The shape of the world before its colour: the clusters, then the loose draws beside them, into the depth.
 		var clustersDrawn = false;
@@ -2712,6 +2726,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//Bakes planned for a frame whose depth never opened go back, or their slots read as drawn - but the portable
 		//frame has no depth block, and draws its sun's pages here the classic way, before the world reads them
+		CoreRenderDevice.ZoneBegin( "light views" );
 		if ( !lightsDrawn )
 		{
 			var portable = CoreRenderDevice.PortableFrame && !overlayOnly ? looseView : null;
@@ -2720,14 +2735,18 @@ internal sealed partial class CoreSceneDrawer
 			lampMaps.Draw( null, 1 + sunPages.ViewCount, portable );
 		}
 
+		CoreRenderDevice.ZoneEnd();
+
 		//The clusters' pixels first, a material at a time over the depth of material numbers; then the world's
 		//own picture opens over the real depth, keeping what was shaded, for everything drawn the classic way.
 		var offscreen = false;
 
 		//The 2D lighting's pictures, out of the sprites already queued, before the world's picture opens - see CoreLight2D.
 		//Overlay-only views too: the editor's 2D views are, and their sprites are lit the same over the finished picture
+		CoreRenderDevice.ZoneBegin( "light 2d" );
 		var light2d = !StereoPass &&
 			CoreLight2D.Draw( scene, camera, frame, pixels.Width, pixels.Height );
+		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "world opaque" );
 
@@ -3092,12 +3111,16 @@ internal sealed partial class CoreSceneDrawer
 
 		if ( Watched || gameView )
 		{
+			CoreRenderDevice.ZoneBegin( "report" );
+
 			CoreRenderProfiler.LastViewport = viewport;
 			CoreRenderProfiler.LogPeriodically( viewport );
 
 			Rinten.Diagnostics.PerfReport.LastViewportPixels = (long)pixels.Width * pixels.Height;
 
 			if ( CoreRenderProfiler.Enabled ) DrawProfilerOverlay();
+
+			CoreRenderDevice.ZoneEnd();
 		}
 	}
 
@@ -5919,6 +5942,15 @@ internal sealed partial class CoreSceneDrawer
 	private static ulong gizmoTrianglesCulledOverlay;
 	private static ulong gizmoTrianglesCulledTwo;
 	private static ulong gizmoTrianglesCulledOverlayTwo;
+
+	//Corner ray length over axis depth for a horizontal field; at most 4, for a lens near 180 degrees
+	internal static float CornerStretch( float fovDegrees, float aspect )
+	{
+		var across = System.MathF.Tan( System.Math.Clamp( fovDegrees, 1.0f, 179.0f ) * ( System.MathF.PI / 360.0f ) );
+		var up = across / System.MathF.Max( 0.001f, aspect );
+
+		return System.MathF.Min( System.MathF.Sqrt( 1.0f + across * across + up * up ), 4.0f );
+	}
 
 	//Camera projection, Y flipped for Vulkan.
 	internal static System.Numerics.Matrix4x4 ProjectionMatrix( bool orthographic, float fovDegrees,

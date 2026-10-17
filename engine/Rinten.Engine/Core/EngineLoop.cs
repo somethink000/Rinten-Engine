@@ -633,7 +633,8 @@ internal static class EngineLoop
 
 		//Everything that was going to draw has drawn. Our renderer holds one frame open across all
 		//of them - the game and the menu are one picture - so this is where it goes on the screen.
-		CoreGameRenderer.Present();
+		using ( Diagnostics.Performance.Scope( "Present" ) )
+			CoreGameRenderer.Present();
 	}
 
 	static Channel<IDisposable> FrameEndDisposables = Channel.CreateUnbounded<IDisposable>();

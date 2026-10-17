@@ -15,6 +15,9 @@ internal sealed class CoreUpscaler
 	//The translation after the projection that draws the world there - identity where not temporal.
 	internal System.Numerics.Matrix4x4 JitterMatrix { get; private set; } = System.Numerics.Matrix4x4.Identity;
 
+	//This frame's clip space straight into last frame's, as the frame block's two matrices make it - the temporal pass's reprojection
+	internal System.Numerics.Matrix4x4 ClipToPrevious { get; set; } = System.Numerics.Matrix4x4.Identity;
+
 	//How much sharper textures are read this frame - see CoreUpscale.MipBias.
 	internal float MipBias { get; private set; }
 
@@ -89,8 +92,7 @@ internal sealed class CoreUpscaler
 	private int historyNow;
 	private bool historyWritten;
 
-	//What the sharpening wrote, and what an edge pass or FSR 3 wrote before it.
-	private ulong sharpened;
+	//What an edge pass or FSR 3 wrote.
 	private ulong carried;
 
 	//Every pixel's motion, for the upscalers that are handed one - see MotionCs.
@@ -116,11 +118,10 @@ internal sealed class CoreUpscaler
 			history[i] = 0;
 		}
 
-		CoreRenderDevice.ReleasePicture( sharpened );
 		CoreRenderDevice.ReleasePicture( carried );
 		CoreRenderDevice.ReleasePicture( motion );
 
-		sharpened = carried = motion = 0;
+		carried = motion = 0;
 		historyWritten = false;
 		keptDisplay = default;
 		keptRender = default;
@@ -158,6 +159,7 @@ internal sealed class CoreUpscaler
 		}
 
 		CoreRenderDevice.ZoneBegin( "upscale" );
+		ComposeSharpening = 0.0f;
 
 		try
 		{
@@ -185,6 +187,9 @@ internal sealed class CoreUpscaler
 
 	//The last Run's picture as a texture, for a pass that reads it by its place in the table - see CoreSceneDrawer.
 	internal ulong LastTexture { get; private set; }
+
+	//How far the compose sharpens the last Run's picture by RCAS, nought none - it reads every pixel anyway, so no pass of its own
+	internal float ComposeSharpening { get; private set; }
 
 	//A picture this keeps, acquired the first time it is wanted at this size.
 	private static ulong Keep( ref ulong picture, CoreRender.PictureKind kind, int width, int height )
@@ -219,7 +224,8 @@ internal sealed class CoreUpscaler
 
 		if ( !Dispatch( easuPipeline, carried, push, width, height ) ) return 0;
 
-		return Sharpen( carried, Rinten.Rendering.DrawSettings.Fsr1Sharpness );
+		ComposeSharpening = CoreUpscale.RcasStrength( Rinten.Rendering.DrawSettings.Fsr1Sharpness );
+		return carried;
 	}
 
 	private ulong RunTemporal( ulong colour, ulong depth, ulong velocity, float near, float far )
@@ -255,12 +261,23 @@ internal sealed class CoreUpscaler
 		//How narrow a sample's reach is, in the world's pixels squared.
 		floats[18] = 1.0f;
 
+		//The reprojection's x, y and w columns, turned so a point in front lands with w above nought - see Reprojected
+		var m = ClipToPrevious;
+		var sign = ( ( 0.5f * m.M34 ) + m.M44 ) < 0.0f ? -1.0f : 1.0f;
+
+		floats[20] = m.M11 * sign; floats[21] = m.M21 * sign; floats[22] = m.M31 * sign; floats[23] = m.M41 * sign;
+		floats[24] = m.M12 * sign; floats[25] = m.M22 * sign; floats[26] = m.M32 * sign; floats[27] = m.M42 * sign;
+		floats[28] = m.M14 * sign; floats[29] = m.M24 * sign; floats[30] = m.M34 * sign; floats[31] = m.M44 * sign;
+
 		if ( !Dispatch( temporalPipeline, writing, push, width, height ) ) return 0;
 
 		historyNow = 1 - historyNow;
 		historyWritten = true;
 
-		return Sharpen( writing, Rinten.Rendering.DrawSettings.TemporalSharpness );
+		var sharpness = Rinten.Rendering.DrawSettings.TemporalSharpness;
+		ComposeSharpening = sharpness > 0.001f ? CoreUpscale.RcasStrength( sharpness ) : 0.0f;
+
+		return writing;
 	}
 
 	private ulong RunFsr3( ulong colour, ulong depth, ulong velocity, float near, float far, float field, float delta, float exposure )
@@ -270,9 +287,14 @@ internal sealed class CoreUpscaler
 
 		fsr3 ??= new CoreFsr3();
 
-		return fsr3.Run( colour, depth, CoreRenderDevice.PictureTexture( motion ), output,
-			RenderSize, DisplaySize, Jitter, near, far, field, delta, Reset,
-			Rinten.Rendering.DrawSettings.Fsr3Sharpness, exposure ) ? output : 0;
+		//Its RCAS in the compose, as the engine's own upscaler's - a pass of its own wrote and read the window's picture again
+		if ( !fsr3.Run( colour, depth, CoreRenderDevice.PictureTexture( motion ), output,
+			RenderSize, DisplaySize, Jitter, near, far, field, delta, Reset, exposure ) ) return 0;
+
+		var sharpness = Rinten.Rendering.DrawSettings.Fsr3Sharpness;
+		ComposeSharpening = sharpness > 0.001f ? CoreUpscale.RcasStrength( sharpness ) : 0.0f;
+
+		return output;
 	}
 
 	private ulong RunDlss( ulong colour, ulong depth, ulong velocity, float near, float far, float delta )
@@ -296,26 +318,11 @@ internal sealed class CoreUpscaler
 
 		Push( push, RenderSize, RenderSize, 0, 0, depth, velocity, velocity != 0 ? 2 : 0, near, far );
 
-		return Dispatch( motionPipeline, motion, push, width, height );
-	}
+		CoreRenderDevice.ZoneBegin( "motion" );
+		var ran = Dispatch( motionPipeline, motion, push, width, height );
+		CoreRenderDevice.ZoneEnd();
 
-	//RCAS over a picture of the window's size, where any is asked for.
-	private ulong Sharpen( ulong picture, float sharpness )
-	{
-		if ( sharpness <= 0.001f ) return picture;
-
-		var (width, height) = DisplaySize;
-
-		if ( Keep( ref sharpened, CoreRender.PictureKind.Hdr, width, height ) == 0 ) return picture;
-
-		Span<byte> push = stackalloc byte[128];
-
-		Push( push, DisplaySize, DisplaySize, CoreRenderDevice.PictureTexture( picture ), 0, 0, 0, 0, 0.0f, 0.0f );
-
-		var floats = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( push );
-		floats[15] = CoreUpscale.RcasStrength( sharpness );
-
-		return Dispatch( sharpenPipeline, sharpened, push, width, height ) ? sharpened : picture;
+		return ran;
 	}
 
 	//The push block every pass here reads - see upscale.slang for which lane is
@@ -360,7 +367,6 @@ internal sealed class CoreUpscaler
 
 	private static ulong temporalPipeline;
 	private static ulong easuPipeline;
-	private static ulong sharpenPipeline;
 	private static ulong motionPipeline;
 	private static ulong copyPipeline;
 	private static int pipelinesBuilt = -1;
@@ -380,11 +386,10 @@ internal sealed class CoreUpscaler
 
 		temporalPipeline = Build( "TemporalCs", null );
 		easuPipeline = Build( "EasuCs", null );
-		sharpenPipeline = Build( "SharpenCs", null );
 		motionPipeline = Build( "MotionCs", MotionDefines );
 		copyPipeline = Build( "CopyCs", null );
 
-		pipelinesFailed = temporalPipeline == 0 || easuPipeline == 0 || sharpenPipeline == 0 || motionPipeline == 0 || copyPipeline == 0;
+		pipelinesFailed = temporalPipeline == 0 || easuPipeline == 0 || motionPipeline == 0 || copyPipeline == 0;
 
 		if ( pipelinesFailed )
 			Log.Warning( $"the upscaler's passes did not build: {CoreRenderDevice.ShaderError}" );
@@ -401,10 +406,10 @@ internal sealed class CoreUpscaler
 	//Every pass let go of, for a device going away.
 	internal static void DestroyPipelines()
 	{
-		foreach ( var pipeline in new[] { temporalPipeline, easuPipeline, sharpenPipeline, motionPipeline, copyPipeline } )
+		foreach ( var pipeline in new[] { temporalPipeline, easuPipeline, motionPipeline, copyPipeline } )
 			if ( pipeline != 0 ) CoreRenderDevice.DestroyPipeline( pipeline );
 
-		temporalPipeline = easuPipeline = sharpenPipeline = motionPipeline = copyPipeline = 0;
+		temporalPipeline = easuPipeline = motionPipeline = copyPipeline = 0;
 		pipelinesBuilt = -1;
 		pipelinesFailed = false;
 	}

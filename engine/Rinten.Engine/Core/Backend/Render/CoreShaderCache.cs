@@ -1019,6 +1019,10 @@ internal static class EngineShaders
 	private static readonly (string, CoreShaderCompiler.Stage)[] Draws =
 		[("MainVs", CoreShaderCompiler.Stage.Vertex), ("MainPs", CoreShaderCompiler.Stage.Pixel)];
 
+	//And a posed thing's, out of its posed positions - see velocity.slang
+	private static readonly (string, CoreShaderCompiler.Stage)[] VelocityDraws =
+		[("MainVs", CoreShaderCompiler.Stage.Vertex), ("PosedVs", CoreShaderCompiler.Stage.Vertex), ("MainPs", CoreShaderCompiler.Stage.Pixel)];
+
 	//Whether the portable frame has a pass - see All, which says it of each of the engine's
 	//own. A file that is not one of those is somebody else's to answer for, and is let through.
 	internal static bool InPortableFrame( string file )
@@ -1054,7 +1058,7 @@ internal static class EngineShaders
 		( Background, "", Draws, true ),
 		//The portable frame's bloom, in pixel passes - see CorePortableGlow
 		( Glow, "", GlowDraws, true ),
-		( Velocity, "", Draws, false ),
+		( Velocity, "", VelocityDraws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),
 		( MeshRaster, "", Draws, false ),
@@ -1129,7 +1133,6 @@ internal static class EngineShaders
 	[
 		("TemporalCs", CoreShaderCompiler.Stage.Compute),
 		("EasuCs", CoreShaderCompiler.Stage.Compute),
-		("SharpenCs", CoreShaderCompiler.Stage.Compute),
 		("CopyCs", CoreShaderCompiler.Stage.Compute),
 	];
 

@@ -460,8 +460,10 @@ internal static unsafe class CoreSceneRenderer
 		block[TimeAt + 0] = RealTime.Now;
 		block[TimeAt + 1] = RealTime.Delta;
 
-		//Scene time while playing, so pause and time scale apply; wall clock in the editor
-		block[TimeAt + 2] = scene.IsValid() && !scene.IsEditor ? (float)scene.TimeNow : RealTime.Now;
+		//Scene time while playing, so pause and time scale apply; wall clock in the editor. And a frame before, for motion
+		var playing = scene.IsValid() && !scene.IsEditor;
+		block[TimeAt + 2] = playing ? (float)scene.TimeNow : RealTime.Now;
+		block[TimeAt + 3] = playing ? (float)( scene.TimeNow - scene.TimeDelta ) : RealTime.Now - RealTime.Delta;
 
 		block[ShadowFilterAt] = Math.Clamp( ShadowFilterQuality, 0, 2 );
 
@@ -1751,6 +1753,9 @@ internal static unsafe class CoreSceneRenderer
 		if ( kind.DepthOnly )
 			pixel = CoreShaderFile.Stage.DepthPixel;
 
+		if ( kind.Cluster && kind.Target == CoreRender.TargetKind.Velocity )
+			return (CoreShaderFile.Stage.ClusterVelocityVertex, CoreShaderFile.Stage.ClusterVelocityPixel);
+
 		if ( kind.Cluster )
 			return (CoreShaderFile.Stage.ClusterVertex,
 				kind.DepthOnly ? CoreShaderFile.Stage.ClusterDepthPixel
@@ -1877,6 +1882,15 @@ internal static unsafe class CoreSceneRenderer
 		{
 			var clusterVertex = stages[(int)vertexStage];
 			var clusterPixel = chained ?? stages[(int)pixelStage];
+
+			//Only a surface that moves its corners has the pair; the rest have no motion of their own to draw
+			if ( kind.Target == CoreRender.TargetKind.Velocity )
+			{
+				return clusterVertex is null || clusterPixel is null ? 0 : CoreRenderDevice.CreatePipeline( clusterVertex, clusterPixel,
+					CoreRender.VertexLayoutKind.None, depthTest: true, CoreRender.Topology.Triangles, blend: false,
+					depthWrite: false, cullBack: !kind.TwoSided, target: kind.Target,
+					compare: CoreRenderDevice.DepthCompare.Equal );
+			}
 
 			if ( clusterVertex is null || clusterPixel is null )
 			{

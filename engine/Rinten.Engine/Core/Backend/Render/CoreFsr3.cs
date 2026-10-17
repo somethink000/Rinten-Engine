@@ -27,14 +27,19 @@ internal sealed class CoreFsr3
 		PrepareReactivity,
 		LumaInstability,
 		Accumulate,
-		AccumulateSharpen,
-		Rcas,
 		ClearWhole,
 		ClearSingle,
 		ClearPair,
 		ClearFull,
 		ClearHdr,
 	}
+
+	//Each pass's zone in the frame's report, by Pass
+	private static readonly string[] passZones =
+	[
+		"fsr3 prepare inputs", "fsr3 luma pyramid", "fsr3 shading change pyramid", "fsr3 shading change",
+		"fsr3 prepare reactivity", "fsr3 luma instability", "fsr3 accumulate", "fsr3 clear", "fsr3 clear", "fsr3 clear", "fsr3 clear", "fsr3 clear",
+	];
 
 	private static readonly string[] passDefines =
 	[
@@ -45,8 +50,6 @@ internal sealed class CoreFsr3
 		"#define FSR3_PREPARE_REACTIVITY 1\n",
 		"#define FSR3_LUMA_INSTABILITY 1\n",
 		"#define FSR3_ACCUMULATE 1\n",
-		"#define FSR3_ACCUMULATE 1\n#define FSR3_SHARPEN 1\n",
-		"#define FSR3_RCAS 1\n",
 		"#define FSR3_CLEAR 1\n",
 		"#define FSR3_CLEAR 2\n",
 		"#define FSR3_CLEAR 3\n",
@@ -240,7 +243,7 @@ internal sealed class CoreFsr3
 	//One frame of it: the world's picture, depth and motion in, the window's picture out. False where it could not, and the caller shows something else.
 	internal bool Run( ulong colour, ulong depth, ulong motion, ulong output,
 		(int Width, int Height) render, (int Width, int Height) display, Vector2 jitter,
-		float near, float far, float field, float delta, bool reset, float sharpness, float exposure )
+		float near, float far, float field, float delta, bool reset, float exposure )
 	{
 		if ( !Available || output == 0 ) return false;
 		if ( !Make( render, display ) ) return false;
@@ -313,14 +316,6 @@ internal sealed class CoreFsr3
 
 		SetLine( c, 10, mips, groupsX * groupsY, 0.0f, 0.0f );
 		SetLine( c, 11, render.Width, render.Height, 0.0f, 0.0f );
-
-		//RCAS: FsrRcasCon over sharpness as FSR takes it - stops softer than the sharpest.
-		var stops = ( -2.0f * Math.Clamp( sharpness, 0.0f, 1.0f ) ) + 2.0f;
-		var linear = MathF.Pow( 2.0f, -stops );
-		var half = BitConverter.HalfToUInt16Bits( (Half)linear );
-
-		c[48] = linear;
-		c[49] = BitConverter.UInt32BitsToSingle( (uint)half | ( (uint)half << 16 ) );
 
 		if ( !CoreRenderDevice.FrameWrite( constants, 0, MemoryMarshal.AsBytes( c ) ) ) return false;
 
@@ -396,23 +391,12 @@ internal sealed class CoreFsr3
 				[historyWrite, intermediate], null,
 				srcGroupsX, srcGroupsY );
 
-		if ( !ok ) return false;
-
-		var sharpening = sharpness > 0.001f;
-
-		ok = Dispatch( sharpening ? Pass.AccumulateSharpen : Pass.Accumulate,
+		//Its RCAS is the compose's - see CoreUpscaler.ComposeSharpening
+		return ok && Dispatch( Pass.Accumulate,
 			[0, Texture( dilatedReactive ), Texture( dilatedMotion ), Texture( upscaledRead ), 0,
 				Texture( farthestMip1 ), Texture( currentLuma ), Texture( intermediate ), colour],
 			[upscaledWrite, output, newLocks], null,
 			dstGroupsX, dstGroupsY );
-
-		if ( ok && sharpening )
-		{
-			ok = Dispatch( Pass.Rcas, [0, Texture( upscaledWrite )], [output], null,
-				( display.Width + 15 ) / 16, ( display.Height + 15 ) / 16 );
-		}
-
-		return ok;
 	}
 
 	//The lines of float4s the constants are - see the callbacks' list.
@@ -461,7 +445,11 @@ internal sealed class CoreFsr3
 
 		Span<ulong> buffers = stackalloc ulong[1] { constants };
 
-		return CoreRenderDevice.DispatchPass( pipeline, CoreSceneDrawer.WhiteTexture, writes, at, buffers, push, groupsX, groupsY );
+		CoreRenderDevice.ZoneBegin( passZones[(int)pass] );
+		var ran = CoreRenderDevice.DispatchPass( pipeline, CoreSceneDrawer.WhiteTexture, writes, at, buffers, push, groupsX, groupsY );
+		CoreRenderDevice.ZoneEnd();
+
+		return ran;
 	}
 
 	//One level of a picture set to a value, by the clear build for its format.

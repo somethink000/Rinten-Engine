@@ -151,6 +151,12 @@ internal sealed class CoreSceneTables
 		public long SkinnedAt = -1;
 		public int SkinnedGeneration = -1;
 
+		/// <summary>Where its positions as posed before the last posing are, a PosedCount range of <see cref="Was"/>; -1 for none.</summary>
+		public long WasAt = -1;
+
+		/// <summary>The loop turn whose posing moved it from what <see cref="WasAt"/> holds - see CoreMeshRender.Skin.</summary>
+		public long PoseMovedTurn = -1;
+
 		/// <summary>Back to what a new one would be, without being a new one - see Give.</summary>
 		public void Wipe()
 		{
@@ -197,6 +203,8 @@ internal sealed class CoreSceneTables
 			SkinnedHash = 0;
 			SkinnedAt = -1;
 			SkinnedGeneration = -1;
+			WasAt = -1;
+			PoseMovedTurn = -1;
 		}
 	}
 
@@ -219,6 +227,9 @@ internal sealed class CoreSceneTables
 	//What every shaped instance's blend shapes add to each of its vertices - a float3 of position and one of
 	//normal a vertex, a range each. Written by mesh_shapes.slang, read by the pose pass beside the palettes.
 	internal static readonly CoreGeometryPool.Pool ShapeSums = new( 24, 1 << 16 );
+
+	//Every posed instance's positions before its last posing, a float3 a vertex - what the velocity pass moves them from
+	internal static readonly CoreGeometryPool.Pool Was = new( 12, 1 << 16 );
 
 	internal static CoreSceneTables Of( Scene scene ) => tables.GetOrCreateValue( scene );
 
@@ -1628,14 +1639,23 @@ internal sealed class CoreSceneTables
 		if ( entry.PosedAt >= 0 && entry.PosedAt + entry.PosedCount > CoreGeometryPool.Vertices.Used ) entry.PosedAt = -1;
 		if ( entry.PaletteAt >= 0 && entry.PaletteAt + entry.PaletteCount > Palettes.Used ) entry.PaletteAt = -1;
 		if ( entry.ShapesAt >= 0 && entry.ShapesAt + entry.ShapesCount > ShapeSums.Used ) entry.ShapesAt = -1;
+		if ( entry.WasAt >= 0 && entry.WasAt + entry.PosedCount > Was.Used ) entry.WasAt = -1;
 
-		if ( entry.PosedAt >= 0 && entry.PosedCount != count ) { CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount ); entry.PosedAt = -1; }
+		if ( entry.PosedAt >= 0 && entry.PosedCount != count )
+		{
+			CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount );
+			if ( entry.WasAt >= 0 ) Was.Give( entry.WasAt, entry.PosedCount );
+			entry.PosedAt = entry.WasAt = -1;
+		}
 		if ( entry.PaletteAt >= 0 && entry.PaletteCount != bones ) { Palettes.Give( entry.PaletteAt, entry.PaletteCount ); entry.PaletteAt = -1; entry.PaletteCount = 0; entry.PoseHash = 0; }
 		if ( entry.ShapesAt >= 0 && entry.ShapesCount != sums ) { ShapeSums.Give( entry.ShapesAt, entry.ShapesCount ); entry.ShapesAt = -1; entry.ShapesCount = 0; entry.PoseHash = 0; }
 
 		//The same for where the posed vertices go: a range that moved holds nothing posed yet, so the
 		//skin pass has to pose into it whether or not the skeleton did anything - see Entry.PoseHash.
-		if ( entry.PosedAt < 0 ) { entry.PosedAt = CoreGeometryPool.Vertices.Take( count ); entry.PosedCount = count; entry.PoseHash = 0; }
+		if ( entry.PosedAt < 0 ) { entry.PosedAt = CoreGeometryPool.Vertices.Take( count ); entry.PosedCount = count; entry.PoseHash = 0; entry.SkinnedAt = -1; }
+
+		//Without room it only loses its motion, never its pose
+		if ( entry.PosedAt >= 0 && entry.WasAt < 0 ) entry.WasAt = Was.Take( count );
 
 		//A new range holds whatever was in it, so the old one's pose says nothing - see Entry.PoseHash
 		if ( bones > 0 && entry.PaletteAt < 0 )
@@ -1666,7 +1686,9 @@ internal sealed class CoreSceneTables
 		if ( entry.PosedAt >= 0 && entry.PosedAt + entry.PosedCount <= CoreGeometryPool.Vertices.Used ) CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount );
 		if ( entry.PaletteAt >= 0 && entry.PaletteAt + entry.PaletteCount <= Palettes.Used ) Palettes.Give( entry.PaletteAt, entry.PaletteCount );
 		if ( entry.ShapesAt >= 0 && entry.ShapesAt + entry.ShapesCount <= ShapeSums.Used ) ShapeSums.Give( entry.ShapesAt, entry.ShapesCount );
+		if ( entry.WasAt >= 0 && entry.WasAt + entry.PosedCount <= Was.Used ) Was.Give( entry.WasAt, entry.PosedCount );
 		entry.PosedAt = -1;
+		entry.WasAt = -1;
 		entry.PoseHash = 0;
 		entry.PaletteAt = -1;
 		entry.PosedCount = 0;
@@ -1970,6 +1992,10 @@ internal static class CoreMaterialTable
 		public ulong DepthPipeline;
 		public bool AskedToDepth;
 
+		/// <summary>And its motion on the screen, for the velocity picture; nought where it has no velocity build.</summary>
+		public ulong VelocityPipeline;
+		public bool AskedToVelocity;
+
 		/// <summary>Whether it has already been said that this surface has no depth build - said once.</summary>
 		public bool SaidNoDepth;
 
@@ -2138,6 +2164,8 @@ internal static class CoreMaterialTable
 			one.AskedToShade = false;
 			one.DepthPipeline = 0;
 			one.AskedToDepth = false;
+			one.VelocityPipeline = 0;
+			one.AskedToVelocity = false;
 			one.ShadePrepass = false;
 			one.ShadeCarries = false;
 			one.ShadeFarCarries = false;

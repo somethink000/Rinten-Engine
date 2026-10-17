@@ -23,6 +23,53 @@ float2 SourceSize() { return g_vPostSlots[0].xy; }
 //Whether the edges are softened - off where nothing was drawn, where the world is carried up, and where a point effect moved where the frame is read.
 bool Softens() { return g_vPostSlots[0].z > 0.5; }
 
+//How far RCAS sharpens what an upscaler gathered (CoreUpscale.RcasStrength), nought none; never with the softening
+float Sharpening() { return g_vPostSlots[0].w; }
+
+float Brightest( float3 c ) { return max( c.x, max( c.y, c.z ) ); }
+
+//Exposed and squeezed into [0, 1) for RCAS to compare, as upscale.slang's Squeeze; Unsqueeze undoes it
+float3 Squeeze( float3 c )
+{
+	float3 exposed = max( c, 0.0 ) * Exposure();
+	return exposed / ( 1.0 + Brightest( exposed ) );
+}
+
+float3 Unsqueeze( float3 s )
+{
+	return ( s / max( 1.0 - Brightest( s ), 1.0 / 65504.0 ) ) / max( Exposure(), 1e-8 );
+}
+
+float LumaOf( float3 c ) { return dot( c, float3( 0.2126, 0.7152, 0.0722 ) ); }
+
+//FSR1's RCAS over the picture read: the lobe as far as the four neighbours allow, less where the pixel is lone noise
+float3 Sharpened( float2 at )
+{
+	float2 texel = g_vFrameSize.zw;
+
+	float3 b = Squeeze( g_color.SampleLevel( at + float2( 0.0, -texel.y ), 0.0 ).rgb );
+	float3 d = Squeeze( g_color.SampleLevel( at + float2( -texel.x, 0.0 ), 0.0 ).rgb );
+	float3 e = Squeeze( g_color.SampleLevel( at, 0.0 ).rgb );
+	float3 f = Squeeze( g_color.SampleLevel( at + float2( texel.x, 0.0 ), 0.0 ).rgb );
+	float3 h = Squeeze( g_color.SampleLevel( at + float2( 0.0, texel.y ), 0.0 ).rgb );
+
+	float3 low = min( min( b, d ), min( f, h ) );
+	float3 high = max( max( b, d ), max( f, h ) );
+
+	float3 hitLow = min( low, e ) / max( 4.0 * high, 1e-5 );
+	float3 hitHigh = ( 1.0 - max( high, e ) ) / min( ( 4.0 * low ) - 4.0, -1e-5 );
+
+	//FSR_RCAS_LIMIT: a quarter less a sixteenth
+	float lobe = max( -0.1875, min( Brightest( max( -hitLow, hitHigh ) ), 0.0 ) ) * Sharpening();
+
+	float lb = LumaOf( b ), ld = LumaOf( d ), le = LumaOf( e ), lf = LumaOf( f ), lh = LumaOf( h );
+	float noise = 0.25 * ( lb + ld + lf + lh ) - le;
+	float range = max( max( max( lb, ld ), max( lf, lh ) ), le ) - min( min( min( lb, ld ), min( lf, lh ) ), le );
+	lobe *= 1.0 - ( 0.5 * saturate( abs( noise ) / max( range, 1e-5 ) ) );
+
+	return Unsqueeze( saturate( ( lobe * ( b + d + f + h ) + e ) / ( 4.0 * lobe + 1.0 ) ) );
+}
+
 #ifdef CARRY
 
 //One EASU tap, weighted by an ellipse stretched along the edge so cross-edge taps count less
@@ -220,7 +267,7 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	//The swapchain is an sRGB format, so the hardware does the last conversion. What leaves here is linear, and that is deliberate.
 	float2 uv = i.uv;
 
-	float3 middle = Shaded( uv );
+	float3 middle = Sharpening() > 0.0 ? ChainBefore( Sharpened( ChainWhere( uv ) ), uv ) : Shaded( uv );
 	float3 result = middle;
 
 	if ( Softens() )

@@ -117,7 +117,7 @@ float3 WindOffset( float3 local, float3 origin, float2 uv )
 	if ( mask <= 0.0 ) return float3( 0.0, 0.0, 0.0 );
 
 	//Scene clock, so pause and time scale apply; wall clock in an editor viewport - see CoreSceneRenderer.BuildFrame
-	float beat = g_frame[0].time.z * g_flWindSpeed;
+	float beat = SceneSeconds() * g_flWindSpeed;
 
 	//About a metre of world is a full phase turn, so close neighbours sway out of step; the factors are not a small
 	//whole-number ratio, so plants on a grid do not fall back into step

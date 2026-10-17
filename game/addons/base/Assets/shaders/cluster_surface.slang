@@ -48,3 +48,57 @@ Out MainClusterPs( V2F i, bool front : SV_IsFrontFace )
 
 	return Shade( i, facing );
 }
+
+#ifdef VELOCITY
+//A surface that moves its own corners (wind) has motion its matrix does not tell: its Vertex is run twice,
+//now and a frame back - the instance's previous matrix and scene clock - and the two compared on the screen
+struct VelocityV2F
+{
+	float4 position : SV_Position;
+	float4 now : TEXCOORD0;
+	float4 before : TEXCOORD1;
+};
+
+[shader("vertex")]
+VelocityV2F MainClusterVelocityVs( uint vid : SV_VertexID )
+{
+	ClusterVertex v;
+	LoadClusterVertex( vid, v );
+
+	ClusterInstance( v.instance );
+	g_clusterRest = v.rest;
+
+	VIn i;
+	i.position = v.position;
+	i.colour = v.colour;
+	i.frame = v.frame;
+	i.texCoord0 = v.uv0;
+	i.texCoord1 = v.uv1;
+
+	V2F now = Vertex( i );
+
+	VisInstance instance = g_visInstances[v.instance];
+	g_modelToWorld = float4x4( instance.prev0, instance.prev1, instance.prev2, instance.prev3 );
+	g_frameBefore = true;
+
+	V2F was = Vertex( i );
+
+	VelocityV2F o;
+	o.position = now.position;
+	o.now = now.position;
+	o.before = mul( float4( was.world, 1.0 ), EYE_FRAME( previousWorldToClip ) );
+	return o;
+}
+
+[shader("fragment")]
+float4 MainClusterVelocityPs( VelocityV2F i ) : SV_Target
+{
+	if ( i.now.w <= 0.0001 || i.before.w <= 0.0001 ) return float4( 0.0, 0.0, 0.0, 0.0 );
+
+	float2 here = ( ( i.now.xy / i.now.w ) * 0.5 ) + 0.5;
+	float2 there = ( ( i.before.xy / i.before.w ) * 0.5 ) + 0.5;
+
+	//As velocity.slang writes it: screen delta, view depth, written
+	return float4( here - there, i.now.w, 1.0 );
+}
+#endif

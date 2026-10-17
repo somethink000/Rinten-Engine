@@ -65,7 +65,7 @@ struct FrameData
 	Probe probes[4];
 
 	//Two clocks: wall time always runs; scene time pauses and scales with the scene
-	float4 time; //Seconds since start, frame delta, scene seconds, spare
+	float4 time; //Seconds since start, frame delta, scene seconds, scene seconds a frame ago
 
 	//The sun's light after the air it crosses, and how far into night; both depend only on the sun's height,
 	//so CoreSceneRenderer.SetSky works them out once a frame
@@ -179,6 +179,12 @@ struct FrameData
 #else
 #define EYE_FRAME( field ) g_frame[Eye()].field
 #endif
+
+//Set while a velocity stage runs a surface's Vertex again for the frame before - see cluster_surface.slang
+static bool g_frameBefore;
+
+//Scene seconds, which pause and scale with the scene; what a surface that moves by the clock reads
+float SceneSeconds() { return g_frameBefore ? g_frame[0].time.w : g_frame[0].time.z; }
 
 //Headset eye being drawn, 0 otherwise; per-eye data reads g_frame[Eye()], the rest g_frame[0]
 #ifdef STEREO

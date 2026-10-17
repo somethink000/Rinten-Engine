@@ -934,11 +934,26 @@ internal sealed partial class CoreSceneDrawer
 		if ( built ) depthKnown = true;
 	}
 
-	//Draws movers into the velocity picture, now over then, and says whether it drew, as an idle frame leaves
-	//another frame's contents
+	//Draws movers and what posed itself anew into the velocity picture, now over then, and says whether it drew,
+	//as an idle frame leaves another frame's contents
 	private bool DrawVelocities( ulong viewport )
 	{
-		if ( velocityPipeline == 0 || tables is null || tables.Moved.Count == 0 ) return false;
+		if ( velocityPipeline == 0 || tables is null ) return false;
+
+		var turn = EngineLoop.LoopFrames;
+		var anyPose = false;
+
+		if ( velocityPosedPipeline != 0 )
+		{
+			foreach ( var slot in tables.PosedSlots )
+			{
+				if ( tables.EntryAt( slot ) is { PoseMovedTurn: var at } && at == turn ) { anyPose = true; break; }
+			}
+		}
+
+		var movers = meshRender.Ready && meshRender.AnyMovers();
+
+		if ( tables.Moved.Count == 0 && !anyPose && !movers ) return false;
 
 		CoreRenderDevice.ZoneBegin( "velocity" );
 
@@ -948,12 +963,12 @@ internal sealed partial class CoreSceneDrawer
 		{
 			drawn = true;
 
-			var push = new byte[128];
+			var push = velocityPush;
 
 			foreach ( var slot in tables.Moved )
 			{
 				var entry = tables.EntryAt( slot );
-				if ( entry?.Mesh is null || entry.Mesh.Pulled ) continue;
+				if ( entry?.Mesh is null || entry.Mesh.Pulled || PosedVelocity( entry ) ) continue;
 
 				ref var record = ref tables.RecordAt( slot );
 				if ( record.Prev == record.World ) continue;
@@ -970,12 +985,82 @@ internal sealed partial class CoreSceneDrawer
 				}
 			}
 
+			foreach ( var slot in tables.PosedSlots )
+			{
+				var entry = tables.EntryAt( slot );
+				if ( entry is null || !PosedVelocity( entry ) ) continue;
+
+				ref var record = ref tables.RecordAt( slot );
+				var poseMoved = entry.PoseMovedTurn == turn;
+
+				if ( !poseMoved && record.Prev == record.World ) continue;
+
+				DrawPosedVelocity( entry, in record, poseMoved );
+			}
+
+			if ( movers ) meshRender.DrawMoverVelocity();
+
 			CoreRenderDevice.EndTarget();
 		}
 
 		CoreRenderDevice.ZoneEnd();
 
 		return drawn;
+	}
+
+	private readonly byte[] velocityPush = new byte[128];
+	private readonly ulong[] velocityBuffers = new ulong[2];
+
+	//Whether a thing's velocity comes from its posed positions: a mesh drawn from them, posed into the range it has now
+	private static bool PosedVelocity( CoreSceneTables.Entry entry )
+		=> velocityPosedPipeline != 0 && entry.Live && entry.Posed && entry.Mesh is { Pooled: true } &&
+			entry.PosedAt >= 0 && entry.SkinnedAt == entry.PosedAt;
+
+	//Each part out of the posed range, moved from the pose before where it posed anew this turn, else from where it stands
+	private void DrawPosedVelocity( CoreSceneTables.Entry entry, in CoreSceneTables.InstanceRecord record, bool poseMoved )
+	{
+		var mesh = entry.Mesh;
+		var positions = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
+		if ( positions == 0 || mesh.Indices == 0 ) return;
+
+		var was = poseMoved && entry.WasAt >= 0 && CoreSceneTables.Was.Buffer != 0;
+
+		velocityBuffers[0] = positions;
+		velocityBuffers[1] = was ? CoreSceneTables.Was.Buffer : positions;
+
+		var words = MemoryMarshal.Cast<byte, float>( velocityPush.AsSpan() );
+		Columns( words, 0, in record.World );
+		Columns( words, 12, in record.Prev );
+
+		var offsets = MemoryMarshal.Cast<byte, uint>( velocityPush.AsSpan() );
+
+		foreach ( var part in mesh.Meshes )
+		{
+			var local = part.FirstVertex - mesh.PoolVertexAt;
+			if ( part.StandsIn || part.IndexCount <= 0 || local < 0 || local >= mesh.PoolVertexCount ) continue;
+
+			offsets[24] = (uint)( entry.PosedAt + local );
+			offsets[25] = (uint)( ( was ? entry.WasAt : entry.PosedAt ) + local );
+
+			var draw = new CoreBufferDraw
+			{
+				Pipeline = velocityPosedPipeline,
+				Indices = mesh.Indices,
+				WideIndices = true,
+				First = part.FirstIndex,
+				Count = part.IndexCount,
+			};
+
+			CoreRenderDevice.DrawBuffers( draw, velocityPush, velocityBuffers );
+		}
+	}
+
+	//An affine row-vector matrix's first three columns, a float4 each - see Affine in velocity.slang
+	private static void Columns( Span<float> into, int at, in System.Numerics.Matrix4x4 m )
+	{
+		into[at + 0] = m.M11; into[at + 1] = m.M21; into[at + 2] = m.M31; into[at + 3] = m.M41;
+		into[at + 4] = m.M12; into[at + 5] = m.M22; into[at + 6] = m.M32; into[at + 7] = m.M42;
+		into[at + 8] = m.M13; into[at + 9] = m.M23; into[at + 10] = m.M33; into[at + 11] = m.M43;
 	}
 
 	//A copy of this frame's block seeing the world through viewProjection rather than the jittered matrix it was
@@ -1638,6 +1723,9 @@ internal sealed partial class CoreSceneDrawer
 
 	private static ulong velocityPipeline;
 
+	//The same for a posed thing, out of its posed positions and the ones before - see PosedVs in velocity.slang
+	private static ulong velocityPosedPipeline;
+
 	//The pass that turns the frame's depth into what culls the next one.
 	private static ulong pyramidPipeline;
 
@@ -1995,6 +2083,7 @@ internal sealed partial class CoreSceneDrawer
 		foreach ( var pipeline in skyTablePipelines.Values ) CoreRenderDevice.DestroyPipeline( pipeline );
 		CoreRenderDevice.DestroyPipeline( backgroundPipeline );
 		CoreRenderDevice.DestroyPipeline( velocityPipeline );
+		CoreRenderDevice.DestroyPipeline( velocityPosedPipeline );
 		CoreRenderDevice.DestroyPipeline( pyramidPipeline );
 		CoreRenderDevice.DestroyPipeline( composePipeline );
 		CoreMeshRender.ReleasePipelines();
@@ -2049,6 +2138,7 @@ internal sealed partial class CoreSceneDrawer
 		CorePortableGlow.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
+		velocityPosedPipeline = 0;
 		pyramidPipeline = 0;
 		composePipeline = 0;
 		whiteTexture = 0;
@@ -2240,7 +2330,11 @@ internal sealed partial class CoreSceneDrawer
 		}
 
 		//Last frame's matrix with this frame's jitter, so still things read as still in motion vectors
-		CoreSceneRenderer.SetPrevious( frame, ( hasPrevious ? previousViewProjection : viewProjection ) * upscaler.JitterMatrix );
+		var previousJittered = ( hasPrevious ? previousViewProjection : viewProjection ) * upscaler.JitterMatrix;
+		CoreSceneRenderer.SetPrevious( frame, previousJittered );
+
+		if ( System.Numerics.Matrix4x4.Invert( drawnViewProjection, out var drawnToWorld ) )
+			upscaler.ClipToPrevious = drawnToWorld * previousJittered;
 		CoreSceneRenderer.SetMipBias( frame, upscaler.MipBias );
 
 		debugView = camera.DebugMode != SceneCameraDebugMode.Normal
@@ -2953,7 +3047,8 @@ internal sealed partial class CoreSceneDrawer
 				Indexed( composeFrame ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 1 ) ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) ),
-				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) ) );
+				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) ),
+				upscaled != 0 ? upscaler.ComposeSharpening : 0.0f );
 
 			var finishing = after && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Final, Color.Transparent,
 				clearFirst: false, discard: true );
@@ -3243,7 +3338,13 @@ internal sealed partial class CoreSceneDrawer
 
 		//Not full-screen: draws the meshes that moved with the world's depth, writing only where they are
 		{
+			if ( velocityPipeline != 0 ) CoreRenderDevice.DestroyPipeline( velocityPipeline );
+			if ( velocityPosedPipeline != 0 ) CoreRenderDevice.DestroyPipeline( velocityPosedPipeline );
+
 			var vs = CoreShaderCache.Pass( EngineShaders.Velocity, "MainVs",
+				CoreShaderCompiler.Stage.Vertex );
+
+			var posedVs = CoreShaderCache.Pass( EngineShaders.Velocity, "PosedVs",
 				CoreShaderCompiler.Stage.Vertex );
 
 			var ps = CoreShaderCache.Pass( EngineShaders.Velocity, "MainPs",
@@ -3255,7 +3356,13 @@ internal sealed partial class CoreSceneDrawer
 					depthTest: true, CoreRender.Topology.Triangles, blend: false,
 					depthWrite: false, target: CoreRender.TargetKind.Velocity );
 
-			if ( velocityPipeline == 0 )
+			velocityPosedPipeline = posedVs is null || ps is null
+				? 0
+				: CoreRenderDevice.CreatePipeline( posedVs, ps, CoreRender.VertexLayoutKind.None,
+					depthTest: true, CoreRender.Topology.Triangles, blend: false,
+					depthWrite: false, target: CoreRender.TargetKind.Velocity );
+
+			if ( velocityPipeline == 0 || velocityPosedPipeline == 0 )
 				Log.Warning( $"the velocity pass did not compile: {CoreRenderDevice.ShaderError}" );
 		}
 		if ( pyramidPipeline == 0 )

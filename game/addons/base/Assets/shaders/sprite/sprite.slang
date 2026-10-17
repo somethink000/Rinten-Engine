@@ -300,8 +300,9 @@ V2F MainVs( uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID )
 #endif
 
 #ifdef LIGHT2D_SCENE
-	//Into the 2D light's pictures, which are the screen grown by a margin: the screen shrunk inside them - see CoreLight2D
-	o.position.xy *= g_frame[0].light2dScene.x;
+	//Into the 2D light's pictures, which are the screen grown by a margin: the screen shrunk inside them, and moved onto
+	//their texels - see CoreLight2D.SnapOf
+	o.position.xy = ( o.position.xy * g_frame[0].light2dScene.xz ) + ( g_frame[0].light2dSnap.xy * o.position.w );
 #endif
 
 	return o;
@@ -327,7 +328,7 @@ float3 Light2DAt( float3 world )
 	if ( pictures.w > 0.0 )
 	{
 		float4 clip = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
-		float2 uv = ( ( clip.xy / clip.w ) * pictures.x * 0.5 ) + 0.5;
+		float2 uv = ( ( ( ( clip.xy / clip.w ) * pictures.xz ) + g_frame[0].light2dSnap.xy ) * 0.5 ) + 0.5;
 
 		return g_textures[uint( pictures.w )].SampleLevel( uv, 0.0 ).rgb;
 	}

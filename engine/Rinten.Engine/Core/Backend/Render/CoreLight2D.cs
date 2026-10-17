@@ -15,6 +15,9 @@ internal static class CoreLight2D
 	//The jump flood's two and the cascades' two are each written while the other is read
 	private sealed record Names( string Scene, string Light, string SeedsA, string SeedsB, string CascadeA, string CascadeB, string Shadows )
 	{
+		//How big a texel of this view's pictures is in the world - see TexelOf
+		public float Texel { get; set; }
+
 		public static Names For( int view ) => new( $"L2D.{view}.Scene", $"L2D.{view}.Light",
 			$"L2D.{view}.SeedsA", $"L2D.{view}.SeedsB", $"L2D.{view}.CascadeA", $"L2D.{view}.CascadeB", $"L2D.{view}.Shadows" );
 	}
@@ -44,7 +47,7 @@ internal static class CoreLight2D
 		drawnDebug = Lighting2D.DebugView.None;
 		drawnNames = null;
 
-		Lay( frame, 0.0f, 0, 0 );
+		Lay( frame, default, 0, 0, default );
 
 		if ( CoreRenderDevice.PortableFrame || camera is not { Orthographic: true } ) return false;
 
@@ -55,21 +58,29 @@ internal static class CoreLight2D
 		var scale = Math.Clamp( settings.ResolutionScale, 0.25f, 1.0f );
 		var grow = 1.0f + ( 2.0f * Math.Clamp( settings.Margin, 0.0f, 0.5f ) );
 
-		var wide = Math.Max( (int)( width * scale * grow ), 1 );
-		var tall = Math.Max( (int)( height * scale * grow ), 1 );
-
 		var names = namesOf.GetValue( camera, _ => Names.For( ++viewsNamed ) );
+
+		//Screen pixels a texel of the pictures is, out of the world's size of one - or, where the view says nothing of
+		//the world's scale, the screen's own pixels scaled, as before
+		var across = TexelOf( names, frame, width, height, scale );
+		if ( across <= 0.0f ) across = 1.0f / scale;
+
+		var wide = Math.Clamp( (int)MathF.Ceiling( width * grow / across ) + 1, 1, MostTexels );
+		var tall = Math.Clamp( (int)MathF.Ceiling( height * grow / across ) + 1, 1, MostTexels );
+
+		//The screen inside the pictures, each way: what of them it is, so the margin is what is left
+		var shrink = new System.Numerics.Vector2( width / ( wide * across ), height / ( tall * across ) );
 
 		var glow = CorePasses.Acquire( names.Scene, CoreRender.PictureKind.Hdr, wide, tall, 1 );
 		var light = CorePasses.Acquire( names.Light, CoreRender.PictureKind.Hdr, wide, tall, 1 );
 
 		if ( glow is null || light is null ) return false;
 
-		var shrink = 1.0f / grow;
+		var snap = SnapOf( frame, shrink, wide, tall );
 
 		//Laid before the draws: the sprites' vertex stage shrinks the screen by it, the passes read the lights through
 		//the view with it, and the world's sprites read the light after
-		Lay( frame, shrink, glow.Index, light.Index );
+		Lay( frame, shrink, glow.Index, light.Index, snap );
 		CoreRenderDevice.SetupFrame( frame );
 
 		CorePasses.Close();
@@ -93,28 +104,82 @@ internal static class CoreLight2D
 		{
 			if ( said.Add( "solve" ) ) Log.Warning( $"the 2D light's passes did not run: {CoreRenderDevice.ShaderError}" );
 
-			Lay( frame, shrink, glow.Index, 0 );
+			Lay( frame, shrink, glow.Index, 0, snap );
 			CoreRenderDevice.SetupFrame( frame );
 		}
 
 		CoreRenderDevice.ZoneEnd();
 
-		drawnShrink = shrink;
+		drawnShrink = shrink.X;
 		drawnDebug = settings.Debug;
 		drawnNames = names;
 
 		return true;
 	}
 
-	//The block's lanes for the pictures - see light2dScene in frame_data.slang; z is spare
-	internal static void Lay( float[] frame, float shrink, int scene, int light )
+	//The block's lanes for the pictures - see light2dScene and light2dSnap in frame_data.slang
+	internal static void Lay( float[] frame, System.Numerics.Vector2 shrink, int scene, int light, System.Numerics.Vector2 snap )
 	{
 		if ( frame is null || frame.Length < CoreSceneRenderer.FrameFloats ) return;
 
-		frame[CoreSceneRenderer.Light2DSceneAt + 0] = shrink;
+		frame[CoreSceneRenderer.Light2DSceneAt + 0] = shrink.X;
 		frame[CoreSceneRenderer.Light2DSceneAt + 1] = scene;
-		frame[CoreSceneRenderer.Light2DSceneAt + 2] = 0.0f;
+		frame[CoreSceneRenderer.Light2DSceneAt + 2] = shrink.Y;
 		frame[CoreSceneRenderer.Light2DSceneAt + 3] = light;
+
+		frame[CoreSceneRenderer.Light2DSnapAt + 0] = snap.X;
+		frame[CoreSceneRenderer.Light2DSnapAt + 1] = snap.Y;
+	}
+
+	//How far to move the pictures, in clip space, so the world's origin falls on a texel's corner of them - and so every
+	//point of the world on the same part of its texel whatever the camera does, until the zoom changes. Without it a
+	//camera moving by less than a texel moved the
+	//world against the pictures' grid: an occluder's edge fell in the next texel or did not, and every shadow it threw
+	//shook with it, the further from the light the more. The camera's jitter, where an upscaler adds one, shook them
+	//the same standing still. The same move, applied wherever the world is put into the pictures, cancels both
+	private static System.Numerics.Vector2 SnapOf( float[] frame, System.Numerics.Vector2 shrink, int wide, int tall )
+	{
+		if ( frame is null || frame.Length < 16 ) return default;
+
+		var worldToClip = MemoryMarshal.Read<System.Numerics.Matrix4x4>( MemoryMarshal.AsBytes( frame.AsSpan( 0, 16 ) ) );
+		var clip = System.Numerics.Vector4.Transform( new System.Numerics.Vector4( 0.0f, 0.0f, 0.0f, 1.0f ), worldToClip );
+
+		if ( MathF.Abs( clip.W ) < 1e-6f ) return default;
+
+		var size = new System.Numerics.Vector2( wide, tall );
+		var texel = ( ( new System.Numerics.Vector2( clip.X, clip.Y ) / clip.W * shrink ) * 0.5f + new System.Numerics.Vector2( 0.5f ) ) * size;
+		var whole = new System.Numerics.Vector2( MathF.Round( texel.X ), MathF.Round( texel.Y ) );
+
+		return ( whole - texel ) * 2.0f / size;
+	}
+
+	//The widest a picture is let be, whatever the texel size asks for
+	private const int MostTexels = 4096;
+
+	//How many screen pixels a texel of this view's pictures is. Its size in the world is held, not its size on the
+	//screen: a camera that zooms changed the world's size of a texel every frame, every occluder fell on the pictures'
+	//grid differently, and every shadow shook as it zoomed. So a texel is a power of two of world units - nearest the
+	//size Resolution Scale asks for - and kept until the zoom takes it past half again or two thirds of it, when it
+	//steps once to the next. Between, the world sits on the same texels however the camera zooms and moves; the
+	//pictures are as many texels as the screen takes. Nought where the view says nothing of the world's scale
+	private static float TexelOf( Names names, float[] frame, int width, int height, float scale )
+	{
+		if ( frame is null || frame.Length < 16 || width <= 0 || height <= 0 ) return 0.0f;
+
+		var worldToClip = MemoryMarshal.Read<System.Numerics.Matrix4x4>( MemoryMarshal.AsBytes( frame.AsSpan( 0, 16 ) ) );
+
+		//Screen pixels a world unit along the plane's x is: the view keeps them square
+		var perUnit = MathF.Sqrt( ( worldToClip.M11 * width * 0.5f ) * ( worldToClip.M11 * width * 0.5f )
+			+ ( worldToClip.M12 * height * 0.5f ) * ( worldToClip.M12 * height * 0.5f ) );
+
+		if ( !float.IsFinite( perUnit ) || perUnit <= 1e-6f ) return 0.0f;
+
+		var wanted = 1.0f / ( scale * perUnit );
+
+		if ( names.Texel <= 0.0f || wanted > names.Texel * 1.5f || wanted < names.Texel * 0.66f )
+			names.Texel = MathF.Pow( 2.0f, MathF.Round( MathF.Log2( wanted ) ) );
+
+		return names.Texel * perUnit;
 	}
 
 	//The scene marched into the light: the jump flood, the cascades from the coarsest down where anything glows, then
@@ -255,7 +320,7 @@ internal static class CoreLight2D
 	}
 
 	//Angles a light's shadow map has about it - see ShadowsCs in light2d_cascades.slang
-	private const int ShadowAngles = 1024;
+	private const int ShadowAngles = 4096;
 
 	//How far apart the first cascade's probes stand, in the scene's pixels; each cascade past it twice the one before.
 	//Every cascade sends four times as many rays as the picture has pixels over this squared, which is what they cost

@@ -922,8 +922,11 @@ internal static unsafe class CoreSceneRenderer
 	//How many 2D lights the block carries and how occluders are lit - see SetLight2D.
 	internal const int Light2DInfoAt = Light2DSceneAt + 4;
 
+	//How far the 2D light's pictures are moved to keep the world on their texels - see CoreLight2D.SnapOf.
+	internal const int Light2DSnapAt = Light2DInfoAt + 4;
+
 	//The 2D lights themselves, three float4s each - see lights2d in frame_data.slang.
-	internal const int Lights2DAt = Light2DInfoAt + 4;
+	internal const int Lights2DAt = Light2DSnapAt + 4;
 	internal const int Light2DFloats = 12;
 
 	internal const int FrameFloats = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );

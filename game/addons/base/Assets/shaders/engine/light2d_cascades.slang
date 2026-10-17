@@ -278,7 +278,7 @@ void CascadeCs( uint3 id : SV_DispatchThreadID )
 float2 PixelOf( float3 world )
 {
 	float4 clip = mul( float4( world, 1.0 ), g_frame[0].worldToClip );
-	float2 ndc = ( clip.xy / clip.w ) * g_frame[0].light2dScene.x;
+	float2 ndc = ( ( clip.xy / clip.w ) * g_frame[0].light2dScene.xz ) + g_frame[0].light2dSnap.xy;
 
 	return ( ( ndc * 0.5 ) + 0.5 ) * g_size.xy;
 }
@@ -308,7 +308,7 @@ float3 Gathered( float2 here )
 }
 
 //Angles a light's shadow map has about it - see CoreLight2D.ShadowAngles
-static const int ShadowAngles = 1024;
+static const int ShadowAngles = 4096;
 
 //How many strides a shadow map's ray may take to the light's range
 static const int MostShadowSteps = 256;
@@ -345,6 +345,19 @@ Light2D LightOf( int i )
 	return light;
 }
 
+//How far along a ray from origin it enters a texel's square - the way into the blocker it met, not the stride that
+//found it: a stride lands anywhere up to a pixel in, and as the light moved the shadow's edge jumped by that much
+float EntryInto( int2 at, float2 origin, float2 toward, float found )
+{
+	float2 low = float2( at );
+	float2 high = low + 1.0;
+
+	float across = abs( toward.x ) > 1e-6 ? ( ( toward.x > 0.0 ? low.x : high.x ) - origin.x ) / toward.x : -1.0e9;
+	float down = abs( toward.y ) > 1e-6 ? ( ( toward.y > 0.0 ? low.y : high.y ) - origin.y ) / toward.y : -1.0e9;
+
+	return clamp( max( across, down ), 0.0, found );
+}
+
 //One light's row of its shadow map: along each of its angles, how far from it the first blocker is, or its range
 [numthreads(8, 8, 1)]
 void ShadowsCs( uint3 id : SV_DispatchThreadID )
@@ -371,7 +384,7 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 
 		if ( Solid( at ) )
 		{
-			seen = t;
+			seen = EntryInto( at, light.position, toward, t );
 			break;
 		}
 
@@ -394,6 +407,22 @@ float Seen( int i, float turn )
 	return lerp( near, far, place - corner );
 }
 
+//Whether light i reaches this far this way, between the map's two nearest angles: each one's answer, blended. Their
+//distances blended were neither at a shadow's edge - a near blocker and the light's range made a distance between
+//that met no blocker - and as the light moved and one ray turned from missing a corner to hitting it, the edge jumped
+//by a ray's width. Blended answers slide an edge from one ray to the next as the light moves
+float Visible( int i, float turn, float distance )
+{
+	float place = ( turn / ( 2.0 * Pi ) * float( ShadowAngles ) ) - 0.5;
+	float corner = floor( place );
+	int a = int( corner );
+
+	float near = Read( g_extra.z, int2( ( a + ShadowAngles ) % ShadowAngles, i ) ).x;
+	float far = Read( g_extra.z, int2( ( a + 1 + ShadowAngles ) % ShadowAngles, i ) ).x;
+
+	return lerp( near + 0.5 >= distance ? 1.0 : 0.0, far + 0.5 >= distance ? 1.0 : 0.0, place - corner );
+}
+
 //How much of light i reaches a point this far from it this way, from its map. None where the way to the light's middle
 //is blocked; beside a shadow, faded by how far round the nearest blocked angle is against the width of the penumbra
 //that blocker throws here - the light's size times how far past it the point lies - so a shadow is sharp where it
@@ -407,7 +436,9 @@ float Shadow( int i, float2 apart, float distance, float source, bool solid, flo
 	float past = distance - Seen( i, turn );
 
 	if ( solid ) return 1.0 - smoothstep( penetration * 0.5, penetration, past );
-	if ( past > 0.5 ) return 0.0;
+
+	float open = Visible( i, turn, distance );
+	if ( open <= 0.0 ) return 0.0;
 
 	//Out as far round as a penumbra here could reach: a blocker a pixel from the light throws the widest
 	float texel = 2.0 * Pi / float( ShadowAngles );
@@ -428,7 +459,7 @@ float Shadow( int i, float2 apart, float distance, float source, bool solid, flo
 		}
 	}
 
-	return smoothstep( 0.0, 1.0, saturate( lit ) );
+	return smoothstep( 0.0, 1.0, saturate( lit ) ) * open;
 }
 
 //Every 2D light's share here - see lights2d in frame_data.slang

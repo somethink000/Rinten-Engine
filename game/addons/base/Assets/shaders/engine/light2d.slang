@@ -3,7 +3,7 @@
 [[vk::push_constant]]
 cbuffer Push
 {
-	//How much the screen is shrunk inside the picture y, which view z - the picture itself is g_color
+	//Which view z - the picture itself is g_color, and how the screen sits in it the frame's light2dScene and light2dSnap
 	float4 g_where;
 };
 
@@ -29,8 +29,8 @@ DebugV2F DebugVs( uint id : SV_VertexID )
 [shader("fragment")]
 float4 DebugPs( DebugV2F i ) : SV_Target0
 {
-	//The screen is the middle of the picture, shrunk by the margin; both are rasterised the same way up
-	float2 uv = ( i.clip * g_where.y * 0.5 ) + 0.5;
+	//The screen is the middle of the picture, shrunk by the margin and moved onto its texels; both are rasterised the same way up
+	float2 uv = ( ( ( i.clip * g_frame[0].light2dScene.xz ) + g_frame[0].light2dSnap.xy ) * 0.5 ) + 0.5;
 	float4 seen = g_color.SampleLevel( uv, 0.0 );
 
 	//The light: as it is

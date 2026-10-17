@@ -147,13 +147,17 @@ struct FrameData
 	//where the scene has 2D lighting at all - nought, and a lit sprite is drawn unlit. See Light2DAt in sprite.slang
 	float4 light2d;
 
-	//The 2D light's pictures (CoreLight2D): how much the screen is shrunk inside them to leave their margin x, the
-	//scene's table index y and the light's w - nought where this view drew none; spare z
+	//The 2D light's pictures (CoreLight2D): how much the screen is shrunk inside them to leave their margin, across x and
+	//down z; the scene's table index y and the light's w - nought where this view drew none
 	float4 light2dScene;
 
 	//How many 2D lights there are x, one in y where occluders shadow themselves, how far light goes into them in world
 	//units z; spare w - see CoreSceneRenderer.SetLight2D
 	float4 light2dInfo;
+
+	//How far the 2D light's pictures are moved, in clip space xy, so the world sits on whole texels of them wherever the
+	//camera stands - see CoreLight2D.SnapOf; spare zw
+	float4 light2dSnap;
 
 	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is
 	//w; which way a spot points on the plane xy, half its cone z (pi shines every way), how much of its edge fades w

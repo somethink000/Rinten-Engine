@@ -403,13 +403,14 @@ internal static partial class CoreShaderFile
 		return ( pass, pass );
 	}
 
-	//Compiles one named entry of a multi-pass file, with the same preludes; null if unavailable
+	//Compiles one named entry of a multi-pass file, with the same preludes, for the frame being drawn or baked; null if unavailable
 	internal static byte[] EntryWords( string path, string combo, string entry, CoreShaderCompiler.Stage kind,
-		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv )
+		CoreShaderCompiler.Format? language = null )
 	{
 		if ( !CoreNative.Available || string.IsNullOrWhiteSpace( path ) || string.IsNullOrWhiteSpace( entry ) ) return null;
 
 		var (draws, runs) = Preludes( path, combo );
+		var format = language ?? CoreShaderCache.Target;
 
 		return kind == CoreShaderCompiler.Stage.Compute
 			? Build( path, entry, kind, runs + Defines( Stage.Compute ), format )

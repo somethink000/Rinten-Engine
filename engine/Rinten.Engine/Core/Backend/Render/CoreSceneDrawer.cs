@@ -2266,8 +2266,11 @@ internal sealed partial class CoreSceneDrawer
 
 		var carry = CoreRenderDevice.PortableFrame && CorePointChain.Refused( lastFoldKey );
 
+		//A page's canvas is multisampled (BrowserSwapchain); elsewhere the portable frame's edges are softened in its finish
+		var asideSoftens = CoreRenderDevice.PortableFrame && Rinten.Rendering.DrawSettings.Fxaa && !OperatingSystem.IsBrowser();
+
 		aside = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
-			glow.Open( camera.PostProcess?.Glow, passes, carry, exposure );
+			glow.Open( camera.PostProcess?.Glow, passes, carry, asideSoftens, exposure );
 
 		//While an export writes down the runs it bakes, the one the portable frame carries beside its passes too
 		if ( CorePointChain.Recording && !CoreRenderDevice.PortableFrame ) FoldChain( camera, passes: true );

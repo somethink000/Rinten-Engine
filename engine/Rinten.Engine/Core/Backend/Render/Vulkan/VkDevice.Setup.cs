@@ -472,6 +472,9 @@ internal static unsafe partial class VkDevice
 		//The dialect says what it needs; what it chains stays alive until the device is made - see ChainFeatures
 		var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2 };
 
+		//Whether the rays are offered before the dialect chains its features: it turns on the buffer addresses they need
+		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
+
 		dialect.ChainFeatures( physicalDevice, &features );
 
 		//And shading an eye coarser away from where it looks, where a headset was found and the device can - see VkFovea.
@@ -481,7 +484,6 @@ internal static unsafe partial class VkDevice
 		CoreLatency.ChainFeatures( &features );
 
 		//And hardware rays, optional, where the card has all they need - see VkRays.
-		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
 		VkRays.ChainFeatures( &features );
 
 		//Asked about rather than demanded, which is why none of these is in a dialect's Missing: ground seen

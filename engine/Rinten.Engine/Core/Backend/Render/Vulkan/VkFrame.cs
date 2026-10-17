@@ -1573,6 +1573,16 @@ internal static unsafe partial class VkFrame
 		//Where a recording begins is where "a frame" is counted from, under -drawtrace - see DrawTrace.
 		DrawTrace.Frame();
 
+		//Begun before the scratch: rewriting the frame's set readies the portable sun's maps with a barrier. A failure
+		//below leaves it recording, which the pool's reset at the next attempt undoes.
+		var begin = new CommandBufferBeginInfo
+		{
+			SType = StructureType.CommandBufferBeginInfo,
+			Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
+		};
+
+		vk.BeginCommandBuffer( frame.Commands, &begin );
+
 		//Pre-size scratch to last frame's peak so mid-frame growth is rare
 		if ( frame.ScratchPeak > 0 ) EnsureScratch( frame, frame.ScratchPeak );
 
@@ -1586,7 +1596,6 @@ internal static unsafe partial class VkFrame
 		var alignment = (ulong)VkDevice.storageAlignment;
 		var frameStart = ( VkDevice.BoneBlockSize + alignment - 1 ) / alignment * alignment;
 
-		//Nothing has been recorded yet - the command buffer has not even begun - so a failure here needs nothing unwound.
 		if ( !EnsureScratch( frame, frameStart + VkDevice.FrameBlockReach ) ) return false;
 
 		frame.NullBones = 0;
@@ -1598,14 +1607,6 @@ internal static unsafe partial class VkFrame
 
 		//From here, what is retired may be named by this recording; the graveyard keeps it until its fence
 		VkDevice.RecordingBegan();
-
-		var begin = new CommandBufferBeginInfo
-		{
-			SType = StructureType.CommandBufferBeginInfo,
-			Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
-		};
-
-		vk.BeginCommandBuffer( frame.Commands, &begin );
 
 		//A clean slate for the profiler and bind cache: state and bindings belong to the just-reset buffer
 		Current.WorldOnScreen = false;

@@ -56,7 +56,7 @@ internal static partial class DrawSettings
 		Help = "Radiance below which a lamp is dropped (0 trusts the authored radius)." )]
 	internal static float LightCutoff { get; set; } = 0.001f;
 
-	//FXAA runs in compose, so it forces the offscreen world target (~0.2 ms)
+	//FXAA runs in compose (the portable frame's finish off a page), so it forces the world drawn aside (~0.2 ms)
 	/// <summary>Whether the edges of the finished picture are softened.</summary>
 	[ConVar( "r_fxaa", ConVarFlags.Saved, Help = "Soften the edges of the finished picture (0 off)." )]
 	internal static bool Fxaa { get; set; } = true;

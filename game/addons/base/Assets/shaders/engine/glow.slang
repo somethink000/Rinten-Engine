@@ -17,7 +17,7 @@ cbuffer Push
 	float4 g_size;   //The written picture's 1/width, 1/height; the filtered read's 1/width, 1/height
 	float4 g_glow;   //Threshold, falloff, mode, the glow's share of each level's total
 	float4 g_tint;   //Strength times tint
-	float4 g_finish; //Exposure, curve, one where the world read is light as it is rather than kept
+	float4 g_finish; //Exposure, curve, one where the world read is light as it is rather than kept, one to soften edges
 };
 
 //What the pass reads; the up pass and the compose read a second picture beside it. A compose carrying a run of
@@ -133,6 +133,44 @@ float4 UpPs( V2F i ) : SV_Target
 	return float4( g_color.SampleLevel( uv, 0.0 ).rgb + ( tent * g_glow.y ), 1.0 );
 }
 
+float Luma( float3 colour ) { return dot( colour, float3( 0.299, 0.587, 0.114 ) ); }
+
+//The world read with its edges softened where g_finish.w asks: compose.slang's FXAA, which the portable frame has no compose for
+float3 World( float2 uv, float3 middle )
+{
+	if ( g_finish.w < 0.5 ) return middle;
+
+	float2 texel = g_size.xy;
+
+	float nw = Luma( g_color.SampleLevel( uv + ( float2( -1.0, -1.0 ) * texel ), 0.0 ).rgb );
+	float ne = Luma( g_color.SampleLevel( uv + ( float2( 1.0, -1.0 ) * texel ), 0.0 ).rgb );
+	float sw = Luma( g_color.SampleLevel( uv + ( float2( -1.0, 1.0 ) * texel ), 0.0 ).rgb );
+	float se = Luma( g_color.SampleLevel( uv + ( float2( 1.0, 1.0 ) * texel ), 0.0 ).rgb );
+	float m = Luma( middle );
+
+	float low = min( m, min( min( nw, ne ), min( sw, se ) ) );
+	float high = max( m, max( max( nw, ne ), max( sw, se ) ) );
+
+	//Flat, or a step too dim to show
+	if ( high - low < max( 1.0 / 24.0, high * 0.125 ) ) return middle;
+
+	float2 direction = float2( -( ( nw + ne ) - ( sw + se ) ), ( nw + sw ) - ( ne + se ) );
+	float reduce = max( ( nw + ne + sw + se ) * 0.25 * 0.125, 1.0 / 128.0 );
+	float scale = 1.0 / ( min( abs( direction.x ), abs( direction.y ) ) + reduce );
+
+	direction = clamp( direction * scale, -8.0, 8.0 ) * texel;
+
+	float3 near = 0.5 * ( g_color.SampleLevel( uv + ( direction * ( ( 1.0 / 3.0 ) - 0.5 ) ), 0.0 ).rgb +
+		g_color.SampleLevel( uv + ( direction * ( ( 2.0 / 3.0 ) - 0.5 ) ), 0.0 ).rgb );
+
+	float3 wide = ( near * 0.5 ) + ( 0.25 * ( g_color.SampleLevel( uv + ( direction * -0.5 ), 0.0 ).rgb +
+		g_color.SampleLevel( uv + ( direction * 0.5 ), 0.0 ).rgb ) );
+
+	float found = Luma( wide );
+
+	return found < low || found > high ? near : wide;
+}
+
 //Light onto the screen through the run of point effects, or exposure and the curve; the world's own alpha is what
 //a see-through window shows the desktop by
 float4 Finished( float3 colour, float alpha, float2 uv )
@@ -151,7 +189,7 @@ float4 ComposePs( V2F i ) : SV_Target
 	float2 uv = Uv( i );
 
 	float4 world = g_color.SampleLevel( uv, 0.0 );
-	float3 colour = Lit( world.rgb );
+	float3 colour = Lit( World( uv, world.rgb ) );
 	float3 glow = Read( g_normal, uv ) * g_tint.rgb * g_glow.w;
 
 	//Added; screened, which is src (1 - dst) + dst; or the glow alone - as bloom.shader's Apply
@@ -169,5 +207,5 @@ float4 FinishPs( V2F i ) : SV_Target
 	float2 uv = Uv( i );
 	float4 world = g_color.SampleLevel( uv, 0.0 );
 
-	return Finished( Lit( world.rgb ), world.a, uv );
+	return Finished( Lit( World( uv, world.rgb ) ), world.a, uv );
 }

@@ -2090,6 +2090,7 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.DestroyPipeline( pyramidPipeline );
 		CoreRenderDevice.DestroyPipeline( composePipeline );
 		CoreMeshRender.ReleasePipelines();
+		ParticleGpuRun.ForgetPipelines();
 		CorePasses.ReleasePipelines();
 
 		foreach ( var made in uiTargetPipelines.Values ) CoreRenderDevice.DestroyPipeline( made );
@@ -2693,6 +2694,9 @@ internal sealed partial class CoreSceneDrawer
 
 		//So whether the world's passes are the last, applying exposure and curve
 		worldFinishes = !wantsOffscreen;
+
+		//The particles stepped on the card, before any pass that draws them - see ParticleGpuRun
+		if ( !overlayOnly ) ParticleGpuRun.Simulate();
 
 		//Whether the adaptive shading rates are worth taking for this world - see VkFrame.Fovea
 		CoreRenderDevice.WorldShades( drawn || opaque.Count > 0 || translucent.Count > 0 ||

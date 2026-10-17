@@ -968,6 +968,7 @@ internal static class EngineShaders
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";
 	internal const string MeshSkin = "shaders/engine/mesh_skin.slang";
+	internal const string Particles = "shaders/engine/particles.slang";
 	internal const string MeshShapes = "shaders/engine/mesh_shapes.slang";
 	internal const string ShadingRate = "shaders/engine/shading_rate.slang";
 	internal const string DepthPyramid = "shaders/engine/depth_pyramid.slang";
@@ -1066,6 +1067,7 @@ internal static class EngineShaders
 		( MeshRaster, View, Draws, false ),
 		( MeshCull, "", Runs, false ),
 		( MeshSkin, "", Runs, false ),
+		( Particles, "", ParticleRuns, false ),
 		( MeshShapes, "", Runs, false ),
 		( ShadingRate, "", Runs, false ),
 		( DepthPyramid, "", Runs, false ),
@@ -1146,6 +1148,9 @@ internal static class EngineShaders
 		("ComposePs", CoreShaderCompiler.Stage.Pixel),
 		("FinishPs", CoreShaderCompiler.Stage.Pixel),
 	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] ParticleRuns =
+		[("main", CoreShaderCompiler.Stage.Compute), ("SpawnCs", CoreShaderCompiler.Stage.Compute)];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =
 		[("MotionCs", CoreShaderCompiler.Stage.Compute)];

@@ -377,6 +377,7 @@ internal static class PerfReport
 			meshListDrawsAtArm = CoreMeshRender.ListDraws;
 			meshMaterialDrawsAtArm = CoreMeshRender.MaterialDraws;
 			particleTicksAtArm = ParticleGameSystem.StepTicks;
+			ParticleGameSystem.CountedFrom++;
 			particleRunsAtArm = ParticleGameSystem.StepRuns;
 			particleAskedAtArm = ParticleGameSystem.Asked;
 			particleHeldAtArm = ParticleGameSystem.Held;
@@ -1130,6 +1131,18 @@ internal static class PerfReport
 
 		if ( asked > 0 && held > 0 )
 			report.AppendLine( $"  {held * 100 / asked} % of the effects asked were held back this frame - too far to step every one" );
+
+		//Which effects that processor went to, the dearest first
+		if ( ticks > 0 && Game.ActiveScene is { } stepping )
+		{
+			foreach ( var (name, effectTicks, effectParticles) in ParticleGameSystem.Costliest( stepping, 10 ) )
+			{
+				var share = effectTicks * 100.0 / ticks;
+				var each = effectTicks * 1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency / Math.Max( effectParticles, 1 );
+
+				report.AppendLine( $"    {share,5:0.0} %  {effectParticles / steps,6} a frame  {each,7:0} ns each  {name}" );
+			}
+		}
 
 		Anchors( report, steps );
 	}

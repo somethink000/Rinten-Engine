@@ -32,7 +32,7 @@ public sealed class ParticleModuleRunner : ParticleController
 	public bool IsFinished
 		=> _sinceStarted > Duration
 			&& !( ( Player?.Definition?.Looping ?? false ) && !( Player?.PlayOnce ?? false ) )
-			&& ( ParticleEffect?.Particles.Count ?? 0 ) <= 0;
+			&& ( ParticleEffect?.ParticleCount ?? 0 ) <= 0;
 
 	//Called beside the native emitter's own reset. Without it, IsFinished would answer yes again on the very next frame however thoroughly the emitter had restarted, because the clock it reads had not moved.
 	/// <summary>Put the clock back to zero.</summary>

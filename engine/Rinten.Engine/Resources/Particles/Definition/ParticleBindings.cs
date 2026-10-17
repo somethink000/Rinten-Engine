@@ -144,6 +144,9 @@ public sealed class ParticleFloatBinding
 	/// <summary>Whether this actually names a parameter that could be read.</summary>
 	public bool IsBound => UseParameter && !string.IsNullOrEmpty( ParameterName );
 
+	//The same for every particle of a player this frame: no slot, and a value that is a plain number - see Evaluate( ParticlePlayer )
+	internal bool Uniform => !HasSlot && Value.IsPlainConstant;
+
 	/// <summary>This as something the engine can hold: a parameter collapses to the constant it is worth for this player.</summary>
 	public ParticleFloat Resolve( ParticlePlayer player )
 	{
@@ -342,6 +345,9 @@ public sealed class ParticleVectorBinding
 
 	/// <summary>Whether this actually names a parameter that could be read.</summary>
 	public bool IsBound => UseParameter && !string.IsNullOrEmpty( ParameterName );
+
+	//The same for every particle of a player this frame: no slot, and a parameter or three plain numbers - see Evaluate
+	internal bool Uniform => !HasSlot && ( IsBound || ( Value.X.IsPlainConstant && Value.Y.IsPlainConstant && Value.Z.IsPlainConstant ) );
 
 	/// <summary>The vector for one particle - or, with no particle, for the effect as a whole, where the random components read as zero.</summary>
 	public Vector3 Evaluate( Particle particle, ParticlePlayer player = null )

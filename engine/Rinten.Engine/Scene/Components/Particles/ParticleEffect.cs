@@ -21,6 +21,11 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	//Accumulated time since last step; distant effects step every few frames with all owed time at once
 	internal float Owed;
 
+	//Processor ticks and particles this effect's steps took since the report's window opened - see ParticleGameSystem.Costliest
+	internal long StepTicks;
+	internal long StepParticles;
+	internal long CountedSince;
+
 	//Which frame of its rate this one steps on - see Owed.
 	internal int StepPhase => (int)( (uint)GetHashCode() & 7u );
 
@@ -282,7 +287,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	public List<Particle> DelayedParticles { get; } = new List<Particle>();
 
 	/// <summary>The total number of particles in the effect, including both active and delayed particles.</summary>
-	public int ParticleCount => Particles.Count + DelayedParticles.Count;
+	public int ParticleCount => Particles.Count + DelayedParticles.Count + ( Card?.Alive ?? 0 );
 
 	/// <summary>Whether the particle effect has reached its maximum capacity. This is determined by comparing the total particle count to the <see cref="MaxParticles"/> property.</summary>
 	public bool IsFull => ParticleCount >= MaxParticles;
@@ -352,6 +357,8 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 	public void Clear()
 	{
+		LeaveCard();
+
 		foreach ( var p in Particles.ToArray() )
 		{
 			Terminate( p );
@@ -702,8 +709,12 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 			Terminate( delete );
 		}
 
-		ParticleBounds = BBox.FromPositionAndSize( _worldTx.Position, _maxDistance * 2.0f );
-		MaxParticleSize = _maxSize;
+		//An effect on the card has its bounds from what it handed over - see ParticleGpuRun.Step
+		if ( Card is null )
+		{
+			ParticleBounds = BBox.FromPositionAndSize( _worldTx.Position, _maxDistance * 2.0f );
+			MaxParticleSize = _maxSize;
+		}
 
 		OnPostStep?.Invoke( _timeDelta );
 

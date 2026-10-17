@@ -74,8 +74,23 @@ sealed class ParticleGameSystem : GameObjectSystem
 			var owed = p.Owed;
 			p.Owed = 0.0f;
 
+			if ( p.CountedSince != CountedFrom )
+			{
+				p.CountedSince = CountedFrom;
+				p.StepTicks = p.StepParticles = 0;
+			}
+
+			p.StepParticles += p.Particles.Count;
+
 			p.TryPreWarm();
 			p.PreStep( owed );
+
+			if ( p.CardStep() )
+			{
+				stepped += p.ParticleCount;
+				continue;
+			}
+
 			p.CollectWork( workList );
 
 			stepped += p.Particles.Count;
@@ -149,7 +164,7 @@ sealed class ParticleGameSystem : GameObjectSystem
 	{
 		//A thing still growing is stepped every frame whatever: its bounds are the bounds of what it
 		//has emitted so far, which on the first frames of a burst is one particle at the emitter.
-		if ( effect.Particles.Count == 0 ) return 1;
+		if ( effect.ParticleCount == 0 ) return 1;
 
 		var bounds = effect.ParticleBounds;
 		var grown = bounds.Grow( MathF.Max( effect.MaxParticleSize, 0.0f ) );
@@ -162,9 +177,42 @@ sealed class ParticleGameSystem : GameObjectSystem
 	//it'd spend more time doing all the admin of giving them to threads than it would actually take.
 	private static void ProcessWork( ParticleEffect.ParticleWork work )
 	{
+		var began = Stopwatch.GetTimestamp();
+
 		for ( int i = work.startIndex; i < work.endIndex; i++ )
 		{
 			work.effect.UpdateParticle( i );
 		}
+
+		Interlocked.Add( ref work.effect.StepTicks, Stopwatch.GetTimestamp() - began );
+	}
+
+	//Bumped when the report's window opens: each effect counts its steps afresh from there - see ParticleEffect.StepTicks
+	internal static long CountedFrom;
+
+	/// <summary>The effects of a scene that cost the most processor since the window opened: name, ticks, particles stepped.</summary>
+	internal static List<(string Name, long Ticks, long Particles)> Costliest( Scene scene, int most )
+	{
+		var found = new List<ParticleEffect>();
+		scene.GetAll( found );
+
+		var named = new List<(string Name, long Ticks, long Particles)>();
+
+		foreach ( var effect in found )
+		{
+			if ( effect.CountedSince != CountedFrom || effect.StepTicks <= 0 ) continue;
+
+			var player = effect.GameObject?.Parent?.Components.Get<ParticlePlayer>();
+			var name = player?.Definition is { } definition
+				? $"{definition.ResourcePath} : {effect.GameObject.Name}"
+				: effect.GameObject?.Name ?? "?";
+
+			named.Add( (effect.OffCard is { } why ? $"{name} (processor: {why})" : name, effect.StepTicks, effect.StepParticles) );
+		}
+
+		named.Sort( ( a, b ) => b.Ticks.CompareTo( a.Ticks ) );
+		if ( named.Count > most ) named.RemoveRange( most, named.Count - most );
+
+		return named;
 	}
 }

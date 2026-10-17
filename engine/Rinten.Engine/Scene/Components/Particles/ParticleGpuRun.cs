@@ -23,6 +23,12 @@ internal sealed class ParticleGpuRun : IDisposable
 	private readonly GpuBuffer<float> table;
 	private readonly GpuBuffer<Packed> spawns;
 	private readonly GpuBuffer<uint> spawnSlots;
+
+	//What the step writes for an effect drawn far to near, before SortCs orders it into sprites; null for one that is not
+	private readonly GpuBuffer<SpriteData> unsorted;
+
+	/// <summary>The most particles an effect drawn far to near may have here: one group of the sort - see SortCs.</summary>
+	internal const int SortMost = 1024;
 	private readonly GpuBuffer<int> indices;
 
 	//What each slot's particle has lived and lives, and how fast its clock runs, as the card steps it - so a slot is
@@ -60,6 +66,8 @@ internal sealed class ParticleGpuRun : IDisposable
 		spawns = new GpuBuffer<Packed>( capacity );
 		spawnSlots = new GpuBuffer<uint>( capacity );
 
+		if ( effect.Components.Get<ParticleSpriteRenderer>() is { IsSorted: true } ) unsorted = new GpuBuffer<SpriteData>( capacity );
+
 		indices = new GpuBuffer<int>( 6, GpuBuffer.UsageFlags.Index );
 		indices.SetData( (ReadOnlySpan<int>)[0, 1, 2, 0, 2, 3] );
 
@@ -89,6 +97,7 @@ internal sealed class ParticleGpuRun : IDisposable
 		table.Dispose();
 		spawns.Dispose();
 		spawnSlots.Dispose();
+		unsorted?.Dispose();
 		indices.Dispose();
 	}
 
@@ -533,6 +542,7 @@ internal sealed class ParticleGpuRun : IDisposable
 
 	private static ulong spawnPipeline;
 	private static ulong stepPipeline;
+	private static ulong sortPipeline;
 	private static int pipelinesBuilt = -1;
 	private static long simulatedAt = -1;
 	private static uint frames;
@@ -546,14 +556,16 @@ internal sealed class ParticleGpuRun : IDisposable
 
 		var spawn = CoreShaderCache.Pass( EngineShaders.Particles, "SpawnCs", CoreShaderCompiler.Stage.Compute );
 		var step = CoreShaderCache.Pass( EngineShaders.Particles, "main", CoreShaderCompiler.Stage.Compute );
+		var sort = CoreShaderCache.Pass( EngineShaders.Particles, "SortCs", CoreShaderCompiler.Stage.Compute );
 
 		spawnPipeline = spawn is null ? 0 : CoreRenderDevice.CreateCompute( spawn );
 		stepPipeline = step is null ? 0 : CoreRenderDevice.CreateCompute( step );
+		sortPipeline = sort is null ? 0 : CoreRenderDevice.CreateCompute( sort );
 
-		if ( spawnPipeline == 0 || stepPipeline == 0 )
+		if ( spawnPipeline == 0 || stepPipeline == 0 || sortPipeline == 0 )
 			Log.Warning( $"the particle passes did not compile: {CoreRenderDevice.ShaderError}" );
 
-		return spawnPipeline != 0 && stepPipeline != 0;
+		return spawnPipeline != 0 && stepPipeline != 0 && sortPipeline != 0;
 	}
 
 	/// <summary>Lets go of the passes, for a device going away or shaders compiled again.</summary>
@@ -561,19 +573,27 @@ internal sealed class ParticleGpuRun : IDisposable
 	{
 		if ( spawnPipeline != 0 ) CoreRenderDevice.DestroyPipeline( spawnPipeline );
 		if ( stepPipeline != 0 ) CoreRenderDevice.DestroyPipeline( stepPipeline );
+		if ( sortPipeline != 0 ) CoreRenderDevice.DestroyPipeline( sortPipeline );
 
-		spawnPipeline = stepPipeline = 0;
+		spawnPipeline = stepPipeline = sortPipeline = 0;
 		pipelinesBuilt = -1;
 	}
 
 	/// <summary>Whether the card can step particles here at all.</summary>
 	internal static bool Possible => CoreNative.Available && !CoreRenderDevice.PortableFrame;
 
+	//Where the view that steps them stands and looks, which a sorted effect is ordered for - the first view drawn in a turn; others take its order
+	private static Vector3 eye;
+	private static Vector3 looking;
+
 	/// <summary>Steps every run that has work, once a turn of the loop, into the frame being recorded - before the world that draws them.</summary>
-	internal static void Simulate()
+	internal static void Simulate( Vector3 position, Vector3 forward )
 	{
 		if ( simulatedAt == EngineLoop.LoopFrames ) return;
 		simulatedAt = EngineLoop.LoopFrames;
+
+		eye = position;
+		looking = forward;
 
 		lock ( Runs )
 		{
@@ -595,8 +615,8 @@ internal sealed class ParticleGpuRun : IDisposable
 		CoreRenderDevice.ZoneEnd();
 	}
 
-	private readonly ulong[] bound = new ulong[5];
-	private readonly byte[] push = new byte[20];
+	private readonly ulong[] bound = new ulong[6];
+	private readonly byte[] push = new byte[64];
 
 	private void Dispatch()
 	{
@@ -605,6 +625,7 @@ internal sealed class ParticleGpuRun : IDisposable
 		bound[2] = table.Handle;
 		bound[3] = spawns.Handle;
 		bound[4] = spawnSlots.Handle;
+		bound[5] = unsorted?.Handle ?? sprites.Handle;
 
 		foreach ( var one in bound ) if ( one == 0 ) return;
 
@@ -629,9 +650,20 @@ internal sealed class ParticleGpuRun : IDisposable
 		BitConverter.TryWriteBytes( push.AsSpan( 12 ), frames );
 		BitConverter.TryWriteBytes( push.AsSpan( 16 ), (uint)Marshal.SizeOf<SpriteData>() );
 
+		//A float3 starts on the next sixteen bytes in the push block - see Push in particles.slang
+		BitConverter.TryWriteBytes( push.AsSpan( 32 ), eye.x );
+		BitConverter.TryWriteBytes( push.AsSpan( 36 ), eye.y );
+		BitConverter.TryWriteBytes( push.AsSpan( 40 ), eye.z );
+		BitConverter.TryWriteBytes( push.AsSpan( 44 ), unsorted is not null ? 1u : 0u );
+		BitConverter.TryWriteBytes( push.AsSpan( 48 ), looking.x );
+		BitConverter.TryWriteBytes( push.AsSpan( 52 ), looking.y );
+		BitConverter.TryWriteBytes( push.AsSpan( 56 ), looking.z );
+
 		if ( count > 0 ) CoreRenderDevice.Dispatch( spawnPipeline, bound, ( count + 63 ) / 64, 1, 1, push );
 
 		CoreRenderDevice.Dispatch( stepPipeline, bound, ( capacity + 63 ) / 64, 1, 1, push );
+
+		if ( unsorted is not null ) CoreRenderDevice.Dispatch( sortPipeline, bound, 1, 1, 1, push );
 
 		pending.Clear();
 		pendingSlots.Clear();

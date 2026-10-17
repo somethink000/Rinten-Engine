@@ -2696,7 +2696,7 @@ internal sealed partial class CoreSceneDrawer
 		worldFinishes = !wantsOffscreen;
 
 		//The particles stepped on the card, before any pass that draws them - see ParticleGpuRun
-		if ( !overlayOnly ) ParticleGpuRun.Simulate();
+		if ( !overlayOnly ) ParticleGpuRun.Simulate( position, new Vector3( forward.x, forward.y, forward.z ) );
 
 		//Whether the adaptive shading rates are worth taking for this world - see VkFrame.Fovea
 		CoreRenderDevice.WorldShades( drawn || opaque.Count > 0 || translucent.Count > 0 ||

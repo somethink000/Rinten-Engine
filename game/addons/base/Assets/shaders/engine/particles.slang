@@ -25,6 +25,9 @@ struct Particle
 [[vk::binding(3,0)]] StructuredBuffer<Particle> g_spawns;
 [[vk::binding(4,0)]] StructuredBuffer<uint> g_spawnSlots;
 
+//What the step wrote, for an effect drawn far to near: SortCs puts it into g_sprites in that order
+[[vk::binding(5,0)]] RWByteAddressBuffer g_unsorted;
+
 [[vk::push_constant]]
 cbuffer Push
 {
@@ -37,6 +40,11 @@ cbuffer Push
 
 	//Bytes a sprite takes - see SpriteBatchSceneObject.SpriteData
 	uint g_spriteStride;
+
+	//Where the eye is and which way it looks, for an effect drawn far to near - see SortCs. Nought where it is not sorted
+	float3 g_eye;
+	uint g_sorted;
+	float3 g_forward;
 };
 
 //Where in the table each thing is - see ParticleGpuRun.Table
@@ -216,8 +224,14 @@ uint4 Rgbe( float3 c )
 
 uint Pack( uint4 bytes ) { return bytes.x | ( bytes.y << 8 ) | ( bytes.z << 16 ) | ( bytes.w << 24 ); }
 
-void Put( uint at, uint word ) { g_sprites.Store( at * 4, word ); }
-void PutF( uint at, float value ) { g_sprites.Store( at * 4, asuint( value ) ); }
+//A sorted effect's step writes aside, and SortCs moves each sprite to its place in the order
+void Put( uint at, uint word )
+{
+	if ( g_sorted != 0u ) g_unsorted.Store( at * 4, word );
+	else g_sprites.Store( at * 4, word );
+}
+
+void PutF( uint at, float value ) { Put( at, asuint( value ) ); }
 
 //A sprite drawn as nothing: no size, no alpha
 void Nothing( uint sprite )
@@ -435,4 +449,78 @@ void main( uint3 id : SV_DispatchThreadID )
 	g_particles[slot] = p;
 
 	Sprite( sprite, p, facing, colour, alpha, size );
+}
+
+//-- far to near -------------------------------------------------------------------------------------------------------
+
+static const uint SortMost = 1024;
+
+//The depth along the view as a key that sorts the same way as unsigned numbers, nothing at all lowest
+groupshared uint2 g_order[SortMost];
+
+uint Key( float depth )
+{
+	uint bits = asuint( depth );
+	return ( bits & 0x80000000u ) != 0u ? ~bits : bits | 0x80000000u;
+}
+
+//A whole effect of at most SortMost in one group: bitonic, furthest first, then each sprite copied to its place
+[shader("compute")]
+[numthreads(1024, 1, 1)]
+void SortCs( uint i : SV_GroupIndex )
+{
+	uint key = 0u;
+
+	if ( i < g_capacity )
+	{
+		Particle p = g_particles[i];
+		if ( p.motion.w > 0.0 ) key = Key( dot( p.place.xyz - g_eye, g_forward ) );
+	}
+
+	g_order[i] = uint2( key, i );
+	GroupMemoryBarrierWithGroupSync();
+
+	for ( uint k = 2u; k <= SortMost; k <<= 1 )
+	{
+		for ( uint j = k >> 1; j > 0u; j >>= 1 )
+		{
+			uint other = i ^ j;
+
+			if ( other > i )
+			{
+				uint2 a = g_order[i];
+				uint2 b = g_order[other];
+
+				//Descending where the run is going down, ascending where up: the whole ends furthest first
+				bool down = ( i & k ) == 0u;
+
+				if ( down ? a.x < b.x : a.x > b.x )
+				{
+					g_order[i] = b;
+					g_order[other] = a;
+				}
+			}
+
+			GroupMemoryBarrierWithGroupSync();
+		}
+	}
+
+	if ( i >= g_capacity ) return;
+
+	uint words = g_spriteStride / 4;
+	uint source = g_order[i].y;
+	uint into = i * words;
+
+	//A slot past the effect's own, which only pads the sort out to a power of two: nothing to draw here
+	if ( source >= g_capacity )
+	{
+		g_sprites.Store( ( into + 6 ) * 4, 0u );
+		g_sprites.Store( ( into + 7 ) * 4, 0u );
+		g_sprites.Store( ( into + 8 ) * 4, 0u );
+		return;
+	}
+
+	uint from = source * words;
+
+	for ( uint w = 0u; w < words; w++ ) g_sprites.Store( ( into + w ) * 4, g_unsorted.Load( ( from + w ) * 4 ) );
 }

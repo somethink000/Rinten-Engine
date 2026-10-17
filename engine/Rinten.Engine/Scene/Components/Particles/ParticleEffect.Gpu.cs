@@ -73,7 +73,7 @@ public sealed partial class ParticleEffect
 		if ( Components.Get<ParticleModelEmitter>() is not null ) return "emits from a model";
 
 		if ( Components.Get<ParticleSpriteRenderer>() is not { } sprite ) return "no sprite";
-		if ( sprite.IsSorted ) return "sorted";
+		if ( sprite.IsSorted && MaxParticles > ParticleGpuRun.SortMost ) return "sorted, and more than one group sorts";
 		if ( sprite.MotionBlur ) return "motion blur";
 		if ( sprite.Shadows ) return "casts shadows";
 		if ( sprite.MaterialOverride is not null ) return "its own material";

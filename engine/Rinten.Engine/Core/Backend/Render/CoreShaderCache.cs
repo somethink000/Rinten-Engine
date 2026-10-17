@@ -1150,7 +1150,7 @@ internal static class EngineShaders
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] ParticleRuns =
-		[("main", CoreShaderCompiler.Stage.Compute), ("SpawnCs", CoreShaderCompiler.Stage.Compute)];
+		[("main", CoreShaderCompiler.Stage.Compute), ("SpawnCs", CoreShaderCompiler.Stage.Compute), ("SortCs", CoreShaderCompiler.Stage.Compute)];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =
 		[("MotionCs", CoreShaderCompiler.Stage.Compute)];

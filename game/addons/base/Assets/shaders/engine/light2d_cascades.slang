@@ -310,8 +310,9 @@ float3 Gathered( float2 here )
 //Angles a light's shadow map has about it - see CoreLight2D.ShadowAngles
 static const int ShadowAngles = 1024;
 
-//How many strides a shadow map's ray may take to the light's range
-static const int MostShadowSteps = 256;
+//How many strides a shadow map's ray may take to the light's range, and the least of one as a share of that range
+static const int MostShadowSteps = 512;
+static const float LeastShadowStrideShare = 256.0;
 
 //Angles read each side of a point's way to a light, looking for the nearest blocked one - see Shadow
 static const int ShadowSearch = 6;
@@ -359,15 +360,27 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 	float turn = ( float( angle ) + 0.5 ) * ( 2.0 * Pi / float( ShadowAngles ) );
 	float2 toward = float2( cos( turn ), sin( turn ) );
 
-	float t = 0.0;
-	float seen = light.range;
+	//Only the part of the ray over the picture: a light off the screen still has its blockers on it
+	float2 safe = select( abs( toward ) < 1e-6, float2( 1e-6, 1e-6 ), toward );
+	float2 a = ( float2( 0.0, 0.0 ) - light.position ) / safe;
+	float2 b = ( float2( SceneSize() ) - light.position ) / safe;
+	float enter = max( max( min( a.x, b.x ), min( a.y, b.y ) ), 0.0 );
+	float leave = min( min( max( a.x, b.x ), max( a.y, b.y ) ), light.range );
 
-	for ( int steps = 0; steps < MostShadowSteps && t < light.range; steps++ )
+	float t = enter;
+	float seen = light.range;
+	float least = max( 0.5, light.range / LeastShadowStrideShare );
+
+	for ( int steps = 0; steps < MostShadowSteps && t < leave; steps++ )
 	{
 		float2 position = light.position + ( toward * t );
 		int2 at = int2( floor( position ) );
 
-		if ( !Inside( at ) ) break;
+		if ( !Inside( at ) )
+		{
+			t += 0.5;
+			continue;
+		}
 
 		if ( Solid( at ) )
 		{
@@ -375,7 +388,7 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 			break;
 		}
 
-		t += max( Clearance( at, position ), 0.5 );
+		t += max( Clearance( at, position ), least );
 	}
 
 	g_out[int2( angle, i )] = float4( seen, 0.0, 0.0, 0.0 );

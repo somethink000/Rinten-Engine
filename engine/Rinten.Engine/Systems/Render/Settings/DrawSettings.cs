@@ -56,15 +56,15 @@ internal static partial class DrawSettings
 		Help = "Radiance below which a lamp is dropped (0 trusts the authored radius)." )]
 	internal static float LightCutoff { get; set; } = 0.001f;
 
-	//FXAA runs in compose, so enabling it forces the offscreen world target (~0.2 ms); off by default
+	//FXAA runs in compose, so it forces the offscreen world target (~0.2 ms)
 	/// <summary>Whether the edges of the finished picture are softened.</summary>
 	[ConVar( "r_fxaa", ConVarFlags.Saved, Help = "Soften the edges of the finished picture (0 off)." )]
-	internal static bool Fxaa { get; set; }
+	internal static bool Fxaa { get; set; } = true;
 
 	/// <summary>MSAA sample count (0 is none); only the web frame reads it, the desktop ignores it</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
 		Help = "Samples per pixel (0 off). The web's frame reads it; the desktop does not yet." )]
-	internal static int Msaa { get; set; }
+	internal static int Msaa { get; set; } = 4;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>
 	[ConVar( "r_upscaling", ConVarFlags.Saved, Min = 0, Max = 5,

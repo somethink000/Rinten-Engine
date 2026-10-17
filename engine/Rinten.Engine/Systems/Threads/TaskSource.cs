@@ -192,7 +192,9 @@ public struct TaskSource
 		var time = Time.NowDouble + ms / 1000.0;
 
 		//For delays longer than the threshold, sleep most of the duration with a single Task.Delay and only poll the remaining sub-threshold window.
-		var bulkMs = ms - DelayPollingThresholdMs;
+		//That sleep is real time: where game time runs faster, the same game time is over sooner
+		var scale = ( Game.ActiveScene?.TimeScale ?? 1.0f ) * Scene.HostTimeScale;
+		var bulkMs = (int)( ( ms - DelayPollingThresholdMs ) / Math.Max( scale, 1.0f ) );
 		if ( bulkMs > 0 )
 		{
 			await Task.Delay( bulkMs, ct );

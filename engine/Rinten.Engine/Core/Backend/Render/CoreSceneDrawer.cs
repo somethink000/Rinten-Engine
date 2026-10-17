@@ -1609,6 +1609,9 @@ internal sealed partial class CoreSceneDrawer
 	private readonly CorePortableGlow glow = new();
 	private bool aside;
 
+	//Last frame's run for the world's shading: where its surfaces had no build of it, the finish carries it from the next frame
+	private string lastFoldKey;
+
 	//The sky table's bindless index, one as a flag in the portable frame, nought for none
 	private int SkyTableSlot()
 	{
@@ -2253,14 +2256,17 @@ internal sealed partial class CoreSceneDrawer
 		//The portable frame's bloom and passes: the world drawn aside and kept past white, its curve left to the finish
 		var passes = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes && PortablePasses( camera );
 
+		var carry = CoreRenderDevice.PortableFrame && CorePointChain.Refused( lastFoldKey );
+
 		aside = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
-			glow.Open( camera.PostProcess?.Glow, passes, exposure );
+			glow.Open( camera.PostProcess?.Glow, passes, carry, exposure );
 
 		//While an export writes down the runs it bakes, the one the portable frame carries beside its passes too
 		if ( CorePointChain.Recording && !CoreRenderDevice.PortableFrame ) FoldChain( camera, passes: true );
 
 		//Upload the point effects the world's shading or the finish may carry, whichever way the frame ends up drawn
 		foldKey = FoldChain( camera, passes: aside && passes );
+		lastFoldKey = foldKey;
 
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
@@ -2287,8 +2293,12 @@ internal sealed partial class CoreSceneDrawer
 		//Overrides run for every view; this also begins the view's CoreImmediate list, replayed later
 		CoreRenderDevice.ZoneBegin( "overrides" );
 
+		//Culled to the 2D light's margin too, or what stands just out of shot never reaches its scene picture
+		var margin = CoreLight2D.Shrink( scene, camera );
+		var culledBy = margin < 1.0f ? viewProjection * System.Numerics.Matrix4x4.CreateScale( margin, margin, 1.0f ) : viewProjection;
+
 		RunOverrides( scene, gizmoWorld, gizmos?.Draws, camera, new Rect( 0, 0, pixels.Width, pixels.Height ),
-			CoreSceneRenderer.FrustumOf( viewProjection ), eyeView, viewProjection, eye: Eye is not null );
+			CoreSceneRenderer.FrustumOf( culledBy ), eyeView, viewProjection, eye: Eye is not null );
 
 		CoreRenderDevice.ZoneEnd();
 

@@ -20,7 +20,7 @@ public static partial class PerformanceStats
 		}
 	}
 
-	/// <summary>How the edges of the world are being smoothed right now: "MSAA 4x" on a page where the player chose it, the edge filter or a temporal upscaler on a desktop, or "off".</summary>
+	/// <summary>How the edges of the world are being smoothed right now: "MSAA 4x" on a page unless the player turned it off, the edge filter or a temporal upscaler on a desktop, or "off".</summary>
 	public static string AntiAliasing
 	{
 		get

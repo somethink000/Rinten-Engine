@@ -240,6 +240,14 @@ partial class StandaloneExporter
 					//loaded here is ticked without that end reaching it, so it is asked for by hand as well.
 					scene.GameTick();
 
+					//Every effect the scene holds switched on, whatever its start left off: a game that turns one on later lays
+					//a run with it, and the bake covers the runs this one leaves when effects are off - see BakeScreens
+					foreach ( var holder in scene.GetAllObjects( true ) )
+					{
+						foreach ( var effect in holder.Components.GetAll<BasePostProcess>( FindMode.Disabled | FindMode.InSelf ) )
+							effect.Enabled = true;
+					}
+
 					if ( scene.GetSystem<PostProcessSystem>() is Component.ISceneStage effects ) effects.End();
 
 					cameras.Clear();

@@ -1173,7 +1173,7 @@ internal static unsafe class BrowserSwapchain
 		return handle;
 	}
 
-	//The canvas's anti-aliasing (RenderSettings.AntiAliasQuality → DrawSettings.Msaa), none by default; four samples,
+	//The canvas's anti-aliasing (RenderSettings.AntiAliasQuality → DrawSettings.Msaa), on by default; four samples,
 	//the one count WebGPU promises besides one, or WebGL2's most up to that
 	private static int WantedSamples => Rinten.Rendering.DrawSettings.Msaa >= 2 ? 4 : 1;
 

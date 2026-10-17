@@ -202,9 +202,8 @@ public partial class RenderSettings
 		Borderless = true;
 		VSync = true;
 
-		//None, which is the only thing this renderer can actually do - no target here is
-		//multisampled. Edge smoothing is DrawSettings.Fxaa, and off by default for its own reasons.
-		AntiAliasQuality = MultisampleAmount.MultisampleNone;
+		//Four samples: only a page's canvas is multisampled; the desktop smooths with DrawSettings.Fxaa
+		AntiAliasQuality = MultisampleAmount.Multisample4x;
 		MaxFrameRate = 144;
 		MaxFrameRateInactive = 60;
 		MaxFrameRateMenu = 144;

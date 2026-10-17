@@ -106,6 +106,15 @@ internal static class CoreLight2D
 		return true;
 	}
 
+	//How much this view's screen is shrunk inside its 2D light's pictures; one where it has no 2D lighting - see Draw
+	internal static float Shrink( Scene scene, CameraComponent camera )
+	{
+		if ( CoreRenderDevice.PortableFrame || camera is not { Orthographic: true } ) return 1.0f;
+		if ( scene?.GetSystem<SceneLight2DSystem>() is not { Active: true } system ) return 1.0f;
+
+		return 1.0f / ( 1.0f + ( 2.0f * Math.Clamp( system.Settings.Margin, 0.0f, 0.5f ) ) );
+	}
+
 	//The block's lanes for the pictures - see light2dScene in frame_data.slang; z is spare
 	internal static void Lay( float[] frame, float shrink, int scene, int light )
 	{

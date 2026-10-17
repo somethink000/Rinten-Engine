@@ -42,6 +42,7 @@ internal sealed class CorePortableGlow
 	private int passWidth, passHeight;
 
 	private ulong world;
+	private int worldWidth, worldHeight;
 	private bool glowing;
 	private Settings settings;
 	private float exposure;
@@ -57,10 +58,10 @@ internal sealed class CorePortableGlow
 	/// <summary>Their size, which is the screen's and the world's drawn aside.</summary>
 	internal (int Width, int Height) PassSize => ( passWidth, passHeight );
 
-	/// <summary>Sends the world aside for this frame's glow, or its passes, or both; false where it cannot, and the frame goes as ever.</summary>
-	internal bool Open( Settings? wanted, bool passes, float frameExposure )
+	/// <summary>Sends the world aside for this frame's glow, its passes, or a run of point effects only the finish carries; false where it cannot.</summary>
+	internal bool Open( Settings? wanted, bool passes, bool carry, float frameExposure )
 	{
-		if ( failed || wanted is null && !passes ) return false;
+		if ( failed || wanted is null && !passes && !carry ) return false;
 
 		//The picture is the screen's size, which the levels follow
 		world = CoreRenderDevice.WorldAside( true, out var screenWidth, out var screenHeight );
@@ -77,6 +78,7 @@ internal sealed class CorePortableGlow
 
 		glowing = wanted is not null;
 		settings = wanted ?? default;
+		( worldWidth, worldHeight ) = ( screenWidth, screenHeight );
 		exposure = frameExposure;
 		return true;
 	}
@@ -99,7 +101,7 @@ internal sealed class CorePortableGlow
 		{
 			CoreRenderDevice.ZoneBegin( "finish" );
 
-			Write( 1.0f / passWidth, 1.0f / passHeight, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, curve, lit );
+			Write( 1.0f / Math.Max( worldWidth, 1 ), 1.0f / Math.Max( worldHeight, 1 ), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, curve, lit );
 
 			//A texture is a material of itself in every slot
 			var finish = ChainPipeline( FinishEntry, chain );

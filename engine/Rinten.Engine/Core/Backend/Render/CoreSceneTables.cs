@@ -1133,7 +1133,7 @@ internal sealed class CoreSceneTables
 
 		var world = CoreSceneRenderer.WorldOf( transform );
 		var scale = transform.Scale;
-		var maxScale = MathF.Max( scale.x, MathF.Max( scale.y, scale.z ) );
+		var maxScale = MathF.Max( MathF.Abs( scale.x ), MathF.Max( MathF.Abs( scale.y ), MathF.Abs( scale.z ) ) );
 		var centre = transform.PointToWorld( mesh.BoundCentre );
 		var radius = mesh.BoundRadius * maxScale;
 
@@ -1467,7 +1467,7 @@ internal sealed class CoreSceneTables
 
 		ref var record = ref records[slot];
 		var scale = transform.Scale;
-		var maxScale = MathF.Max( scale.x, MathF.Max( scale.y, scale.z ) );
+		var maxScale = MathF.Max( MathF.Abs( scale.x ), MathF.Max( MathF.Abs( scale.y ), MathF.Abs( scale.z ) ) );
 		var centre = transform.PointToWorld( entry.Mesh.BoundCentre );
 
 		record.Prev = record.World;

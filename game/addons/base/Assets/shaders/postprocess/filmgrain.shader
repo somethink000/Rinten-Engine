@@ -15,7 +15,7 @@ PARAMETERS
 	//How much the grain keeps to the shadows: a bright frame shows almost none.
 	float g_flResponse < Attribute( "Response" ); Default( 0.5 ); >;
 
-	//Seconds, kept small so the hash below does not run out of precision.
+	//Seconds; the hash takes a new pattern each sixtieth
 	float g_flTime < Attribute( "Time" ); Default( 0.0 ); >;
 }
 
@@ -25,9 +25,15 @@ float3 Apply( float3 colour, float2 uv )
 {
 	if ( g_flIntensity <= 0.0 ) return colour;
 
-	float2 at = ( uv * g_vFrameSize.xy ) + g_flTime;
+	//An integer hash of pixel and frame: sin of pixel coordinates in the thousands lost its precision on the GPU and drew stripes
+	uint3 v = uint3( uint2( uv * g_vFrameSize.xy ), uint( g_flTime * 60.0 ) );
 
-	float noise = frac( sin( dot( at, float2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+	v = v * 1664525u + 1013904223u;
+	v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+	v ^= v >> 16u;
+	v.x += v.y * v.z;
+
+	float noise = float( v.x >> 8u ) * ( 1.0 / 16777216.0 );
 
 	float luma = dot( colour, float3( 0.299, 0.587, 0.114 ) );
 	float shadow = lerp( 1.0, 1.0 - saturate( luma ), saturate( g_flResponse ) );

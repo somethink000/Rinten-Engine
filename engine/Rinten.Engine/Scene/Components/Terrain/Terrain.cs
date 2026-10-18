@@ -48,6 +48,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 	void DisposeRenderResources()
 	{
 		ReleaseChunks();
+		DropRelief();
 
 		if ( watched is not null ) watched.Changed -= MeshChanged;
 		watched = null;
@@ -74,8 +75,9 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 			return;
 		}
 
-		//Whatever is waiting to be baked, and whatever the workers finished.
+		//Whatever is waiting to be baked, and whatever the workers finished; then the ring of relief over what stands.
 		PumpChunks();
+		PumpRelief();
 	}
 
 	protected override void OnPreRender()

@@ -550,6 +550,8 @@ public partial class Terrain
 
 		var index = Array.IndexOf( chunks, chunk );
 		if ( index >= 0 ) ChunkBaked?.Invoke( index % chunksWide, index / chunksWide );
+
+		reliefStale = true;
 	}
 
 	private SceneObject Place( SceneObject made, Material wears )
@@ -616,5 +618,6 @@ public partial class Terrain
 			return;
 
 		UpdateParamsMap();
+		relief?.Again();
 	}
 }

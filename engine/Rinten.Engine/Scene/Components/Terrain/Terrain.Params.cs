@@ -15,7 +15,7 @@ public partial class Terrain
 	//How many layers a terrain may list, and how wide the picture is.
 	private const int ParamsWide = 64;
 
-	//And how many rows it has - seven used, the rest headroom.
+	//And how many rows it has.
 	private const int ParamsHigh = 8;
 
 	private const int RowTerrain = 0;
@@ -23,7 +23,7 @@ public partial class Terrain
 	//Colour index low, normal index high.
 	private const int RowLayerMaps = 1;
 
-	//Height index high; the low half is spare.
+	//Displacement in metres low, as a half; height index high.
 	private const int RowLayerPacks = 2;
 
 	//One over the layer's uv scale, as a whole float.
@@ -37,6 +37,9 @@ public partial class Terrain
 
 	//Roughness map index low, occlusion map index high.
 	private const int RowLayerMaps2 = 6;
+
+	//The ring of relief round the eye - see FillRelief.
+	private const int RowRing = 7;
 
 	//Current and last-sent bytes, so frames where nothing changed skip the upload
 	private byte[] paramsBytes;
@@ -88,7 +91,7 @@ public partial class Terrain
 				LayerPicture( layer, "Normal", srgb: false ) );
 
 			WriteShorts( i, RowLayerPacks,
-				0,
+				BitConverter.HalfToUInt16Bits( (Half)CoreResources.Number( layer?.core, "g_flDisplacement", 0.0f ) ),
 				LayerPicture( layer, "g_tHeight", srgb: false ) );
 
 			WriteShorts( i, RowLayerMaps2,
@@ -109,6 +112,8 @@ public partial class Terrain
 				CoreResources.Number( layer?.core, "g_flNormalStrength", 1.0f ),
 				CoreResources.Number( layer?.core, "g_flHeightBlend", 1.0f ) );
 		}
+
+		FillRelief();
 	}
 
 	//Bindless index of a layer's compiled texture, looked up per frame since slots get reused

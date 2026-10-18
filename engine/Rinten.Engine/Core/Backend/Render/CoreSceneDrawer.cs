@@ -2604,6 +2604,9 @@ internal sealed partial class CoreSceneDrawer
 		//And the sky's light, where its sky changed: capture, reflection levels, irradiance
 		skyLight.Draw( frame, skyShader, skyDevice, skyCore );
 
+		//The terrains' rings of relief built since the last frame, before the ground they are drawn over
+		TerrainRelief.ExpandAll();
+
 		//Whether anything reads the world picture; if not, the world is shaded straight onto the window
 		var worldSize = CoreRenderDevice.WorldSize();
 

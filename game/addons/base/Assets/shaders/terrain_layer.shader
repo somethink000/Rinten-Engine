@@ -36,6 +36,9 @@ PARAMETERS
 
 	//Height per texel for height blending and displacement; 0.5 is flat
 	Texture2D g_tHeight < Default( 0.5 ); UiGroup( "Maps" ); >;
+
+	//How far, in metres, white in the height map lifts the ground near the eye over black. Nought for none - see terrain_relief.shader.
+	float g_flDisplacement < Default( 0.0 ); Range( 0.0, 0.5 ); UiGroup( "Terrain" ); >;
 }
 
 #include "depth_id.slang"

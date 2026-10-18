@@ -163,7 +163,6 @@ struct Splatted
 	float roughness;
 	float occlusion;
 	float metalness;
-	float height;
 };
 
 //How many layers a vertex carries weights for - Terrain.MaxLayers, and the two change together.
@@ -299,9 +298,8 @@ float4 SampleUntiledOr( uint map, Untiled where, float2 dx, float2 dy, float4 in
 }
 #endif
 
-//<paramref name="deepToo"/> says whether the height map is wanted. It is read by one thing, the blend that lets the layer standing higher take the pixel, and
-//a terrain that does not blend that way was fetching a third picture per layer per projection - up to eighteen of them a pixel - to multiply it by nothing.
-Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal, bool deepToo )
+//Everything of a layer but its height, which the blend by height reads apart - see LayerHeight.
+Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal )
 {
 	Layer layer = LayerAt( index );
 
@@ -309,9 +307,8 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 	float2 dx = ( ddxLocal / LayerTile ) * layer.uvScale;
 	float2 dy = ( ddyLocal / LayerTile ) * layer.uvScale;
 
-	//Colour, normal and height, read the way the standard surface reads them - a flat
-	//normal and a middling height standing in for the ones this layer did not name.
-	float4 colour, mapped, deep;
+	//Colour and normal, read the way the standard surface reads them - a flat normal standing in where this layer named none.
+	float4 colour, mapped;
 	float rough = 1.0, occ = 1.0;
 
 #ifdef PORTABLE
@@ -319,7 +316,6 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 		? LayerColourUntiled( index, UntileAt( uv, dx, dy ), dx, dy )
 		: LayerColour( index, uv, dx, dy );
 	mapped = float4( 0.5, 0.5, 1.0, 1.0 );
-	deep = float4( 0.5, 0.5, 0.5, 1.0 );
 #else
 	if ( ( layer.flags & LayerNoTile ) != 0u )
 	{
@@ -327,7 +323,6 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 
 		colour = SampleUntiledOr( layer.colour, where, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) );
 		mapped = SampleUntiledOr( layer.normal, where, dx, dy, float4( 0.5, 0.5, 1.0, 1.0 ) );
-		deep = deepToo ? SampleUntiledOr( layer.height, where, dx, dy, float4( 0.5, 0.5, 0.5, 1.0 ) ) : float4( 0.0, 0.0, 0.0, 1.0 );
 		rough = SampleUntiledOr( layer.roughnessMap, where, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) ).r;
 		occ = SampleUntiledOr( layer.occlusionMap, where, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) ).r;
 	}
@@ -335,7 +330,6 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 	{
 		colour = SampleOr( layer.colour, uv, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) );
 		mapped = SampleOr( layer.normal, uv, dx, dy, float4( 0.5, 0.5, 1.0, 1.0 ) );
-		deep = deepToo ? SampleOr( layer.height, uv, dx, dy, float4( 0.5, 0.5, 0.5, 1.0 ) ) : float4( 0.0, 0.0, 0.0, 1.0 );
 		rough = SampleOr( layer.roughnessMap, uv, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) ).r;
 		occ = SampleOr( layer.occlusionMap, uv, dx, dy, float4( 1.0, 1.0, 1.0, 1.0 ) ).r;
 	}
@@ -354,7 +348,6 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 	o.roughness = clamp( rough * layer.roughness, 0.04, 1.0 );
 	o.metalness = saturate( layer.metalness );
 	o.occlusion = occ;
-	o.height = deep.r * layer.heightStrength;
 
 	return o;
 }
@@ -412,7 +405,7 @@ V2F MainVs( VIn i )
 }
 
 //Triplanar layer sample, reading only the sides the surface faces enough (just top on flat ground)
-Splatted SampleLayerAround( uint index, float3 local, float3 facing, float3 dxLocal, float3 dyLocal, float3 sides, bool deepToo )
+Splatted SampleLayerAround( uint index, float3 local, float3 facing, float3 dxLocal, float3 dyLocal, float3 sides )
 {
 	Splatted o = (Splatted)0;
 
@@ -422,37 +415,34 @@ Splatted SampleLayerAround( uint index, float3 local, float3 facing, float3 dxLo
 
 	if ( sides.y > 0.0 )
 	{
-		Splatted top = SampleLayer( index, local.xz, dxLocal.xz, dyLocal.xz, deepToo );
+		Splatted top = SampleLayer( index, local.xz, dxLocal.xz, dyLocal.xz );
 
 		o.albedo += top.albedo * sides.y;
 		o.roughness += top.roughness * sides.y;
 		o.metalness += top.metalness * sides.y;
 		o.occlusion += top.occlusion * sides.y;
-		o.height += top.height * sides.y;
 		bend += float3( top.normal.x, 0.0, top.normal.y ) * sides.y;
 	}
 
 	if ( sides.x > 0.0 )
 	{
-		Splatted side = SampleLayer( index, local.zy, dxLocal.zy, dyLocal.zy, deepToo );
+		Splatted side = SampleLayer( index, local.zy, dxLocal.zy, dyLocal.zy );
 
 		o.albedo += side.albedo * sides.x;
 		o.roughness += side.roughness * sides.x;
 		o.metalness += side.metalness * sides.x;
 		o.occlusion += side.occlusion * sides.x;
-		o.height += side.height * sides.x;
 		bend += float3( 0.0, side.normal.y, side.normal.x ) * sides.x;
 	}
 
 	if ( sides.z > 0.0 )
 	{
-		Splatted side = SampleLayer( index, local.xy, dxLocal.xy, dyLocal.xy, deepToo );
+		Splatted side = SampleLayer( index, local.xy, dxLocal.xy, dyLocal.xy );
 
 		o.albedo += side.albedo * sides.z;
 		o.roughness += side.roughness * sides.z;
 		o.metalness += side.metalness * sides.z;
 		o.occlusion += side.occlusion * sides.z;
-		o.height += side.height * sides.z;
 		bend += float3( side.normal.x, side.normal.y, 0.0 ) * sides.z;
 	}
 
@@ -460,6 +450,38 @@ Splatted SampleLayerAround( uint index, float3 local, float3 facing, float3 dxLo
 	o.normal = normalize( facing + bend );
 
 	return o;
+}
+
+//How high a layer stands where the ground is drawn: its height map alone, read the way SampleLayer reads it.
+float LayerHeight( uint index, float2 local, float2 ddxLocal, float2 ddyLocal )
+{
+	Layer layer = LayerAt( index );
+
+#ifdef PORTABLE
+	return 0.5 * layer.heightStrength;
+#else
+	float2 uv = ( local / LayerTile ) * layer.uvScale;
+	float2 dx = ( ddxLocal / LayerTile ) * layer.uvScale;
+	float2 dy = ( ddyLocal / LayerTile ) * layer.uvScale;
+
+	float4 deep = ( layer.flags & LayerNoTile ) != 0u
+		? SampleUntiledOr( layer.height, UntileAt( uv, dx, dy ), dx, dy, float4( 0.5, 0.5, 0.5, 1.0 ) )
+		: SampleOr( layer.height, uv, dx, dy, float4( 0.5, 0.5, 0.5, 1.0 ) );
+
+	return deep.r * layer.heightStrength;
+#endif
+}
+
+//And over the projections the surface faces, as SampleLayerAround weighs them.
+float LayerHeightAround( uint index, float3 local, float3 dxLocal, float3 dyLocal, float3 sides )
+{
+	float height = 0.0;
+
+	if ( sides.y > 0.0 ) height += LayerHeight( index, local.xz, dxLocal.xz, dyLocal.xz ) * sides.y;
+	if ( sides.x > 0.0 ) height += LayerHeight( index, local.zy, dxLocal.zy, dyLocal.zy ) * sides.x;
+	if ( sides.z > 0.0 ) height += LayerHeight( index, local.xy, dxLocal.xy, dyLocal.xy ) * sides.z;
+
+	return height;
 }
 
 //The pixel body, which the classic entry at the end and the engine's cluster entry both run.
@@ -506,43 +528,48 @@ Out Shade( V2F i, bool front )
 		for ( uint s = 0u; s < MaxLayers; s++ ) painted += weights[s];
 		if ( painted < 1e-3 ) { weights[0] = 1.0; painted = 1.0; }
 
-		//First pass: what each layer present here is, and how high it stands.
-		Splatted worn[MaxLayers];
-		float highest = 1e-4;
 #ifdef PORTABLE
 		uint most = min( g.layers, PortableLayers );
 #else
 		uint most = min( g.layers, MaxLayers );
 #endif
 
-		for ( uint l = 0u; l < most; l++ )
+		//A layer under a hundredth is a fetch of three pictures for nothing.
+		for ( uint l = 0u; l < MaxLayers; l++ )
 		{
-			weights[l] /= painted;
-
-			//A layer under a hundredth is a fetch of three pictures for nothing.
-			if ( weights[l] < 0.01 ) { weights[l] = 0.0; continue; }
-
-			worn[l] = SampleLayerAround( l, i.local, facing, dxLocal, dyLocal, sides, g.blendByHeight );
-			highest = max( highest, worn[l].height );
+			weights[l] = l < most ? weights[l] / painted : 0.0;
+			if ( weights[l] < 0.01 ) weights[l] = 0.0;
 		}
 
 		//The layer standing higher takes the pixel, so a boundary between stones and sand is sand between the stones rather than a fade.
+		//Its height alone first, a number a layer, so no layer's whole read is held while the others are read.
 		if ( g.blendByHeight )
 		{
+			float heights[MaxLayers] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+			float highest = 1e-4;
+
+			for ( uint h = 0u; h < MaxLayers; h++ )
+			{
+				if ( weights[h] <= 0.0 ) continue;
+
+				heights[h] = LayerHeightAround( h, i.local, dxLocal, dyLocal, sides );
+				highest = max( highest, heights[h] );
+			}
+
 			float depth = lerp( 0.3, 0.02, saturate( g.sharpness ) );
 			float top = 0.0;
 
-			for ( uint a = 0u; a < most; a++ )
-				if ( weights[a] > 0.0 ) top = max( top, ( worn[a].height / highest ) + weights[a] );
+			for ( uint a = 0u; a < MaxLayers; a++ )
+				if ( weights[a] > 0.0 ) top = max( top, ( heights[a] / highest ) + weights[a] );
 
 			top -= depth;
 
-			for ( uint b = 0u; b < most; b++ )
-				if ( weights[b] > 0.0 ) weights[b] = max( ( worn[b].height / highest ) + weights[b] - top, 0.0 );
+			for ( uint b = 0u; b < MaxLayers; b++ )
+				if ( weights[b] > 0.0 ) weights[b] = max( ( heights[b] / highest ) + weights[b] - top, 0.0 );
 		}
 
 		float total = 0.0;
-		for ( uint t = 0u; t < most; t++ ) total += weights[t];
+		for ( uint t = 0u; t < MaxLayers; t++ ) total += weights[t];
 		total = max( total, 1e-6 );
 
 		albedo = float3( 0.0, 0.0, 0.0 );
@@ -551,17 +578,19 @@ Out Shade( V2F i, bool front )
 		occlusion = 0.0;
 		metalness = 0.0;
 
-		for ( uint m = 0u; m < most; m++ )
+		//Then each layer read and added in turn.
+		for ( uint m = 0u; m < MaxLayers; m++ )
 		{
 			if ( weights[m] <= 0.0 ) continue;
 
 			float w = weights[m] / total;
+			Splatted worn = SampleLayerAround( m, i.local, facing, dxLocal, dyLocal, sides );
 
-			albedo += worn[m].albedo * w;
-			normalOnTerrain += worn[m].normal * w;
-			roughness += worn[m].roughness * w;
-			occlusion += worn[m].occlusion * w;
-			metalness += worn[m].metalness * w;
+			albedo += worn.albedo * w;
+			normalOnTerrain += worn.normal * w;
+			roughness += worn.roughness * w;
+			occlusion += worn.occlusion * w;
+			metalness += worn.metalness * w;
 		}
 
 		normalOnTerrain = normalize( normalOnTerrain );

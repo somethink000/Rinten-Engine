@@ -1511,6 +1511,9 @@ internal static class CoreResources
 	//Generation bumps that were only texture swaps, so scene tables needn't rebake shadows for them
 	internal static int PictureGeneration { get; private set; } = 1;
 
+	//Bumped only when everything on the device goes - see Clear - for what holds device pictures of its own across Generation's other bumps
+	internal static int Cleared { get; private set; } = 1;
+
 	/// <summary>Lets go of all of it, for device shutdown and for tests starting from nothing.</summary>
 	public static void Clear()
 	{
@@ -1519,6 +1522,7 @@ internal static class CoreResources
 		Clearing?.Invoke();
 
 		Generation++;
+		Cleared++;
 
 		ForgetLastPipeline();
 

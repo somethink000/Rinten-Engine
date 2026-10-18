@@ -9,8 +9,12 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 {
 	public override bool IsConcave => true;
 
+	//Between OnEnabled and OnDisabled. A storage set while the scene is read comes before OnEnabled, and laying it out then lays it out twice
+	private bool running;
+
 	protected override void OnEnabled()
 	{
+		running = true;
 		Create();
 		Transform.OnTransformChanged += OnTerrainChanged;
 		Storage?.MaterialSettings?.OnChanged += OnTerrainChanged;
@@ -18,6 +22,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 
 	protected override void OnDisabled()
 	{
+		running = false;
 		DestroyInternal();
 	}
 
@@ -108,7 +113,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 	/// <summary>Call on enable or storage change</summary>
 	public void Create()
 	{
-		if ( !Active )
+		if ( !Active || !running )
 			return;
 
 		DisposeRenderResources();

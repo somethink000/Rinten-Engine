@@ -418,6 +418,7 @@ public partial class Terrain
 			Coarse = mesh.IsEditing,
 			GroundName = $"terrain_ground_{++modelSerial}",
 			SetInName = $"terrain_set_{++modelSerial}",
+			Shipped = string.IsNullOrEmpty( Storage.ResourcePath ) ? Scene?.Source?.ResourcePath : Storage.ResourcePath,
 		};
 
 		job.Materials.AddRange( Storage.InsetMaterials );

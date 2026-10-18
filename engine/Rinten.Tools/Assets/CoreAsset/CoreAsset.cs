@@ -127,6 +127,10 @@ internal sealed class CoreAsset : Asset
 		//the scene without it had every scene mesh in it come up with nothing to build, and the game drew the error marker in their place.
 		Add( Rinten.CompiledPaths.BlobSidecar( relative ) );
 
+		//The terrain chunks the editor baked of what this holds - a terrain, or a scene one is set in - so the game starts without
+		//baking them; see TerrainBakeCache. Shipped only where the file is there.
+		Add( Rinten.CompiledPaths.TerrainChunks( relative ) );
+
 		return files;
 	}
 

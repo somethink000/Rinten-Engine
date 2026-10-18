@@ -70,6 +70,9 @@ internal sealed class TerrainChunkJob
 
 	public TerrainChunkBake Result;
 
+	/// <summary>What holds the terrain this chunk is of - its own resource, or the scene it is set in - whose shipped pack is looked in first. See TerrainBakeCache.</summary>
+	public string Shipped;
+
 	/// <summary>Whether anybody is going to draw this - false where the game runs without a window.</summary>
 	public bool Draws;
 
@@ -89,11 +92,17 @@ internal static class TerrainChunkBaker
 {
 	public static void Build( TerrainChunkJob job )
 	{
-		//What this very chunk baked to last time anybody baked it, if that was on this machine. Almost all of the cost below is the model, and a
-		//terrain that nobody has sculpted since the last start bakes to the same bytes - see TerrainBakeCache, which says what is filed and what is not.
+		var ground = job.Ground;
+
+		foreach ( var modifier in job.Modifiers )
+			modifier.Shape( ground );
+
+		//What this chunk baked to last, shipped or on this machine; almost all the cost below is the model - see TerrainBakeCache
 		var key = TerrainBakeCache.Key( job );
 
-		if ( key is not null && TerrainBakeCache.Read( key ) is { } kept )
+		TerrainBakeCache.Note( job, key );
+
+		if ( key is not null && TerrainBakeCache.Read( key, job.Shipped ) is { } kept )
 		{
 			kept.GroundName = job.GroundName;
 			kept.SetInName = job.SetInName;
@@ -101,11 +110,6 @@ internal static class TerrainChunkBaker
 			job.Result = kept;
 			return;
 		}
-
-		var ground = job.Ground;
-
-		foreach ( var modifier in job.Modifiers )
-			modifier.Shape( ground );
 
 		for ( var m = 0; m < job.Modifiers.Length; m++ )
 		{

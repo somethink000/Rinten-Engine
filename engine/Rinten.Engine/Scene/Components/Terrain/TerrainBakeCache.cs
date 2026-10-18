@@ -7,8 +7,8 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//On-disk cache of baked chunk models, keyed by everything the bake reads, so it never goes stale
-//Chunks under modifiers, flat brush bakes and headless bakes are not cached
+//On-disk cache of baked chunk models, keyed by everything the bake reads, so it never goes stale; and a pack of them beside the
+//terrain or scene, which a game is shipped with and reads first. Flat brush bakes and headless bakes are not cached
 internal static class TerrainBakeCache
 {
 	private static readonly Logger log = new( "Terrain" );
@@ -43,11 +43,11 @@ internal static class TerrainBakeCache
 		}
 	}
 
-	/// <summary>What this job would be filed under, or null where it is not to be cached at all.</summary>
+	/// <summary>What this job would be filed under, or null where it is not to be cached at all. Asked once its modifiers have shaped the ground.</summary>
 	public static string Key( TerrainChunkJob job )
 	{
 		if ( off || folder is null || job is null ) return null;
-		if ( !job.Draws || job.Coarse || job.Modifiers.Length > 0 ) return null;
+		if ( !job.Draws || job.Coarse ) return null;
 		if ( job.Ground is not { } soup || soup.Indices.Count < 3 ) return null;
 
 		//Two hashes of the same bytes under different seeds - a hundred and twenty-eight
@@ -83,6 +83,25 @@ internal static class TerrainBakeCache
 		foreach ( var material in job.Materials )
 			Feed( System.Text.Encoding.UTF8.GetBytes( ( material?.ResourcePath ?? material?.Name ?? "" ) + "\n" ) );
 
+		//A modifier's shaping is in the ground already; what it sets in is its solid, carved or joined, its materials from ModifierMaterialsAt
+		var told = new byte[12];
+
+		for ( var m = 0; m < job.Modifiers.Length; m++ )
+		{
+			var solid = job.Modifiers[m].Solid;
+
+			BinaryPrimitives.WriteInt32LittleEndian( told.AsSpan( 0, 4 ), job.ModifierMaterialsAt[m] );
+			BinaryPrimitives.WriteInt32LittleEndian( told.AsSpan( 4, 4 ), job.Modifiers[m].Carve ? 1 : 0 );
+			BinaryPrimitives.WriteInt32LittleEndian( told.AsSpan( 8, 4 ), solid?.Indices.Count ?? -1 );
+			Feed( told );
+
+			if ( solid is null ) continue;
+
+			Feed( MemoryMarshal.AsBytes( CollectionsMarshal.AsSpan( solid.Vertices ) ) );
+			Feed( MemoryMarshal.AsBytes( CollectionsMarshal.AsSpan( solid.Indices ) ) );
+			Feed( MemoryMarshal.AsBytes( CollectionsMarshal.AsSpan( solid.Materials ) ) );
+		}
+
 		Span<byte> key = stackalloc byte[16];
 
 		BinaryPrimitives.WriteUInt64LittleEndian( key[..8], one.GetCurrentHashAsUInt64() );
@@ -99,10 +118,16 @@ internal static class TerrainBakeCache
 
 	private static int hits, misses;
 
-	/// <summary>What was filed under that key, or null.</summary>
-	public static TerrainChunkBake Read( string key )
+	/// <summary>What was filed under that key - in the shipped pack, else on this machine - or null.</summary>
+	public static TerrainChunkBake Read( string key, string shipped = null )
 	{
 		if ( key is null ) return null;
+
+		if ( Packed( shipped, key ) is { } packed && Parse( packed ) is { } fromPack )
+		{
+			System.Threading.Interlocked.Increment( ref hits );
+			return fromPack;
+		}
 
 		byte[] bytes;
 
@@ -117,6 +142,17 @@ internal static class TerrainBakeCache
 			return null;
 		}
 
+		var bake = Parse( bytes );
+
+		if ( bake is null ) System.Threading.Interlocked.Increment( ref misses );
+		else System.Threading.Interlocked.Increment( ref hits );
+
+		return bake;
+	}
+
+	//A filed bake's bytes back into a bake, or null where they are not one of this version's
+	private static TerrainChunkBake Parse( ReadOnlySpan<byte> bytes )
+	{
 		try
 		{
 			var read = new Reader( bytes );
@@ -136,19 +172,152 @@ internal static class TerrainBakeCache
 			read.Into( bake.Ground.Indices );
 			read.Into( bake.Ground.Materials );
 
-			if ( !read.Whole )
-			{
-				System.Threading.Interlocked.Increment( ref misses );
-				return null;
-			}
-
-			System.Threading.Interlocked.Increment( ref hits );
-			return bake;
+			return read.Whole ? bake : null;
 		}
 		catch ( Exception )
 		{
-			System.Threading.Interlocked.Increment( ref misses );
 			return null;
+		}
+	}
+
+	private const uint PackMagic = 0x50425452; //"RTBP"
+
+	//Each holder's pack as read, by the holder's resource path: each key's place in the bytes. Read once, the first time a chunk of it is baked
+	private sealed class Pack
+	{
+		public byte[] Bytes;
+		public readonly Dictionary<string, (int At, int Length)> Entries = new();
+	}
+
+	private static readonly Dictionary<string, Pack> packs = new( StringComparer.OrdinalIgnoreCase );
+
+	private static byte[] Packed( string shipped, string key )
+	{
+		if ( string.IsNullOrEmpty( shipped ) ) return null;
+
+		Pack pack;
+
+		lock ( packs )
+		{
+			if ( !packs.TryGetValue( shipped, out pack ) ) packs[shipped] = pack = Load( CompiledPaths.TerrainChunks( shipped ) );
+		}
+
+		return pack is not null && pack.Entries.TryGetValue( key, out var entry ) ? pack.Bytes.AsSpan( entry.At, entry.Length ).ToArray() : null;
+	}
+
+	private static Pack Load( string path )
+	{
+		try
+		{
+			if ( !FileSystem.Mounted.FileExists( path ) ) return null;
+
+			var pack = new Pack { Bytes = FileSystem.Mounted.ReadAllBytes( path ).ToArray() };
+			var bytes = pack.Bytes.AsSpan();
+
+			if ( bytes.Length < 12 || BinaryPrimitives.ReadUInt32LittleEndian( bytes ) != PackMagic ) return null;
+			if ( BinaryPrimitives.ReadUInt32LittleEndian( bytes[4..] ) != Version ) return null;
+
+			var count = BinaryPrimitives.ReadInt32LittleEndian( bytes[8..] );
+			var at = 12;
+
+			for ( var i = 0; i < count; i++ )
+			{
+				var key = Convert.ToHexString( bytes.Slice( at, 16 ) );
+				var length = BinaryPrimitives.ReadInt32LittleEndian( bytes[( at + 16 )..] );
+
+				pack.Entries[key] = (at + 20, length);
+				at += 20 + length;
+			}
+
+			return pack;
+		}
+		catch ( Exception e )
+		{
+			log.Info( $"{path}: the terrain's baked chunks could not be read, so they are baked here - {e.Message}" );
+			return null;
+		}
+	}
+
+	//What each holder's terrain chunks are baked under now, by where the chunk is - written as its pack when it is saved. The editor's alone
+	private static readonly Dictionary<string, Dictionary<Vector2, string>> current = new( StringComparer.OrdinalIgnoreCase );
+
+	/// <summary>Whether a chunk of anything this resource holds was baked here - what saving it packs.</summary>
+	public static bool Holds( string resource )
+	{
+		if ( string.IsNullOrEmpty( resource ) ) return false;
+
+		lock ( current ) return current.TryGetValue( resource, out var chunks ) && chunks.Count > 0;
+	}
+
+	/// <summary>Says which key a chunk of a terrain is baked under now, or that it has none any more.</summary>
+	public static void Note( TerrainChunkJob job, string key )
+	{
+		if ( !Application.IsEditor || job is null || string.IsNullOrEmpty( job.Shipped ) || job.Coarse ) return;
+
+		lock ( current )
+		{
+			if ( !current.TryGetValue( job.Shipped, out var chunks ) ) current[job.Shipped] = chunks = new();
+
+			if ( key is null ) chunks.Remove( job.Min );
+			else chunks[job.Min] = key;
+		}
+	}
+
+	/// <summary>Writes a holder's pack out of this machine's cache, every chunk as it now stands; nothing where none was baked here.</summary>
+	public static void WritePack( string shipped, string path )
+	{
+		if ( string.IsNullOrEmpty( shipped ) || string.IsNullOrEmpty( path ) ) return;
+
+		string[] keys;
+
+		lock ( current )
+		{
+			if ( !current.TryGetValue( shipped, out var chunks ) || chunks.Count == 0 ) return;
+			keys = chunks.Values.Distinct().ToArray();
+		}
+
+		try
+		{
+			using var into = new MemoryStream();
+			using var write = new BinaryWriter( into );
+
+			write.Write( PackMagic );
+			write.Write( Version );
+
+			var counted = into.Position;
+			write.Write( 0 );
+
+			var count = 0;
+
+			foreach ( var key in keys )
+			{
+				byte[] bytes;
+
+				try { bytes = File.ReadAllBytes( PathOf( key ) ); }
+				catch ( Exception ) { continue; }
+
+				write.Write( Convert.FromHexString( key ) );
+				write.Write( bytes.Length );
+				write.Write( bytes );
+				count++;
+			}
+
+			into.Position = counted;
+			write.Write( count );
+			write.Flush();
+
+			var temporary = $"{path}.{Environment.ProcessId}.part";
+
+			File.WriteAllBytes( temporary, into.ToArray() );
+			File.Move( temporary, path, true );
+
+			lock ( packs ) packs.Remove( shipped );
+
+			log.Info( $"{shipped}: {count} of {keys.Length} baked chunks packed beside it for the game, {into.Length / 1024} KB" );
+		}
+		catch ( Exception e )
+		{
+			log.Info( $"{shipped}: its baked chunks were not packed - {e.Message}" );
 		}
 	}
 

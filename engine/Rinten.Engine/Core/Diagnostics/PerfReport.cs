@@ -129,6 +129,7 @@ internal static class PerfReport
 	//And what the mesh passes had counted, and the editor's labels.
 	private static long meshCullsAtArm, meshListDrawsAtArm, meshMaterialDrawsAtArm;
 	private static long particleTicksAtArm, particleRunsAtArm;
+	private static long presentWaitsAtArm, presentTicksAtArm;
 	private static long particleAskedAtArm, particleHeldAtArm;
 	private static long textLabelsAtArm, textMadeAtArm, textGoneAtArm;
 
@@ -377,6 +378,8 @@ internal static class PerfReport
 			meshListDrawsAtArm = CoreMeshRender.ListDraws;
 			meshMaterialDrawsAtArm = CoreMeshRender.MaterialDraws;
 			particleTicksAtArm = ParticleGameSystem.StepTicks;
+			presentWaitsAtArm = CorePresent.Waits;
+			presentTicksAtArm = CorePresent.WaitTicks;
 			ParticleGameSystem.CountedFrom++;
 			particleRunsAtArm = ParticleGameSystem.StepRuns;
 			particleAskedAtArm = ParticleGameSystem.Asked;
@@ -576,6 +579,13 @@ internal static class PerfReport
 		if ( VkFrame.CardIdleRecordings > 1 && frameMs.Count > 0 )
 			report.AppendLine( $"  card idle between recordings {VkFrame.CardIdleMs / frameMs.Count:F3} ms a frame " +
 				$"({VkFrame.CardIdleRecordings / (double)frameMs.Count:F1} recordings a frame)" );
+
+		//How long the top of a frame waited for the screen to show the frame before last - see CorePresent. Only held to the refresh.
+		var presentWaits = CorePresent.Waits - presentWaitsAtArm;
+
+		if ( presentWaits > 0 && frameMs.Count > 0 )
+			report.AppendLine( $"  paced to the screen: {presentWaits / (double)frameMs.Count:F2} waits a frame, " +
+				$"{( CorePresent.WaitTicks - presentTicksAtArm ) * 1000.0 / System.Diagnostics.Stopwatch.Frequency / frameMs.Count:F3} ms a frame waiting" );
 
 		//The one cost a baked shader cache does not remove: SPIR-V is not what the card runs, so the driver compiles every pipeline the first
 		//time it is made. A player's first run pays for all of them; every run after finds them in the driver's own cache. See VkPipelines.Baked.

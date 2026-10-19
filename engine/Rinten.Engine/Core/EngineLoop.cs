@@ -237,6 +237,7 @@ internal static class EngineLoop
 	{
 		try
 		{
+			CorePresent.Pace();
 			CoreLatency.BeforeInput();
 		}
 		catch ( System.Exception e )
@@ -605,6 +606,7 @@ internal static class EngineLoop
 	internal static void OnClientOutput()
 	{
 		RenderedFrames++;
+		CoreLatency.RenderStarts();
 
 		using var _outputScope = _clientOutput.Start();
 

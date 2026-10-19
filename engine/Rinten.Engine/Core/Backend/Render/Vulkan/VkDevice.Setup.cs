@@ -439,7 +439,7 @@ internal static unsafe partial class VkDevice
 
 	private static bool CreateDevice()
 	{
-		using var names = new Utf8Names( 8 );
+		using var names = new Utf8Names( 32 );
 
 		var priority = 1.0f;
 
@@ -469,6 +469,9 @@ internal static unsafe partial class VkDevice
 				( dialect is VkModern || name != CoreLatency.ReflexExtension ),
 			chosen.VendorID ).ToArray();
 
+		//And present ids with waits on them, for pacing the processor to the screen - see CorePresent.
+		var presentExtensions = CorePresent.DeviceExtensions( name => HasDeviceExtension( physicalDevice, name ) ).ToArray();
+
 		//The dialect says what it needs; what it chains stays alive until the device is made - see ChainFeatures
 		var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2 };
 
@@ -482,6 +485,7 @@ internal static unsafe partial class VkDevice
 		VkFovea.ChainFeatures( &features );
 
 		CoreLatency.ChainFeatures( &features );
+		CorePresent.ChainFeatures( &features );
 
 		//And hardware rays, optional, where the card has all they need - see VkRays.
 		VkRays.ChainFeatures( &features );
@@ -549,7 +553,7 @@ internal static unsafe partial class VkDevice
 		if ( StatsZone is not null && !statsQueries )
 			Log.Warning( $"RINTEN_ZONE_STATS asked for '{StatsZone}' and this device has no pipeline statistics" );
 
-		var deviceExtensions = stackalloc byte*[32];
+		var deviceExtensions = stackalloc byte*[48];
 		var extensionCount = 0u;
 
 		//Mesh stages, where the device has them - asked about, and the indexed draw stands in without.
@@ -600,12 +604,15 @@ internal static unsafe partial class VkDevice
 
 		//NGX's extensions for DLSS where present; skip the buffer-address ext on 1.2 (it's core there)
 		foreach ( var latency in latencyExtensions )
-			if ( extensionCount < 24 ) deviceExtensions[extensionCount++] = names.Add( latency );
+			if ( extensionCount < 40 ) deviceExtensions[extensionCount++] = names.Add( latency );
+
+		foreach ( var present in presentExtensions )
+			if ( extensionCount < 40 ) deviceExtensions[extensionCount++] = names.Add( present );
 
 		foreach ( var wantedByNgx in ngxExtensions )
 		{
 			if ( ngxDeviceAddress && wantedByNgx == "VK_EXT_buffer_device_address" ) continue;
-			if ( extensionCount >= 24 || !HasDeviceExtension( physicalDevice, wantedByNgx ) ) continue;
+			if ( extensionCount >= 40 || !HasDeviceExtension( physicalDevice, wantedByNgx ) ) continue;
 
 			var already = false;
 
@@ -646,6 +653,7 @@ internal static unsafe partial class VkDevice
 		dialect.FeaturesDone();
 		VkFovea.FeaturesDone();
 		CoreLatency.FeaturesDone();
+		CorePresent.FeaturesDone();
 		VkRays.FeaturesDone();
 
 		if ( opened != Result.Success )
@@ -667,6 +675,7 @@ internal static unsafe partial class VkDevice
 		vk.CurrentDevice = device;
 
 		CoreLatency.DeviceMade();
+		CorePresent.DeviceMade();
 		VkRays.DeviceMade();
 
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
@@ -1534,6 +1543,7 @@ internal static unsafe partial class VkDevice
 			//NGX's features and its hold on the device first - see CoreDlss.
 			CoreDlss.DeviceGoing();
 			CoreLatency.DeviceGoing();
+			CorePresent.DeviceGoing();
 
 			vk.DestroyDevice( device, null );
 		}

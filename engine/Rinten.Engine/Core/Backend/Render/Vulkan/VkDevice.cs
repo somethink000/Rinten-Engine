@@ -892,6 +892,8 @@ internal static unsafe partial class VkDevice
 
 	internal static void RetireSwapchain( SwapchainKHR swapchain, uint after = 0 )
 	{
+		CorePresent.Forget( swapchain );
+
 		if ( swapchain.Handle == 0 ) return;
 
 		Retire( new Grave { Ticket = StampAfter( after ), Swapchain = swapchain, Block = -1 } );

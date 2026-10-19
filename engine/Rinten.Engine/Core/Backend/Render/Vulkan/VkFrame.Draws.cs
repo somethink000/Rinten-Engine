@@ -509,6 +509,8 @@ internal static unsafe partial class VkFrame
 					return 0;
 				}
 
+				CoreLatency.Submitted();
+
 				//The graveyard learns which ticket this recording went to the queue as - everything retired while it was open waits for exactly this fence.
 				frame.Ticket = VkDevice.RecordingSubmitted();
 				frame.Submitted = true;
@@ -517,6 +519,7 @@ internal static unsafe partial class VkFrame
 				var finished = Current.RenderFinished[Current.ImageIndex];
 				var swapchain = Current.Handle;
 				var index = Current.ImageIndex;
+				var id = CorePresent.Next( Current );
 
 				//Handed over: the present goes on the submit thread while this one gets on with the next frame - see VkSubmitter. The submission
 				//above stays here, so the card starts on the frame the moment it is closed; what is handed over is the display's half.
@@ -528,6 +531,7 @@ internal static unsafe partial class VkFrame
 						Handle = swapchain,
 						Image = index,
 						Owner = Current,
+						Id = id,
 					} );
 
 					Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
@@ -544,7 +548,12 @@ internal static unsafe partial class VkFrame
 					PImageIndices = &index,
 				};
 
+				PresentIdKHR told;
+				CorePresent.Stamp( &present, &told, &id );
+
+				CoreLatency.Presenting( id );
 				var presented = VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
+				CoreLatency.Presented( id );
 
 				Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
 

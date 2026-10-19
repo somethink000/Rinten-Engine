@@ -353,6 +353,9 @@ internal static unsafe partial class VkSwapchain
 
 		public ulong Presented;
 
+		/// <summary>The last present id handed out for it - see CorePresent.</summary>
+		public ulong PresentIds;
+
 		/// <summary>The last finished frame, measured.</summary>
 		public readonly VkFrame.Profile Profile = new();
 	}
@@ -1226,7 +1229,11 @@ internal static unsafe partial class VkSwapchain
 		if ( !keepSwapchain && Current.Handle.Handle != 0 )
 		{
 			if ( deferred ) VkDevice.RetireSwapchain( Current.Handle, FramesInFlight );
-			else VkDevice.khrSwapchain.DestroySwapchain( device, Current.Handle, null );
+			else
+			{
+				CorePresent.Forget( Current.Handle );
+				VkDevice.khrSwapchain.DestroySwapchain( device, Current.Handle, null );
+			}
 
 			Current.Handle = default;
 		}

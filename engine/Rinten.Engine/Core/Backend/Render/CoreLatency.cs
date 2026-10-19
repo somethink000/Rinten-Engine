@@ -20,8 +20,9 @@ internal static unsafe class CoreLatency
 	//Whether the device was opened with Reflex's low latency.
 	internal static bool Reflex { get; private set; }
 
-	//Whether the instance should ask for Mesa's Anti-Lag layer by name: where it is installed and the setting was on when the instance was made.
-	internal static bool WantsMesaLayer => Mode != 0 && OperatingSystem.IsLinux();
+	//Whether the instance asks for Mesa's Anti-Lag layer by name, where it is installed: always, since it does nothing until told to and the
+	//saved setting is read only after the device is made - asked for only with the setting on, it was never there at a start.
+	internal static bool WantsMesaLayer => OperatingSystem.IsLinux();
 
 	//The device extensions to ask for, of those this card has - see VkDevice.CreateDevice.
 	internal static IEnumerable<string> DeviceExtensions( Func<string, bool> has, uint vendor )
@@ -60,6 +61,7 @@ internal static unsafe class CoreLatency
 	private static delegate* unmanaged[Cdecl]<Device, AntiLagDataAMD*, void> antiLagUpdate;
 	private static delegate* unmanaged[Cdecl]<Device, SwapchainKHR, LatencySleepModeInfoNV*, Result> setSleepMode;
 	private static delegate* unmanaged[Cdecl]<Device, SwapchainKHR, LatencySleepInfoNV*, Result> latencySleep;
+	private static delegate* unmanaged[Cdecl]<Device, SwapchainKHR, SetLatencyMarkerInfoNV*, void> setMarker;
 
 	private static Semaphore sleepSemaphore;
 	private static ulong sleepValue;
@@ -81,6 +83,7 @@ internal static unsafe class CoreLatency
 
 		setSleepMode = (delegate* unmanaged[Cdecl]<Device, SwapchainKHR, LatencySleepModeInfoNV*, Result>)vk.GetDeviceProcAddr( device, "vkSetLatencySleepModeNV" ).Handle;
 		latencySleep = (delegate* unmanaged[Cdecl]<Device, SwapchainKHR, LatencySleepInfoNV*, Result>)vk.GetDeviceProcAddr( device, "vkLatencySleepNV" ).Handle;
+		setMarker = (delegate* unmanaged[Cdecl]<Device, SwapchainKHR, SetLatencyMarkerInfoNV*, void>)vk.GetDeviceProcAddr( device, "vkSetLatencyMarkerNV" ).Handle;
 
 		//A timeline semaphore the driver signals when the frame should start.
 		var timeline = new SemaphoreTypeCreateInfo
@@ -114,6 +117,7 @@ internal static unsafe class CoreLatency
 		antiLagUpdate = null;
 		setSleepMode = null;
 		latencySleep = null;
+		setMarker = null;
 		AntiLag = false;
 		Reflex = false;
 		modeSet = -1;
@@ -157,17 +161,12 @@ internal static unsafe class CoreLatency
 
 		wasOn = on;
 
+		//The frame about to be made: the loop counts it up as it starts - see FrameId.
+		var frame = FrameId + 1;
+
 		if ( AntiLag && antiLagUpdate is not null )
 		{
-			var data = new AntiLagDataAMD
-			{
-				SType = StructureType.AntiLagDataAmd,
-				Mode = on ? AntiLagModeAMD.OnAmd : AntiLagModeAMD.OffAmd,
-				MaxFps = 0,
-				PPresentationInfo = null,
-			};
-
-			antiLagUpdate( VkDevice.device, &data );
+			UpdateAntiLag( on, AntiLagStageAMD.InputAmd, frame );
 			return;
 		}
 
@@ -217,5 +216,60 @@ internal static unsafe class CoreLatency
 
 		//A tenth of a second at most: a frame never waits longer than that for the card, and a driver that never signals must not hang the game.
 		VkDevice.vk.WaitSemaphores( VkDevice.device, &wait, 100_000_000 );
+
+		Mark( LatencyMarkerNV.SimulationStartNV, frame );
+		Mark( LatencyMarkerNV.InputSampleNV, frame );
+	}
+
+	/// <summary>The frame the loop is on, as the id its presents go with - see CorePresent.Next. What both drivers tie a frame's stages together by.</summary>
+	internal static ulong FrameId => (ulong)EngineLoop.LoopFrames;
+
+	private static void UpdateAntiLag( bool on, AntiLagStageAMD stage, ulong frame )
+	{
+		var told = new AntiLagPresentationInfoAMD
+		{
+			SType = StructureType.AntiLagPresentationInfoAmd,
+			Stage = stage,
+			FrameIndex = frame,
+		};
+
+		var data = new AntiLagDataAMD
+		{
+			SType = StructureType.AntiLagDataAmd,
+			Mode = on ? AntiLagModeAMD.OnAmd : AntiLagModeAMD.OffAmd,
+			MaxFps = 0,
+			PPresentationInfo = &told,
+		};
+
+		antiLagUpdate( VkDevice.device, &data );
+	}
+
+	/// <summary>Where the game's half of a frame ends and its drawing begins.</summary>
+	internal static void RenderStarts()
+	{
+		Mark( LatencyMarkerNV.SimulationEndNV, FrameId );
+		Mark( LatencyMarkerNV.RendersubmitStartNV, FrameId );
+	}
+
+	/// <summary>The frame's work handed to the card.</summary>
+	internal static void Submitted() => Mark( LatencyMarkerNV.RendersubmitEndNV, FrameId );
+
+	/// <summary>Around a present of the frame with this id, on whichever thread presents it.</summary>
+	internal static void Presenting( ulong frame )
+	{
+		if ( Mode != 0 && AntiLag && antiLagUpdate is not null && frame != 0 ) UpdateAntiLag( true, AntiLagStageAMD.PresentAmd, frame );
+
+		Mark( LatencyMarkerNV.PresentStartNV, frame );
+	}
+
+	internal static void Presented( ulong frame ) => Mark( LatencyMarkerNV.PresentEndNV, frame );
+
+	//One of Reflex's markers, where it is on.
+	private static void Mark( LatencyMarkerNV marker, ulong frame )
+	{
+		if ( Mode == 0 || !Reflex || setMarker is null || reflexSwapchain.Handle == 0 || frame == 0 ) return;
+
+		var info = new SetLatencyMarkerInfoNV { SType = StructureType.SetLatencyMarkerInfoNV, PresentID = frame, Marker = marker };
+		setMarker( VkDevice.device, reflexSwapchain, &info );
 	}
 }

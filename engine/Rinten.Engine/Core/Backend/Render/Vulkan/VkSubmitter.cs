@@ -17,6 +17,9 @@ internal static unsafe class VkSubmitter
 		/// <summary>The swapchain it belongs to - read and written by <see cref="Settle"/> alone.</summary>
 		public VkSwapchain.Swapchain Owner;
 
+		/// <summary>Its present id, nought for none - see CorePresent.</summary>
+		public ulong Id;
+
 		public Result Presented;
 	}
 
@@ -164,6 +167,7 @@ internal static unsafe class VkSubmitter
 		var finished = one.Signal;
 		var swapchain = one.Handle;
 		var index = one.Image;
+		var id = one.Id;
 
 		var present = new PresentInfoKHR
 		{
@@ -175,6 +179,11 @@ internal static unsafe class VkSubmitter
 			PImageIndices = &index,
 		};
 
+		PresentIdKHR told;
+		CorePresent.Stamp( &present, &told, &id );
+
+		CoreLatency.Presenting( id );
 		one.Presented = VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
+		CoreLatency.Presented( id );
 	}
 }

@@ -352,10 +352,8 @@ public partial class Scene : GameObject
 	//Computes the detail view once per tick; with no camera, policies act as if right in front of the eye
 	private void LookForDetail()
 	{
-		var camera = Camera;
-
-		//Editor scenes are viewed through the editor camera, which Camera excludes
-		if ( !camera.IsValid() ) camera = EditorCamera;
+		//An editor scene is viewed through the editor camera, which Camera excludes, whatever cameras the scene holds
+		var camera = IsEditor ? EditorCamera ?? Camera : Camera ?? EditorCamera;
 
 		if ( !camera.IsValid() )
 		{

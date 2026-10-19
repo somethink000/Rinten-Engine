@@ -30,9 +30,8 @@ public partial class Terrain
 
 		if ( Scene is null ) return;
 
-		//The eye the scene's detail is reckoned from; in the editor, which ticks no game and so has not looked for it, the editor's camera
-		var seen = Scene.Detail.Looking ? Scene.Detail.Eye
-			: ( Scene.EditorCamera ?? Scene.GetAll<CameraComponent>().FirstOrDefault( one => one.IsSceneEditorCamera ) ?? Scene.Camera )?.WorldPosition;
+		//The eye the scene's detail is reckoned from - the editor's camera in an editor scene
+		var seen = Scene.Detail.Looking ? Scene.Detail.Eye : ( Scene.EditorCamera ?? Scene.Camera )?.WorldPosition;
 
 		if ( seen is not { } at ) return;
 

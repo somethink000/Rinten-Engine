@@ -186,6 +186,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		{
 			terrain.ChunkBaked -= OnChunkBaked;
 			terrain.Transform.OnTransformChanged -= Again;
+			terrain.KeepWhole( this, 0.0f );
 		}
 
 		terrain = null;
@@ -237,6 +238,12 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		Stand();
 		Check();
+
+		//Patches stand on the ground of whole chunks only: kept whole as far out as one is taken away - see Look.
+		var most = 0.0f;
+		foreach ( var layer in Layers ) if ( layer?.Model is not null && layer.Density > 0.0f ) most = MathF.Max( most, layer.Distance );
+
+		terrain.KeepWhole( this, most > 0.0f ? ( most * 1.15f ) + ( terrain.ChunkSpan * 0.7072f ) : 0.0f );
 
 		//Where the frame is being looked at from - see CoreDetail, which is told once a tick and is
 		//the one place that knows whether it is the scene's camera, the editor's or a headset's.

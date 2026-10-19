@@ -143,7 +143,10 @@ public partial class Terrain
 		maskPlace = place;
 
 		foreach ( var chunk in chunks )
+		{
 			if ( chunk.Ground.IsValid() ) SayPaint( chunk.Ground, chunk.Palette );
+			if ( chunk.FarGround.IsValid() ) SayPaint( chunk.FarGround, chunk.Palette );
+		}
 
 		if ( relief is not null ) SayPaint( relief.Attributes, default );
 	}

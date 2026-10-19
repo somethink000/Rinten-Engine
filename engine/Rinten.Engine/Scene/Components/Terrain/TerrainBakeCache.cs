@@ -15,7 +15,7 @@ internal static class TerrainBakeCache
 
 	//Bumped whenever what a bake comes to changes - the model format, the cluster builder, what a
 	//vertex carries. Everything written before is then a different key and is swept up by the budget.
-	private const uint Version = 3;   //3: four layers by number a vertex, weighed by the chunk's palette
+	private const uint Version = 4;   //4: far models and the palette first, what a far chunk reads alone
 
 	//The file's own magic, so half a file or somebody else's is a miss rather than a crash.
 	private const uint Magic = 0x4B425452; //"RTBK"
@@ -118,12 +118,12 @@ internal static class TerrainBakeCache
 
 	private static int hits, misses;
 
-	/// <summary>What was filed under that key - in the shipped pack, else on this machine - or null.</summary>
-	public static TerrainChunkBake Read( string key, string shipped = null )
+	/// <summary>What was filed under that key - shipped, else on this machine - or null; not <paramref name="whole"/>, a far chunk's part.</summary>
+	public static TerrainChunkBake Read( string key, string shipped, bool whole )
 	{
 		if ( key is null ) return null;
 
-		if ( Packed( shipped, key ) is { } packed && Parse( packed ) is { } fromPack )
+		if ( Packed( shipped, key, whole ) is { } packed && Parse( packed, whole ) is { } fromPack )
 		{
 			System.Threading.Interlocked.Increment( ref hits );
 			return fromPack;
@@ -133,7 +133,8 @@ internal static class TerrainBakeCache
 
 		try
 		{
-			bytes = File.ReadAllBytes( PathOf( key ) );
+			using var file = File.OpenRead( PathOf( key ) );
+			bytes = Front( file, (int)file.Length, whole );
 		}
 		catch ( Exception )
 		{
@@ -142,7 +143,7 @@ internal static class TerrainBakeCache
 			return null;
 		}
 
-		var bake = Parse( bytes );
+		var bake = Parse( bytes, whole );
 
 		if ( bake is null ) System.Threading.Interlocked.Increment( ref misses );
 		else System.Threading.Interlocked.Increment( ref hits );
@@ -151,7 +152,7 @@ internal static class TerrainBakeCache
 	}
 
 	//A filed bake's bytes back into a bake, or null where they are not one of this version's
-	private static TerrainChunkBake Parse( ReadOnlySpan<byte> bytes )
+	private static TerrainChunkBake Parse( ReadOnlySpan<byte> bytes, bool whole )
 	{
 		try
 		{
@@ -160,13 +161,21 @@ internal static class TerrainBakeCache
 			if ( read.U32() != Magic || read.U32() != Version ) return null;
 			if ( read.U32() != (uint)Unsafe.SizeOf<TerrainSoup.Vertex>() ) return null;
 
-			var bake = new TerrainChunkBake { Ground = new TerrainSoup() };
+			var bake = new TerrainChunkBake { HasFar = true, Whole = whole };
 
-			bake.GroundBytes = read.Blob();
-			bake.SetInBytes = read.Blob();
+			bake.Palette = read.Blob();
+			bake.FarGroundBytes = read.Blob();
+			bake.FarSetInBytes = read.Blob();
 
 			read.Into( bake.CollisionPoints );
 			read.Into( bake.CollisionIndices );
+
+			if ( bake.Palette is null ) return null;
+			if ( !whole ) return bake;
+
+			bake.Ground = new TerrainSoup();
+			bake.GroundBytes = read.Blob();
+			bake.SetInBytes = read.Blob();
 
 			read.Into( bake.Ground.Vertices );
 			read.Into( bake.Ground.Indices );
@@ -180,18 +189,55 @@ internal static class TerrainBakeCache
 		}
 	}
 
+	//What a far chunk reads of an entry, in order, by the size of one of each: palette, far models, collision.
+	private static readonly int[] farParts = [1, 1, 1, 12, 4];
+
+	//The front of an entry, as far as what a far chunk keeps reaches - or all of it.
+	private static byte[] Front( Stream from, int length, bool whole )
+	{
+		if ( whole )
+		{
+			var all = new byte[length];
+			from.ReadExactly( all );
+
+			return all;
+		}
+
+		using var into = new MemoryStream();
+		var four = new byte[4];
+
+		void Take( int count )
+		{
+			var some = new byte[count];
+			from.ReadExactly( some );
+			into.Write( some );
+		}
+
+		Take( 12 );
+
+		foreach ( var size in farParts )
+		{
+			from.ReadExactly( four );
+			into.Write( four );
+			Take( (int)BinaryPrimitives.ReadUInt32LittleEndian( four ) * size );
+		}
+
+		return into.ToArray();
+	}
+
 	private const uint PackMagic = 0x50425452; //"RTBP"
 
-	//Each holder's pack as read, by the holder's resource path: each key's place in the bytes. Read once, the first time a chunk of it is baked
+	//Each holder's pack by its resource path: where it is and each key's place in it. The index is read the first time a chunk
+	//of it is baked, an entry out of the file when asked for, so a large world's pack is never held whole.
 	private sealed class Pack
 	{
-		public byte[] Bytes;
-		public readonly Dictionary<string, (int At, int Length)> Entries = new();
+		public string Path;
+		public readonly Dictionary<string, (long At, int Length)> Entries = new();
 	}
 
 	private static readonly Dictionary<string, Pack> packs = new( StringComparer.OrdinalIgnoreCase );
 
-	private static byte[] Packed( string shipped, string key )
+	private static byte[] Packed( string shipped, string key, bool whole )
 	{
 		if ( string.IsNullOrEmpty( shipped ) ) return null;
 
@@ -202,7 +248,39 @@ internal static class TerrainBakeCache
 			if ( !packs.TryGetValue( shipped, out pack ) ) packs[shipped] = pack = Load( CompiledPaths.TerrainChunks( shipped ) );
 		}
 
-		return pack is not null && pack.Entries.TryGetValue( key, out var entry ) ? pack.Bytes.AsSpan( entry.At, entry.Length ).ToArray() : null;
+		if ( pack is null || !pack.Entries.TryGetValue( key, out var entry ) ) return null;
+
+		try
+		{
+			using var file = FileSystem.Mounted.OpenRead( pack.Path );
+			Skip( file, entry.At );
+
+			return Front( file, entry.Length, whole );
+		}
+		catch ( Exception )
+		{
+			return null;
+		}
+	}
+
+	//Moves a stream on, by reading where it cannot seek.
+	private static void Skip( Stream file, long count )
+	{
+		if ( file.CanSeek )
+		{
+			file.Seek( count, SeekOrigin.Current );
+			return;
+		}
+
+		var spare = new byte[64 * 1024];
+
+		while ( count > 0 )
+		{
+			var read = file.Read( spare, 0, (int)Math.Min( spare.Length, count ) );
+			if ( read <= 0 ) throw new EndOfStreamException();
+
+			count -= read;
+		}
 	}
 
 	private static Pack Load( string path )
@@ -211,22 +289,30 @@ internal static class TerrainBakeCache
 		{
 			if ( !FileSystem.Mounted.FileExists( path ) ) return null;
 
-			var pack = new Pack { Bytes = FileSystem.Mounted.ReadAllBytes( path ).ToArray() };
-			var bytes = pack.Bytes.AsSpan();
+			using var file = FileSystem.Mounted.OpenRead( path );
 
-			if ( bytes.Length < 12 || BinaryPrimitives.ReadUInt32LittleEndian( bytes ) != PackMagic ) return null;
-			if ( BinaryPrimitives.ReadUInt32LittleEndian( bytes[4..] ) != Version ) return null;
+			var pack = new Pack { Path = path };
+			var head = new byte[20];
 
-			var count = BinaryPrimitives.ReadInt32LittleEndian( bytes[8..] );
-			var at = 12;
+			file.ReadExactly( head.AsSpan( 0, 12 ) );
+
+			if ( BinaryPrimitives.ReadUInt32LittleEndian( head ) != PackMagic ) return null;
+			if ( BinaryPrimitives.ReadUInt32LittleEndian( head.AsSpan( 4 ) ) != Version ) return null;
+
+			var count = BinaryPrimitives.ReadInt32LittleEndian( head.AsSpan( 8 ) );
+			long at = 12;
 
 			for ( var i = 0; i < count; i++ )
 			{
-				var key = Convert.ToHexString( bytes.Slice( at, 16 ) );
-				var length = BinaryPrimitives.ReadInt32LittleEndian( bytes[( at + 16 )..] );
+				file.ReadExactly( head );
+
+				var key = Convert.ToHexString( head.AsSpan( 0, 16 ) );
+				var length = BinaryPrimitives.ReadInt32LittleEndian( head.AsSpan( 16 ) );
 
 				pack.Entries[key] = (at + 20, length);
 				at += 20 + length;
+
+				Skip( file, length );
 			}
 
 			return pack;
@@ -336,11 +422,16 @@ internal static class TerrainBakeCache
 			write.U32( Version );
 			write.U32( (uint)Unsafe.SizeOf<TerrainSoup.Vertex>() );
 
-			write.Blob( bake.GroundBytes );
-			write.Blob( bake.SetInBytes );
+			//What a far chunk reads, first - see Front.
+			write.Blob( bake.Palette );
+			write.Blob( bake.FarGroundBytes );
+			write.Blob( bake.FarSetInBytes );
 
 			write.From( bake.CollisionPoints );
 			write.From( bake.CollisionIndices );
+
+			write.Blob( bake.GroundBytes );
+			write.Blob( bake.SetInBytes );
 
 			write.From( bake.Ground.Vertices );
 			write.From( bake.Ground.Indices );

@@ -10,9 +10,13 @@ internal static class TerrainMeshCopy
 
 	public static void Triangles( TerrainMesh mesh, List<int> triangles, TerrainSoup into, Func<int, ushort> materialOf, List<int> sourceOf = null )
 	{
-		var placed = new Dictionary<(int, Vector2, Vector4, Vector3), int>( triangles.Count * 2 );
-		var groundNormal = new Dictionary<int, Vector3>();
+		//The ground's vertex is one soup vertex whatever the corner; what was set in is one a coordinate and a shading.
+		var groundAt = new Dictionary<int, int>( triangles.Count );
+		Dictionary<(int, Vector2, Vector4, Vector3), int> placed = null;
 		var around = new List<int>();
+
+		into.Indices.Capacity = Math.Max( into.Indices.Capacity, into.Indices.Count + ( triangles.Count * 3 ) );
+		into.Materials.Capacity = Math.Max( into.Materials.Capacity, into.Materials.Count + triangles.Count );
 
 		foreach ( var t in triangles )
 		{
@@ -28,35 +32,44 @@ internal static class TerrainMeshCopy
 
 			int Copy( int vertex, int k )
 			{
-				var corner = worn == 0 ? default : mesh.CornerOf( t, k );
-				var normal = worn == 0 ? GroundNormal( vertex ) : WornNormal( vertex, worn, face );
+				if ( worn == 0 )
+				{
+					if ( groundAt.TryGetValue( vertex, out var ground ) ) return ground;
 
-				//The ground's vertex is one soup vertex whatever the corner; what was set in is one a coordinate and a shading.
-				var key = ( vertex, corner.Uv, corner.Tangent, worn == 0 ? default : normal );
+					Add( vertex, GroundNormal( vertex ), default );
+					return groundAt[vertex] = into.Vertices.Count - 1;
+				}
 
+				var corner = mesh.CornerOf( t, k );
+				var normal = WornNormal( vertex, worn, face );
+				var key = ( vertex, corner.Uv, corner.Tangent, normal );
+
+				placed ??= new();
 				if ( placed.TryGetValue( key, out var at ) ) return at;
 
-				var v = mesh.GetVertex( vertex );
-
-				into.Vertices.Add( new TerrainSoup.Vertex
-				{
-					Position = v.Position,
-					Normal = normal,
-					Paint = v.Paint,
-					Uv = corner.Uv,
-					Tangent = corner.Tangent,
-				} );
-
-				sourceOf?.Add( vertex );
-
+				Add( vertex, normal, corner );
 				return placed[key] = into.Vertices.Count - 1;
 			}
 		}
 
+		void Add( int vertex, Vector3 normal, in TerrainMesh.Corner corner )
+		{
+			var v = mesh.GetVertex( vertex );
+
+			into.Vertices.Add( new TerrainSoup.Vertex
+			{
+				Position = v.Position,
+				Normal = normal,
+				Paint = v.Paint,
+				Uv = corner.Uv,
+				Tangent = corner.Tangent,
+			} );
+
+			sourceOf?.Add( vertex );
+		}
+
 		Vector3 GroundNormal( int vertex )
 		{
-			if ( groundNormal.TryGetValue( vertex, out var known ) ) return known;
-
 			mesh.TrianglesAround( vertex, around );
 
 			var sum = Vector3.Zero;
@@ -65,9 +78,7 @@ internal static class TerrainMeshCopy
 				if ( mesh.MaterialOf( t ) == 0 ) sum += FaceArea( mesh, t );
 
 			//Ground with no ground round it is set-in geometry's; it has a normal of its own.
-			var normal = sum.LengthSquared > 1e-20f ? sum.Normal : mesh.NormalOf( vertex );
-
-			return groundNormal[vertex] = normal;
+			return sum.LengthSquared > 1e-20f ? sum.Normal : mesh.NormalOf( vertex );
 		}
 
 		Vector3 WornNormal( int vertex, ushort material, Vector3 face )

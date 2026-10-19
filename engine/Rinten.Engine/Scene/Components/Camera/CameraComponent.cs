@@ -437,7 +437,18 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 		}
 	}
 
-	internal bool IsSceneEditorCamera;
+	//Set after the component is added, so the scene looks for its cameras again then
+	internal bool IsSceneEditorCamera
+	{
+		get => field;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Scene?.UpdateMainCamera();
+		}
+	}
 
 	internal void InitializeRendering( bool renderUI = true )
 	{

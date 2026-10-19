@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Rinten.Meshlets;
 
 namespace Rinten;
 
@@ -36,6 +37,16 @@ internal sealed class TerrainChunkBake
 
 	/// <summary>What those models are called.</summary>
 	public string GroundName, SetInName;
+
+	/// <summary>The two drawn past where the chunk is kept whole - see TerrainChunkBaker.Thinned. Null where there is nothing of that kind.</summary>
+	public byte[] FarGroundBytes;
+	public byte[] FarSetInBytes;
+
+	/// <summary>Whether far models were made for it at all - not while the ground is being sculpted.</summary>
+	public bool HasFar;
+
+	/// <summary>Whether it holds the whole chunk, or only what a far one keeps: its far models, palette and collision.</summary>
+	public bool Whole = true;
 
 	/// <summary>Lets go of the geometry the models were written from.</summary>
 	public void Drop()
@@ -82,6 +93,12 @@ internal sealed class TerrainChunkJob
 	/// <summary>Skip coarse LOD levels while sculpting; the chunk is rebaked properly when the edit ends</summary>
 	public bool Coarse;
 
+	/// <summary>Whether the chunk is kept whole; a far one reads back only its far models and collision - see TerrainChunkBake.Whole.</summary>
+	public bool Whole = true;
+
+	/// <summary>Whether its ground changed since it was last baked, rather than it only being read again whole or far.</summary>
+	public bool Changed;
+
 	/// <summary>What the two models are called. Named on the main thread, where the count is kept.</summary>
 	public string GroundName, SetInName;
 
@@ -105,13 +122,10 @@ internal static class TerrainChunkBaker
 
 		TerrainBakeCache.Note( job, key );
 
-		if ( key is not null && TerrainBakeCache.Read( key, job.Shipped ) is { } kept )
+		if ( key is not null && TerrainBakeCache.Read( key, job.Shipped, job.Whole ) is { } kept )
 		{
 			kept.GroundName = job.GroundName;
 			kept.SetInName = job.SetInName;
-
-			//The models were written with it, and it comes out of the ground they were written from the same way again.
-			kept.Palette = Palette( kept.Ground.Vertices );
 
 			job.Result = kept;
 			return;
@@ -157,8 +171,6 @@ internal static class TerrainChunkBaker
 			bake.GroundBytes = Levels( Model.Builder.WithName( job.GroundName ).WithoutCollision().AddMesh( mesh ), job ).ToBytes();
 		}
 
-		if ( bake.Parts.Count == 0 ) return;
-
 		var builder = Model.Builder.WithName( job.SetInName ).WithoutCollision();
 		var any = false;
 
@@ -175,6 +187,98 @@ internal static class TerrainChunkBaker
 		}
 
 		if ( any ) bake.SetInBytes = Levels( builder, job ).ToBytes();
+
+		//Not while sculpting: a far chunk then stands its whole models until the edit ends and it is baked properly.
+		if ( job.Coarse ) return;
+
+		bake.HasFar = true;
+
+		var error = ( job.Max.x - job.Min.x ) * FarShare;
+
+		if ( Thinned( bake.Vertices, bake.Indices, null, error, true ) is { } ground )
+			bake.FarGroundBytes = Model.Builder.WithName( $"{job.GroundName}_far" ).WithoutCollision().AddMesh( ground ).WithLockedBorder().ToBytes();
+
+		var far = Model.Builder.WithName( $"{job.SetInName}_far" ).WithoutCollision();
+		any = false;
+
+		foreach ( var part in bake.Parts )
+		{
+			if ( Thinned( part.Vertices, part.Indices, part.Material, error, false ) is not { } mesh ) continue;
+
+			far.AddMesh( mesh );
+			any = true;
+		}
+
+		if ( any ) bake.FarSetInBytes = far.WithLockedBorder().ToBytes();
+	}
+
+	/// <summary>How far a far chunk's model may stray from the ground, as a share of the chunk's side - see Terrain.WholeReach.</summary>
+	public const float FarShare = 1.0f / 128.0f;
+
+	//How much a whole change of paint or texture coordinate counts against the error, in metres.
+	private const float FarAttributeWeight = 0.25f;
+
+	//One material's geometry thinned to within an error of metres, its border kept where it is so it meets a whole neighbour without a
+	//crack; the vertices kept are the ones it had, paint and all. Null where nothing is left.
+	private static Mesh Thinned( List<Vertex> vertices, List<int> indices, Material material, float error, bool painted )
+	{
+		if ( indices.Count < 3 ) return null;
+
+		//The eight paint slots of the ground's vertex, or a set-in part's texture coordinates.
+		var stride = painted ? 8 : 2;
+		var positions = new Vector3[vertices.Count];
+		var attributes = new float[vertices.Count * stride];
+
+		for ( var i = 0; i < vertices.Count; i++ )
+		{
+			var vertex = vertices[i];
+			var at = i * stride;
+
+			positions[i] = vertex.Position;
+			attributes[at] = vertex.TexCoord0.x;
+			attributes[at + 1] = vertex.TexCoord0.y;
+
+			if ( !painted ) continue;
+
+			attributes[at + 2] = vertex.TexCoord1.x;
+			attributes[at + 3] = vertex.TexCoord1.y;
+			attributes[at + 4] = vertex.Color.r / 255.0f;
+			attributes[at + 5] = vertex.Color.g / 255.0f;
+			attributes[at + 6] = vertex.Color.b / 255.0f;
+			attributes[at + 7] = vertex.Color.a / 255.0f;
+		}
+
+		var weights = new float[stride];
+		Array.Fill( weights, FarAttributeWeight );
+
+		var source = System.Runtime.InteropServices.MemoryMarshal.Cast<int, uint>( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( indices ) );
+		var kept = new uint[source.Length];
+		var count = MeshSimplifier.Simplify( kept, source, positions, attributes, stride, weights, 0, error,
+			MeshSimplifier.Options.LockBorder | MeshSimplifier.Options.ErrorAbsolute, out _ );
+
+		if ( count < 3 ) return null;
+
+		var newAt = new Dictionary<uint, int>();
+		var thinVertices = new List<Vertex>();
+		var thinIndices = new List<int>( count );
+
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( !newAt.TryGetValue( kept[i], out var at ) )
+			{
+				at = thinVertices.Count;
+				newAt[kept[i]] = at;
+				thinVertices.Add( vertices[(int)kept[i]] );
+			}
+
+			thinIndices.Add( at );
+		}
+
+		var mesh = material is null ? new Mesh() : new Mesh( material );
+		mesh.CreateVertexBuffer( thinVertices.Count, thinVertices );
+		mesh.CreateIndexBuffer( thinIndices.Count, thinIndices );
+
+		return mesh;
 	}
 
 	private static ModelBuilder Levels( ModelBuilder builder, TerrainChunkJob job )

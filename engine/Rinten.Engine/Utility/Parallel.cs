@@ -27,6 +27,12 @@ public static class Parallel
 			return true;
 		}
 
+		if ( source is IList<T> items )
+		{
+			Rinten.Jobs.JobSystem.For( items.Count, (items, body), static ( s, i ) => s.body( s.items[i] ) );
+			return true;
+		}
+
 		var r = System.Threading.Tasks.Parallel.ForEach( source, body );
 		return r.IsCompleted;
 	}
@@ -56,8 +62,8 @@ public static class Parallel
 			return true;
 		}
 
-		var r = System.Threading.Tasks.Parallel.For( fromInclusive, toExclusive, body );
-		return r.IsCompleted;
+		Rinten.Jobs.JobSystem.For( toExclusive - fromInclusive, (fromInclusive, body), static ( s, i ) => s.body( s.fromInclusive + i ) );
+		return true;
 	}
 
 	//A list split as it is worked through rather than in fixed ranges - for work per item that is very uneven
@@ -69,10 +75,9 @@ public static class Parallel
 			return;
 		}
 
-		System.Threading.Tasks.Parallel.ForEach( System.Collections.Concurrent.Partitioner.Create( list, loadBalance: true ), options ?? DefaultOptions, body );
+		Rinten.Jobs.JobSystem.For( list.Count, (list, body), static ( s, i ) => s.body( s.list[i] ), options?.MaxDegreeOfParallelism ?? -1 );
 	}
 
-	private static readonly ParallelOptions DefaultOptions = new();
 
 	//With a state each worker starts, carries through its items and hands back at the end - one state for the lot where it runs in order
 	internal static void For<TLocal>( int fromInclusive, int toExclusive, Func<TLocal> localInit,
@@ -86,7 +91,19 @@ public static class Parallel
 			return;
 		}
 
-		System.Threading.Tasks.Parallel.For( fromInclusive, toExclusive, localInit, body, localFinally );
+		//A slice a thread, each with a state of its own from start to finish, as Parallel gives a state a task. Nothing reads the loop state.
+		var count = toExclusive - fromInclusive;
+		var slices = Math.Min( Rinten.Jobs.JobSystem.Workers + 1, Math.Max( count, 1 ) );
+
+		Rinten.Jobs.JobSystem.For( slices, (fromInclusive, count, slices, localInit, body, localFinally), static ( s, slice ) =>
+		{
+			var start = s.fromInclusive + (int)( (long)s.count * slice / s.slices );
+			var end = s.fromInclusive + (int)( (long)s.count * ( slice + 1 ) / s.slices );
+
+			var local = s.localInit();
+			for ( var i = start; i < end; i++ ) local = s.body( i, null, local );
+			s.localFinally( local );
+		} );
 	}
 
 	public static async Task ForAsync( int fromInclusive, int toExclusive, CancellationToken token, Func<int, CancellationToken, ValueTask> body )

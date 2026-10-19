@@ -90,7 +90,7 @@ internal sealed class NavigationSimulation
 				}
 				else
 				{
-					Parallel.For( 0, agents.Count, stepWorker );
+					Rinten.Jobs.JobSystem.For( agents.Count, stepWorker );
 				}
 				if ( agents.Count > 1 ) ResolveOverlaps();
 			}
@@ -298,7 +298,7 @@ internal sealed class NavigationSimulation
 			}
 			else
 			{
-				Parallel.For( 0, agents.Count, separationWorker );
+				Rinten.Jobs.JobSystem.For( agents.Count, separationWorker );
 				foreach ( var agent in agents ) overlap |= agent.HadOverlap;
 			}
 			if ( !overlap ) break;
@@ -308,7 +308,7 @@ internal sealed class NavigationSimulation
 		{
 			foreach ( var agent in agents ) ConstrainPosition( agent );
 		}
-		else Parallel.For( 0, agents.Count, constrainWorker );
+		else Rinten.Jobs.JobSystem.For( agents.Count, constrainWorker );
 	}
 
 	private void ConstrainPosition( SimulationAgent agent )

@@ -294,7 +294,7 @@ static class MixingThread
 
 	static void SampleAll( VoiceFrameSnapshot snapshot )
 	{
-		System.Threading.Tasks.Parallel.For( 0, snapshot.Voices.Count, i =>
+		Rinten.Jobs.JobSystem.For( snapshot.Voices.Count, snapshot, static ( snapshot, i ) =>
 		{
 			var v = snapshot.Voices[i];
 			if ( v.Sampler is null ) return;

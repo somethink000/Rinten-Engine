@@ -122,11 +122,10 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 			}
 		}
 
-		Rinten.Utility.Parallel.ForEach( adopted, p =>
+		Rinten.Jobs.JobSystem.For( adopted.Count, (adopted, Time.Delta), static ( s, i ) =>
 		{
-			p.AdvanceTime( Time.Delta );
-			p.Build();
-
+			s.adopted[i].AdvanceTime( s.Delta );
+			s.adopted[i].Build();
 		} );
 
 		adopted.RemoveAll( retire ??= Retire );

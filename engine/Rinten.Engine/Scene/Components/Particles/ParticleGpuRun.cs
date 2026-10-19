@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Runtime.InteropServices;
 using Rinten.Rendering;
 using static Rinten.Rendering.SpriteBatchSceneObject;
@@ -198,11 +199,15 @@ internal sealed class ParticleGpuRun : IDisposable
 		effect.ParticleBounds = BBox.FromPositionAndSize( effect.WorldPosition, MathF.Max( reach, 1.0f ) * 2.0f );
 		drawer.Bounds = effect.ParticleBounds;
 
-		lock ( Runs )
+		//Once until it is stepped on the card: effects step side by side on the workers, and a search of the list under the lock was each one's wait.
+		if ( Interlocked.Exchange( ref listed, 1 ) == 0 )
 		{
-			if ( !Runs.Contains( this ) ) Runs.Add( this );
+			lock ( Runs ) Runs.Add( this );
 		}
 	}
+
+	//Whether it is in Runs, waiting to be stepped on the card.
+	private int listed;
 
 	//-- the table -----------------------------------------------------------------------------------------------------
 
@@ -265,7 +270,8 @@ internal sealed class ParticleGpuRun : IDisposable
 	//Everything the card reads that is the effect's rather than a particle's, as it stands now
 	private void Lay( float[] into )
 	{
-		Array.Clear( into );
+		//The headers alone: a baked curve or the shape past them is read only where a header below says where it is, and every header is laid again.
+		Array.Clear( into, 0, TableShape );
 
 		var gravity = Gravity( effect );
 		into[TableGravity] = gravity.x;
@@ -601,6 +607,8 @@ internal sealed class ParticleGpuRun : IDisposable
 			stepping.AddRange( Runs );
 			Runs.Clear();
 		}
+
+		foreach ( var run in stepping ) Volatile.Write( ref run.listed, 0 );
 
 		if ( stepping.Count == 0 || !EnsurePipelines() ) return;
 

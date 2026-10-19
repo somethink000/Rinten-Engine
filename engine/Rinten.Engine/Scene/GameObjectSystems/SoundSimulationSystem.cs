@@ -132,7 +132,7 @@ internal sealed partial class SoundSimulationSystem : GameObjectSystem<SoundSimu
 			//the listener's own room, which is traced every frame so the reverb is ready for the first sound. One item is run where it stands.
 			if ( total == 1 ) ParallelDispatch( 0 );
 			else if ( Rinten.Utility.Parallel.InOrder ) for ( var i = 0; i < total; i++ ) ParallelDispatch( i );
-			else System.Threading.Tasks.Parallel.For( 0, total, _parallelDispatchAction );
+			else Rinten.Jobs.JobSystem.For( total, _parallelDispatchAction );
 		}
 
 		ApplyOcclusionResults();

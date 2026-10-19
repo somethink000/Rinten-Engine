@@ -637,7 +637,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 		if ( count >= 512 && !Rinten.Utility.Parallel.InOrder )
 		{
-			System.Threading.Tasks.Parallel.For( 0, count, UpdateParticle );
+			Rinten.Jobs.JobSystem.For( count, this, static ( effect, i ) => effect.UpdateParticle( i ) );
 		}
 		else
 		{

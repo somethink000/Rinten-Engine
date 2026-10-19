@@ -107,10 +107,12 @@ sealed class ParticleGameSystem : GameObjectSystem
 		//Parallelise only with enough particles; Parallel.ForEach setup costs a few microseconds
 		if ( stepped >= ParallelParticles && !Rinten.Utility.Parallel.InOrder )
 		{
-			//Timed per worker, not per item; Parallel beat a custom pool since its workers are already awake
-			System.Threading.Tasks.Parallel.ForEach( workList,
+			//Timed per worker, not per item: a slice a thread, on the engine's job workers
+			var list = workList;
+
+			Rinten.Utility.Parallel.For( 0, list.Count,
 				static () => Stopwatch.GetTimestamp(),
-				( work, _, began ) => { ProcessWork( work ); return began; },
+				( i, _, began ) => { ProcessWork( list[i] ); return began; },
 				static began =>
 				{
 					Interlocked.Add( ref StepTicks, Stopwatch.GetTimestamp() - began );

@@ -61,9 +61,9 @@ internal static partial class DrawSettings
 	[ConVar( "r_fxaa", ConVarFlags.Saved, Help = "Soften the edges of the finished picture (0 off)." )]
 	internal static bool Fxaa { get; set; } = true;
 
-	/// <summary>MSAA sample count (0 is none); only the web frame reads it, the desktop ignores it</summary>
+	/// <summary>MSAA sample count (0 is none); the web's and the portable frame read it, the full frame smooths temporally</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
-		Help = "Samples per pixel (0 off). The web's frame reads it; the desktop does not yet." )]
+		Help = "Samples per pixel (0 off). The web's frame and the portable frame read it; the full frame does not." )]
 	internal static int Msaa { get; set; } = 4;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>

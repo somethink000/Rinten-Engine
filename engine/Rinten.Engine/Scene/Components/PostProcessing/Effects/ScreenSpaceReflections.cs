@@ -2,7 +2,8 @@ using Rinten.Rendering;
 
 namespace Rinten;
 
-//Traces mirror and GGX rays through a nearest-depth chain into "Reflection", gathers them into a resolve, before sky and glass
+//Traces mirror and GGX rays through a nearest-depth chain into "Reflection" - on through the scene with hardware rays where
+//they are on - and gathers them into a resolve, before sky and glass
 /// <summary>Reflects what is on the screen in the surfaces that are mirrors, traced through the depth.</summary>
 [Title( "Screen-Space Reflections" )]
 [Category( "Post Processing" )]
@@ -83,7 +84,7 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 		cl.Attributes.Set( "Steps", (float)ReflectionSteps );
 		cl.Attributes.Set( "Turn", (float)turn );
 		cl.SetRenderTarget( reflection );
-		cl.Blit( Trace );
+		cl.Blit( Trace, entry: CoreRays.On ? "RayPs" : null );
 		cl.ClearRenderTarget();
 
 		//Gathered over its neighbours and the frames before, into the resolve not read this frame

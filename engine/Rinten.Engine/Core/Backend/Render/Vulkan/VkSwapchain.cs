@@ -86,6 +86,17 @@ internal static unsafe partial class VkSwapchain
 		public ImageView VelocityView;
 		public ulong VelocityHandle;
 
+		/// <summary>The screen's pass multisampled: its colour and depth, resolved into the screen and DepthImage as it ends - see VkFrame.MainSamples.</summary>
+		public VkImage SampledColourImage, SampledDepthImage;
+		public DeviceMemory SampledColourMemory, SampledDepthMemory;
+		public ImageView SampledColourView, SampledDepthView;
+
+		/// <summary>What they were made for, and whether they have left the layout an image is made in.</summary>
+		public uint Samples;
+		public Format SampledFormat;
+		public Extent2D SampledExtent;
+		public bool SampledReady;
+
 		/// <summary>The depth buffer: written by the world, read by the passes that ask about its shape.</summary>
 		public VkImage DepthImage;
 		public DeviceMemory DepthMemory;
@@ -311,6 +322,9 @@ internal static unsafe partial class VkSwapchain
 
 		/// <summary>Whether the world's pass has already been begun once this frame, and so has to be resumed rather than started - loading what is there instead of clearing over it. Taking a backdrop copy is the only thing that interrupts it.</summary>
 		public bool MainBegun;
+
+		/// <summary>Samples a pixel the world's pass takes this frame - see VkFrame.MainSamples.</summary>
+		public uint MainSamples = 1;
 
 		/// <summary>Whether the world's pass was resumed this frame, and the last - see the depth's store in VkFrame.EnsureMainPass, which keeps the depth only where it may be.</summary>
 		public bool ResumedThisFrame, ResumedLastFrame;
@@ -788,7 +802,7 @@ internal static unsafe partial class VkSwapchain
 	}
 
 	internal static bool MakePicture( Format format, Extent2D extent, uint mips, ImageUsageFlags usage,
-		out VkImage outImage, out DeviceMemory outMemory, out ImageView outView, uint layers = 1 )
+		out VkImage outImage, out DeviceMemory outMemory, out ImageView outView, uint layers = 1, uint samples = 1 )
 	{
 		outImage = default;
 		outMemory = default;
@@ -805,7 +819,7 @@ internal static unsafe partial class VkSwapchain
 			Extent = new Extent3D( extent.Width, extent.Height, 1 ),
 			MipLevels = mips,
 			ArrayLayers = layers,
-			Samples = SampleCountFlags.Count1Bit,
+			Samples = samples > 1 ? (SampleCountFlags)samples : SampleCountFlags.Count1Bit,
 			Tiling = ImageTiling.Optimal,
 			Usage = usage,
 			InitialLayout = ImageLayout.Undefined,
@@ -813,6 +827,9 @@ internal static unsafe partial class VkSwapchain
 
 		VkImage image;
 		if ( vk.CreateImage( device, &info, null, &image ) != Result.Success ) return false;
+
+		//A picture only ever drawn in and resolved need never leave the tile, where the device has memory for that
+		var transient = ( usage & ImageUsageFlags.TransientAttachmentBit ) != 0;
 
 		outImage = image;
 
@@ -823,8 +840,13 @@ internal static unsafe partial class VkSwapchain
 		{
 			SType = StructureType.MemoryAllocateInfo,
 			AllocationSize = requirements.Size,
-			MemoryTypeIndex = VkDevice.FindMemoryType( requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit ),
+			MemoryTypeIndex = transient
+				? VkDevice.FindMemoryType( requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.LazilyAllocatedBit )
+				: uint.MaxValue,
 		};
+
+		if ( allocate.MemoryTypeIndex == uint.MaxValue )
+			allocate.MemoryTypeIndex = VkDevice.FindMemoryType( requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit );
 
 		DeviceMemory memory;
 
@@ -845,7 +867,8 @@ internal static unsafe partial class VkSwapchain
 			Image = image,
 			ViewType = layers > 1 ? ImageViewType.Type2DArray : ImageViewType.Type2D,
 			Format = format,
-			SubresourceRange = new ImageSubresourceRange( ImageAspectFlags.ColorBit, 0, mips, 0, layers ),
+			SubresourceRange = new ImageSubresourceRange( format == VkDevice.DepthFormat ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit,
+				0, mips, 0, layers ),
 		};
 
 		ImageView view;
@@ -894,12 +917,54 @@ internal static unsafe partial class VkSwapchain
 		DropImage( default, default, p.PostTop, deferred );
 		DropImage( p.PostImage, p.PostMemory, p.PostView, deferred );
 		DropImage( p.DepthImage, p.DepthMemory, p.DepthView, deferred );
+		DropSampled( p, deferred );
 		DropHandle( p.ScreenDepthHandle, deferred );
 		DropImage( p.ScreenDepthImage, p.ScreenDepthMemory, p.ScreenDepthView, deferred );
 
 		VkFovea.Release( p.Fovea, deferred );
 
 		p.Forget();
+	}
+
+	//The multisampled pair let go, to be made again at the next pass that wants them
+	internal static void DropSampled( Pictures p, bool deferred )
+	{
+		DropImage( p.SampledColourImage, p.SampledColourMemory, p.SampledColourView, deferred );
+		DropImage( p.SampledDepthImage, p.SampledDepthMemory, p.SampledDepthView, deferred );
+
+		p.SampledColourImage = p.SampledDepthImage = default;
+		p.SampledColourMemory = p.SampledDepthMemory = default;
+		p.SampledColourView = p.SampledDepthView = default;
+		p.Samples = 0;
+		p.SampledFormat = Format.Undefined;
+		p.SampledExtent = default;
+		p.SampledReady = false;
+	}
+
+	//The multisampled pair for a pass of this colour, at the screen's size and layers: kept while all of that holds
+	internal static bool EnsureSampled( Pictures p, Format colour, uint samples )
+	{
+		if ( p.Samples == samples && p.SampledFormat == colour && p.SampledExtent.Width == p.ScreenExtent.Width &&
+			p.SampledExtent.Height == p.ScreenExtent.Height && p.SampledColourView.Handle != 0 ) return true;
+
+		DropSampled( p, deferred: true );
+
+		const ImageUsageFlags drawn = ImageUsageFlags.TransientAttachmentBit;
+
+		if ( !MakePicture( colour, p.ScreenExtent, 1, ImageUsageFlags.ColorAttachmentBit | drawn,
+				out p.SampledColourImage, out p.SampledColourMemory, out p.SampledColourView, p.Layers, samples ) ||
+			!MakePicture( VkDevice.DepthFormat, p.ScreenExtent, 1, ImageUsageFlags.DepthStencilAttachmentBit | drawn,
+				out p.SampledDepthImage, out p.SampledDepthMemory, out p.SampledDepthView, p.Layers, samples ) )
+		{
+			DropSampled( p, deferred: true );
+			return false;
+		}
+
+		p.Samples = samples;
+		p.SampledFormat = colour;
+		p.SampledExtent = p.ScreenExtent;
+
+		return true;
 	}
 
 	internal static void DropImage( VkImage image, DeviceMemory memory, ImageView view, bool deferred )

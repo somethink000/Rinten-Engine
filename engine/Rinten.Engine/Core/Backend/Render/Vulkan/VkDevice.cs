@@ -398,6 +398,12 @@ internal static unsafe partial class VkDevice
 	//Whether multiview (both headset eyes in one pass) is available; on whenever supported
 	internal static bool multiview;
 
+	//Samples the portable frame's pass may take at most, colour and depth resolved in it; one where it cannot
+	internal static uint mostSamples = 1;
+
+	//What makes a pass that resolves its depth (VK_KHR_create_renderpass2), where mostSamples is above one
+	internal static KhrCreateRenderpass2 renderPass2;
+
 	//How many one call may name: one where the above is missing
 	internal static uint maxDrawIndirect = 1;
 
@@ -680,6 +686,7 @@ internal static unsafe partial class VkDevice
 		public DescriptorSet Set;
 		public VkSemaphore Semaphore;
 		public SwapchainKHR Swapchain;
+		public AccelerationStructureKHR Structure;
 		public uint Bindless;
 
 		/// <summary>Where this image's memory came from, when it was a slice of a texture slab: the slice is given back rather than freed.</summary>
@@ -722,6 +729,7 @@ internal static unsafe partial class VkDevice
 		if ( grave.Image.Handle != 0 ) vk.DestroyImage( device, grave.Image, null );
 
 		//Before the buffer it was built into, which is its storage.
+		if ( grave.Structure.Handle != 0 ) VkRays.DestroyStructure( grave.Structure );
 
 		if ( grave.Buffer.Handle != 0 ) vk.DestroyBuffer( device, grave.Buffer, null );
 
@@ -859,6 +867,12 @@ internal static unsafe partial class VkDevice
 	internal static void RetireBuffer( VkBuffer buffer, DeviceMemory memory )
 	{
 		Retire( new Grave { Ticket = StampForNow(), Buffer = buffer, Memory = memory, Block = -1 } );
+	}
+
+	//A ray structure with the buffer that holds it
+	internal static void RetireStructure( AccelerationStructureKHR structure, VkBuffer buffer, DeviceMemory memory )
+	{
+		Retire( new Grave { Ticket = StampForNow(), Structure = structure, Buffer = buffer, Memory = memory, Block = -1 } );
 	}
 
 	internal static void RetireImage( VkImage image, DeviceMemory memory, ImageView view )

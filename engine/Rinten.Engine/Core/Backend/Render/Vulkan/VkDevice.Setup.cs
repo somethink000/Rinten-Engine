@@ -622,6 +622,27 @@ internal static unsafe partial class VkDevice
 			if ( !already ) deviceExtensions[extensionCount++] = names.Add( wantedByNgx );
 		}
 
+		//The portable frame's edges multisampled and resolved in its pass, depth with them - what a headset and a phone smooth by
+		mostSamples = 1;
+
+		if ( dialect.Tier == RenderTier.Portable && HasDeviceExtension( physicalDevice, "VK_KHR_create_renderpass2" ) &&
+			HasDeviceExtension( physicalDevice, "VK_KHR_depth_stencil_resolve" ) )
+		{
+			PhysicalDeviceProperties limits;
+			vk.GetPhysicalDeviceProperties( physicalDevice, &limits );
+
+			var counts = (uint)( limits.Limits.FramebufferColorSampleCounts & limits.Limits.FramebufferDepthSampleCounts );
+
+			for ( var samples = 8u; samples > 1 && mostSamples == 1; samples /= 2 )
+				if ( ( counts & samples ) != 0 ) mostSamples = samples;
+
+			if ( mostSamples > 1 )
+			{
+				deviceExtensions[extensionCount++] = names.Add( "VK_KHR_create_renderpass2" );
+				deviceExtensions[extensionCount++] = names.Add( "VK_KHR_depth_stencil_resolve" );
+			}
+		}
+
 		var info = new DeviceCreateInfo
 		{
 			SType = StructureType.DeviceCreateInfo,
@@ -681,6 +702,7 @@ internal static unsafe partial class VkDevice
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
 
 		if ( meshShaders && !vk.TryGetDeviceExtension( instance, device, out extMeshShader ) ) meshShaders = false;
+		if ( mostSamples > 1 && !vk.TryGetDeviceExtension( instance, device, out renderPass2 ) ) mostSamples = 1;
 
 		Queue got;
 		vk.GetDeviceQueue( device, graphicsFamily, 0, &got );

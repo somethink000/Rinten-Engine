@@ -666,6 +666,14 @@ internal static unsafe partial class VkFrame
 
 		colour.ClearValue.Color = new ClearColorValue( Current.Clear[0], Current.Clear[1], Current.Clear[2], Current.Clear[3] );
 
+		var screenFormat = aside?.Format ?? ( view is not null ? view.OutputFormat : Current.Format );
+		var samples = MainSamples( p, scaled );
+
+		if ( samples > 1 && !VkSwapchain.EnsureSampled( p, screenFormat, samples ) ) samples = 1;
+
+		Current.MainSamples = samples;
+		LastMainSamples = samples;
+
 		//Always attached, whether or not anything drawn this frame tests against it: dynamic rendering demands that
 		//pipelines and the pass agree about the attachments, and one honest arrangement beats two to keep in step.
 		var depth = new RenderingAttachmentInfo
@@ -689,6 +697,36 @@ internal static unsafe partial class VkFrame
 
 		depth.ClearValue.DepthStencil = new ClearDepthStencilValue( 1.0f, 0 );
 
+		//Drawn into the multisampled pair and resolved as the pass ends: colour into what it was going to be, depth into the depth.
+		//The pair is kept only where the pass may be resumed; the resolves always are
+		if ( samples > 1 )
+		{
+			if ( !p.SampledReady )
+			{
+				var colourLayout = ImageLayout.Undefined;
+				var depthLayout = ImageLayout.Undefined;
+
+				MoveTo( frame.Commands, p.SampledColourImage, ref colourLayout, ImageLayout.ColorAttachmentOptimal, ImageAspectFlags.ColorBit );
+				MoveTo( frame.Commands, p.SampledDepthImage, ref depthLayout, ImageLayout.DepthAttachmentOptimal, ImageAspectFlags.DepthBit );
+
+				p.SampledReady = true;
+			}
+
+			var kept = Current.MainBegun || Current.ResumedLastFrame ? AttachmentStoreOp.Store : AttachmentStoreOp.DontCare;
+
+			colour.ResolveMode = ResolveModeFlags.AverageBit;
+			colour.ResolveImageView = colour.ImageView;
+			colour.ResolveImageLayout = ImageLayout.ColorAttachmentOptimal;
+			colour.ImageView = p.SampledColourView;
+			colour.StoreOp = kept;
+
+			depth.ResolveMode = ResolveModeFlags.SampleZeroBit;
+			depth.ResolveImageView = depth.ImageView;
+			depth.ResolveImageLayout = ImageLayout.DepthAttachmentOptimal;
+			depth.ImageView = p.SampledDepthView;
+			depth.StoreOp = kept;
+		}
+
 		//Every eye at once, where the view holds more than one - see ViewMask.
 		var viewMask = ViewMask;
 
@@ -705,8 +743,9 @@ internal static unsafe partial class VkFrame
 			PDepthAttachment = &depth,
 		};
 
-		var formats = VkPassFormats.Of( aside?.Format ?? ( view is not null ? view.OutputFormat : Current.Format ), VkDevice.DepthFormat );
+		var formats = VkPassFormats.Of( screenFormat, VkDevice.DepthFormat );
 		formats.ViewMask = viewMask;
+		formats.Samples = samples;
 
 		//Where the world goes straight to the screen - the portable frame - this is its pass, foveated per eye;
 		//the full frame foveated already, and what goes here, the compose, is seen whole
@@ -734,6 +773,22 @@ internal static unsafe partial class VkFrame
 		}
 
 		DrawTrace.Phase( DrawTrace.Kind.MainPass, traced );
+	}
+
+	/// <summary>Samples the last screen's pass opened took, for the report.</summary>
+	internal static uint LastMainSamples = 1;
+
+	//Samples the screen's pass takes: the player's anti-aliasing where the portable frame resolves it in the pass, over a depth
+	//the pass clears itself; said at the frame's first opening, as a pass resumed has to be the one it was
+	private static uint MainSamples( VkSwapchain.Pictures p, bool scaled )
+	{
+		if ( Current.MainBegun ) return Current.MainSamples;
+		if ( VkDevice.mostSamples <= 1 || scaled || p.SceneDrawn || p.DepthFilled ) return 1;
+
+		var asked = Rinten.Rendering.DrawSettings.Msaa;
+		if ( asked < 2 ) return 1;
+
+		return Math.Min( 1u << System.Numerics.BitOperations.Log2( (uint)asked ), VkDevice.mostSamples );
 	}
 
 	//Fovea map for this view's world passes, or null; only when the world is drawn at screen size
@@ -855,10 +910,12 @@ internal static unsafe partial class VkFrame
 	//Binds a pipeline, unless it is the one already bound - which in a queue sorted by pipeline is most draws.
 	private static void BindPipeline( Frame frame, Pipeline pipeline )
 	{
-		//A pass drawing both eyes uses the pipeline remade for it - see VkPipelines.Multiview
-		var mask = Current.MainPass && !Current.TargetPass ? ViewMask : 0;
+		//A pass drawing both eyes, or multisampled, uses the pipeline remade for it - see VkPipelines.Variant
+		var main = Current.MainPass && !Current.TargetPass;
+		var mask = main ? ViewMask : 0;
+		var samples = main ? Current.MainSamples : 1;
 
-		if ( mask != 0 ) pipeline = VkPipelines.Multiview( pipeline, mask );
+		if ( mask != 0 || samples > 1 ) pipeline = VkPipelines.Variant( pipeline, mask, samples );
 
 		if ( frame.LastPipeline.Handle == pipeline.Handle )
 		{

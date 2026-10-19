@@ -587,6 +587,8 @@ internal static class PerfReport
 		if ( generatedShown > 0 )
 			report.AppendLine( $"  frame generation: {generatedShown / (double)frameMs.Count:F2} generated frames shown a drawn one" );
 
+		report.AppendLine( $"  edges smoothed by {PerformanceStats.AntiAliasing}" );
+
 		var presentWaits = CorePresent.Waits - presentWaitsAtArm;
 
 		if ( presentWaits > 0 && frameMs.Count > 0 )

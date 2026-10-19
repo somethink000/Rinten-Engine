@@ -7,7 +7,8 @@ using Vec4 = System.Numerics.Vector4;
 
 namespace Rinten.Bake;
 
-//Bake ray tracing in a plain compute shader; each GPU step runs on the main thread, falls back to CPU
+//Bake ray tracing in a compute shader, through hardware ray queries where the card has them; each GPU step runs on the main
+//thread, falls back to CPU
 internal static class BakeGpu
 {
 	/// <summary>Whether the bake traces on the card where it can.</summary>
@@ -41,8 +42,12 @@ internal static class BakeGpu
 	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
 	internal const int ProbeFloats = 20;
 
-	private static readonly ulong[] pipelines = new ulong[2];
-	private static readonly int[] pipelineBuilt = { -1, -1 };
+	//Each kernel walking the tree, then each through hardware rays
+	private static readonly ulong[] pipelines = new ulong[4];
+	private static readonly int[] pipelineBuilt = { -1, -1, -1, -1 };
+
+	/// <summary>The kernels' defines where they trace hardware rays - see bake_trace.slang.</summary>
+	internal const string RaysDefines = "#define BAKE_RAYS 1\n";
 
 	//What a sheet pass's samples do - bake_trace.slang's Mode flags
 	internal const int ModeGather = 1;
@@ -126,28 +131,45 @@ internal static class BakeGpu
 
 		var (_, floats) = Of( kernel );
 
-		ulong worldBuffer = 0, inputBuffer = 0, sumBuffer = 0, cacheBuffer = 0, lightBuffer = 0;
+		//Where the card has rays, the world as their structure: solid triangles first, each slot's world triangle
+		var (corners, order, solid) = VkRays.On ? Soup( scene ) : (null, null, 0);
+
+		ulong worldBuffer = 0, inputBuffer = 0, sumBuffer = 0, cacheBuffer = 0, lightBuffer = 0, orderBuffer = 0;
+		VkRays.Soup traced = null;
 		ulong built = 0;
 		var made = false;
 
 		OnMain( () =>
 		{
-			built = EnsurePipeline( kernel );
+			if ( corners is not null && EnsurePipeline( kernel, true ) is not 0 and var rayed && CoreGpuWork.Begin( out var own ) )
+			{
+				try
+				{
+					traced = VkFrame.RaysBuildSoup( corners, solid );
+				}
+				finally
+				{
+					CoreGpuWork.End( own );
+				}
+
+				if ( traced is not null )
+				{
+					orderBuffer = CoreRenderDevice.CreateBuffer( MemoryMarshal.AsBytes( order.AsSpan() ) );
+					built = rayed;
+				}
+			}
+
+			if ( built == 0 || orderBuffer == 0 ) built = EnsurePipeline( kernel, false );
 			if ( built == 0 ) return;
 
 			worldBuffer = CoreRenderDevice.CreateBuffer( MemoryMarshal.AsBytes( world.AsSpan() ) );
 			inputBuffer = CoreRenderDevice.CreateBuffer( MemoryMarshal.AsBytes( inputs.AsSpan() ) );
 			sumBuffer = CoreRenderDevice.CreateBuffer( new byte[items * floats * 4] );
-			cacheBuffer = kernel == Kernel.Sheet
-				? CoreRenderDevice.CreateBuffer( cache is { Length: > 0 } ? MemoryMarshal.AsBytes( cache.AsSpan() ) : new byte[16] )
-				: 0;
+			//The probes read neither, but the rays' order is bound after them
+			cacheBuffer = CoreRenderDevice.CreateBuffer( cache is { Length: > 0 } ? MemoryMarshal.AsBytes( cache.AsSpan() ) : new byte[16] );
+			lightBuffer = CoreRenderDevice.CreateBuffer( lights is { Count: > 0 } ? MemoryMarshal.AsBytes( lights.Floats.AsSpan() ) : new byte[16] );
 
-			lightBuffer = kernel == Kernel.Sheet
-				? CoreRenderDevice.CreateBuffer( lights is { Count: > 0 } ? MemoryMarshal.AsBytes( lights.Floats.AsSpan() ) : new byte[16] )
-				: 0;
-
-			made = worldBuffer != 0 && inputBuffer != 0 && sumBuffer != 0
-				&& ( kernel != Kernel.Sheet || ( cacheBuffer != 0 && lightBuffer != 0 ) );
+			made = worldBuffer != 0 && inputBuffer != 0 && sumBuffer != 0 && cacheBuffer != 0 && lightBuffer != 0;
 		}, CancellationToken.None );
 
 		try
@@ -179,6 +201,8 @@ internal static class BakeGpu
 			}
 
 			progress.Begin( stage, jobs.Count );
+
+			var rays = traced is not null && orderBuffer != 0;
 
 			var seed = (uint)System.Environment.TickCount;
 
@@ -213,10 +237,17 @@ internal static class BakeGpu
 							push[7] = (uint)( lights?.Count ?? 0 );
 							push[8] = (uint)scene.MaterialOf.Length;
 
-							Span<ulong> buffers = stackalloc ulong[5] { worldBuffer, inputBuffer, sumBuffer, cacheBuffer, lightBuffer };
+							if ( rays )
+							{
+								push[9] = (uint)traced.Address;
+								push[10] = (uint)( traced.Address >> 32 );
+								push[11] = (uint)solid;
+							}
 
-							ok = CoreRenderDevice.Dispatch( built, kernel == Kernel.Sheet ? buffers : buffers[..3], ( job.Count + 63 ) / 64, 1, 1,
-								MemoryMarshal.AsBytes( push ) );
+							Span<ulong> buffers = stackalloc ulong[6] { worldBuffer, inputBuffer, sumBuffer, cacheBuffer, lightBuffer, orderBuffer };
+
+							ok = CoreRenderDevice.Dispatch( built, rays ? buffers : kernel == Kernel.Sheet ? buffers[..5] : buffers[..3],
+								( job.Count + 63 ) / 64, 1, 1, MemoryMarshal.AsBytes( push ) );
 						}
 					}
 					finally
@@ -276,6 +307,9 @@ internal static class BakeGpu
 				if ( sumBuffer != 0 ) CoreRenderDevice.DestroyBuffer( sumBuffer );
 				if ( cacheBuffer != 0 ) CoreRenderDevice.DestroyBuffer( cacheBuffer );
 				if ( lightBuffer != 0 ) CoreRenderDevice.DestroyBuffer( lightBuffer );
+				if ( orderBuffer != 0 ) CoreRenderDevice.DestroyBuffer( orderBuffer );
+
+				VkRays.RetireSoup( traced );
 			}, CancellationToken.None, wait: false );
 		}
 	}
@@ -309,9 +343,9 @@ internal static class BakeGpu
 	}
 
 	//A kernel's pipeline, built the first time and again when the shaders change - nought where it will not build.
-	private static ulong EnsurePipeline( Kernel kernel )
+	private static ulong EnsurePipeline( Kernel kernel, bool rays )
 	{
-		var i = (int)kernel;
+		var i = ( (int)kernel * 2 ) + ( rays ? 1 : 0 );
 
 		if ( pipelines[i] != 0 && pipelineBuilt[i] == CoreShaderCache.Revision ) return pipelines[i];
 
@@ -319,10 +353,34 @@ internal static class BakeGpu
 
 		pipelineBuilt[i] = CoreShaderCache.Revision;
 
-		var code = CoreShaderCache.Pass( EngineShaders.BakeTrace, Of( kernel ).Entry, CoreShaderCompiler.Stage.Compute );
+		var code = CoreShaderCache.Pass( EngineShaders.BakeTrace, Of( kernel ).Entry, CoreShaderCompiler.Stage.Compute, rays ? RaysDefines : null );
 		pipelines[i] = code is null ? 0 : CoreRenderDevice.CreateCompute( code );
 
 		return pipelines[i];
+	}
+
+	//The world's triangles for the rays' structure, three corners each: the solid ones, then those a ray may pass
+	private static (float[] Corners, uint[] Order, int Solid) Soup( BakeScene scene )
+	{
+		var triangles = scene.MaterialOf.Length;
+		var order = new uint[triangles];
+		var solid = 0;
+
+		for ( var t = 0; t < triangles; ++t )
+			if ( scene.ThroughMode( t ) == 0 ) order[solid++] = (uint)t;
+
+		for ( int t = 0, at = solid; t < triangles; ++t )
+			if ( scene.ThroughMode( t ) != 0 ) order[at++] = (uint)t;
+
+		var corners = new float[triangles * 9];
+
+		for ( var i = 0; i < triangles; ++i )
+		{
+			for ( var k = 0; k < 3; ++k )
+				Put( corners, ( i * 9 ) + ( k * 3 ), scene.Positions[scene.Corners[( (int)order[i] * 3 ) + k]] );
+		}
+
+		return triangles == 0 ? (null, null, 0) : (corners, order, solid);
 	}
 
 	//-- the world, in words - see bake_trace.slang's header ----------------------

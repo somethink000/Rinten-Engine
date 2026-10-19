@@ -165,7 +165,7 @@ internal static unsafe class VkRays
 
 	//-- buffers of the structures' own -------------------------------------------------------------
 
-	private struct Owned
+	internal struct Owned
 	{
 		public VkBuffer Buffer;
 		public DeviceMemory Memory;
@@ -455,6 +455,181 @@ internal static unsafe class VkRays
 
 		return AddressOfStructure( top );
 	}
+
+	/// <summary>A world of triangles in a structure of its own, for a bake to trace: its address, and what it holds.</summary>
+	internal sealed class Soup
+	{
+		public ulong Address;
+		internal AccelerationStructureKHR Bottom, Top;
+		internal Owned BottomStorage, TopStorage, Corners, Placed, Scratch;
+	}
+
+	/// <summary>Builds a structure over triangles of three corners each, the first `solid` opaque; null where it will not build.</summary>
+	internal static Soup BuildSoup( CommandBuffer commands, ReadOnlySpan<float> corners, int solid )
+	{
+		var triangles = corners.Length / 9;
+		if ( !On || triangles == 0 ) return null;
+
+		var soup = new Soup();
+
+		if ( !MakeBuffer( (ulong)corners.Length * 4, BufferUsageFlags.AccelerationStructureBuildInputReadOnlyBitKhr, true, out soup.Corners ) )
+			return null;
+
+		corners.CopyTo( new Span<float>( soup.Corners.Mapped, corners.Length ) );
+
+		//The solid triangles opaque, the hardware's own; the rest come back to the query, each once
+		Span<AccelerationStructureGeometryKHR> geometries = stackalloc AccelerationStructureGeometryKHR[2];
+		Span<uint> counts = stackalloc uint[2];
+		Span<AccelerationStructureBuildRangeInfoKHR> ranges = stackalloc AccelerationStructureBuildRangeInfoKHR[2];
+		var used = 0;
+
+		foreach ( var (first, count, flags) in new[] { (0, solid, GeometryFlagsKHR.OpaqueBitKhr),
+			(solid, triangles - solid, GeometryFlagsKHR.NoDuplicateAnyHitInvocationBitKhr) } )
+		{
+			if ( count <= 0 ) continue;
+
+			geometries[used] = new AccelerationStructureGeometryKHR
+			{
+				SType = StructureType.AccelerationStructureGeometryKhr,
+				GeometryType = GeometryTypeKHR.TrianglesKhr,
+				Flags = flags,
+				Geometry = new AccelerationStructureGeometryDataKHR
+				{
+					Triangles = new AccelerationStructureGeometryTrianglesDataKHR
+					{
+						SType = StructureType.AccelerationStructureGeometryTrianglesDataKhr,
+						VertexFormat = Format.R32G32B32Sfloat,
+						VertexData = new DeviceOrHostAddressConstKHR { DeviceAddress = soup.Corners.Address + ( (ulong)first * 36ul ) },
+						VertexStride = 12,
+						MaxVertex = (uint)( ( count * 3 ) - 1 ),
+						IndexType = IndexType.NoneKhr,
+					},
+				},
+			};
+
+			counts[used] = (uint)count;
+			ranges[used] = new AccelerationStructureBuildRangeInfoKHR { PrimitiveCount = (uint)count };
+			used++;
+		}
+
+		fixed ( AccelerationStructureGeometryKHR* geometry = geometries )
+		fixed ( uint* count = counts )
+		fixed ( AccelerationStructureBuildRangeInfoKHR* range = ranges )
+		{
+			var build = new AccelerationStructureBuildGeometryInfoKHR
+			{
+				SType = StructureType.AccelerationStructureBuildGeometryInfoKhr,
+				Type = AccelerationStructureTypeKHR.BottomLevelKhr,
+				Flags = BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr,
+				Mode = BuildAccelerationStructureModeKHR.BuildKhr,
+				GeometryCount = (uint)used,
+				PGeometries = geometry,
+			};
+
+			var sizes = new AccelerationStructureBuildSizesInfoKHR { SType = StructureType.AccelerationStructureBuildSizesInfoKhr };
+			ext.GetAccelerationStructureBuildSizes( VkDevice.device, AccelerationStructureBuildTypeKHR.DeviceKhr, &build, count, &sizes );
+
+			if ( !MakeStructure( AccelerationStructureTypeKHR.BottomLevelKhr, sizes.AccelerationStructureSize, out soup.Bottom, out soup.BottomStorage )
+				|| !MakeBuffer( sizes.BuildScratchSize + scratchAlign, BufferUsageFlags.StorageBufferBit, false, out soup.Scratch ) )
+			{
+				RetireSoup( soup );
+				return null;
+			}
+
+			build.DstAccelerationStructure = soup.Bottom;
+			build.ScratchData = new DeviceOrHostAddressKHR { DeviceAddress = Aligned( soup.Scratch.Address ) };
+
+			var ranged = range;
+			ext.CmdBuildAccelerationStructures( commands, 1, &build, &ranged );
+			Barrier( commands );
+		}
+
+		//One instance where the world stands, both sides of every triangle
+		if ( !MakeBuffer( (ulong)sizeof( AccelerationStructureInstanceKHR ), BufferUsageFlags.AccelerationStructureBuildInputReadOnlyBitKhr, true,
+			out soup.Placed ) )
+		{
+			RetireSoup( soup );
+			return null;
+		}
+
+		var transform = new TransformMatrixKHR();
+		var rows = (float*)&transform;
+		rows[0] = rows[5] = rows[10] = 1.0f;
+
+		*(AccelerationStructureInstanceKHR*)soup.Placed.Mapped = new AccelerationStructureInstanceKHR
+		{
+			Transform = transform,
+			Mask = 0xFF,
+			Flags = GeometryInstanceFlagsKHR.TriangleFacingCullDisableBitKhr,
+			AccelerationStructureReference = AddressOfStructure( soup.Bottom ),
+		};
+
+		var instances = new AccelerationStructureGeometryKHR
+		{
+			SType = StructureType.AccelerationStructureGeometryKhr,
+			GeometryType = GeometryTypeKHR.InstancesKhr,
+			Geometry = new AccelerationStructureGeometryDataKHR
+			{
+				Instances = new AccelerationStructureGeometryInstancesDataKHR
+				{
+					SType = StructureType.AccelerationStructureGeometryInstancesDataKhr,
+					Data = new DeviceOrHostAddressConstKHR { DeviceAddress = soup.Placed.Address },
+				},
+			},
+		};
+
+		var top = new AccelerationStructureBuildGeometryInfoKHR
+		{
+			SType = StructureType.AccelerationStructureBuildGeometryInfoKhr,
+			Type = AccelerationStructureTypeKHR.TopLevelKhr,
+			Flags = BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr,
+			Mode = BuildAccelerationStructureModeKHR.BuildKhr,
+			GeometryCount = 1,
+			PGeometries = &instances,
+		};
+
+		var one = 1u;
+		var topSizes = new AccelerationStructureBuildSizesInfoKHR { SType = StructureType.AccelerationStructureBuildSizesInfoKhr };
+		ext.GetAccelerationStructureBuildSizes( VkDevice.device, AccelerationStructureBuildTypeKHR.DeviceKhr, &top, &one, &topSizes );
+
+		if ( topSizes.BuildScratchSize + scratchAlign > soup.Scratch.Size
+			|| !MakeStructure( AccelerationStructureTypeKHR.TopLevelKhr, topSizes.AccelerationStructureSize, out soup.Top, out soup.TopStorage ) )
+		{
+			RetireSoup( soup );
+			return null;
+		}
+
+		top.DstAccelerationStructure = soup.Top;
+		top.ScratchData = new DeviceOrHostAddressKHR { DeviceAddress = Aligned( soup.Scratch.Address ) };
+
+		var topRange = new AccelerationStructureBuildRangeInfoKHR { PrimitiveCount = 1 };
+		var topRanged = &topRange;
+
+		ext.CmdBuildAccelerationStructures( commands, 1, &top, &topRanged );
+		Barrier( commands );
+
+		soup.Address = AddressOfStructure( soup.Top );
+		return soup;
+	}
+
+	/// <summary>Lets go of a soup once the work that traces it is done.</summary>
+	internal static void RetireSoup( Soup soup )
+	{
+		if ( soup is null ) return;
+
+		VkDevice.RetireStructure( soup.Top, soup.TopStorage.Buffer, soup.TopStorage.Memory );
+		VkDevice.RetireStructure( soup.Bottom, soup.BottomStorage.Buffer, soup.BottomStorage.Memory );
+
+		foreach ( var owned in new[] { soup.Corners, soup.Placed, soup.Scratch } )
+			if ( owned.Buffer.Handle != 0 ) VkDevice.RetireBuffer( owned.Buffer, owned.Memory );
+
+		soup.Top = default;
+		soup.Bottom = default;
+		soup.TopStorage = soup.BottomStorage = soup.Corners = soup.Placed = soup.Scratch = default;
+	}
+
+	/// <summary>Destroys a structure whose grave came up.</summary>
+	internal static void DestroyStructure( AccelerationStructureKHR structure ) => ext.DestroyAccelerationStructure( VkDevice.device, structure, null );
 
 	private static bool MakeStructure( AccelerationStructureTypeKHR type, ulong size, out AccelerationStructureKHR handle, out Owned storage )
 	{

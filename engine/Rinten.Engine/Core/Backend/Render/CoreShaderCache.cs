@@ -1088,6 +1088,7 @@ internal static class EngineShaders
 		.. FrameGenerationBuilds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
+		( BakeTrace, Rinten.Bake.BakeGpu.RaysDefines, BakeRuns, false ),
 		( BakeDenoise, "", Runs, false ),
 		//The probes' bounce through hardware rays - see CoreLiveBounce. Built everywhere, run where the card has rays.
 		( RayBounce, "", Runs, false ),

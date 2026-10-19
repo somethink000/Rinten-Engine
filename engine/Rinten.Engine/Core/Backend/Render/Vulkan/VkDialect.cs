@@ -19,6 +19,9 @@ internal struct VkPassFormats
 	/// <summary>Layers one draw goes to, a bit each; nought for every pass but a headset's.</summary>
 	public uint ViewMask;
 
+	/// <summary>Samples a pixel, its colour and depth resolved in the pass; nought or one for none - see VkFrame.MainSamples.</summary>
+	public uint Samples;
+
 	public static VkPassFormats Of( Format colour, Format depth = Format.Undefined )
 		=> new() { Colour0 = colour, Colours = colour == Format.Undefined ? 0u : 1u, Depth = depth };
 
@@ -284,13 +287,13 @@ internal sealed unsafe class VkClassic : VkDialect
 		Format Colour0, Format Colour1, uint Colours, Format Depth,
 		AttachmentLoadOp Load0, AttachmentLoadOp Load1, AttachmentLoadOp LoadDepth,
 		AttachmentStoreOp Store0, AttachmentStoreOp Store1, AttachmentStoreOp StoreDepth,
-		ImageLayout Layout0, ImageLayout Layout1, ImageLayout LayoutDepth, uint ViewMask );
+		ImageLayout Layout0, ImageLayout Layout1, ImageLayout LayoutDepth, uint ViewMask, uint Samples );
 
 	//What makes two framebuffers the same object. Any pass of the same formats may draw into it.
 	private readonly record struct TargetKey(
 		Format Colour0, Format Colour1, uint Colours, Format Depth,
 		ulong View0, ulong View1, ulong ViewDepth,
-		uint Width, uint Height, uint Layers );
+		uint Width, uint Height, uint Layers, uint Samples, ulong Resolve0, ulong ResolveDepth );
 
 	private readonly Dictionary<PassKey, RenderPass> passes = new();
 	private readonly Dictionary<TargetKey, Framebuffer> targets = new();
@@ -308,6 +311,8 @@ internal sealed unsafe class VkClassic : VkDialect
 	private RenderPass PassFor( in PassKey key )
 	{
 		if ( passes.TryGetValue( key, out var kept ) ) return kept;
+
+		if ( key.Samples > 1 ) return SampledPassFor( key );
 
 		var attachments = stackalloc AttachmentDescription[3];
 		var colours = stackalloc AttachmentReference[2];
@@ -399,6 +404,138 @@ internal sealed unsafe class VkClassic : VkDialect
 		return made;
 	}
 
+	//A pass of one colour and a depth drawn multisampled, both resolved into single pictures as it ends - the colour averaged,
+	//the depth by its first sample. Attachments: the two drawn, then the colour's resolve and the depth's
+	private RenderPass SampledPassFor( in PassKey key )
+	{
+		if ( key.Colours != 1 || key.Depth == Format.Undefined || VkDevice.renderPass2 is null )
+		{
+			VkDevice.SetText( "a multisampled pass is one colour and a depth, on a device that resolves both" );
+			return default;
+		}
+
+		var samples = (SampleCountFlags)key.Samples;
+		var attachments = stackalloc AttachmentDescription2[4];
+
+		attachments[0] = new AttachmentDescription2
+		{
+			SType = StructureType.AttachmentDescription2,
+			Format = key.Colour0,
+			Samples = samples,
+			LoadOp = key.Load0,
+			StoreOp = key.Store0,
+			StencilLoadOp = AttachmentLoadOp.DontCare,
+			StencilStoreOp = AttachmentStoreOp.DontCare,
+			InitialLayout = ImageLayout.ColorAttachmentOptimal,
+			FinalLayout = ImageLayout.ColorAttachmentOptimal,
+		};
+
+		attachments[1] = new AttachmentDescription2
+		{
+			SType = StructureType.AttachmentDescription2,
+			Format = key.Depth,
+			Samples = samples,
+			LoadOp = key.LoadDepth,
+			StoreOp = key.StoreDepth,
+			StencilLoadOp = AttachmentLoadOp.DontCare,
+			StencilStoreOp = AttachmentStoreOp.DontCare,
+			InitialLayout = ImageLayout.DepthStencilAttachmentOptimal,
+			FinalLayout = ImageLayout.DepthStencilAttachmentOptimal,
+		};
+
+		//Every texel of both written by the resolve, so what was there before is not read
+		attachments[2] = new AttachmentDescription2
+		{
+			SType = StructureType.AttachmentDescription2,
+			Format = key.Colour0,
+			Samples = SampleCountFlags.Count1Bit,
+			LoadOp = AttachmentLoadOp.DontCare,
+			StoreOp = AttachmentStoreOp.Store,
+			StencilLoadOp = AttachmentLoadOp.DontCare,
+			StencilStoreOp = AttachmentStoreOp.DontCare,
+			InitialLayout = key.Layout0,
+			FinalLayout = key.Layout0,
+		};
+
+		attachments[3] = new AttachmentDescription2
+		{
+			SType = StructureType.AttachmentDescription2,
+			Format = key.Depth,
+			Samples = SampleCountFlags.Count1Bit,
+			LoadOp = AttachmentLoadOp.DontCare,
+			StoreOp = AttachmentStoreOp.Store,
+			StencilLoadOp = AttachmentLoadOp.DontCare,
+			StencilStoreOp = AttachmentStoreOp.DontCare,
+			InitialLayout = key.LayoutDepth,
+			FinalLayout = key.LayoutDepth,
+		};
+
+		var colour = new AttachmentReference2
+		{
+			SType = StructureType.AttachmentReference2, Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal, AspectMask = ImageAspectFlags.ColorBit,
+		};
+
+		var depth = new AttachmentReference2
+		{
+			SType = StructureType.AttachmentReference2, Attachment = 1, Layout = ImageLayout.DepthStencilAttachmentOptimal, AspectMask = ImageAspectFlags.DepthBit,
+		};
+
+		var colourResolve = new AttachmentReference2
+		{
+			SType = StructureType.AttachmentReference2, Attachment = 2, Layout = key.Layout0, AspectMask = ImageAspectFlags.ColorBit,
+		};
+
+		var depthResolve = new AttachmentReference2
+		{
+			SType = StructureType.AttachmentReference2, Attachment = 3, Layout = key.LayoutDepth, AspectMask = ImageAspectFlags.DepthBit,
+		};
+
+		var depthResolving = new SubpassDescriptionDepthStencilResolve
+		{
+			SType = StructureType.SubpassDescriptionDepthStencilResolve,
+			DepthResolveMode = ResolveModeFlags.SampleZeroBit,
+			StencilResolveMode = ResolveModeFlags.None,
+			PDepthStencilResolveAttachment = &depthResolve,
+		};
+
+		var subpass = new SubpassDescription2
+		{
+			SType = StructureType.SubpassDescription2,
+			PNext = &depthResolving,
+			PipelineBindPoint = PipelineBindPoint.Graphics,
+			ViewMask = key.ViewMask,
+			ColorAttachmentCount = 1,
+			PColorAttachments = &colour,
+			PResolveAttachments = &colourResolve,
+			PDepthStencilAttachment = &depth,
+		};
+
+		var viewMask = key.ViewMask;
+
+		var info = new RenderPassCreateInfo2
+		{
+			SType = StructureType.RenderPassCreateInfo2,
+			AttachmentCount = 4,
+			PAttachments = attachments,
+			SubpassCount = 1,
+			PSubpasses = &subpass,
+			CorrelatedViewMaskCount = viewMask != 0 ? 1u : 0u,
+			PCorrelatedViewMasks = viewMask != 0 ? &viewMask : null,
+		};
+
+		RenderPass made;
+
+		if ( VkDevice.renderPass2.CreateRenderPass2( VkDevice.device, &info, null, &made ) != Result.Success )
+		{
+			VkDevice.SetText( "a multisampled render pass would not be made" );
+			return default;
+		}
+
+		passes[key] = made;
+
+		return made;
+	}
+
 	//The pass a pipeline is made against and a framebuffer is made for: the formats, and nothing about
 	//what is done with them - which is all that has to agree between a pass and what is used in it.
 	private RenderPass ShapeOf( in VkPassFormats formats ) => PassFor( new PassKey(
@@ -408,10 +545,12 @@ internal sealed unsafe class VkClassic : VkDialect
 		AttachmentLoadOp.Load, AttachmentLoadOp.Load, AttachmentLoadOp.Load,
 		AttachmentStoreOp.Store, AttachmentStoreOp.Store, AttachmentStoreOp.Store,
 		ImageLayout.ColorAttachmentOptimal, ImageLayout.ColorAttachmentOptimal,
-		ImageLayout.DepthStencilAttachmentOptimal, formats.ViewMask ) );
+		ImageLayout.DepthStencilAttachmentOptimal, formats.ViewMask, formats.Samples > 1 ? formats.Samples : 1u ) );
 
 	public override bool DescribePass( GraphicsPipelineCreateInfo* pipeline, PipelineRenderingCreateInfo* rendering )
 	{
+		var samples = pipeline->PMultisampleState is null ? 1u : (uint)pipeline->PMultisampleState->RasterizationSamples;
+
 		var formats = new VkPassFormats
 		{
 			Colours = rendering->ColorAttachmentCount,
@@ -419,6 +558,7 @@ internal sealed unsafe class VkClassic : VkDialect
 			Colour1 = rendering->ColorAttachmentCount > 1 ? rendering->PColorAttachmentFormats[1] : Format.Undefined,
 			Depth = rendering->DepthAttachmentFormat,
 			ViewMask = rendering->ViewMask,
+			Samples = samples,
 		};
 
 		var pass = ShapeOf( formats );
@@ -438,6 +578,7 @@ internal sealed unsafe class VkClassic : VkDialect
 		var first = colours > 0 ? info->PColorAttachments : null;
 		var second = colours > 1 ? info->PColorAttachments + 1 : null;
 		var depth = formats.Depth != Format.Undefined ? info->PDepthAttachment : null;
+		var samples = formats.Samples > 1 && first is not null && depth is not null ? formats.Samples : 1u;
 
 		var pass = PassFor( new PassKey(
 			colours > 0 ? formats.Colour0 : Format.Undefined,
@@ -449,10 +590,10 @@ internal sealed unsafe class VkClassic : VkDialect
 			first is null ? AttachmentStoreOp.Store : first->StoreOp,
 			second is null ? AttachmentStoreOp.Store : second->StoreOp,
 			depth is null ? AttachmentStoreOp.Store : depth->StoreOp,
-			first is null ? ImageLayout.ColorAttachmentOptimal : Known( first->ImageLayout ),
+			samples > 1 ? Known( first->ResolveImageLayout ) : first is null ? ImageLayout.ColorAttachmentOptimal : Known( first->ImageLayout ),
 			second is null ? ImageLayout.ColorAttachmentOptimal : Known( second->ImageLayout ),
-			depth is null ? ImageLayout.DepthStencilAttachmentOptimal : Known( depth->ImageLayout ),
-			info->ViewMask ) );
+			samples > 1 ? Known( depth->ResolveImageLayout ) : depth is null ? ImageLayout.DepthStencilAttachmentOptimal : Known( depth->ImageLayout ),
+			info->ViewMask, samples ) );
 
 		if ( pass.Handle == 0 ) return;
 
@@ -465,16 +606,24 @@ internal sealed unsafe class VkClassic : VkDialect
 			depth is null ? 0 : depth->ImageView.Handle,
 			info->RenderArea.Offset.X < 0 ? 0u : (uint)info->RenderArea.Offset.X + info->RenderArea.Extent.Width,
 			info->RenderArea.Offset.Y < 0 ? 0u : (uint)info->RenderArea.Offset.Y + info->RenderArea.Extent.Height,
-			info->LayerCount == 0 ? 1u : info->LayerCount );
+			info->LayerCount == 0 ? 1u : info->LayerCount, samples,
+			samples > 1 ? first->ResolveImageView.Handle : 0, samples > 1 ? depth->ResolveImageView.Handle : 0 );
 
 		if ( !targets.TryGetValue( key, out var target ) )
 		{
-			var views = stackalloc ImageView[3];
+			var views = stackalloc ImageView[4];
 			var count = 0u;
 
 			if ( first is not null ) views[count++] = first->ImageView;
 			if ( second is not null ) views[count++] = second->ImageView;
 			if ( depth is not null ) views[count++] = depth->ImageView;
+
+			//A multisampled pass's resolves after the two it draws - see SampledPassFor
+			if ( samples > 1 )
+			{
+				views[count++] = first->ResolveImageView;
+				views[count++] = depth->ResolveImageView;
+			}
 
 			var made = new FramebufferCreateInfo
 			{
@@ -532,7 +681,8 @@ internal sealed unsafe class VkClassic : VkDialect
 
 		foreach ( var key in targets.Keys )
 		{
-			if ( key.View0 == view.Handle || key.View1 == view.Handle || key.ViewDepth == view.Handle )
+			if ( key.View0 == view.Handle || key.View1 == view.Handle || key.ViewDepth == view.Handle ||
+				key.Resolve0 == view.Handle || key.ResolveDepth == view.Handle )
 				doomed.Add( key );
 		}
 

@@ -1,5 +1,5 @@
-//Screen-space reflections via hierarchical depth trace; misses fade into the probe or sky. Rough surfaces send one GGX ray a
-//texel turned every frame, which ResolvePs gathers over its neighbours and over the frames before
+//Screen-space reflections via hierarchical depth trace; misses go on as hardware rays where traced (RayPs), else fade into
+//the probe or sky. Rough surfaces send one GGX ray a texel a frame, which ResolvePs gathers over neighbours and frames
 
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1
@@ -39,6 +39,45 @@ float3 PlaceOf( float2 uv, float depth )
 
 	return world.xyz / max( world.w, 0.000001 );
 }
+
+#include "ray_hit.slang"
+
+#ifndef PORTABLE
+//A hardware ray where the screen has nothing: what leaves the front of the first thing it meets
+bool RayFound( float3 from, float3 way, out float3 light )
+{
+	light = 0.0;
+
+	if ( g_frame[0].rays.z < 0.5 ) return false;
+
+	RaytracingAccelerationStructure scene = RayScene();
+
+	RayDesc ray;
+	ray.Origin = from;
+	ray.Direction = way;
+	ray.TMin = 0.0;
+	ray.TMax = 1000.0;
+
+	RayQuery<RAY_FLAG_FORCE_OPAQUE> query;
+	query.TraceRayInline( scene, RAY_FLAG_NONE, 0xFF, ray );
+	query.Proceed();
+
+	if ( query.CommittedStatus() != COMMITTED_TRIANGLE_HIT || !query.CommittedTriangleFrontFace() ) return false;
+
+	float3 corners[3] = query.CommittedGetIntersectionTriangleVertexPositions();
+	float3x4 toWorld = query.CommittedObjectToWorld3x4();
+
+	float3 a = mul( toWorld, float4( corners[0], 1.0 ) );
+	float3 b = mul( toWorld, float4( corners[1], 1.0 ) );
+	float3 c = mul( toWorld, float4( corners[2], 1.0 ) );
+
+	float3 n = normalize( cross( b - a, c - a ) );
+	if ( dot( n, way ) > 0.0 ) n = -n;
+
+	light = HitLight( scene, from + ( way * query.CommittedRayT() ), n, query.CommittedInstanceID(), 0.0 );
+	return true;
+}
+#endif
 
 //The solid world as it now stands, reflections and all, at the size it is drawn into - for the water and the glass drawn
 //after it, which trace their own rays and cannot read the picture they are drawn into. See ScreenReflected in frame.slang.
@@ -107,8 +146,8 @@ float2 StandsFor( float2 uv )
 	return ( floor( uv * size ) + 0.5 ) / size;
 }
 
-[shader("fragment")]
-float4 MainPs( PostV2F i ) : SV_Target0
+//The trace, and where rays is set a hardware ray past what the screen holds - see MainPs and RayPs
+float4 Reflected( PostV2F i, bool rays )
 {
 	//What it found, less what was there - and in the alpha which plane it was traced from: how far the eye stands off the plane of that pixel, which
 	//the lay weighs its four by; less than nought where it was no mirror to trace from. How much of a mirror is the lay's, at the world's own size.
@@ -149,7 +188,18 @@ float4 MainPs( PostV2F i ) : SV_Target0
 		place + ( normal * g_flBias ), ray, EYE_FRAME( worldToClip ), EYE_FRAME( clipToWorld ), camera,
 		clamp( int( g_flSteps ), 8, 128 ) );
 
-	if ( !hit.found ) return float4( 0.0, 0.0, 0.0, plane );
+	float3 found = hit.found ? SceneColour( hit.uv ) : 0.0;
+	float fade = hit.found ? hit.fade : 1.0;
+
+	if ( !hit.found )
+	{
+#ifdef PORTABLE
+		return float4( 0.0, 0.0, 0.0, plane );
+#else
+		float3 from = place + ( normal * ( g_flBias + ( 0.002 * length( place - camera ) ) ) );
+		if ( !rays || !RayFound( from, ray, found ) ) return float4( 0.0, 0.0, 0.0, plane );
+#endif
+	}
 
 	//Found colour minus what the surface already reflects; may go negative, which is correct
 	float3 already = EnvironmentAt( ProbesHere( place ), place, normal, ray, 0.0 );
@@ -161,7 +211,20 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	float2 screen = uv * g_frame[0].settings.yz;
 	float3 through = ApplyFog( float3( 1.0, 1.0, 1.0 ), place, camera, screen ) - ApplyFog( float3( 0.0, 0.0, 0.0 ), place, camera, screen );
 
-	return float4( ( SceneColour( hit.uv ) - already ) * through * hit.fade, plane );
+	return float4( ( found - already ) * through * fade, plane );
+}
+
+[shader("fragment")]
+float4 MainPs( PostV2F i ) : SV_Target0
+{
+	return Reflected( i, false );
+}
+
+//MainPs with the hardware rays behind it, where the card traces them - see ScreenSpaceReflections
+[shader("fragment")]
+float4 RayPs( PostV2F i ) : SV_Target0
+{
+	return Reflected( i, true );
 }
 
 //MainPs's rays gathered: a rough texel takes its neighbours on its own plane, then the frame before's resolve where its point was

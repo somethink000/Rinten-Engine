@@ -20,6 +20,9 @@ internal static unsafe partial class VkFrame
 		/// <summary>Signalled when the image this frame drew into is free.</summary>
 		public VkSemaphore ImageAvailable;
 
+		/// <summary>The same for the second image a frame takes when a generated frame goes before it - see VkFrame.Generation.</summary>
+		public VkSemaphore GeneratedAvailable;
+
 		/// <summary>Signalled when the GPU finishes the frame, so its command buffer may be recorded over.</summary>
 		public Fence Finished;
 
@@ -1186,6 +1189,7 @@ internal static unsafe partial class VkFrame
 
 		if ( frame.Finished.Handle != 0 ) vk.DestroyFence( device, frame.Finished, null );
 		if ( frame.ImageAvailable.Handle != 0 ) vk.DestroySemaphore( device, frame.ImageAvailable, null );
+		if ( frame.GeneratedAvailable.Handle != 0 ) vk.DestroySemaphore( device, frame.GeneratedAvailable, null );
 
 		//The pool owns the command buffer; freeing it separately is allowed but pointless.
 		if ( frame.Pool.Handle != 0 ) vk.DestroyCommandPool( device, frame.Pool, null );
@@ -1198,6 +1202,7 @@ internal static unsafe partial class VkFrame
 		frame.Pool = default;
 		frame.Commands = default;
 		frame.ImageAvailable = default;
+		frame.GeneratedAvailable = default;
 		frame.Finished = default;
 		frame.Submitted = false;
 		frame.FrameSetStale = false;
@@ -1283,6 +1288,10 @@ internal static unsafe partial class VkFrame
 			if ( vk.CreateSemaphore( device, &semaphoreInfo, null, &semaphore ) != Result.Success ) return false;
 
 			frame.ImageAvailable = semaphore;
+
+			if ( vk.CreateSemaphore( device, &semaphoreInfo, null, &semaphore ) != Result.Success ) return false;
+
+			frame.GeneratedAvailable = semaphore;
 		}
 
 		var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };

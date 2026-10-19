@@ -15,7 +15,8 @@ internal static unsafe partial class VkFrame
 		{
 			//The frame before this one out of the submit thread's hands, and what the queue and the display said about it acted on - see VkSubmitter. Before
 			//anything here, because the acquire below and that frame's present may not run at once, and what they said may be that this swapchain has gone.
-			VkSubmitter.Drain();
+			//Yielded rather than drained: a frame left waiting to be shown after a generated one takes this lock before it is presented.
+			VkSubmitter.Yield();
 			VkSubmitter.Settle();
 
 			//A device that has been lost stays lost until it is shut down and brought up again. Every call past this
@@ -352,6 +353,9 @@ internal static unsafe partial class VkFrame
 				VkDevice.dialect.EndRendering( frame.Commands );
 				Current.MainPass = false;
 
+				//The frame between the last one and this, in a second image of its own, where the world was kept for one - see VkFrame.Generation.
+				var generated = GenerateBeforeEnd( frame, out var generatedImage );
+
 				//The buffers somebody asked to have back, read after everything the frame did to them - see VkReadbacks.
 				VkReadbacks.RecordInto( frame );
 
@@ -459,7 +463,10 @@ internal static unsafe partial class VkFrame
 				vk.EndCommandBuffer( frame.Commands );
 				frame.CpuEnd = VkSwapchain.NowNs();
 
-				var wait = new SemaphoreSubmitInfo
+				var wait = stackalloc SemaphoreSubmitInfo[2];
+				var signal = stackalloc SemaphoreSubmitInfo[2];
+
+				wait[0] = new SemaphoreSubmitInfo
 				{
 					SType = StructureType.SemaphoreSubmitInfo,
 					Semaphore = frame.ImageAvailable,
@@ -468,10 +475,25 @@ internal static unsafe partial class VkFrame
 					StageMask = PipelineStageFlags2.ColorAttachmentOutputBit,
 				};
 
-				var signal = new SemaphoreSubmitInfo
+				signal[0] = new SemaphoreSubmitInfo
 				{
 					SType = StructureType.SemaphoreSubmitInfo,
 					Semaphore = Current.RenderFinished[Current.ImageIndex],
+					StageMask = PipelineStageFlags2.AllCommandsBit,
+				};
+
+				//The generated frame's image is written by a copy at the end
+				wait[1] = new SemaphoreSubmitInfo
+				{
+					SType = StructureType.SemaphoreSubmitInfo,
+					Semaphore = frame.GeneratedAvailable,
+					StageMask = PipelineStageFlags2.AllTransferBit,
+				};
+
+				signal[1] = new SemaphoreSubmitInfo
+				{
+					SType = StructureType.SemaphoreSubmitInfo,
+					Semaphore = generated ? Current.RenderFinished[generatedImage] : default,
 					StageMask = PipelineStageFlags2.AllCommandsBit,
 				};
 
@@ -484,12 +506,12 @@ internal static unsafe partial class VkFrame
 				var submit = new SubmitInfo2
 				{
 					SType = StructureType.SubmitInfo2,
-					WaitSemaphoreInfoCount = 1,
-					PWaitSemaphoreInfos = &wait,
+					WaitSemaphoreInfoCount = generated ? 2u : 1u,
+					PWaitSemaphoreInfos = wait,
 					CommandBufferInfoCount = 1,
 					PCommandBufferInfos = &commands,
-					SignalSemaphoreInfoCount = 1,
-					PSignalSemaphoreInfos = &signal,
+					SignalSemaphoreInfoCount = generated ? 2u : 1u,
+					PSignalSemaphoreInfos = signal,
 				};
 
 				//Every picture uploaded while this frame was being recorded goes to the card first, in one submission.
@@ -519,6 +541,10 @@ internal static unsafe partial class VkFrame
 				var finished = Current.RenderFinished[Current.ImageIndex];
 				var swapchain = Current.Handle;
 				var index = Current.ImageIndex;
+
+				//The generated frame's id first: it is shown first
+				var generatedId = generated ? CorePresent.Next( Current ) : 0ul;
+				var spacing = generated ? GeneratedSpacing() : 0L;
 				var id = CorePresent.Next( Current );
 
 				//Handed over: the present goes on the submit thread while this one gets on with the next frame - see VkSubmitter. The submission
@@ -532,27 +558,28 @@ internal static unsafe partial class VkFrame
 						Image = index,
 						Owner = Current,
 						Id = id,
+						Generated = generated,
+						GeneratedSignal = signal[1].Semaphore,
+						GeneratedImage = generatedImage,
+						GeneratedId = generatedId,
+						Spacing = spacing,
 					} );
 
 					Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
 					return 1;
 				}
 
-				var present = new PresentInfoKHR
+				if ( generated )
 				{
-					SType = StructureType.PresentInfoKhr,
-					WaitSemaphoreCount = 1,
-					PWaitSemaphores = &finished,
-					SwapchainCount = 1,
-					PSwapchains = &swapchain,
-					PImageIndices = &index,
-				};
+					var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
-				PresentIdKHR told;
-				CorePresent.Stamp( &present, &told, &id );
+					//What it answers is what the frame's own present answers a moment later
+					VkSubmitter.Present( signal[1].Semaphore, swapchain, generatedImage, generatedId );
+					VkSubmitter.Hold( began + spacing );
+				}
 
 				CoreLatency.Presenting( id );
-				var presented = VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
+				var presented = VkSubmitter.Present( finished, swapchain, index, id );
 				CoreLatency.Presented( id );
 
 				Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
@@ -591,6 +618,8 @@ internal static unsafe partial class VkFrame
 			finally
 			{
 				//Whatever happened above, the frame is over and the swapchain goes back to nobody's - so the next one can begin, on this or on any other.
+				if ( ReferenceEquals( generating, Current ) ) generating = null;
+
 				Current.Recording = false;
 				VkSwapchain.active = VkSwapchain.placeholder;
 			}

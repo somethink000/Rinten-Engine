@@ -976,6 +976,7 @@ internal static class EngineShaders
 	internal const string Fold = "shaders/engine/picture_fold.slang";
 	internal const string Upscale = "shaders/engine/upscale.slang";
 	internal const string Fsr3 = "shaders/engine/fsr3.slang";
+	internal const string FrameGeneration = "shaders/engine/framegen.slang";
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
 	internal const string BakeDenoise = "shaders/engine/bake_denoise.slang";
 	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
@@ -1084,6 +1085,7 @@ internal static class EngineShaders
 		( Upscale, CoreUpscaler.SingleDefines, ReactiveRuns, false ),
 		//And FSR 3's, one build a pass - see CoreFsr3.
 		.. Fsr3Builds,
+		.. FrameGenerationBuilds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
 		( BakeDenoise, "", Runs, false ),
@@ -1131,6 +1133,9 @@ internal static class EngineShaders
 
 	private static IEnumerable<(string, string, (string, CoreShaderCompiler.Stage)[], bool)> Fsr3Builds
 		=> CoreFsr3.Defines.Select( defines => ( Fsr3, defines, Runs, false ) );
+
+	private static IEnumerable<(string, string, (string, CoreShaderCompiler.Stage)[], bool)> FrameGenerationBuilds
+		=> CoreFrameGeneration.Defines.Select( defines => ( FrameGeneration, defines, Runs, false ) );
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] UpscaleRuns =
 	[

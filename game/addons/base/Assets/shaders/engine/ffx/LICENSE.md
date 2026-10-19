@@ -1,4 +1,4 @@
-# AMD FidelityFX - FSR 3.1 upscaler shaders
+# AMD FidelityFX - FSR 3.1 upscaler and frame generation shaders
 
 The files under `gpu/` are AMD's, from the FidelityFX SDK
 (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK, `Kits/FidelityFX`),
@@ -8,6 +8,13 @@ their `#include` paths pointed into the SDK's own tree.
 `gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_rinten.h` is the engine's, written
 in place of AMD's `ffx_fsr3upscaler_callbacks_hlsl.h`; `../fsr3.slang` is the
 engine's in place of AMD's eight `*_pass.hlsl` entry files.
+
+Frame generation's `gpu/opticalflow/` and `gpu/frameinterpolation/` come from
+`Kits/FidelityFX/framegeneration/fsr3` at commit 60f4ea8, changed only in their
+`#include` paths. `ffx_opticalflow_callbacks_rinten.h` and
+`ffx_frameinterpolation_callbacks_rinten.h` are the engine's, in place of AMD's
+`*_callbacks_hlsl.h`; `../framegen.slang` is the engine's in place of AMD's
+`*_pass.hlsl` entry files.
 
 ---
 

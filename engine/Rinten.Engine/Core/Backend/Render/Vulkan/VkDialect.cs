@@ -60,7 +60,10 @@ internal abstract unsafe class VkDialect
 	/// <summary>A submission to the queue, after any frame the submit thread holds - see VkSubmitter.</summary>
 	public Result Submit( Queue queue, SubmitInfo2* submit, Fence fence )
 	{
-		VkSubmitter.Drain();
+		//Under the render lock the worker's parked present waits for it - see VkSubmitter.Yield
+		if ( VkDevice.renderLock.IsHeldByCurrentThread ) VkSubmitter.Yield();
+		else VkSubmitter.Drain();
+
 		return SubmitNow( queue, submit, fence );
 	}
 

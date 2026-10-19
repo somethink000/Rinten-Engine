@@ -129,7 +129,7 @@ internal static class PerfReport
 	//And what the mesh passes had counted, and the editor's labels.
 	private static long meshCullsAtArm, meshListDrawsAtArm, meshMaterialDrawsAtArm;
 	private static long particleTicksAtArm, particleRunsAtArm;
-	private static long presentWaitsAtArm, presentTicksAtArm;
+	private static long presentWaitsAtArm, presentTicksAtArm, generatedAtArm;
 	private static long particleAskedAtArm, particleHeldAtArm;
 	private static long textLabelsAtArm, textMadeAtArm, textGoneAtArm;
 
@@ -380,6 +380,7 @@ internal static class PerfReport
 			particleTicksAtArm = ParticleGameSystem.StepTicks;
 			presentWaitsAtArm = CorePresent.Waits;
 			presentTicksAtArm = CorePresent.WaitTicks;
+			generatedAtArm = VkFrame.GeneratedShown;
 			ParticleGameSystem.CountedFrom++;
 			particleRunsAtArm = ParticleGameSystem.StepRuns;
 			particleAskedAtArm = ParticleGameSystem.Asked;
@@ -581,6 +582,11 @@ internal static class PerfReport
 				$"({VkFrame.CardIdleRecordings / (double)frameMs.Count:F1} recordings a frame)" );
 
 		//How long the top of a frame waited for the screen to show the frame before last - see CorePresent. Only held to the refresh.
+		var generatedShown = VkFrame.GeneratedShown - generatedAtArm;
+
+		if ( generatedShown > 0 )
+			report.AppendLine( $"  frame generation: {generatedShown / (double)frameMs.Count:F2} generated frames shown a drawn one" );
+
 		var presentWaits = CorePresent.Waits - presentWaitsAtArm;
 
 		if ( presentWaits > 0 && frameMs.Count > 0 )

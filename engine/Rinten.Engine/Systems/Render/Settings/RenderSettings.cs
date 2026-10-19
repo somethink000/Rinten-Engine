@@ -177,6 +177,13 @@ public partial class RenderSettings
 		set => ConVarSystem.SetFloat( "r_taa_sharpness", Math.Clamp( value, 0.0f, 1.0f ), true );
 	}
 
+	/// <summary>Whether a frame is generated between every two drawn; works with a temporal upscaler.</summary>
+	public bool FrameGeneration
+	{
+		get => ConVarSystem.GetInt( "r_frame_generation", 0, true ) != 0;
+		set => ConVarSystem.SetInt( "r_frame_generation", value ? 1 : 0, true );
+	}
+
 	/// <summary>Keeps the processor from running ahead: Anti-Lag or Reflex - 0 off, 1 on, 2 with boost.</summary>
 	public int LowLatency
 	{
@@ -217,6 +224,7 @@ public partial class RenderSettings
 		DlssPreset = 0;
 		TemporalRenderScale = 1.0f;
 		TemporalSharpness = 0.2f;
+		FrameGeneration = false;
 
 		VideoSettings.Save();
 	}

@@ -3139,6 +3139,17 @@ internal sealed partial class CoreSceneDrawer
 			{
 				RunStage( camera, Rinten.Rendering.Stage.AfterPostProcess, CoreRender.TargetKind.Screen, near, far );
 			}
+
+			//The finished world before panels and the interface go over it: what a frame generated ahead of this one is made of
+			if ( upscaled != 0 && !editorOverlays && CoreFrameGeneration.Wanted )
+			{
+				var depth = CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 );
+				var velocity = moved ? CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) : 0ul;
+
+				CoreFrameGeneration.Capture( depth, upscaler.MotionTexture( depth, velocity, near, far ),
+					upscaler.RenderSize, upscaler.DisplaySize, upscaler.Jitter, near, far, VerticalField( drawnProjection ),
+					RealTime.Delta, upscaler.Reset );
+			}
 		}
 
 		//Overlays use the unjittered matrix so gizmos don't shake; frame-block readers get a plain copy

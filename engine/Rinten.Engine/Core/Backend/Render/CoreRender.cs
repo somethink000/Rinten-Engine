@@ -62,6 +62,9 @@ internal static unsafe class CoreRender
 
 		/// <summary>One unsigned integer: a counter or an atomic-min depth, read as stored, not as float.</summary>
 		Whole = 8,
+
+		/// <summary>Two signed integers: a movement in whole pixels, read as stored, not as float.</summary>
+		WholePair = 9,
 	}
 
 	internal enum TargetKind
@@ -472,6 +475,9 @@ internal static unsafe class CoreRender
 
 	internal static int BackdropCapture()
 		=> Portable ? 0 : VkFrame.BackdropCapture();
+
+	internal static int GenerationCapture( ulong picture )
+		=> Portable ? 0 : VkFrame.GenerationCapture( picture );
 
 	internal static int ScreenInterrupt()
 		=> Portable ? 0 : VkFrame.ScreenInterrupt();

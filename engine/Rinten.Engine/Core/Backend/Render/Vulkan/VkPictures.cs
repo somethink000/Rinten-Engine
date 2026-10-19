@@ -76,12 +76,13 @@ internal static unsafe class VkPictures
 			(int)CoreRender.PictureKind.SingleFull => Format.R32Sfloat,
 			(int)CoreRender.PictureKind.Ten => Format.A2B10G10R10UnormPack32,
 			(int)CoreRender.PictureKind.Whole => Format.R32Uint,
+			(int)CoreRender.PictureKind.WholePair => Format.R32G32Sint,
 			_ => VkDevice.SceneFormat,
 		};
 
 		//An integer is never filtered, and is only ever stored into and read back by the pass that stores it - so it asks
 		//for storage and nothing else, and never falls back to half floats, which would be the wrong kind of number.
-		if ( kind == (int)CoreRender.PictureKind.Whole )
+		if ( kind is (int)CoreRender.PictureKind.Whole or (int)CoreRender.PictureKind.WholePair )
 			return wanted;
 
 		var needs = FormatFeatureFlags.ColorAttachmentBit | FormatFeatureFlags.SampledImageBit |

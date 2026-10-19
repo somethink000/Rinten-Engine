@@ -148,6 +148,8 @@ internal sealed class CoreUpscaler
 	//there is nothing to carry, or it could not be done and the compose carries the world itself as it always has.
 	internal ulong Run( ulong colour, ulong depth, ulong velocity, float near, float far, float field, float delta, float exposure )
 	{
+		motionMade = false;
+
 		if ( Kind is CoreUpscale.Kind.Native or CoreUpscale.Kind.Stretch ) return 0;
 		if ( colour == 0 || depth == 0 ) return 0;
 
@@ -371,7 +373,20 @@ internal sealed class CoreUpscaler
 		var ran = Dispatch( motionPipeline, motion, push, width, height );
 		CoreRenderDevice.ZoneEnd();
 
+		motionMade = ran;
 		return ran;
+	}
+
+	//Whether this frame's motion has been made.
+	private bool motionMade;
+
+	//This frame's motion as a texture, made here where the upscaler did not need it - for the generated frame, see CoreFrameGeneration.
+	internal ulong MotionTexture( ulong depth, ulong velocity, float near, float far )
+	{
+		if ( !Temporal || depth == 0 || !EnsurePipelines() ) return 0;
+		if ( !motionMade && !Motion( depth, velocity, near, far ) ) return 0;
+
+		return CoreRenderDevice.PictureTexture( motion );
 	}
 
 	//The push block every pass here reads - see upscale.slang for which lane is

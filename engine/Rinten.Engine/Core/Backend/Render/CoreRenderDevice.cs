@@ -483,6 +483,10 @@ internal static unsafe class CoreRenderDevice
 	public static bool CaptureBackdrop()
 		=> CoreNative.Available && CoreRender.BackdropCapture() != 0;
 
+	/// <summary>Copies the window's picture as it stands into a picture, for a frame generated before this one - see CoreFrameGeneration.</summary>
+	public static bool CaptureForGeneration( ulong picture )
+		=> CoreNative.Available && picture != 0 && CoreRender.GenerationCapture( picture ) != 0;
+
 	/// <summary>That copy as a texture, or zero until it has been taken this frame.</summary>
 	public static ulong BackdropTexture()
 		=> CoreNative.Available ? CoreRender.BackdropTexture() : 0;

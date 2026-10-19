@@ -2431,8 +2431,10 @@ internal sealed partial class CoreSceneDrawer
 		var inspecting = debugView != DebugOverlay.ToolsVisualization.mat_toolsvis ||
 			Rinten.Rendering.Wireframe.Clusters > 0;
 
-		//Translucency needs an offscreen picture: blending onto the window would leak alpha to the compositor
-		var blending = translucent.Count > 0;
+		//Translucency needs an offscreen picture: blending onto the window would leak alpha to the compositor.
+		//Sprites too: their screen stage only finishes the colour, so a folded point chain would skip them
+		var blending = translucent.Count > 0 || ( !overlayOnly && !StereoPass &&
+			( CoreImmediate.Instanced.Length > 0 || CoreImmediate.Blocks.Length > 0 ) );
 
 		//Whether every world pixel gets written (sky or background); else keep an offscreen picture
 		var fills = !overlayOnly && ( skyShown || backgroundPipeline != 0 );

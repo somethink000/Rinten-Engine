@@ -190,7 +190,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 				KeepIncludedMeshes( builder, definition, path );
 				var count = builder.MeshCount;
 				LayMaterials( builder, count, definition.Materials, definition );
-				WriteGroups( builder, count, definition, null );
+				WriteGroups( builder, count, definition, path, null );
 				LayClipSkeleton( builder, definition, path );
 
 				//Lightmap UVs, made at compile so bake and draw agree; skips models with UV2 or skinning
@@ -516,7 +516,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 				LayMaterials( builder, count, materials, definition );
 				Lap( "materials" );
 
-				WriteGroups( builder, count, definition, owner );
+				WriteGroups( builder, count, definition, definitionPath, owner );
 				LayClipSkeleton( builder, definition, definitionPath );
 				Lap( "groups and skeleton" );
 
@@ -1127,7 +1127,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 	}
 
 	//Maps body groups and material sets to mask bits; unclaimed meshes always draw, max 64 choices
-	private static void WriteGroups( CoreAssets.ModelBuilder builder, int meshCount, ModelDefinition definition,
+	private static void WriteGroups( CoreAssets.ModelBuilder builder, int meshCount, ModelDefinition definition, string definitionPath,
 		List<string> owner )
 	{
 		if ( definition is null ) return;
@@ -1150,7 +1150,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 
 		if ( layout.Dropped > 0 )
 		{
-			Log.Warning( $"{definition.ResourcePath}: more than {ModelDefinition.BodyGroupLayout.MaxChoices} " +
+			Log.Warning( $"{definitionPath}: more than {ModelDefinition.BodyGroupLayout.MaxChoices} " +
 				$"body group choices - {layout.Dropped} of them are ignored" );
 		}
 
@@ -1187,7 +1187,7 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 					}
 
 					if ( !any )
-						Log.Warning( $"{definition.ResourcePath}: no mesh or part called {meshName}" );
+						Log.Warning( $"{definitionPath}: no mesh or part called {meshName}" );
 				}
 			}
 		}

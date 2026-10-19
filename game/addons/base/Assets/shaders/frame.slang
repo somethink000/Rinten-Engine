@@ -306,6 +306,12 @@ struct NoOcclusion
 static NoOcclusion g_occlusionMap;
 #endif
 
+//Whether a light's map is being drawn rather than a camera's view: its frame says so by a light count below nought.
+bool LightLooks()
+{
+	return EYE_FRAME( camera ).w < 0.0;
+}
+
 //How many lights this frame has.
 uint LightCount()
 {

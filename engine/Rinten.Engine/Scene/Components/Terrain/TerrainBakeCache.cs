@@ -190,7 +190,7 @@ internal static class TerrainBakeCache
 	}
 
 	//What a far chunk reads of an entry, in order, by the size of one of each: palette, far models, collision.
-	private static readonly int[] farParts = [1, 1, 1, 12, 4];
+	private static readonly int[] farParts = [1, 1, 1, Unsafe.SizeOf<Vector3>(), sizeof( int )];
 
 	//The front of an entry, as far as what a far chunk keeps reaches - or all of it.
 	private static byte[] Front( Stream from, int length, bool whole )

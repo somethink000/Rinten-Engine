@@ -713,9 +713,9 @@ internal sealed class CoreLampMaps : IDisposable
 	{
 		var planes = lamp.PlanesOf( face );
 
-		foreach ( var slot in casters.Movers )
+		for ( var i = 0; i < casters.MovingCount; i++ )
 		{
-			var sphere = casters.SphereOf( slot );
+			var sphere = casters.MovingSphere( i );
 			if ( sphere.W < 0.0f ) continue;
 			if ( CoreSceneRenderer.SphereVisible( planes, new Vector3( sphere.X, sphere.Y, sphere.Z ), sphere.W ) ) return true;
 		}
@@ -762,9 +762,9 @@ internal sealed class CoreLampMaps : IDisposable
 		var right = float.MinValue;
 		var bottom = float.MinValue;
 
-		foreach ( var slot in casters.Movers )
+		for ( var i = 0; i < casters.MovingCount; i++ )
 		{
-			var sphere = casters.SphereOf( slot );
+			var sphere = casters.MovingSphere( i );
 			if ( sphere.W < 0.0f ) continue;
 
 			var centre = new Vector3( sphere.X, sphere.Y, sphere.Z );

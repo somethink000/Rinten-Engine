@@ -82,6 +82,9 @@ struct Out
 #endif
 };
 
+//Metres the ring casts from under itself - more than the moving casters' map's depth steps on flat ground.
+static const float RingShadowSink = 0.05;
+
 //The vertex body, which the classic entry below and the engine's cluster entry both run -
 //see cluster_surface.slang. Nothing is moved: the ground is where its vertices say it is.
 V2F Vertex( VIn i )
@@ -104,6 +107,9 @@ V2F Vertex( VIn i )
 	{
 		world = ( local * ring.scale ) + ring.at;
 		palette = i.texCoord0.zw;
+
+		//Into a light's map from a little under itself: what it lifts casts, where it lifts nothing it does not shade itself.
+		if ( LightLooks() ) world -= i.normal * RingShadowSink;
 	}
 	else
 	{
@@ -135,6 +141,23 @@ V2F MainVs( VIn i )
 	return Vertex( i );
 }
 
+//Metres from the eye the ground starts being shaded more cheaply, and over how many it gets there: a side and the
+//heaviest layers rather than every side and layer, and no blend by height - what a far slope's tiny mips show anyway.
+static const float FarFrom = 120.0;
+static const float FarBand = 40.0;
+
+//The sides narrowed to the one the surface faces most as the ground gets far, the rest let go of once they weigh little.
+float3 FarSides( float3 sides, float far )
+{
+	sides = pow( sides, 1.0 + ( 7.0 * far ) );
+	sides /= max( sides.x + sides.y + sides.z, 1e-5 );
+
+	float least = 0.05 + ( 0.3 * far );
+	sides = float3( sides.x < least ? 0.0 : sides.x, sides.y < least ? 0.0 : sides.y, sides.z < least ? 0.0 : sides.z );
+
+	return sides / max( sides.x + sides.y + sides.z, 1e-5 );
+}
+
 //The pixel body, which the classic entry at the end and the engine's cluster entry both run.
 Out Shade( V2F i, bool front )
 {
@@ -143,7 +166,10 @@ Out Shade( V2F i, bool front )
 	float3 facing = normalize( i.normal );
 	if ( !front ) facing = -facing;
 
+	float far = saturate( ( distance( i.world, EYE_FRAME( camera ).xyz ) - FarFrom ) / FarBand );
+
 	float3 sides = TriplanarSides( facing );
+	if ( far > 0.0 ) sides = FarSides( sides, far );
 
 	float3 dxLocal = ddx( i.local );
 	float3 dyLocal = ddy( i.local );
@@ -175,9 +201,17 @@ Out Shade( V2F i, bool front )
 
 		Worn p = PaintAt( i.paint, i.paintMore, i.palette, mask, i.local, facing.y, most );
 
+		//Far off, a layer weighing little is not read at all; what is left shares its weight.
+		if ( far > 0.0 )
+		{
+			float least = 0.3 * far * max( max( p.weight.x, p.weight.y ), max( p.weight.z, p.weight.w ) );
+			p.weight = float4( p.weight.x < least ? 0.0 : p.weight.x, p.weight.y < least ? 0.0 : p.weight.y,
+				p.weight.z < least ? 0.0 : p.weight.z, p.weight.w < least ? 0.0 : p.weight.w );
+		}
+
 		//The layer standing higher takes the pixel, so a boundary between stones and sand is sand between the stones rather than a fade.
 		//Its height alone first, a number a layer, so no layer's whole read is held while the others are read.
-		if ( g.blendByHeight )
+		if ( g.blendByHeight && far < 1.0 )
 		{
 			float4 heights = float4( 0.0, 0.0, 0.0, 0.0 );
 			float highest = 1e-4;
@@ -198,8 +232,13 @@ Out Shade( V2F i, bool front )
 
 			top -= depth;
 
+			float4 painted = p.weight / max( dot( p.weight, float4( 1.0, 1.0, 1.0, 1.0 ) ), 1e-6 );
+
 			for ( uint b = 0u; b < PlaceLayers; b++ )
 				if ( p.weight[b] > 0.0 ) p.weight[b] = max( ( heights[b] / highest ) + p.weight[b] - top, 0.0 );
+
+			//Fading back to the paint alone over the far band, so the blend ends where it costs nothing to see it end.
+			p.weight = lerp( p.weight / max( dot( p.weight, float4( 1.0, 1.0, 1.0, 1.0 ) ), 1e-6 ), painted, far );
 		}
 
 		float total = max( dot( p.weight, float4( 1.0, 1.0, 1.0, 1.0 ) ), 1e-6 );

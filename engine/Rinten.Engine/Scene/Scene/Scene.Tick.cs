@@ -349,11 +349,20 @@ public partial class Scene : GameObject
 	//something is on the screen. See CoreDetail, whose policies it is given to.
 	internal CoreDetail.Look Detail;
 
+	//What the scene is viewed through: an editor scene's editor camera, which Camera excludes, whatever cameras the scene holds
+	internal CameraComponent DetailCamera
+	{
+		get
+		{
+			var (first, then) = IsEditor ? (EditorCamera, Camera) : (Camera, EditorCamera);
+			return first.IsValid() ? first : then;
+		}
+	}
+
 	//Computes the detail view once per tick; with no camera, policies act as if right in front of the eye
 	private void LookForDetail()
 	{
-		//An editor scene is viewed through the editor camera, which Camera excludes, whatever cameras the scene holds
-		var camera = IsEditor ? EditorCamera ?? Camera : Camera ?? EditorCamera;
+		var camera = DetailCamera;
 
 		if ( !camera.IsValid() )
 		{

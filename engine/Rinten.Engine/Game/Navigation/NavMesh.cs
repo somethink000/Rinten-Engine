@@ -347,6 +347,15 @@ public sealed partial class NavMesh : IDisposable
 			result = result == null ? body.GetBounds() : result?.AddBBox( body.GetBounds() );
 		}
 
+		//And every terrain's whole ground, most of which a game may keep out of the physics world - see Terrain.UnheldCollision.
+		foreach ( var terrain in world.Scene?.GetAll<Terrain>() ?? [] )
+		{
+			if ( !terrain.IsValid() || terrain.Storage?.Mesh is not { } mesh || !IsTerrainRelevantForNavmesh( terrain ) ) continue;
+
+			var ground = mesh.Bounds.Transform( terrain.WorldTransform );
+			result = result == null ? ground : result?.AddBBox( ground );
+		}
+
 		if ( result != null )
 		{
 			result?.Grow( CellSize * 2.0f ); //Grow the bounds a bit to make sure we don't have any precission issues with the edges
@@ -372,6 +381,22 @@ public sealed partial class NavMesh : IDisposable
 		//Inlcuded by tags
 		if ( IncludedBodies is not null && !IncludedBodies.IsEmpty && !body.Shapes.Any( shape => shape.Tags.HasAny( IncludedBodies ) ) )
 			return false;
+
+		return true;
+	}
+
+	//Whether a terrain's ground outside the physics world counts, as its static body would with its tags.
+	internal bool IsTerrainRelevantForNavmesh( Terrain terrain )
+	{
+		var bodyType = terrain.PhysicsBody?.NavmeshBodyTypeOverride ?? PhysicsBodyType.Static;
+		if ( bodyType == PhysicsBodyType.Dynamic ) return false;
+		if ( bodyType == PhysicsBodyType.Static && !IncludeStaticBodies ) return false;
+		if ( bodyType == PhysicsBodyType.Keyframed && !IncludeKeyframedBodies ) return false;
+
+		var tags = terrain.GameObject.Tags;
+
+		if ( ExcludedBodies is not null && !ExcludedBodies.IsEmpty && tags.HasAny( ExcludedBodies ) ) return false;
+		if ( IncludedBodies is not null && !IncludedBodies.IsEmpty && !tags.HasAny( IncludedBodies ) ) return false;
 
 		return true;
 	}

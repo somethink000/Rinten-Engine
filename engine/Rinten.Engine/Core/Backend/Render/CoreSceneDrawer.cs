@@ -674,23 +674,7 @@ internal sealed partial class CoreSceneDrawer
 			var mesh = CoreResources.Mesh( drawn.Model );
 			if ( mesh is null ) continue;
 
-			//A material over every part, as a renderer override is: its set, shader and features
-			ulong overrideTexture = 0;
-			string overrideShader = null;
-			string overrideCombo = null;
-			bool? twoSided = null;
-			bool? translucent = null;
-
-			if ( drawn.Override is { } material && material.IsValid() && material.core is not null )
-			{
-				overrideTexture = CoreResources.Live( material );
-				overrideShader = material.core.Shader;
-				overrideCombo = CoreResources.LiveCombo( material );
-
-				var flags = CoreResources.LiveFlags( material );
-				twoSided = flags.TwoSided;
-				translucent = flags.Translucent;
-			}
+			Over( drawn.Override, out var overrideTexture, out var overrideShader, out var overrideCombo, out var twoSided, out var translucent );
 
 			var countFrom = drawn.CountFrom is { } buffer ? buffer.Handle : 0;
 			counted |= countFrom != 0;
@@ -703,12 +687,49 @@ internal sealed partial class CoreSceneDrawer
 				pose: drawn.Pose );
 		}
 
+		//What the engine made on the card, in this world: moving casters too, as it is made again as the eye moves.
+		if ( scene?.SceneWorld is { } world )
+		{
+			CoreCardMeshes.In( world, cardMeshes );
+
+			foreach ( var shape in cardMeshes )
+			{
+				Over( shape.Wears, out var overrideTexture, out var overrideShader, out var overrideCombo, out var twoSided, out var translucent );
+
+				QueueMesh( shape.Mesh, shape.Transform, Color.White, ulong.MaxValue, eye,
+					overrideTexture: overrideTexture, overrideTwoSided: twoSided, overrideTranslucent: translucent,
+					overrideShader: overrideShader, overrideCombo: overrideCombo, inMotion: true, attributes: shape.Attributes );
+			}
+		}
+
 		//Arguments for what a project buffer counts, before any pass opens
 		if ( counted )
 		{
 			PrepareCounted( opaque );
 			PrepareCounted( translucent );
 		}
+	}
+
+	private readonly List<CoreCardMeshes.Shape> cardMeshes = new();
+
+	//A material over every part, as a renderer override is: its set, shader and features; nothing where there is none.
+	private static void Over( Material material, out ulong texture, out string shader, out string combo, out bool? twoSided, out bool? translucent )
+	{
+		texture = 0;
+		shader = null;
+		combo = null;
+		twoSided = null;
+		translucent = null;
+
+		if ( material is null || !material.IsValid() || material.core is null ) return;
+
+		texture = CoreResources.Live( material );
+		shader = material.core.Shader;
+		combo = CoreResources.LiveCombo( material );
+
+		var flags = CoreResources.LiveFlags( material );
+		twoSided = flags.TwoSided;
+		translucent = flags.Translucent;
 	}
 
 	//What makes classic draws copies of each other: mesh, part, texture, pipeline handle (cheap to hash)
@@ -814,6 +835,9 @@ internal sealed partial class CoreSceneDrawer
 
 		frameNow.AsSpan( 0, lightFrame.Length ).CopyTo( lightFrame );
 		MemoryMarshal.Write( MemoryMarshal.AsBytes( lightFrame.AsSpan() ), in view.WorldToClip );
+
+		//The light count below nought says to a vertex that a light is looking, not the camera - see LightLooks in frame.slang.
+		lightFrame[19] = -1.0f;
 
 		var put = CoreRenderDevice.PutFrame( lightFrame.AsSpan( 0, CoreSceneRenderer.EffectsAt ) );
 		if ( put == 0 ) return;
@@ -2462,6 +2486,14 @@ internal sealed partial class CoreSceneDrawer
 		if ( !overlayOnly )
 		{
 			casters.Note( tables );
+
+			//What this frame draws by hand and moves - code's models, geometry made on the card - into the maps of what moves, beside the tables' movers.
+			casters.Hand.Clear();
+
+			foreach ( ref readonly var queued in CollectionsMarshal.AsSpan( opaque ) )
+				if ( !queued.NoShadow && queued.InMotion && queued.Radius > 0.0f )
+					casters.Hand.Add( new System.Numerics.Vector4( queued.Center.x, queued.Center.y, queued.Center.z, queued.Radius ) );
+
 			sunPages.Note();
 
 			//And what this frame draws by hand and holds still - the ground's blocks - which the tables do not hold,

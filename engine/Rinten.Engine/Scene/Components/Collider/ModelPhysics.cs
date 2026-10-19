@@ -275,7 +275,6 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 	//Said once - a pose that is wrong is wrong every frame.
 	bool _warnedAboutOverride;
 
-	//How many bones up to the skeleton's root, so overrides can be applied parent-first.
 	//The bodies' indices, parents before children - worked out again only when the list or the model changes
 	int[] ParentFirst()
 	{
@@ -304,6 +303,7 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 	List<Body> _parentFirstOf;
 	Model _parentFirstModel;
 
+	//How many bones up to the skeleton's root
 	int BoneDepth( int boneIndex )
 	{
 		var bones = Model?.Bones?.AllBones;

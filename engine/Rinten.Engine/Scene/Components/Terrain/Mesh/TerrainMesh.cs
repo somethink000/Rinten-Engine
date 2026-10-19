@@ -41,9 +41,8 @@ public sealed partial class TerrainMesh
 	private int[] tVertex = [];
 	private ushort[] tMaterial = [];
 
-	//A triangle's corners' own numbers - see Corner. Three to a triangle, beside tVertex .
-	private Vector2[] cUv = [];
-	private Vector4[] cTangent = [];
+	//A triangle's corners' own numbers - see Corner - for the triangles that have any: what was set in. The ground's own say nothing.
+	private readonly Dictionary<int, (Corner A, Corner B, Corner C)> worn = new();
 	private bool[] tAlive = [];
 
 	//The next corner at the same vertex, per corner.
@@ -118,7 +117,10 @@ public sealed partial class TerrainMesh
 	};
 
 	/// <summary>One corner of a triangle, k from nought to two in the order <see cref="GetTriangle"/> gives them.</summary>
-	public Corner CornerOf( int t, int k ) => new() { Uv = cUv[( t * 3 ) + k], Tangent = cTangent[( t * 3 ) + k] };
+	public Corner CornerOf( int t, int k )
+		=> !worn.TryGetValue( t, out var three ) ? default : k == 0 ? three.A : k == 1 ? three.B : three.C;
+
+	private static bool Says( in Corner corner ) => corner.Uv != Vector2.Zero || corner.Tangent != Vector4.Zero;
 
 	/// <summary>Everything there is, as a box. Only ever grows between loads.</summary>
 	public BBox Bounds => anyBounds ? bounds : new BBox( Vector3.Zero, Vector3.Zero );
@@ -153,8 +155,6 @@ public sealed partial class TerrainMesh
 
 			Array.Resize( ref tVertex, room * 3 );
 			Array.Resize( ref cNext, room * 3 );
-			Array.Resize( ref cUv, room * 3 );
-			Array.Resize( ref cTangent, room * 3 );
 			Array.Resize( ref tMaterial, room );
 			Array.Resize( ref tAlive, room );
 		}
@@ -298,9 +298,8 @@ public sealed partial class TerrainMesh
 		tVertex[( t * 3 ) + 2] = c;
 		tMaterial[t] = material;
 
-		cUv[t * 3] = ca.Uv; cTangent[t * 3] = ca.Tangent;
-		cUv[( t * 3 ) + 1] = cb.Uv; cTangent[( t * 3 ) + 1] = cb.Tangent;
-		cUv[( t * 3 ) + 2] = cc.Uv; cTangent[( t * 3 ) + 2] = cc.Tangent;
+		if ( Says( ca ) || Says( cb ) || Says( cc ) ) worn[t] = (ca, cb, cc);
+		else worn.Remove( t );
 		tAlive[t] = true;
 		triangleCount++;
 
@@ -357,6 +356,7 @@ public sealed partial class TerrainMesh
 		tAlive[t] = false;
 		triangleCount--;
 		freeTriangles.Push( t );
+		worn.Remove( t );
 	}
 
 	//the public changes: the primitives, recorded
@@ -904,17 +904,10 @@ public sealed partial class TerrainMesh
 			Grow( vPosition[v] );
 		}
 
-		for ( var t = 0; t < triangleSlots; t++ )
+		foreach ( var t in worn.Keys.ToArray() )
 		{
-			if ( !tAlive[t] ) continue;
-
-			for ( var k = 0; k < 3; k++ )
-			{
-				var at = ( t * 3 ) + k;
-				var along = new Vector3( cTangent[at].x, cTangent[at].y, cTangent[at].z ) * factor;
-				along = along.IsNearZeroLength ? along : along.Normal;
-				cTangent[at] = new Vector4( along.x, along.y, along.z, cTangent[at].w );
-			}
+			var (a, b, c) = worn[t];
+			worn[t] = (Stretched( a, factor ), Stretched( b, factor ), Stretched( c, factor ));
 		}
 
 		longestEdge *= MathF.Max( across, up );
@@ -928,6 +921,14 @@ public sealed partial class TerrainMesh
 		Report();
 
 		return true;
+	}
+
+	private static Corner Stretched( Corner corner, Vector3 factor )
+	{
+		var along = new Vector3( corner.Tangent.x, corner.Tangent.y, corner.Tangent.z ) * factor;
+		along = along.IsNearZeroLength ? along : along.Normal;
+
+		return corner with { Tangent = new Vector4( along.x, along.y, along.z, corner.Tangent.w ) };
 	}
 
 	/// <summary>Moves the ground along a direction - up to raise it, along the view to carve into a cliff.</summary>
@@ -964,6 +965,79 @@ public sealed partial class TerrainMesh
 		Renormal( brushed );
 		Report();
 	}
+
+	/// <summary>How a stamp meets the ground under it.</summary>
+	public enum StampMode
+	{
+		/// <summary>The shape is added on top of the ground.</summary>
+		Raise,
+
+		/// <summary>The shape is pressed down into the ground.</summary>
+		Lower,
+
+		/// <summary>The ground becomes the shape, standing on the stamp's centre.</summary>
+		Set,
+	}
+
+	//How much of the stamp's half-width its edge blends into the ground over.
+	private const float StampEdge = 0.1f;
+
+	/// <summary>Lays a shape over a square of the ground: <paramref name="shapeAt"/> answers nought to one across it, from (0, 0) to (1, 1), and <paramref name="height"/> is what one comes to. Only ground facing up is moved, so a cave under it keeps its roof.</summary>
+	public void Stamp( Vector3 centre, float half, float turn, Func<float, float, float> shapeAt, float height, StampMode mode )
+	{
+		if ( !( half > 0.0f ) || shapeAt is null ) return;
+
+		var reach = half * MathF.Sqrt( 2.0f );
+		var cos = MathF.Cos( MathX.DegreeToRadian( turn ) );
+		var sin = MathF.Sin( MathX.DegreeToRadian( turn ) );
+
+		brushed.Clear();
+
+		CellRange( centre.x - reach, centre.z - reach, centre.x + reach, centre.z + reach, out var x0, out var x1, out var z0, out var z1 );
+
+		for ( var z = z0; z <= z1; z++ )
+			for ( var x = x0; x <= x1; x++ )
+				for ( var v = gridFirst[( z * gridWide ) + x]; v >= 0; v = vCellNext[v] )
+					if ( vNormal[v].y > 0.0f ) brushed.Add( v );
+
+		stamped.Clear();
+
+		foreach ( var v in brushed )
+		{
+			var at = vPosition[v];
+			var dx = at.x - centre.x;
+			var dz = at.z - centre.z;
+
+			//Across the stamp, turned with it: minus one to one on each side.
+			var u = ( ( dx * cos ) + ( dz * sin ) ) / half;
+			var w = ( ( dz * cos ) - ( dx * sin ) ) / half;
+
+			if ( MathF.Abs( u ) > 1.0f || MathF.Abs( w ) > 1.0f ) continue;
+
+			var inside = Math.Clamp( MathF.Min( 1.0f - MathF.Abs( u ), 1.0f - MathF.Abs( w ) ) / StampEdge, 0.0f, 1.0f );
+			var blend = inside * inside * ( 3.0f - ( 2.0f * inside ) );
+			if ( blend <= 0.0f ) continue;
+
+			var shape = shapeAt( ( u * 0.5f ) + 0.5f, ( w * 0.5f ) + 0.5f ) * height;
+
+			var y = mode switch
+			{
+				StampMode.Raise => at.y + ( shape * blend ),
+				StampMode.Lower => at.y - ( shape * blend ),
+				_ => at.y + ( ( centre.y + shape - at.y ) * blend ),
+			};
+
+			if ( y == at.y ) continue;
+
+			Move( v, new Vector3( at.x, y, at.z ) );
+			stamped.Add( v );
+		}
+
+		Renormal( stamped );
+		Report();
+	}
+
+	private readonly List<int> stamped = new();
 
 	/// <summary>Moves each vertex along its own normal: swells what is there, or with less than nought hollows it.</summary>
 	public void Inflate( Vector3 centre, float radius, float amount )
@@ -2019,9 +2093,9 @@ public sealed partial class TerrainMesh
 
 			for ( var k = 0; k < 3; k++ )
 			{
-				var c = ( t * 3 ) + k;
-				into.Write( cUv[c].x ); into.Write( cUv[c].y );
-				into.Write( cTangent[c].x ); into.Write( cTangent[c].y ); into.Write( cTangent[c].z ); into.Write( cTangent[c].w );
+				var corner = CornerOf( t, k );
+				into.Write( corner.Uv.x ); into.Write( corner.Uv.y );
+				into.Write( corner.Tangent.x ); into.Write( corner.Tangent.y ); into.Write( corner.Tangent.z ); into.Write( corner.Tangent.w );
 			}
 		}
 

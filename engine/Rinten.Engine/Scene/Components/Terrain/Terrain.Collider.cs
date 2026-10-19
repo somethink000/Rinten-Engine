@@ -25,6 +25,8 @@ public partial class Terrain
 
 		foreach ( var chunk in chunks )
 		{
+			if ( !chunk.Solid ) continue;
+
 			var shape = ShapeOf( chunk, targetBody );
 			if ( !shape.IsValid() ) continue;
 

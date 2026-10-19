@@ -17,6 +17,8 @@ internal sealed class EnumConvert : JsonConverterFactory
 	//Over object rather than Enum: the serializer wants the converter's type related to the member's, and a nullable enum is not an Enum
 	private sealed class EnumByName( Type type ) : JsonConverter<object>
 	{
+		private readonly bool Unsigned = Type.GetTypeCode( Enum.GetUnderlyingType( type ) ) is TypeCode.Byte or TypeCode.UInt16 or TypeCode.UInt32 or TypeCode.UInt64;
+
 		public override bool CanConvert( Type typeToConvert ) => ( Nullable.GetUnderlyingType( typeToConvert ) ?? typeToConvert ) == type;
 
 		public override object Read( ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options )
@@ -52,8 +54,6 @@ internal sealed class EnumConvert : JsonConverterFactory
 		{
 			return Unsigned ? Enum.ToObject( type, reader.GetUInt64() ) : Enum.ToObject( type, reader.GetInt64() );
 		}
-
-		private bool Unsigned => Type.GetTypeCode( Enum.GetUnderlyingType( type ) ) is TypeCode.Byte or TypeCode.UInt16 or TypeCode.UInt32 or TypeCode.UInt64;
 
 		//What ToString gives a value no name covers
 		private static bool Numeric( string name ) => name.Length > 0 && ( char.IsDigit( name[0] ) || name[0] == '-' );

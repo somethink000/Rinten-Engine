@@ -16,6 +16,7 @@ public partial class TerrainEditorTool : EditorTool
 		yield return new RaiseLowerTool( this );
 		yield return new SmoothTool( this );
 		yield return new NoiseTool( this );
+		yield return new StampTool( this );
 		yield return new FlattenTool( this );
 		yield return new DigTool( this );
 		yield return new PaintTextureTool( this );
@@ -86,6 +87,16 @@ public partial class TerrainEditorTool : EditorTool
 				if ( prop?.Name == nameof( BrushSettings.RandomRotation ) && rot.IsValid() )
 					rot.Enabled = !BrushSettings.RandomRotation;
 			};
+		}
+
+		if ( CurrentTool is StampTool )
+		{
+			var group = sidebar.AddGroup( "Stamp" );
+			var so = StampTool.Settings.GetSerialized();
+
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.HeightMap ) ) ) );
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.Height ) ) ) );
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.Mode ) ) ) );
 		}
 
 		//Paint-only sections — hidden unless PaintTextureTool is active

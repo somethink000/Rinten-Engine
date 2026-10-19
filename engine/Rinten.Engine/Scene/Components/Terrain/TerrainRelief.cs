@@ -4,7 +4,8 @@ namespace Rinten;
 
 //The ring of relief round the eye: the ground's triangles near it cut finer the nearer they are, and lifted along their normal by the
 //layers' height maps times their displacement on the card - see terrain_relief.shader - then drawn with the ground's own material over
-//the ground, whose corners sink a little under it, by a list on every camera after the depth pre-pass, so the sunk ground under it is never shaded. The full frame alone; collision never sees it.
+//the ground, whose corners sink a little under it, as a mesh made on the card (CoreCardMeshes): in every view of the world and the maps
+//of what moves, so it casts. The full frame alone; collision never sees it.
 internal sealed class TerrainRelief : IDisposable
 {
 	/// <summary>Metres from the eye the lift reaches, the last of which it fades over, and how far the ground's own corners sink under it.</summary>
@@ -40,10 +41,11 @@ internal sealed class TerrainRelief : IDisposable
 	private Vector3 builtAt;
 	private bool built;
 
-	//What every camera of the scene runs after the opaque world, and the cameras it is on.
-	private readonly Rendering.CommandList list = new( "Terrain relief" );
-	private readonly HashSet<CameraComponent> on = new();
-	private Material wears;
+	//What the world draws it as.
+	private readonly CoreCardMeshes.Shape shape = new();
+
+	//The ring's box in the terrain's metres, before it is lifted.
+	private BBox box;
 
 	private static readonly List<TerrainRelief> live = new();
 	private static long expandedFrame = -1;
@@ -60,45 +62,34 @@ internal sealed class TerrainRelief : IDisposable
 	public TerrainRelief()
 	{
 		lock ( live ) live.Add( this );
+
+		shape.Attributes = Attributes;
+
+		//Made this frame counts: the card makes it before any pass or map draws it - see ExpandAll.
+		shape.Ready = () => Drawn || ( waiting && ParamsIndex != 0 );
+
+		CoreCardMeshes.Add( shape );
 	}
 
-	/// <summary>The material the ring is drawn with: the ground's own.</summary>
-	public Material Wears
+	/// <summary>Where the ring is drawn: the world, the ground's material, where the terrain stands, and how far its layers can lift it in its metres.</summary>
+	public void Stand( SceneWorld world, Material wears, Transform terrain, float lift )
 	{
-		set
-		{
-			if ( ReferenceEquals( wears, value ) ) return;
+		shape.World = world;
+		shape.Wears = wears;
+		shape.Transform = terrain;
 
-			wears = value;
-			Record();
-		}
+		Hold( lift );
 	}
 
-	//What the list draws: the ring as it was last built, once the card has made it.
-	private void Record()
+	private float lift;
+
+	//The mesh pointed at the ring as it was last built, in a box grown by what can lift it.
+	private void Hold( float lifted )
 	{
-		list.Reset();
+		lift = lifted;
 
-		if ( wears is null || vertexBuffer is null || indexBuffer is null || indices == 0 ) return;
-
-		list.DrawMesh( vertexBuffer, indexBuffer, indices, wears, () => Drawn, Attributes );
-	}
-
-	/// <summary>Puts the list on every camera that draws the scene, the editor's among them, and takes it off those gone. On the main thread.</summary>
-	public void Show( Scene scene )
-	{
-		on.RemoveWhere( camera => !camera.IsValid() );
-
-		foreach ( var camera in scene.GetAll<CameraComponent>() ) Show( camera );
-
-		if ( scene.EditorCamera is { } editor ) Show( editor );
-	}
-
-	private void Show( CameraComponent camera )
-	{
-		if ( !camera.IsValid() || !on.Add( camera ) ) return;
-
-		camera.AddCommandList( list, Rendering.Stage.AfterDepthPrepass, -1000 );
+		var grown = new BBox( box.Mins - new Vector3( lift ), box.Maxs + new Vector3( lift ) );
+		shape.Hold( vertexBuffer, indexBuffer, triangles > 0 ? indices : 0, grown );
 	}
 
 	/// <summary>Whether the eye has gone far enough from where the ring was built that it wants building again.</summary>
@@ -147,6 +138,14 @@ internal sealed class TerrainRelief : IDisposable
 		}
 
 		triangles = corners.Count / 3;
+
+		box = default;
+
+		for ( var k = 0; k < corners.Count; k++ )
+		{
+			var at = new Vector3( corners[k].Place.x, corners[k].Place.y, corners[k].Place.z );
+			box = k == 0 ? new BBox( at, at ) : box.AddPoint( at );
+		}
 
 		//Where each triangle's vertices and indices start, coarser all round until the whole ring fits.
 		while ( true )
@@ -207,7 +206,7 @@ internal sealed class TerrainRelief : IDisposable
 		cornerBuffer.SetData( corners );
 		cutBuffer.SetData( cuts );
 
-		Record();
+		Hold( lift );
 	}
 
 	/// <summary>The ring is to be made again where it is - the layers it reads changed.</summary>
@@ -279,10 +278,7 @@ internal sealed class TerrainRelief : IDisposable
 	{
 		lock ( live ) live.Remove( this );
 
-		foreach ( var camera in on )
-			if ( camera.IsValid() ) camera.RemoveCommandList( list );
-
-		on.Clear();
+		CoreCardMeshes.Remove( shape );
 
 		cornerBuffer?.Dispose();
 		cutBuffer?.Dispose();

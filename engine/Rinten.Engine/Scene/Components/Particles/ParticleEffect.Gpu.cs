@@ -43,6 +43,9 @@ public sealed partial class ParticleEffect
 		if ( OnStep is not { HasSingleTarget: true } step ) return "something besides its runner steps its particles";
 		if ( step.Target is not ParticleModuleRunner { Data: { } data } ) return "no runner";
 
+		//A particle on the card dies there, unseen
+		if ( OnParticleDestroyed is { } died && !( died.HasSingleTarget && died.Target == step.Target ) ) return "something is told when its particles die";
+
 		var orbits = 0;
 		var follows = 0;
 		var attractors = 0;

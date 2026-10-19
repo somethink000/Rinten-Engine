@@ -53,16 +53,16 @@ public static partial class RintenSystemExtensions
 		return str;
 	}
 
-	//Whether a run of spaces or tabs, a tab, or white space at either end is there to change
+	//Whether white space at either end, any white space but a space, or two together is there to change
 	private static bool HasWhiteSpaceToCollapse( string str )
 	{
 		if ( char.IsWhiteSpace( str[0] ) || char.IsWhiteSpace( str[^1] ) ) return true;
 
-		for ( var i = 0; i < str.Length; i++ )
+		for ( var i = 1; i < str.Length; i++ )
 		{
 			var c = str[i];
-			if ( c == '\t' ) return true;
-			if ( c == ' ' && i + 1 < str.Length && ( str[i + 1] == ' ' || str[i + 1] == '\t' ) ) return true;
+			if ( !char.IsWhiteSpace( c ) ) continue;
+			if ( c != ' ' || char.IsWhiteSpace( str[i - 1] ) ) return true;
 		}
 
 		return false;

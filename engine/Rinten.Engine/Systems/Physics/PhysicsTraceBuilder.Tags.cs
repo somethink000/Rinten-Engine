@@ -96,11 +96,12 @@
 			{
 				for ( int i = 0; i < PhysicsTrace.Request.NumTagFields; i++ )
 				{
-					if ( t.request.TagAny[i] == te ) return this;
+					if ( t.request.TagAny[i] == te ) break;
 
 					if ( t.request.TagAny[i] == 0 )
 					{
 						t.request.TagAny[i] = te;
+						break;
 					}
 				}
 			}

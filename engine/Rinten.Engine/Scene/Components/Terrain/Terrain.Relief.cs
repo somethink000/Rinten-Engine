@@ -16,6 +16,17 @@ public partial class Terrain
 		&& MathF.Abs( WorldRotation.w ) > 0.99999f
 		&& Storage is { } storage && storage.Materials.Any( Displaces );
 
+	//The most any layer lifts the ground, in metres.
+	private float Lift()
+	{
+		var most = 0.0f;
+
+		foreach ( var layer in Storage.Materials )
+			if ( Displaces( layer ) ) most = MathF.Max( most, CoreResources.Number( layer.core, "g_flDisplacement", 0.0f ) );
+
+		return most;
+	}
+
 	private static bool Displaces( Material layer )
 		=> layer is not null && CoreResources.Number( layer.core, "g_flDisplacement", 0.0f ) > 0.0f && layer.GetTexture( "g_tHeight" ) is not null;
 
@@ -43,9 +54,8 @@ public partial class Terrain
 			SayPaint( relief.Attributes, default );
 		}
 
-		relief.Wears = DrawnWith;
 		relief.ParamsIndex = ParamsMap?.Index ?? 0;
-		relief.Show( Scene );
+		relief.Stand( Scene.SceneWorld, DrawnWith, WorldTransform, Lift() );
 
 		if ( !reliefStale && !relief.Wants( eye ) ) return;
 

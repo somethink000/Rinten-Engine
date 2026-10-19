@@ -28,6 +28,9 @@ public partial class Terrain
 		/// <summary>Whether its ground has changed since it was last gathered, rather than it only being wanted whole or far.</summary>
 		public bool Changed;
 
+		/// <summary>Whether the physics world holds its collision - see Solidify. Its triangles are kept either way.</summary>
+		public bool Solid = true;
+
 		/// <summary>What it last baked to: what it collides as, and what is scattered over it.</summary>
 		public TerrainChunkBake Baked;
 
@@ -204,6 +207,7 @@ public partial class Terrain
 
 		//Which are kept whole for where the eye is now; the rest read back only what is drawn of them far off, and their collision.
 		Keep();
+		Solidify( true );
 
 		//Bake every chunk now in parallel, so collision exists before the first frame. Gathered
 		//on the workers too: nothing sculpts the mesh until this returns.
@@ -356,7 +360,7 @@ public partial class Terrain
 			eye = Scene.Detail.Eye;
 			pixels = Scene.Detail.PixelsAtAMetre;
 		}
-		else if ( ( Scene.IsEditor ? Scene.EditorCamera ?? Scene.Camera : Scene.Camera ) is { } camera )
+		else if ( Scene.DetailCamera is { } camera && camera.IsValid() )
 		{
 			eye = camera.WorldPosition;
 			pixels = UnseenPixelsAtAMetre;
@@ -458,6 +462,121 @@ public partial class Terrain
 
 	private bool relayout;
 
+	//Metres round the eye, and round everything that moves, the ground holds physics in play - what a shot or a step can reach.
+	private const float SolidReach = 256.0f;
+
+	//Seconds between looks at where what moves has gone.
+	private const float SolidEvery = 0.1f;
+
+	private RealTimeSince solidLooked;
+	private readonly List<Vector3> solidFrom = new();
+
+	//Which chunks the physics world holds. All of them in the editor, whose tools trace wherever they are pointed; in play those within
+	//SolidReach of the eye and of every body that moves and every character - a chunk further out keeps its triangles for the navigation mesh.
+	private void Solidify( bool now )
+	{
+		if ( chunks.Length == 0 || Scene is null ) return;
+		if ( !now && solidLooked < SolidEvery ) return;
+
+		solidLooked = 0;
+
+		var every = Scene.IsEditor;
+		var scale = MathF.Max( WorldTransform.UniformScale, 1e-4f );
+		var reach = MathF.Max( SolidReach / scale, chunkSpan * 2.0f );
+
+		solidFrom.Clear();
+
+		if ( !every )
+		{
+			if ( Looked( out var eye, out var whole ) )
+			{
+				solidFrom.Add( eye );
+				reach = MathF.Max( reach, whole );
+			}
+
+			foreach ( var body in Scene.GetAll<Rigidbody>() )
+				if ( body.IsValid() && body.MotionEnabled ) solidFrom.Add( WorldTransform.PointToLocal( body.WorldPosition ) );
+
+			foreach ( var walker in Scene.GetAll<CharacterController>() )
+				if ( walker.IsValid() ) solidFrom.Add( WorldTransform.PointToLocal( walker.WorldPosition ) );
+		}
+
+		var changed = false;
+
+		for ( var i = 0; i < chunks.Length; i++ )
+		{
+			var chunk = chunks[i];
+			var solid = every || Near( i, chunk.Solid ? reach + chunkSpan : reach );
+
+			if ( solid == chunk.Solid ) continue;
+
+			chunk.Solid = solid;
+
+			//Laid out a moment ago: the rebuild after the layout gives it its shape.
+			if ( chunk.Baked is null ) continue;
+
+			Collide( chunk );
+			changed = true;
+		}
+
+		if ( changed ) ConfigureShapes();
+	}
+
+	//Whether a chunk stands within a reach of any of solidFrom, across the ground's plane.
+	private bool Near( int index, float reach )
+	{
+		var x0 = chunkOrigin.x + ( ( index % chunksWide ) * chunkSpan );
+		var z0 = chunkOrigin.y + ( ( index / chunksWide ) * chunkSpan );
+
+		foreach ( var at in solidFrom )
+		{
+			var dx = MathF.Max( MathF.Max( x0 - at.x, at.x - ( x0 + chunkSpan ) ), 0.0f );
+			var dz = MathF.Max( MathF.Max( z0 - at.z, at.z - ( z0 + chunkSpan ) ), 0.0f );
+
+			if ( ( dx * dx ) + ( dz * dz ) <= reach * reach ) return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>The collision of the chunks under a box of the world that the physics world does not hold now, as world triangles - what the navigation mesh reads where the ground is not solid.</summary>
+	internal void UnheldCollision( BBox world, List<Vector3> points, List<int> indices )
+	{
+		if ( chunks.Length == 0 ) return;
+
+		//The box's corners in the terrain's own space, which may be turned.
+		var local = new BBox( WorldTransform.PointToLocal( world.Mins ), WorldTransform.PointToLocal( world.Mins ) );
+
+		for ( var corner = 1; corner < 8; corner++ )
+		{
+			var at = new Vector3( ( corner & 1 ) != 0 ? world.Maxs.x : world.Mins.x, ( corner & 2 ) != 0 ? world.Maxs.y : world.Mins.y,
+				( corner & 4 ) != 0 ? world.Maxs.z : world.Mins.z );
+
+			local = local.AddPoint( WorldTransform.PointToLocal( at ) );
+		}
+
+		var x0 = Math.Clamp( (int)MathF.Floor( ( local.Mins.x - chunkOrigin.x ) / chunkSpan ), 0, chunksWide - 1 );
+		var x1 = Math.Clamp( (int)MathF.Floor( ( local.Maxs.x - chunkOrigin.x ) / chunkSpan ), 0, chunksWide - 1 );
+		var z0 = Math.Clamp( (int)MathF.Floor( ( local.Mins.z - chunkOrigin.y ) / chunkSpan ), 0, chunksDeep - 1 );
+		var z1 = Math.Clamp( (int)MathF.Floor( ( local.Maxs.z - chunkOrigin.y ) / chunkSpan ), 0, chunksDeep - 1 );
+
+		var stands = WorldTransform;
+
+		for ( var z = z0; z <= z1; z++ )
+		{
+			for ( var x = x0; x <= x1; x++ )
+			{
+				var chunk = chunks[( z * chunksWide ) + x];
+				if ( chunk.Shape.IsValid() || chunk.Baked is not { } bake || bake.CollisionIndices.Count < 3 ) continue;
+
+				var first = points.Count;
+
+				foreach ( var point in bake.CollisionPoints ) points.Add( stands.PointToWorld( point ) );
+				foreach ( var index in bake.CollisionIndices ) indices.Add( first + index );
+			}
+		}
+	}
+
 	//Moves the baking along: stands up what is baked within a few milliseconds of the frame, and hands the
 	//workers what is waiting - nearest the eye first. Costs a comparison on a frame with nothing to do.
 	private void PumpChunks()
@@ -472,6 +591,7 @@ public partial class Terrain
 		}
 
 		Keep();
+		Solidify( false );
 
 		if ( dirtyChunks == 0 && buildingChunks == 0 && baked.IsEmpty && standing == chunks.Length ) return;
 
@@ -670,7 +790,7 @@ public partial class Terrain
 
 		chunk.Shape = null;
 
-		if ( !EnableCollision || !PhysicsBody.IsValid() ) return;
+		if ( !EnableCollision || !chunk.Solid || !PhysicsBody.IsValid() ) return;
 
 		chunk.Shape = ShapeOf( chunk, PhysicsBody );
 

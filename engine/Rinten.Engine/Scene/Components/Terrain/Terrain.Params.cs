@@ -9,10 +9,15 @@ public partial class Terrain
 	//Layout is shared with shaders/engine/terrain.shader; change both together
 	internal Texture ParamsMap { get; private set; }
 
-	/// <summary>How many layers the ground can paint at once - a weight each on the vertex, spread over its colour and both texture coordinates, see TerrainChunkBaker. The shader's <c>MaxLayers</c> is the same number and the two change together.</summary>
+	//A weight each on the drawn vertex, spread over its colour and both texture coordinates, for the chunk's palette - see TerrainChunkBaker.
+	//The shader's MaxLayers is the same number and the two change together.
+	/// <summary>How many layers one chunk of ground draws.</summary>
 	public const int MaxLayers = 8;
 
-	//How many layers a terrain may list, and how wide the picture is.
+	/// <summary>How many layers a terrain may list. A point of the ground wears four of them at most - see TerrainPaint.</summary>
+	public const int MostLayers = 32;
+
+	//How wide the picture is: a column a layer, with room to spare.
 	private const int ParamsWide = 64;
 
 	//And how many rows it has.
@@ -114,6 +119,7 @@ public partial class Terrain
 		}
 
 		FillRelief();
+		FillMask();
 	}
 
 	//Bindless index of a layer's compiled texture, looked up per frame since slots get reused

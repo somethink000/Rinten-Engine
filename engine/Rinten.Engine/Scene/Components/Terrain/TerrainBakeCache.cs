@@ -15,7 +15,7 @@ internal static class TerrainBakeCache
 
 	//Bumped whenever what a bake comes to changes - the model format, the cluster builder, what a
 	//vertex carries. Everything written before is then a different key and is swept up by the budget.
-	private const uint Version = 2;   //2: eight layer weights a vertex
+	private const uint Version = 3;   //3: four layers by number a vertex, weighed by the chunk's palette
 
 	//The file's own magic, so half a file or somebody else's is a miss rather than a crash.
 	private const uint Magic = 0x4B425452; //"RTBK"

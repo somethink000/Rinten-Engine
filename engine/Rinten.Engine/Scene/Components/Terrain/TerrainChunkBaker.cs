@@ -27,6 +27,9 @@ internal sealed class TerrainChunkBake
 	/// <summary>The ground alone, with what it is painted with - what is scattered over a chunk is scattered over this.</summary>
 	public TerrainSoup Ground;
 
+	/// <summary>Which of the terrain's layers each of the drawn vertex's weights is for - see TerrainChunkBaker.Palette.</summary>
+	public byte[] Palette;
+
 	/// <summary>The two models as compiled bytes, written on the worker that baked the chunk. The main thread turns them into models and lets them go - see Terrain.Rendering.Stand.</summary>
 	public byte[] GroundBytes;
 	public byte[] SetInBytes;
@@ -106,6 +109,9 @@ internal static class TerrainChunkBaker
 		{
 			kept.GroundName = job.GroundName;
 			kept.SetInName = job.SetInName;
+
+			//The models were written with it, and it comes out of the ground they were written from the same way again.
+			kept.Palette = Palette( kept.Ground.Vertices );
 
 			job.Result = kept;
 			return;
@@ -236,17 +242,12 @@ internal static class TerrainChunkBaker
 						at = bake.Vertices.Count;
 						groundAt[source] = at;
 
-						//Layer weights spread over colour and UVs, since the simplifier preserves UVs but not colour
+						//Painted below, once the chunk's palette is known.
 						bake.Vertices.Add( new Vertex
 						{
 							Position = vertex.Position,
 							Normal = vertex.Normal,
 							Tangent = new Vector4( 1.0f, 0.0f, 0.0f, -1.0f ),
-							//Layers 6 and 7 go in the colour's spare two: the cluster vertex has no more coordinates
-							//to give, and the last two layers wandering a little across a collapse is the price.
-							Color = new Color32( vertex.Layers.r, vertex.Layers.g, Byte01( vertex.Layers2.z ), Byte01( vertex.Layers2.w ) ),
-							TexCoord0 = new Vector4( vertex.Layers.b / 255.0f, vertex.Layers.a / 255.0f, 0.0f, 0.0f ),
-							TexCoord1 = new Vector4( vertex.Layers2.x, vertex.Layers2.y, 0.0f, 0.0f ),
 						} );
 
 						bake.Ground.Vertices.Add( vertex );
@@ -287,7 +288,87 @@ internal static class TerrainChunkBaker
 			}
 		}
 
+		bake.Palette = Palette( bake.Ground.Vertices );
+
+		Span<float> slots = stackalloc float[Terrain.MaxLayers];
+
+		for ( var i = 0; i < bake.Vertices.Count; i++ )
+		{
+			Slots( bake.Ground.Vertices[i].Paint, bake.Palette, slots );
+
+			//Spread over colour and UVs, since the simplifier keeps UVs but not colour. Slots 6 and 7 go in the colour's spare two: the cluster
+			//vertex has no more coordinates to give, and the last two wandering a little across a collapse is the price.
+			var drawn = bake.Vertices[i];
+			drawn.Color = new Color32( Byte01( slots[0] ), Byte01( slots[1] ), Byte01( slots[6] ), Byte01( slots[7] ) );
+			drawn.TexCoord0 = new Vector4( slots[2], slots[3], 0.0f, 0.0f );
+			drawn.TexCoord1 = new Vector4( slots[4], slots[5], 0.0f, 0.0f );
+			bake.Vertices[i] = drawn;
+		}
+
 		return bake;
+	}
+
+	//What its drawn vertices weigh; a ninth layer and on are not drawn in this chunk.
+	/// <summary>The eight layers a chunk's ground wears most, in the order of their numbers.</summary>
+	public static byte[] Palette( List<TerrainSoup.Vertex> ground )
+	{
+		Span<float> totals = stackalloc float[Terrain.MostLayers];
+		totals.Clear();
+
+		foreach ( var vertex in ground ) vertex.Paint.AddTo( totals, 1.0f );
+
+		var palette = new byte[Terrain.MaxLayers];
+		Span<bool> taken = stackalloc bool[Terrain.MostLayers];
+		taken.Clear();
+
+		var count = 0;
+
+		for ( ; count < Terrain.MaxLayers; count++ )
+		{
+			var best = -1;
+
+			for ( var l = 0; l < totals.Length; l++ )
+				if ( !taken[l] && totals[l] > 0.0f && ( best < 0 || totals[l] > totals[best] ) ) best = l;
+
+			if ( best < 0 ) break;
+
+			taken[best] = true;
+		}
+
+		//In the order of their numbers, the slots past the last left at nought and weighing nothing.
+		var at = 0;
+		for ( var l = 0; l < taken.Length; l++ ) if ( taken[l] ) palette[at++] = (byte)l;
+
+		if ( at == 0 ) palette[0] = 0;
+
+		return palette;
+	}
+
+	/// <summary>How much of each palette slot's layer a paint holds. A slot past the palette's last, which repeats layer nought, weighs nothing.</summary>
+	public static void Slots( in TerrainPaint paint, byte[] palette, Span<float> into )
+	{
+		into.Clear();
+
+		for ( var s = 0; s < palette.Length && s < into.Length; s++ )
+		{
+			if ( s > 0 && palette[s] <= palette[s - 1] ) break;
+
+			into[s] = paint.Of( palette[s] );
+		}
+	}
+
+	/// <summary>A palette as the two numbers the terrain shader reads it from, six bits a slot - exact in a float.</summary>
+	public static Vector4 PaletteNumbers( byte[] palette )
+	{
+		uint low = 0, high = 0;
+
+		for ( var s = 0; s < 4; s++ )
+		{
+			low |= (uint)( palette[s] & 63 ) << ( s * 6 );
+			high |= (uint)( palette[s + 4] & 63 ) << ( s * 6 );
+		}
+
+		return new Vector4( low, high, 0.0f, 0.0f );
 	}
 
 	//Nought to one as a colour byte.

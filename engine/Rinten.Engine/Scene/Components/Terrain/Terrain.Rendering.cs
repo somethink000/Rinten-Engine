@@ -22,6 +22,9 @@ public partial class Terrain
 		/// <summary>Whether what is baked has been stood up in the scene yet.</summary>
 		public bool Stood;
 
+		/// <summary>Its palette as the shader reads it - see TerrainChunkBaker.PaletteNumbers.</summary>
+		public Vector4 Palette;
+
 		public bool Dirty;
 		public bool Building;
 	}
@@ -544,6 +547,10 @@ public partial class Terrain
 		chunk.SetInModel = setIn is not null && setIn != Model.Error ? setIn : null;
 
 		chunk.Ground = chunk.GroundModel is null ? null : Place( new SceneObject( world, chunk.GroundModel, WorldTransform ), DrawnWith );
+
+		//Which layers its vertices' eight weights are for, and where the paint mask is.
+		if ( result.Palette is { } palette ) chunk.Palette = TerrainChunkBaker.PaletteNumbers( palette );
+		if ( chunk.Ground.IsValid() ) SayPaint( chunk.Ground, chunk.Palette );
 		chunk.SetIn = chunk.SetInModel is null ? null : Place( new SceneObject( world, chunk.SetInModel, WorldTransform ), null );
 
 		Release( was, false );

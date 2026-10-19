@@ -33,6 +33,7 @@ struct Corner
 	float4 normal;
 	float4 paint;
 	float4 paintMore;
+	float4 palette;
 };
 
 //The triangles three corners at a time, each one's cuts a side and where its vertices and indices start - see TerrainRelief.
@@ -70,7 +71,10 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 
 	Ring ring = RingOf();
 	Ground g = GroundPaint();
-	uint most = min( g.layers, MaxLayers );
+
+	//A triangle is one chunk's, and wears its palette.
+	float2 palette = a.palette.xy;
+	MaskPlace mask = MaskPlaceOfParams();
 
 	//How long a cut's side is: the coarsest level of a height map worth reading for it.
 	float texel = max( max( distance( a.place.xyz, b.place.xyz ), distance( a.place.xyz, c.place.xyz ) ), 1e-3 ) / float( n );
@@ -88,20 +92,17 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 			float4 paint = ( a.paint * wa ) + ( b.paint * wb ) + ( c.paint * wc );
 			float4 paintMore = ( a.paintMore * wa ) + ( b.paintMore * wb ) + ( c.paintMore * wc );
 
-			//The layers' lifts weighed by their paint, as the paint weighs everything else of them.
-			float weights[MaxLayers] = { paint.x, paint.y, paint.z, paint.w, paintMore.x, paintMore.y, paintMore.z, paintMore.w };
-			float total = 0.0;
-			for ( uint w = 0u; w < MaxLayers; w++ ) total += w < most ? weights[w] : 0.0;
-
+			//The layers' lifts weighed by their paint, as the pixel weighs everything else of them - the mask's among it.
 			float lift = 0.0;
 			float share = RingShare( ring, place );
 
-			if ( share > 0.0 && total > 1e-3 )
+			if ( share > 0.0 && g.layers > 0u )
 			{
+				Worn p = PaintAt( paint, paintMore, palette, mask, place, normal.y, g.layers );
 				float3 sides = TriplanarSides( normal );
 
-				for ( uint l = 0u; l < most; l++ )
-					if ( weights[l] > 0.01 ) lift += LayerLiftAround( l, place, sides, texel ) * ( weights[l] / total );
+				for ( uint l = 0u; l < PlaceLayers; l++ )
+					if ( p.weight[l] > 0.0 ) lift += LayerLiftAround( p.layer[l], place, sides, texel ) * p.weight[l];
 			}
 
 			place += normal * ( lift * share );
@@ -111,7 +112,7 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 			g_vertices.Store3( at, asuint( place ) );
 			g_vertices.Store( at + 12u, Byte( paint.x ) | ( Byte( paint.y ) << 8 ) | ( Byte( paintMore.z ) << 16 ) | ( Byte( paintMore.w ) << 24 ) );
 			g_vertices.Store( at + 16u, VertexFrameEncode( normal, float4( 1.0, 0.0, 0.0, -1.0 ) ) );
-			g_vertices.Store4( at + 20u, asuint( float4( paint.z, paint.w, 0.0, 0.0 ) ) );
+			g_vertices.Store4( at + 20u, asuint( float4( paint.z, paint.w, palette ) ) );
 			g_vertices.Store4( at + 36u, asuint( float4( paintMore.x, paintMore.y, 1.0, 0.0 ) ) );
 		}
 	}

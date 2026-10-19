@@ -42,8 +42,7 @@ internal static class TerrainMeshCopy
 				{
 					Position = v.Position,
 					Normal = normal,
-					Layers = v.Layers,
-					Layers2 = v.Layers2,
+					Paint = v.Paint,
 					Uv = corner.Uv,
 					Tangent = corner.Tangent,
 				} );
@@ -228,8 +227,7 @@ internal static class TerrainMeshCopy
 			{
 				Position = position,
 				Normal = normal.LengthSquared > 1e-20f ? normal.Normal : Vector3.Up,
-				Layers = paint.Layers,
-				Layers2 = paint.Layers2,
+				Paint = paint.Paint,
 			} );
 
 			made.Add( v );

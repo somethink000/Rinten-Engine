@@ -1,4 +1,4 @@
-﻿//Terrain: a baked mesh painted by 8 per-vertex weights (colour + both UVs), triplanar layers
+﻿//Terrain: a baked mesh painted by 8 per-vertex weights (colour + both UVs) for the chunk's palette and a mask over the top, triplanar layers
 
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1
@@ -15,6 +15,13 @@ PARAMETERS
 	//The same picture bound on the material, where the frame has no table to find it in by number
 	//- the portable one. Set by Terrain there and not otherwise; see NamePortablePictures.
 	Texture2D g_tParams < Default( 0.0 ); UiGroup( "Terrain" ); >;
+
+	//Which layer each of the vertex's eight weights is for, set on each chunk: six bits a slot, four slots a number - see
+	//TerrainChunkBaker.PaletteNumbers; layers 0 to 7 where nothing set it. Then the paint mask's table and atlas, nought for none.
+	float4 g_vPalette < Attribute( "TerrainPalette" ); Default4( 794688.0, 1859908.0, 0.0, 0.0 ); >;
+
+	//And the tile the mask's table starts at, x then z, and how many tiles it is across and deep - see Terrain.Mask.
+	float4 g_vMask < Attribute( "TerrainMask" ); Default4( 0.0, 0.0, 0.0, 0.0 ); >;
 }
 
 #include "depth_id.slang"
@@ -37,6 +44,9 @@ struct V2F
 	//Gathered from the three places the vertex keeps them - see the head of this file.
 	float4 paint : TEXCOORD3;
 	float4 paintMore : TEXCOORD4;
+
+	//Which layers those are - the chunk's palette, or a ring corner's own.
+	nointerpolation float2 palette : TEXCOORD5;
 };
 
 //The push block every world draw carries is the engine's, not this shader's - see frame.slang.
@@ -80,6 +90,7 @@ V2F Vertex( VIn i )
 
 	float3 local = i.position;
 	float3 world;
+	float2 palette = g_vPalette.xy;
 
 #ifdef PORTABLE
 	world = mul( float4( local, 1.0 ), modelToWorld ).xyz;
@@ -92,6 +103,7 @@ V2F Vertex( VIn i )
 	if ( i.texCoord1.z > 0.5 )
 	{
 		world = ( local * ring.scale ) + ring.at;
+		palette = i.texCoord0.zw;
 	}
 	else
 	{
@@ -110,6 +122,7 @@ V2F Vertex( VIn i )
 	o.paint = float4( i.colour.xy, i.texCoord0.xy );
 	//Layers 4 and 5 in the second coordinate, 6 and 7 in the colour's other half - see TerrainChunkBaker.
 	o.paintMore = float4( i.texCoord1.xy, i.colour.zw );
+	o.palette = palette;
 
 	DEPTH_ID_SET( o, float2( 0.0, 0.0 ) );
 
@@ -147,61 +160,49 @@ Out Shade( V2F i, bool front )
 	}
 	else
 	{
-		float weights[MaxLayers] = { i.paint.x, i.paint.y, i.paint.z, i.paint.w, i.paintMore.x, i.paintMore.y, i.paintMore.z, i.paintMore.w };
-
 #ifdef PORTABLE
 		//The layers past the ones this frame can bind are not there at all, so ground painted only with those reads as unpainted.
-		for ( uint p = PortableLayers; p < MaxLayers; p++ ) weights[p] = 0.0;
-#endif
-
-		//A vertex nobody painted wears the first layer.
-		float painted = 0.0;
-		for ( uint s = 0u; s < MaxLayers; s++ ) painted += weights[s];
-		if ( painted < 1e-3 ) { weights[0] = 1.0; painted = 1.0; }
-
-#ifdef PORTABLE
 		uint most = min( g.layers, PortableLayers );
 #else
-		uint most = min( g.layers, MaxLayers );
+		uint most = g.layers;
 #endif
 
-		//A layer under a hundredth is a fetch of three pictures for nothing.
-		for ( uint l = 0u; l < MaxLayers; l++ )
-		{
-			weights[l] = l < most ? weights[l] / painted : 0.0;
-			if ( weights[l] < 0.01 ) weights[l] = 0.0;
-		}
+		MaskPlace mask;
+		mask.table = uint( g_vPalette.z + 0.5 );
+		mask.atlas = uint( g_vPalette.w + 0.5 );
+		mask.origin = int2( round( g_vMask.xy ) );
+		mask.extent = int2( round( g_vMask.zw ) );
+
+		Worn p = PaintAt( i.paint, i.paintMore, i.palette, mask, i.local, facing.y, most );
 
 		//The layer standing higher takes the pixel, so a boundary between stones and sand is sand between the stones rather than a fade.
 		//Its height alone first, a number a layer, so no layer's whole read is held while the others are read.
 		if ( g.blendByHeight )
 		{
-			float heights[MaxLayers] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+			float4 heights = float4( 0.0, 0.0, 0.0, 0.0 );
 			float highest = 1e-4;
 
-			for ( uint h = 0u; h < MaxLayers; h++ )
+			for ( uint h = 0u; h < PlaceLayers; h++ )
 			{
-				if ( weights[h] <= 0.0 ) continue;
+				if ( p.weight[h] <= 0.0 ) continue;
 
-				heights[h] = LayerHeightAround( h, i.local, dxLocal, dyLocal, sides );
+				heights[h] = LayerHeightAround( p.layer[h], i.local, dxLocal, dyLocal, sides );
 				highest = max( highest, heights[h] );
 			}
 
 			float depth = lerp( 0.3, 0.02, saturate( g.sharpness ) );
 			float top = 0.0;
 
-			for ( uint a = 0u; a < MaxLayers; a++ )
-				if ( weights[a] > 0.0 ) top = max( top, ( heights[a] / highest ) + weights[a] );
+			for ( uint a = 0u; a < PlaceLayers; a++ )
+				if ( p.weight[a] > 0.0 ) top = max( top, ( heights[a] / highest ) + p.weight[a] );
 
 			top -= depth;
 
-			for ( uint b = 0u; b < MaxLayers; b++ )
-				if ( weights[b] > 0.0 ) weights[b] = max( ( heights[b] / highest ) + weights[b] - top, 0.0 );
+			for ( uint b = 0u; b < PlaceLayers; b++ )
+				if ( p.weight[b] > 0.0 ) p.weight[b] = max( ( heights[b] / highest ) + p.weight[b] - top, 0.0 );
 		}
 
-		float total = 0.0;
-		for ( uint t = 0u; t < MaxLayers; t++ ) total += weights[t];
-		total = max( total, 1e-6 );
+		float total = max( dot( p.weight, float4( 1.0, 1.0, 1.0, 1.0 ) ), 1e-6 );
 
 		albedo = float3( 0.0, 0.0, 0.0 );
 		normalOnTerrain = float3( 0.0, 0.0, 0.0 );
@@ -210,12 +211,12 @@ Out Shade( V2F i, bool front )
 		metalness = 0.0;
 
 		//Then each layer read and added in turn.
-		for ( uint m = 0u; m < MaxLayers; m++ )
+		for ( uint m = 0u; m < PlaceLayers; m++ )
 		{
-			if ( weights[m] <= 0.0 ) continue;
+			if ( p.weight[m] <= 0.0 ) continue;
 
-			float w = weights[m] / total;
-			Splatted worn = SampleLayerAround( m, i.local, facing, dxLocal, dyLocal, sides );
+			float w = p.weight[m] / total;
+			Splatted worn = SampleLayerAround( p.layer[m], i.local, facing, dxLocal, dyLocal, sides );
 
 			albedo += worn.albedo * w;
 			normalOnTerrain += worn.normal * w;

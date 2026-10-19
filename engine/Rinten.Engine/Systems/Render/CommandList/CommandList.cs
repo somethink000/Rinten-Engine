@@ -849,9 +849,9 @@ public sealed unsafe partial class CommandList
 		AddEntry( &Execute, new Entry { Object1 = indexBuffer, Object2 = material, Object3 = indirectBuffer, Data1 = new Vector4( bufferOffset, (int)primitiveType, drawCount, stride ), Object4 = attributes } );
 	}
 
-	//Vertices as a mesh lays them out on the device (PackedVertex) and their indices, drawn with a material's own stages into the world as it
-	//is drawn - for geometry the engine makes on the card, the terrain's ring of relief. Nothing where <paramref name="ready"/> says no.
-	internal void DrawMesh( GpuBuffer vertices, GpuBuffer indices, int count, Material material, Func<bool> ready )
+	//Vertices as a mesh lays them out on the device (PackedVertex) and their indices, drawn with a material's own stages and the draw's own numbers
+	//into the world as it is drawn - for geometry the engine makes on the card, the terrain's ring of relief. Nothing where ready says no.
+	internal void DrawMesh( GpuBuffer vertices, GpuBuffer indices, int count, Material material, Func<bool> ready, RenderAttributes attributes = null )
 	{
 		static void Execute( ref Entry entry, CommandList commandList )
 		{
@@ -867,9 +867,12 @@ public sealed unsafe partial class CommandList
 				Instances = 1,
 			};
 
-			Graphics.DrawOutOf( shape, null, material, null, Graphics.PrimitiveType.Triangles, commandList );
+			Graphics.DrawOutOf( shape, null, material, entry.Object5 as RenderAttributes, Graphics.PrimitiveType.Triangles, commandList );
 		}
-		AddEntry( &Execute, new Entry { Object1 = vertices, Object2 = indices, Object3 = material, Object4 = ready, Data1 = new Vector4( count, 0, 0, 0 ) } );
+		AddEntry( &Execute, new Entry
+		{
+			Object1 = vertices, Object2 = indices, Object3 = material, Object4 = ready, Object5 = attributes, Data1 = new Vector4( count, 0, 0, 0 ),
+		} );
 	}
 
 	//No vertex buffer: the index buffer names the corners and the shader reads everything else out of the attributes' buffers at set 2 - see Graphics.DrawOutOf.

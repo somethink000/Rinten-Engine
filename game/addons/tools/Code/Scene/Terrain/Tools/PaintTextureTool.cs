@@ -1,6 +1,7 @@
 namespace Editor.TerrainEditor;
 
-/// <summary>Paint the selected layer onto the ground - onto its vertices, so a cave's floor and the hill over it are painted apart.</summary>
+//Onto the vertices, so a cave's floor and the hill over it are painted apart, and over the top of the ground onto the paint mask too.
+/// <summary>Paint the selected layer onto the ground, a quarter of a metre fine.</summary>
 [Title( "Paint Texture" )]
 [Icon( "brush" )]
 [Alias( "tools.terrain.paint-texture" )]
@@ -11,8 +12,8 @@ public class PaintTextureTool : BaseBrushTool
 	//How fast a layer goes on at full opacity: all of it in a fifth of a second.
 	const float Rate = 5.0f;
 
-	//How many layers a vertex has weights for - see TerrainMesh.Vertex.
-	const int MostLayers = Terrain.MaxLayers;
+	//How many layers a terrain may list.
+	const int MostLayers = Terrain.MostLayers;
 
 	public PaintTextureTool( TerrainEditorTool terrainEditorTool ) : base( terrainEditorTool )
 	{

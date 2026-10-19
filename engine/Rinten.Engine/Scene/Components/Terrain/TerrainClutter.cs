@@ -313,6 +313,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		var ground = terrain.BakedGround( x, z );
 
 		List<TerrainModifier> near = null;
+		Dictionary<long, TerrainMaskTile> mask = null;
 
 		if ( ground is not null )
 		{
@@ -326,12 +327,16 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 				( near ??= new() ).Add( modifier );
 			}
+
+			//The paint mask's tiles over the chunk, as they are now: a worker reads them while the mesh is painted on.
+			if ( layer.OnLayers.Count > 0 ) mask = terrain.Mesh?.MaskAround( min, max );
 		}
 
 		var ask = new Ask
 		{
 			Ground = ground,
 			Modifiers = near?.ToArray() ?? [],
+			Mask = mask,
 			Seed = HashCode.Combine( Seed, layerIndex ),
 			Density = MathF.Max( layer.Density, 1e-4f ),
 			OnLayers = layer.OnLayers.Count > 0 ? OnMask( layer.OnLayers ) : 0u,
@@ -421,6 +426,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	{
 		public TerrainSoup Ground;
 		public TerrainModifier[] Modifiers;
+		public Dictionary<long, TerrainMaskTile> Mask;
 		public int Seed;
 		public float Density;
 		public uint OnLayers;
@@ -437,6 +443,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	{
 		var places = new List<Transform>();
 		var ground = ask.Ground;
+
+		Span<float> layers = stackalloc float[Terrain.MostLayers];
 
 		if ( ground is null ) return places;
 
@@ -479,21 +487,27 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 				var sized = Unit( ref bits );
 				var turned = Unit( ref bits );
 
+				var point = ( a.Position * w ) + ( b.Position * u ) + ( c.Position * v );
+
+				//What is painted there: the mask over the top of the ground, the corners' paint for the rest.
 				if ( ask.OnLayers != 0u )
 				{
+					layers.Clear();
+
+					var share = 1.0f - TerrainMesh.MaskAt( ask.Mask, point, facing.y, layers );
+
+					a.Paint.AddTo( layers, w * share );
+					b.Paint.AddTo( layers, u * share );
+					c.Paint.AddTo( layers, v * share );
+
 					var grows = 0.0f;
 
-					for ( var l = 0; l < Terrain.MaxLayers; l++ )
-					{
-						if ( ( ask.OnLayers & ( 1u << l ) ) == 0u ) continue;
-
-						grows += ( Painted( a, l ) * w ) + ( Painted( b, l ) * u ) + ( Painted( c, l ) * v );
-					}
+					for ( var l = 0; l < layers.Length; l++ )
+						if ( ( ask.OnLayers & ( 1u << l ) ) != 0u ) grows += layers[l];
 
 					if ( chance >= grows ) continue;
 				}
 
-				var point = ( a.Position * w ) + ( b.Position * u ) + ( c.Position * v );
 				var clear = true;
 
 				foreach ( var modifier in ask.Modifiers )
@@ -519,19 +533,6 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		return places;
 	}
-
-	//How much of one layer a vertex is painted with, nought to one.
-	private static float Painted( in TerrainSoup.Vertex vertex, int layer ) => layer switch
-	{
-		0 => vertex.Layers.r / 255.0f,
-		1 => vertex.Layers.g / 255.0f,
-		2 => vertex.Layers.b / 255.0f,
-		3 => vertex.Layers.a / 255.0f,
-		4 => vertex.Layers2.x,
-		5 => vertex.Layers2.y,
-		6 => vertex.Layers2.z,
-		_ => vertex.Layers2.w,
-	};
 
 	private static uint Mix( uint seed, uint x, uint z )
 	{

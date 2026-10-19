@@ -413,6 +413,307 @@ float3 TriplanarSides( float3 facing )
 	return sides;
 }
 
+//Where row 0 says the paint mask is, for a pass with no draw of its own: the table of its tiles and the atlas they are in, low and high; the
+//tile the table's corner is, x then z; and how many tiles the table is across and deep, low and high. A draw is told the same by its
+//attributes - see the terrain shader's g_vPalette and g_vMask. See Terrain.Mask and TerrainMesh.MaskAt, which reads it the same.
+static const int MaskColumnPictures = 7;
+static const int MaskColumnOriginX = 8;
+static const int MaskColumnOriginZ = 9;
+static const int MaskColumnExtent = 10;
+
+//Where the mask is: nought pictures where there is none.
+struct MaskPlace
+{
+	uint table;
+	uint atlas;
+	int2 origin;
+	int2 extent;
+};
+
+MaskPlace MaskPlaceOfParams()
+{
+	MaskPlace o;
+
+	uint pictures = Bits( MaskColumnPictures, RowTerrain );
+	uint extent = Bits( MaskColumnExtent, RowTerrain );
+
+	o.table = Low( pictures );
+	o.atlas = High( pictures );
+	o.origin = int2( asint( Bits( MaskColumnOriginX, RowTerrain ) ), asint( Bits( MaskColumnOriginZ, RowTerrain ) ) );
+	o.extent = int2( Low( extent ), High( extent ) );
+
+	return o;
+}
+
+//Metres between two of its points, steps along a tile's side, and the points a tile has a side - its far edge is the next tile's near one.
+static const float MaskStep = 0.25;
+static const int MaskCells = 32;
+static const int MaskSide = 33;
+
+//How many tiles stand side by side in the atlas, and the texels a point takes in it: its paint in 32 bits, and the top's float as four bytes.
+static const uint MaskAtlasSlots = 32u;
+static const int MaskPointTexels = 2;
+
+//How far under the top of the ground the mask still paints; below is a cave's floor, which its vertices paint.
+static const float MaskUnder = 1.0;
+
+//How many layers one place blends at most, and how many they are the heaviest of: the chunk's eight, then the mask's four.
+static const uint PlaceLayers = 4u;
+static const uint PaintedMost = 12u;
+
+//What is painted at a place: a layer and how much of it, twelve places for them, nought where a place is empty. Only ever
+//indexed in unrolled loops, so it lives in registers; what leaves PaintAt is the four of Worn.
+struct Painted
+{
+	uint layer[PaintedMost];
+	float weight[PaintedMost];
+};
+
+//The four layers a place wears and how much of each, coming to one; nought where a place is empty.
+struct Worn
+{
+	uint4 layer;
+	float4 weight;
+};
+
+//Which layer a slot of the drawn vertex's weights is for, out of the chunk's palette: six bits a slot, four slots a number.
+//See TerrainChunkBaker.PaletteNumbers.
+uint PaletteSlot( float2 palette, uint slot )
+{
+	uint packed = uint( ( slot < 4u ? palette.x : palette.y ) + 0.5 );
+
+	return ( packed >> ( ( slot & 3u ) * 6u ) ) & 63u;
+}
+
+#ifndef PORTABLE
+//One of the mask's layers into its four places: onto the same layer, else into the lightest place if it is lighter.
+void MaskAdd( inout Painted p, uint layer, float weight )
+{
+	bool merged = false;
+
+	[unroll]
+	for ( uint m = 8u; m < PaintedMost; m++ )
+	{
+		if ( !merged && p.weight[m] > 0.0 && p.layer[m] == layer )
+		{
+			p.weight[m] += weight;
+			merged = true;
+		}
+	}
+
+	if ( merged ) return;
+
+	uint lightest = 8u;
+	float least = p.weight[8];
+
+	[unroll]
+	for ( uint e = 9u; e < PaintedMost; e++ )
+	{
+		if ( p.weight[e] < least )
+		{
+			least = p.weight[e];
+			lightest = e;
+		}
+	}
+
+	if ( least >= weight ) return;
+
+	[unroll]
+	for ( uint r = 8u; r < PaintedMost; r++ )
+	{
+		if ( r == lightest )
+		{
+			p.layer[r] = layer;
+			p.weight[r] = weight;
+		}
+	}
+}
+
+//Four bytes of a picture as the 32 bits they were written from, low byte first.
+uint MaskBits( uint picture, int2 texel )
+{
+	float4 bytes = g_textures[NonUniformResourceIndex( picture )].Load( int3( texel, 0 ) );
+
+	return uint( bytes.r * 255.0 + 0.5 )
+		| ( uint( bytes.g * 255.0 + 0.5 ) << 8 )
+		| ( uint( bytes.b * 255.0 + 0.5 ) << 16 )
+		| ( uint( bytes.a * 255.0 + 0.5 ) << 24 );
+}
+
+//The mask's four points round a place into its last four places, counted only where the place stands near the top of the ground - the
+//nearest point's top - and faces up; says how much of the place they cover, nought to one. See Terrain.Mask for how a point is written.
+float MaskInto( MaskPlace where, float3 local, float facingUp, inout Painted p )
+{
+	uint table = where.table;
+	uint atlas = where.atlas;
+
+	if ( table == 0u || atlas == 0u ) return 0.0;
+
+	float2 at = local.xz / MaskStep;
+	int2 tile = int2( floor( at / float( MaskCells ) ) );
+	int2 cell = tile - where.origin;
+
+	if ( cell.x < 0 || cell.y < 0 || cell.x >= where.extent.x || cell.y >= where.extent.y ) return 0.0;
+
+	float4 entry = g_textures[NonUniformResourceIndex( table )].Load( int3( cell, 0 ) );
+	uint slot = uint( entry.r * 255.0 + 0.5 ) | ( uint( entry.g * 255.0 + 0.5 ) << 8 );
+
+	if ( slot == 0u ) return 0.0;
+
+	slot -= 1u;
+
+	int2 corner = int2( int( slot % MaskAtlasSlots ) * MaskSide * MaskPointTexels, int( slot / MaskAtlasSlots ) * MaskSide );
+	float2 inTile = at - float2( tile * MaskCells );
+	int2 base = clamp( int2( floor( inTile ) ), int2( 0, 0 ), int2( MaskCells - 1, MaskCells - 1 ) );
+	float2 f = saturate( inTile - float2( base ) );
+
+	//Under the top - a cave's floor - the vertices paint.
+	int2 nearest = base + int2( f + 0.5 );
+	float top = asfloat( MaskBits( atlas, corner + int2( ( nearest.x * MaskPointTexels ) + 1, nearest.y ) ) );
+
+	if ( local.y < top - MaskUnder ) return 0.0;
+
+	//Under a cave's roof the ground faces down, and there too.
+	float upright = saturate( ( facingUp * 4.0 ) + 1.0 );
+	float cover = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 4u; k++ )
+	{
+		int2 step = int2( k & 1u, k >> 1u );
+		float share = ( step.x == 1 ? f.x : 1.0 - f.x ) * ( step.y == 1 ? f.y : 1.0 - f.y ) * upright;
+
+		int2 point = base + step;
+
+		//Three layers in five bits each, the first two's weights in a byte each and the third's what is left; the top bit says it is painted.
+		uint packed = MaskBits( atlas, corner + int2( point.x * MaskPointTexels, point.y ) );
+
+		if ( share <= 0.0 || ( packed >> 31 ) == 0u ) continue;
+
+		float first = float( ( packed >> 15 ) & 0xFFu ) / 255.0;
+		float second = float( ( packed >> 23 ) & 0xFFu ) / 255.0;
+		float third = max( 1.0 - first - second, 0.0 );
+
+		cover += share;
+
+		if ( first > 0.0 ) MaskAdd( p, packed & 31u, first * share );
+		if ( second > 0.0 ) MaskAdd( p, ( packed >> 5 ) & 31u, second * share );
+		if ( third > 0.0 ) MaskAdd( p, ( packed >> 10 ) & 31u, third * share );
+	}
+
+	return cover;
+}
+#endif
+
+//What is painted at a place, as the heaviest four layers coming to one: the drawn vertex's eight weights by the chunk's palette, and where
+//the mask covers the place, the mask instead. Ground nobody painted wears the first layer; layers from the count on are not there.
+Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, float3 local, float facingUp, uint layers )
+{
+	Painted p;
+
+	float slots[MaxLayers] = { paint.x, paint.y, paint.z, paint.w, paintMore.x, paintMore.y, paintMore.z, paintMore.w };
+
+	float painted = 0.0;
+
+	[unroll]
+	for ( uint s = 0u; s < MaxLayers; s++ ) painted += slots[s];
+
+	[unroll]
+	for ( uint m = 0u; m < MaxLayers; m++ )
+	{
+		p.layer[m] = PaletteSlot( palette, m );
+		p.weight[m] = painted > 1e-3 ? slots[m] / painted : 0.0;
+	}
+
+	if ( painted <= 1e-3 )
+	{
+		p.layer[0] = 0u;
+		p.weight[0] = 1.0;
+	}
+
+	[unroll]
+	for ( uint e = MaxLayers; e < PaintedMost; e++ )
+	{
+		p.layer[e] = 0u;
+		p.weight[e] = 0.0;
+	}
+
+#ifndef PORTABLE
+	float cover = MaskInto( mask, local, facingUp, p );
+
+	if ( cover > 0.0 )
+	{
+		[unroll]
+		for ( uint v = 0u; v < MaxLayers; v++ ) p.weight[v] *= 1.0 - cover;
+
+		//A layer both name is one layer.
+		[unroll]
+		for ( uint a = MaxLayers; a < PaintedMost; a++ )
+		{
+			[unroll]
+			for ( uint b = 0u; b < MaxLayers; b++ )
+			{
+				if ( p.weight[a] > 0.0 && p.weight[b] > 0.0 && p.layer[a] == p.layer[b] )
+				{
+					p.weight[b] += p.weight[a];
+					p.weight[a] = 0.0;
+				}
+			}
+		}
+	}
+#endif
+
+	[unroll]
+	for ( uint l = 0u; l < PaintedMost; l++ )
+		if ( p.layer[l] >= layers ) p.weight[l] = 0.0;
+
+	//The heaviest four, one at a time, carried by value so nothing indexes the list by a number known only when it runs.
+	Worn o;
+	o.layer = uint4( 0u, 0u, 0u, 0u );
+	o.weight = float4( 0.0, 0.0, 0.0, 0.0 );
+
+	uint kept = 0u;
+
+	[unroll]
+	for ( uint k = 0u; k < PlaceLayers; k++ )
+	{
+		float best = 0.0;
+		uint bestLayer = 0u;
+		uint which = PaintedMost;
+
+		[unroll]
+		for ( uint i = 0u; i < PaintedMost; i++ )
+		{
+			if ( ( kept & ( 1u << i ) ) == 0u && p.weight[i] > best )
+			{
+				best = p.weight[i];
+				bestLayer = p.layer[i];
+				which = i;
+			}
+		}
+
+		if ( which < PaintedMost ) kept |= 1u << which;
+
+		o.layer[k] = bestLayer;
+		o.weight[k] = best;
+	}
+
+	float total = dot( o.weight, float4( 1.0, 1.0, 1.0, 1.0 ) );
+
+	//A layer under a hundredth is a fetch of three pictures for nothing.
+	o.weight = total > 1e-6 ? o.weight / total : float4( 0.0, 0.0, 0.0, 0.0 );
+	o.weight *= step( 0.01, o.weight );
+
+	//Painted only with layers the terrain no longer lists: the first one, as unpainted ground.
+	if ( total <= 1e-6 )
+	{
+		o.layer.x = 0u;
+		o.weight.x = 1.0;
+	}
+
+	return o;
+}
+
 //How far a layer lifts the ground where it is, in metres: its height map, nought to one, times its displacement. Nought where it has
 //no height map or does not displace. The map read at a footprint of <paramref name="texel"/> metres, so a coarse lift reads a coarse level.
 float LayerLift( uint index, float2 local, float texel )

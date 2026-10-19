@@ -38,7 +38,12 @@ public partial class Terrain
 
 		var eye = WorldTransform.PointToLocal( at );
 
-		relief ??= new TerrainRelief();
+		if ( relief is null )
+		{
+			relief = new TerrainRelief();
+			SayPaint( relief.Attributes, default );
+		}
+
 		relief.Wears = DrawnWith;
 		relief.ParamsIndex = ParamsMap?.Index ?? 0;
 		relief.Show( Scene );
@@ -52,8 +57,8 @@ public partial class Terrain
 		UpdateParamsMap();
 	}
 
-	//The grounds of every chunk within a reach of the eye, in the terrain's metres
-	private IEnumerable<TerrainSoup> AroundEye( Vector3 eye, float reach )
+	//The grounds of every chunk within a reach of the eye, in the terrain's metres, with their palettes
+	private IEnumerable<(TerrainSoup, byte[])> AroundEye( Vector3 eye, float reach )
 	{
 		if ( chunks.Length == 0 ) yield break;
 
@@ -64,7 +69,7 @@ public partial class Terrain
 
 		for ( var z = z0; z <= z1; z++ )
 			for ( var x = x0; x <= x1; x++ )
-				if ( BakedGround( x, z ) is { } ground ) yield return ground;
+				if ( chunks[( z * chunksWide ) + x].Baked is { Ground: { } ground, Palette: { } palette } ) yield return (ground, palette);
 	}
 
 	private void DropRelief()

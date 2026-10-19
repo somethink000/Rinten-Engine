@@ -75,7 +75,7 @@ public sealed class TerrainModelModifier : TerrainModifier
 				Normal = ( toTerrain.Rotation * v.Normal ).Normal,
 				Tangent = new Vector4( tangent.x, tangent.y, tangent.z, v.Tangent.w ),
 				Uv = new Vector2( v.TexCoord0.x, v.TexCoord0.y ),
-				Layers = new Color32( 255, 0, 0, 0 ),
+				Paint = TerrainPaint.Only( 0 ),
 			} );
 		}
 

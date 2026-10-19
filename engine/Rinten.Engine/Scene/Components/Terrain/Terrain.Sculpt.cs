@@ -57,6 +57,11 @@ public partial class Terrain
 
 		mesh.BeginEdit();
 
+		//The map is the paint now, and the mask over the top of the ground would hide it.
+		mesh.ClearMask();
+
+		System.Span<float> weights = stackalloc float[MostLayers];
+
 		for ( var v = 0; v < mesh.VertexSlots; v++ )
 		{
 			if ( !mesh.IsVertexAlive( v ) ) continue;
@@ -69,15 +74,12 @@ public partial class Terrain
 			var painted = new CompactTerrainMaterial( control[( z * side ) + x] );
 			var blend = painted.BlendFactor / 255.0f;
 
-			System.Span<float> weights = stackalloc float[MaxLayers];
 			weights.Clear();
 
-			weights[Math.Min( (int)painted.BaseTextureId, MaxLayers - 1 )] += 1.0f - blend;
-			weights[Math.Min( (int)painted.OverlayTextureId, MaxLayers - 1 )] += blend;
+			weights[Math.Min( (int)painted.BaseTextureId, MostLayers - 1 )] += 1.0f - blend;
+			weights[Math.Min( (int)painted.OverlayTextureId, MostLayers - 1 )] += blend;
 
-			vertex.Layers = new Color32( (byte)( weights[0] * 255.0f + 0.5f ), (byte)( weights[1] * 255.0f + 0.5f ),
-				(byte)( weights[2] * 255.0f + 0.5f ), (byte)( weights[3] * 255.0f + 0.5f ) );
-			vertex.Layers2 = new Vector4( weights[4], weights[5], weights[6], weights[7] );
+			vertex.Paint = TerrainPaint.Strongest( weights );
 
 			mesh.SetVertex( v, vertex );
 		}

@@ -5,6 +5,7 @@ internal sealed class StaticInstanceSet : IDisposable
 {
 	private readonly Scene scene;
 	private readonly List<int> slots = new();
+	private readonly List<int> runs = new();
 
 	public StaticInstanceSet( Scene scene )
 	{
@@ -23,16 +24,51 @@ internal sealed class StaticInstanceSet : IDisposable
 		if ( slot >= 0 ) slots.Add( slot );
 	}
 
+	/// <summary>A run of copies the card places itself, all inside a sphere - see CoreSceneTables.AddRun. False where the tables will not take it.</summary>
+	public bool AddRun( Model model, int count, System.Numerics.Vector4 sphere, in Transform frame, IInstanceRun placer, bool castShadows, float lodScale, string lodGroup )
+	{
+		if ( Application.IsHeadless || scene is null || model is null ) return false;
+
+		var head = CoreSceneTables.Of( scene ).AddRun( model, count, sphere, frame, placer, null, castShadows, lodScale, lodGroup );
+		if ( head < 0 ) return false;
+
+		runs.Add( head );
+		return true;
+	}
+
+	/// <summary>Whether its runs are drawn from clusters: false where one cannot be, null while a model is not loaded yet.</summary>
+	public bool? RunsDrawn
+	{
+		get
+		{
+			if ( runs.Count == 0 ) return null;
+
+			var tables = CoreSceneTables.Of( scene );
+			bool? all = true;
+
+			foreach ( var head in runs )
+			{
+				var drawn = tables.RunDrawn( head );
+				if ( drawn == false ) return false;
+				if ( drawn is null ) all = null;
+			}
+
+			return all;
+		}
+	}
+
 	/// <summary>Takes every copy away.</summary>
 	public void Clear()
 	{
-		if ( slots.Count == 0 ) return;
+		if ( slots.Count == 0 && runs.Count == 0 ) return;
 
 		var tables = CoreSceneTables.Of( scene );
 
 		foreach ( var slot in slots ) tables.RemoveStatic( slot );
+		foreach ( var head in runs ) tables.RemoveRun( head );
 
 		slots.Clear();
+		runs.Clear();
 	}
 
 	public void Dispose() => Clear();

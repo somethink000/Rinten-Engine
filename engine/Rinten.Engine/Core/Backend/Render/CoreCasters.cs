@@ -160,7 +160,7 @@ internal sealed class CoreCasters
 		//What its clusters draw, or - drawn the classic way - what the drawer draws into
 		//the maps beside them: loose instances cast too, see CoreSceneDrawer.DrawLooseView.
 		var shown = entry is { Live: true, Mesh: not null } &&
-			( entry.Loose || ( record.Flags & CoreMeshShaders.InstanceDrawn ) != 0 );
+			( entry.Loose || ( ( record.Flags | entry.RunFlags ) & CoreMeshShaders.InstanceDrawn ) != 0 );
 
 		var casts = shown && ( record.Flags & CoreMeshShaders.InstanceNoShadow ) == 0;
 

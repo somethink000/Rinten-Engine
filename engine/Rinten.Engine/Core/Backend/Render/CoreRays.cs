@@ -114,7 +114,8 @@ internal static class CoreRays
 			var entry = tables.EntryAt( i );
 			if ( entry is not { Live: true, Mesh: { Pooled: true } mesh } ) continue;
 			if ( entry.Renderer is SkinnedModelRenderer || entry.RenderType == ModelRenderer.ShadowRenderType.Off ) continue;
-			if ( entry.Layer != CoreSceneTables.DrawLayer.Game ) continue;
+			//A run's copies stand where the card put them, which the processor never reads back.
+			if ( entry.Layer != CoreSceneTables.DrawLayer.Game || entry.Run > 0 ) continue;
 
 			var (albedo, glow) = ColoursOf( entry );
 

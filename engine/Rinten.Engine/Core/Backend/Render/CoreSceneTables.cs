@@ -4,6 +4,14 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
+//What places a run of copies on the card - see CoreSceneTables.AddRun.
+internal interface IInstanceRun
+{
+	//Writes every slot of the run, from its first, into the instance buffer: each copy the template where it stands, a slot holding none with
+	//InstanceDrawn left out of its flags. Between targets, after the tables went up. False where it could not yet, to be asked again next frame.
+	bool Place( ulong instances, int head, int count, in CoreSceneTables.InstanceRecord template, System.Numerics.Vector4 bound );
+}
+
 //GPU tables for one scene: a record per instance plus materials; Sync uploads only what changed
 internal sealed class CoreSceneTables
 {
@@ -71,6 +79,16 @@ internal sealed class CoreSceneTables
 
 		/// <summary>The detail group it was added with, or null for its model's own - see LodGroupOf.</summary>
 		public string StaticLodGroup;
+
+		/// <summary>How many slots from this one on a run of copies placed on the card holds - nought for one instance; see AddRun.</summary>
+		public int Run;
+
+		/// <summary>A run's flags as its copies are drawn with: its own record leaves InstanceDrawn out until the card has placed them.</summary>
+		public uint RunFlags;
+
+		/// <summary>Where a run's copies stand, all of them inside it, and what places them.</summary>
+		public System.Numerics.Vector4 RunSphere;
+		public IInstanceRun Placer;
 
 		public CoreSceneRenderer.SceneMesh Mesh;
 		public Model Model;
@@ -173,6 +191,10 @@ internal sealed class CoreSceneTables
 			StaticShadows = false;
 			StaticLodScale = 1.0f;
 			StaticLodGroup = null;
+			Run = 0;
+			RunFlags = 0;
+			RunSphere = default;
+			Placer = null;
 			Mesh = null;
 			Model = null;
 			Groups = default;
@@ -817,9 +839,176 @@ internal sealed class CoreSceneTables
 	internal void RemoveStatic( int slot )
 	{
 		if ( slot < 0 || slot >= used ) return;
-		if ( entries[slot] is not { Live: true, Static: true } ) return;
+		if ( entries[slot] is not { Live: true, Static: true, Run: 0 } ) return;
 
 		Give( slot );
+	}
+
+	//Each slot's run as its first slot plus one, nought for none; the runs' gaps once let go of; the runs the card has to place again.
+	private int[] runOf = Array.Empty<int>();
+	private readonly List<(int At, int Count)> runHoles = new();
+	private readonly HashSet<int> runs = new();
+	private readonly HashSet<int> unplaced = new();
+	private readonly List<int> placing = new();
+
+	//Adds a run of copies of one model in slots side by side, all inside a sphere, placed by the card rather than here: one record
+	//resolved for them all, written into each slot by the placer - see PlaceRuns. The first slot, or -1 where the model is not drawn from clusters.
+	internal int AddRun( Model model, int count, System.Numerics.Vector4 sphere, in Transform frame, IInstanceRun placer, Material over, bool castShadows, float lodScale, string lodGroup )
+	{
+		if ( model is null || placer is null || count < 1 || !Rinten.Rendering.DrawSettings.Clusters ) return -1;
+
+		var head = TakeRun( count );
+		var entry = entries[head] ??= new Entry();
+
+		entry.Live = true;
+		entry.Renderer = null;
+		entry.Object = null;
+		entry.Static = true;
+		entry.StaticTransform = frame;
+		entry.StaticShadows = castShadows;
+		entry.StaticLodScale = lodScale;
+		entry.StaticLodGroup = lodGroup;
+		entry.Model = model;
+		entry.Override = over;
+		entry.Tint = Color.White;
+		entry.Run = count;
+		entry.RunSphere = sphere;
+		entry.Placer = placer;
+
+		for ( var slot = head; slot < head + count; slot++ ) runOf[slot] = head + 1;
+
+		runs.Add( head );
+		SlotGeneration++;
+
+		Resolve( head );
+
+		return head;
+	}
+
+	//Whether a run is drawn from clusters: null while its model is not there yet.
+	internal bool? RunDrawn( int head )
+	{
+		if ( head < 0 || head >= used || entries[head] is not { Live: true, Run: > 0 } entry ) return false;
+		if ( entry.Mesh is null ) return null;
+
+		return ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) != 0;
+	}
+
+	//Takes a run out again, every slot of it.
+	internal void RemoveRun( int head )
+	{
+		if ( head < 0 || head >= used || entries[head] is not { Live: true, Run: > 0 } entry ) return;
+
+		var count = entry.Run;
+
+		runs.Remove( head );
+		unplaced.Remove( head );
+
+		Give( head, toFree: false );
+
+		//What the card placed in them is wiped too, and they leave their cell.
+		for ( var slot = head; slot < head + count; slot++ )
+		{
+			runOf[slot] = 0;
+			records[slot] = default;
+			dirty.Add( slot );
+		}
+
+		GiveRun( head, count );
+	}
+
+	//Slots side by side: out of a gap a run let go of, else past the last.
+	private int TakeRun( int count )
+	{
+		for ( var i = 0; i < runHoles.Count; i++ )
+		{
+			var (at, room) = runHoles[i];
+			if ( room < count ) continue;
+
+			if ( room == count ) runHoles.RemoveAt( i );
+			else runHoles[i] = ( at + count, room - count );
+
+			return at;
+		}
+
+		var head = used;
+		used += count;
+
+		if ( used > records.Length )
+		{
+			var size = Math.Max( records.Length * 2, used );
+
+			Array.Resize( ref records, size );
+			Array.Resize( ref entries, size );
+		}
+
+		if ( runOf.Length < records.Length ) Array.Resize( ref runOf, records.Length );
+
+		return head;
+	}
+
+	//A run's slots back as a gap, joined to the gaps either side of it.
+	private void GiveRun( int at, int count )
+	{
+		var i = 0;
+		while ( i < runHoles.Count && runHoles[i].At < at ) i++;
+
+		runHoles.Insert( i, ( at, count ) );
+
+		if ( i + 1 < runHoles.Count && runHoles[i].At + runHoles[i].Count == runHoles[i + 1].At )
+		{
+			runHoles[i] = ( runHoles[i].At, runHoles[i].Count + runHoles[i + 1].Count );
+			runHoles.RemoveAt( i + 1 );
+		}
+
+		if ( i > 0 && runHoles[i - 1].At + runHoles[i - 1].Count == runHoles[i].At )
+		{
+			runHoles[i - 1] = ( runHoles[i - 1].At, runHoles[i - 1].Count + runHoles[i].Count );
+			runHoles.RemoveAt( i );
+		}
+	}
+
+	//Has the card place every run whose slots were written from here since it last did - after Upload, before the cull reads them.
+	internal void PlaceRuns()
+	{
+		if ( unplaced.Count == 0 || instanceBuffer == 0 ) return;
+
+		placing.Clear();
+		placing.AddRange( unplaced );
+
+		foreach ( var head in placing )
+		{
+			var entry = head < used ? entries[head] : null;
+
+			if ( entry is not { Live: true, Run: > 0 } || entry.Mesh is null || ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) == 0 )
+			{
+				unplaced.Remove( head );
+				continue;
+			}
+
+			var template = records[head];
+			template.Flags = entry.RunFlags;
+
+			var bound = new System.Numerics.Vector4( entry.Mesh.BoundCentre.x, entry.Mesh.BoundCentre.y, entry.Mesh.BoundCentre.z, entry.Mesh.BoundRadius );
+
+			if ( entry.Placer.Place( instanceBuffer, head, entry.Run, in template, bound ) ) unplaced.Remove( head );
+		}
+	}
+
+	//Where a slot is filed for the cull: a run's first files all of its slots, the rest are left where it put them.
+	private void NoteCell( int slot )
+	{
+		var head = slot < runOf.Length ? runOf[slot] - 1 : -1;
+
+		if ( head < 0 )
+		{
+			Cells.Note( slot, records[slot], slot < used ? entries[slot] : null );
+			return;
+		}
+
+		if ( head != slot || entries[slot] is not { } entry ) return;
+
+		Cells.NoteRun( slot, entry.Run, entry.RunSphere, ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) != 0, entry.CountedChunks / Math.Max( 1, entry.Run ) );
 	}
 
 	private int Take()
@@ -885,7 +1074,7 @@ internal sealed class CoreSceneTables
 		}
 	}
 
-	private void Give( int slot )
+	private void Give( int slot, bool toFree = true )
 	{
 		var entry = entries[slot];
 		if ( entry is null ) return;
@@ -905,7 +1094,8 @@ internal sealed class CoreSceneTables
 		entry.Wipe();
 		records[slot] = default;
 		dirty.Add( slot );
-		free.Add( slot );
+
+		if ( toFree ) free.Add( slot );
 	}
 
 	//Holes are an unordered set, so a used one is swapped with the last instead of RemoveAt
@@ -1406,6 +1596,15 @@ internal sealed class CoreSceneTables
 			LodGroup = LodGroupOf( entry ),
 		};
 
+		//A run is drawn from clusters or not at all, and only once the card has placed it: its record is what each copy's starts from.
+		if ( entry.Run > 0 )
+		{
+			Loose.Remove( slot );
+			entry.RunFlags = flags;
+			record.Flags = flags & ~CoreMeshShaders.InstanceDrawn;
+			record.Sphere = entry.RunSphere;
+		}
+
 
 		Count( entry );
 		dirty.Add( slot );
@@ -1573,12 +1772,14 @@ internal sealed class CoreSceneTables
 
 		if ( entry.Mesh is null || entry.Loose || entry.Mesh.ClusterCount == 0 ) return;
 
-		entry.CountedChunks = ChunksOf( entry.Mesh );
-		entry.CountedFinest = entry.Mesh.ClusterCount;
-		entry.CountedOneSided = entry.OneSided;
-		entry.CountedTwoSided = entry.TwoSided;
-		entry.CountedCutOut = entry.CutOut;
-		entry.CountedMoving = entry.Moving;
+		var copies = Math.Max( 1, entry.Run );
+
+		entry.CountedChunks = ChunksOf( entry.Mesh ) * copies;
+		entry.CountedFinest = entry.Mesh.ClusterCount * copies;
+		entry.CountedOneSided = entry.OneSided * copies;
+		entry.CountedTwoSided = entry.TwoSided * copies;
+		entry.CountedCutOut = entry.CutOut * copies;
+		entry.CountedMoving = entry.Moving * copies;
 
 		ChunkCount += entry.CountedChunks;
 		FinestClusters += entry.CountedFinest;
@@ -1837,6 +2038,10 @@ internal sealed class CoreSceneTables
 		{
 			var bytes = MemoryMarshal.AsBytes( records.AsSpan( 0, used ) );
 
+			//What is written here over a run's slots wipes what the card placed in them.
+			if ( allDirty || dirty.Count * 2 >= used ) unplaced.UnionWith( runs );
+			else foreach ( var slot in dirty ) if ( runs.Contains( slot ) ) unplaced.Add( slot );
+
 			if ( allDirty )
 			{
 				CoreRenderDevice.FrameWrite( instanceBuffer, 0, bytes );
@@ -1893,11 +2098,11 @@ internal sealed class CoreSceneTables
 		if ( allDirty )
 		{
 			Cells.Reset();
-			for ( var slot = 0; slot < used; slot++ ) Cells.Note( slot, records[slot], entries[slot] );
+			for ( var slot = 0; slot < used; slot++ ) NoteCell( slot );
 		}
 		else
 		{
-			foreach ( var slot in dirty ) Cells.Note( slot, records[slot], slot < used ? entries[slot] : null );
+			foreach ( var slot in dirty ) NoteCell( slot );
 		}
 
 		Cells.Update( used );

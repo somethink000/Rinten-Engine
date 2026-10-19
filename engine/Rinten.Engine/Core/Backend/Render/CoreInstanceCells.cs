@@ -48,6 +48,23 @@ internal sealed class CoreInstanceCells
 	/// <summary>A slot whose record changed: where it is filed now.</summary>
 	public void Note( int slot, in CoreSceneTables.InstanceRecord record, CoreSceneTables.Entry entry )
 	{
+		var drawn = ( record.Flags & CoreMeshShaders.InstanceDrawn ) != 0;
+		var key = record.Moving != 0 ? Moving
+			: WorldGrid.CellFor( new Vector3( record.Sphere.X, record.Sphere.Y, record.Sphere.Z ), record.Sphere.W ).Key;
+
+		Note( slot, key, drawn, record.Sphere, entry?.CountedChunks ?? 0 );
+	}
+
+	/// <summary>A run's slots, every one filed by the sphere they all stand inside - see CoreSceneTables.AddRun.</summary>
+	public void NoteRun( int head, int count, System.Numerics.Vector4 sphere, bool drawn, int chunks )
+	{
+		var key = WorldGrid.CellFor( new Vector3( sphere.X, sphere.Y, sphere.Z ), sphere.W ).Key;
+
+		for ( var slot = head; slot < head + count; slot++ ) Note( slot, key, drawn, sphere, chunks );
+	}
+
+	private void Note( int slot, long key, bool drawn, System.Numerics.Vector4 sphere, int chunks )
+	{
 		if ( slot >= cellOf.Length )
 		{
 			var size = System.Math.Max( slot + 1, System.Math.Max( 256, cellOf.Length * 2 ) );
@@ -57,11 +74,6 @@ internal sealed class CoreInstanceCells
 			System.Array.Resize( ref sphereOf, size );
 			System.Array.Resize( ref chunksOf, size );
 		}
-
-		var chunks = entry?.CountedChunks ?? 0;
-		var drawn = ( record.Flags & CoreMeshShaders.InstanceDrawn ) != 0;
-		var key = record.Moving != 0 ? Moving
-			: WorldGrid.CellFor( new Vector3( record.Sphere.X, record.Sphere.Y, record.Sphere.Z ), record.Sphere.W ).Key;
 
 		var was = cellOf[slot];
 		Cell now = null;
@@ -95,13 +107,13 @@ internal sealed class CoreInstanceCells
 			changed = true;
 		}
 
-		if ( now is not null && ReferenceEquals( was, now ) && !now.Moving && sphereOf[slot] != record.Sphere )
+		if ( now is not null && ReferenceEquals( was, now ) && !now.Moving && sphereOf[slot] != sphere )
 		{
 			now.BoundsDirty = true;
 			changed = true;
 		}
 
-		sphereOf[slot] = record.Sphere;
+		sphereOf[slot] = sphere;
 	}
 
 	//Takes a slot out of its cell: the last of the cell's list stands where it stood.

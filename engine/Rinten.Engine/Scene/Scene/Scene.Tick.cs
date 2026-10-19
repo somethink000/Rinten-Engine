@@ -85,6 +85,8 @@ public partial class Scene : GameObject
 		TimeNow = timeNow;
 		TimeDelta = timeDelta;
 
+		LookForDetail();
+
 		using var timeScope = Time.ScopeInternal( TimeNow, TimeDelta );
 		using var gizmoScope = gizmoInstance.PushInternal();
 

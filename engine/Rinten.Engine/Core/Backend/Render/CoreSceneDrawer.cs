@@ -651,7 +651,7 @@ internal sealed partial class CoreSceneDrawer
 				for ( var i = 0; i < tables.InstanceCount; i++ )
 				{
 					var entry = tables.EntryAt( i );
-					if ( entry is null || !entry.Live || entry.Mesh is null ) continue;
+					if ( entry is null || !entry.Live || entry.Mesh is null || entry.Run > 0 ) continue;
 					QueueInstance( entry, ref tables.RecordAt( i ), eye, true, into: LayerOf( entry ), hidden: HiddenFromCamera( i ) );
 				}
 			}
@@ -2512,6 +2512,7 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneBegin( "cull" );
 
 			tables.Upload();
+			tables.PlaceRuns();
 
 			var count = 0;
 			//Rasterised through the jittered matrix, which the cluster passes read out of here rather than

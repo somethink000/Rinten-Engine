@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Rinten;
 
@@ -81,7 +82,7 @@ public sealed class TerrainClutterLayer
 	}
 }
 
-/// <summary>Models scattered over a terrain by paint and slope, read from baked chunks, GPU culled.</summary>
+/// <summary>Models scattered over a terrain by paint and slope, read from baked chunks, placed and culled on the card.</summary>
 [Expose]
 [Title( "Terrain Clutter" )]
 [Category( "World" )]
@@ -109,6 +110,19 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		/// <summary>Worked out and waiting to stand, and how far through them the frames have got.</summary>
 		public List<Transform> Waiting;
 		public int Stood;
+
+		/// <summary>What the card places it from, and whether the tables have yet said they draw it.</summary>
+		public Placed Placed;
+		public bool Checked;
+
+		public void Drop()
+		{
+			Set?.Dispose();
+			Placed?.Dispose();
+			Set = null;
+			Placed = null;
+			Checked = false;
+		}
 	}
 
 	private sealed class Scattered
@@ -116,7 +130,14 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public long Key;
 		public int Version;
 		public List<Transform> Places;
+		public Laid Laid;
 	}
+
+	//Whether patches are placed on the card: the full frame's clusters, which the portable frame and a headless run have none of.
+	private static bool OnCard => !Application.IsHeadless && CoreNative.Available && !CoreRenderDevice.PortableFrame && Rendering.DrawSettings.Clusters;
+
+	//Layers whose model the tables would not draw from clusters - translucent, say - placed here instead.
+	private readonly HashSet<int> byHand = new();
 
 	private Terrain terrain;
 	private readonly Dictionary<long, Patch> patches = new();
@@ -174,9 +195,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	/// <summary>Everything is scattered again from nothing.</summary>
 	public void Again()
 	{
-		foreach ( var patch in patches.Values ) patch.Set?.Dispose();
+		foreach ( var patch in patches.Values ) patch.Drop();
 
 		patches.Clear();
+		byHand.Clear();
 		standing.Clear();
 		version++;
 		lookAgain = true;
@@ -205,7 +227,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		var now = Seed;
 		foreach ( var layer in Layers ) now = HashCode.Combine( now, layer?.Settings() ?? 0 );
-		now = HashCode.Combine( now, Layers.Count, terrain.ChunksWide, terrain.ChunkSpan, terrain.ChunkOrigin );
+		now = HashCode.Combine( now, Layers.Count, terrain.ChunksWide, terrain.ChunkSpan, terrain.ChunkOrigin, OnCard );
 
 		if ( now != settings )
 		{
@@ -214,6 +236,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		}
 
 		Stand();
+		Check();
 
 		//Where the frame is being looked at from - see CoreDetail, which is told once a tick and is
 		//the one place that knows whether it is the scene's camera, the editor's or a headset's.
@@ -287,7 +310,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		foreach ( var key in gone )
 		{
-			if ( patches.Remove( key, out var patch ) ) patch.Set?.Dispose();
+			if ( patches.Remove( key, out var patch ) ) patch.Drop();
 			standing.Remove( key );
 		}
 	}
@@ -348,6 +371,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			Yaw = layer.RandomYaw,
 			Sink = layer.Sink,
 			World = terrain.WorldTransform,
+			OnCard = OnCard && !byHand.Contains( layerIndex ),
+			Reach = Reach( layer ),
 		};
 
 		var stamped = version;
@@ -355,17 +380,19 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		System.Threading.Tasks.Task.Run( () =>
 		{
 			List<Transform> places = null;
+			Laid laid = null;
 
 			try
 			{
-				places = Work( ask );
+				if ( ask.OnCard ) laid = Lay( ask );
+				else places = Work( ask );
 			}
 			catch ( Exception e )
 			{
 				Log.Warning( e, "A patch of terrain clutter could not be scattered" );
 			}
 
-			scattered.Enqueue( new Scattered { Key = key, Version = stamped, Places = places ?? new() } );
+			scattered.Enqueue( new Scattered { Key = key, Version = stamped, Places = places ?? ( laid is null ? new() : null ), Laid = laid } );
 		} );
 	}
 
@@ -390,9 +417,11 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			patch.Waiting = done.Places;
 			patch.Stood = 0;
 
-			//What stood here before goes now; the new ones follow in this frame and the next few.
-			patch.Set?.Dispose();
+			//What stood here before goes now; the new ones follow in this frame and the next few - or all at once, by the card.
+			patch.Drop();
 			patch.Set = new StaticInstanceSet( Scene );
+
+			if ( done.Laid is { } laid ) Hand( done.Key, patch, laid );
 
 			if ( patch.Stale ) lookAgain = true;
 		}
@@ -421,6 +450,59 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		}
 	}
 
+	//A patch's copies to the tables as one run the card places; a layer whose run they refuse is scattered here from then on.
+	private void Hand( long key, Patch patch, Laid laid )
+	{
+		var layer = (int)( key >> 40 );
+		if ( laid.Copies == 0 || layer >= Layers.Count || Layers[layer]?.Model is not { } model ) return;
+
+		var placed = new Placed( terrain, laid );
+		var rules = Layers[layer];
+
+		if ( !patch.Set.AddRun( model, laid.Copies, laid.Sphere, terrain.WorldTransform, placed, rules.CastShadows, rules.LodScale, rules.LodGroup ) )
+		{
+			placed.Dispose();
+			Refuse( layer );
+			return;
+		}
+
+		patch.Placed = placed;
+	}
+
+	//Whether the tables draw the runs handed them since the last look - which they know only once the model is there.
+	private void Check()
+	{
+		foreach ( var key in standing )
+		{
+			if ( !patches.TryGetValue( key, out var patch ) || patch.Placed is null || patch.Checked ) continue;
+
+			var drawn = patch.Set?.RunsDrawn;
+			if ( drawn is null ) continue;
+
+			patch.Checked = true;
+
+			if ( drawn == false ) Refuse( (int)( key >> 40 ) );
+		}
+	}
+
+	private void Refuse( int layer )
+	{
+		if ( !byHand.Add( layer ) ) return;
+
+		foreach ( var (key, patch) in patches )
+			if ( (int)( key >> 40 ) == layer ) patch.Stale = true;
+
+		lookAgain = true;
+	}
+
+	//How far a copy reaches past where it stands, in the terrain's metres: the model's sphere at its largest, and the sink.
+	private static float Reach( TerrainClutterLayer layer )
+	{
+		var bounds = layer.Model?.Bounds ?? default;
+
+		return ( ( bounds.Center.Length + ( bounds.Size.Length * 0.5f ) ) * MathF.Max( layer.Scale.Min, layer.Scale.Max ) ) + layer.Sink;
+	}
+
 	//Everything a worker needs to scatter one patch, and nothing that changes under it.
 	private sealed class Ask
 	{
@@ -435,6 +517,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public bool Align, Yaw;
 		public float Sink;
 		public Transform World;
+		public bool OnCard;
+		public float Reach;
 	}
 
 	//One patch: every triangle of the chunk's ground grows what its area and the density come to, placed by numbers drawn from where the triangle
@@ -532,6 +616,274 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		}
 
 		return places;
+	}
+
+	//What the card places one patch from - see terrain_clutter.shader, whose layout this is in fours of words: the record every copy starts from
+	//and the model's sphere, written when it places them; the run; the rules; six a triangle.
+	private const int TemplateAt = 0;
+	private const int BoundAt = 16;
+	private const int RunAt = 17;
+	private const int RulesAt = 18;
+	private const int TrianglesAt = 23;
+	private const int TriangleWords = 6;
+
+	//How many of a triangle's copies a modifier's clearing is said for, a bit each; one under a modifier gets no more than this.
+	private const int MostCleared = 32;
+
+	private sealed class Laid
+	{
+		public uint[] Words;
+		public int Triangles;
+		public int Copies;
+
+		/// <summary>Round every copy, in the world.</summary>
+		public System.Numerics.Vector4 Sphere;
+	}
+
+	//One patch as the card places it: each triangle its corners, which way it faces, its corners' paint, how many copies, where their
+	//slots start and the numbers they are drawn from - the same as Work's, so a patch is the same whichever places it.
+	private static Laid Lay( Ask ask )
+	{
+		var ground = ask.Ground;
+		var words = new List<uint>( 4096 );
+
+		for ( var i = 0; i < TrianglesAt * 4; i++ ) words.Add( 0u );
+
+		var copies = 0;
+		var triangles = 0;
+		var low = new Vector3( float.MaxValue );
+		var high = new Vector3( float.MinValue );
+
+		if ( ground is not null )
+		{
+			for ( var t = 0; t + 2 < ground.Indices.Count; t += 3 )
+			{
+				var a = ground.Vertices[ground.Indices[t]];
+				var b = ground.Vertices[ground.Indices[t + 1]];
+				var c = ground.Vertices[ground.Indices[t + 2]];
+
+				var cross = Vector3.Cross( b.Position - a.Position, c.Position - a.Position );
+				var area = cross.Length * 0.5f;
+
+				if ( area < 1e-6f ) continue;
+
+				var facing = ( a.Normal + b.Normal + c.Normal ).Normal;
+
+				if ( facing.y < ask.SteepLeast || facing.y > ask.SteepMost + 1e-5f ) continue;
+
+				var middle = ( a.Position + b.Position + c.Position ) / 3.0f;
+
+				var bits = Mix( (uint)ask.Seed, (uint)(int)MathF.Round( middle.x * 64.0f ),
+					(uint)(int)MathF.Round( middle.z * 64.0f ) ^ ( (uint)(int)MathF.Round( middle.y * 64.0f ) * 0x27D4EB2Fu ) );
+
+				var wanted = area * ask.Density;
+				var count = (int)wanted;
+
+				if ( Unit( ref bits ) < wanted - count ) count++;
+				if ( count == 0 ) continue;
+
+				var min = Vector3.Min( a.Position, Vector3.Min( b.Position, c.Position ) );
+				var max = Vector3.Max( a.Position, Vector3.Max( b.Position, c.Position ) );
+
+				//Nothing it grows on in its corners' paint nor a tile of the mask over it: none of its copies would be kept.
+				if ( ask.OnLayers != 0u && !Grows( a.Paint, ask.OnLayers ) && !Grows( b.Paint, ask.OnLayers ) && !Grows( c.Paint, ask.OnLayers ) &&
+					!Masked( ask.Mask, min, max ) )
+					continue;
+
+				var keep = Cleared( ask, a.Position, b.Position, c.Position, min, max, bits, ref count );
+
+				if ( copies + count > MostPerPatch ) break;
+
+				Add( words, a.Position, keep );
+				Add( words, b.Position, (uint)copies );
+				Add( words, c.Position, (uint)count );
+				Add( words, facing, bits );
+
+				words.Add( a.Paint.Layers );
+				words.Add( a.Paint.Weights );
+				words.Add( b.Paint.Layers );
+				words.Add( b.Paint.Weights );
+				words.Add( c.Paint.Layers );
+				words.Add( c.Paint.Weights );
+				words.Add( 0u );
+				words.Add( 0u );
+
+				copies += count;
+				triangles++;
+				low = Vector3.Min( low, min );
+				high = Vector3.Max( high, max );
+			}
+		}
+
+		var laid = new Laid { Triangles = triangles, Copies = copies };
+
+		if ( copies == 0 ) return laid;
+
+		//The rules - see RulesAt in the shader.
+		var at = RulesAt * 4;
+		var turn = ask.World.Rotation;
+
+		words[at + 0] = ask.OnLayers;
+		words[at + 1] = ( ask.Yaw ? 1u : 0u ) | ( ask.Align ? 2u : 0u );
+		words[at + 2] = BitConverter.SingleToUInt32Bits( ask.ScaleMin );
+		words[at + 3] = BitConverter.SingleToUInt32Bits( ask.ScaleMax );
+		words[at + 4] = BitConverter.SingleToUInt32Bits( ask.Sink );
+		Set( words, at + 8, ask.World.Position, 0u );
+		Set( words, at + 12, new Vector3( turn.x, turn.y, turn.z ), BitConverter.SingleToUInt32Bits( turn.w ) );
+		Set( words, at + 16, ask.World.Scale, 0u );
+
+		//The sphere every copy stands inside, in the world: round the triangles, and as far again as a copy reaches.
+		var middleOf = ( low + high ) * 0.5f;
+		var scale = ask.World.Scale;
+		var most = MathF.Max( MathF.Abs( scale.x ), MathF.Max( MathF.Abs( scale.y ), MathF.Abs( scale.z ) ) );
+		var centre = ask.World.PointToWorld( middleOf );
+
+		laid.Sphere = new System.Numerics.Vector4( centre.x, centre.y, centre.z, ( ( ( high - low ).Length * 0.5f ) + ask.Reach ) * most );
+		laid.Words = words.ToArray();
+
+		return laid;
+	}
+
+	private static void Add( List<uint> words, Vector3 v, uint w )
+	{
+		words.Add( BitConverter.SingleToUInt32Bits( v.x ) );
+		words.Add( BitConverter.SingleToUInt32Bits( v.y ) );
+		words.Add( BitConverter.SingleToUInt32Bits( v.z ) );
+		words.Add( w );
+	}
+
+	private static void Set( List<uint> words, int at, Vector3 v, uint w )
+	{
+		words[at] = BitConverter.SingleToUInt32Bits( v.x );
+		words[at + 1] = BitConverter.SingleToUInt32Bits( v.y );
+		words[at + 2] = BitConverter.SingleToUInt32Bits( v.z );
+		words[at + 3] = w;
+	}
+
+	private static bool Grows( in TerrainPaint paint, uint layers )
+	{
+		for ( var slot = 0; slot < TerrainPaint.Most; slot++ )
+		{
+			var layer = paint.LayerAt( slot );
+			if ( layer < 32 && ( layers & ( 1u << layer ) ) != 0u && paint.WeightAt( slot ) > 0.0f ) return true;
+		}
+
+		return false;
+	}
+
+	//Whether a tile of the paint mask lies under any of a box.
+	private static bool Masked( Dictionary<long, TerrainMaskTile> mask, Vector3 min, Vector3 max )
+	{
+		if ( mask is null || mask.Count == 0 ) return false;
+
+		var x0 = (int)MathF.Floor( min.x / TerrainMesh.MaskSpan );
+		var x1 = (int)MathF.Floor( max.x / TerrainMesh.MaskSpan );
+		var z0 = (int)MathF.Floor( min.z / TerrainMesh.MaskSpan );
+		var z1 = (int)MathF.Floor( max.z / TerrainMesh.MaskSpan );
+
+		for ( var z = z0; z <= z1; z++ )
+			for ( var x = x0; x <= x1; x++ )
+				if ( mask.ContainsKey( TerrainMesh.MaskKey( x, z ) ) ) return true;
+
+		return false;
+	}
+
+	//A bit a copy, set where no modifier clears the ground it would stand on - worked out here, as the card cannot ask a modifier.
+	private static uint Cleared( Ask ask, Vector3 a, Vector3 b, Vector3 c, Vector3 min, Vector3 max, uint bits, ref int count )
+	{
+		TerrainModifier[] near = null;
+		var box = new BBox( min, max );
+
+		foreach ( var modifier in ask.Modifiers )
+		{
+			if ( !modifier.Bounds.Overlaps( box ) ) continue;
+
+			near = ask.Modifiers;
+			break;
+		}
+
+		if ( near is null ) return uint.MaxValue;
+
+		count = Math.Min( count, MostCleared );
+
+		var keep = 0u;
+
+		for ( var n = 0; n < count; n++ )
+		{
+			var u = Unit( ref bits );
+			var v = Unit( ref bits );
+
+			if ( u + v > 1.0f ) { u = 1.0f - u; v = 1.0f - v; }
+
+			var w = 1.0f - u - v;
+
+			Unit( ref bits );
+			Unit( ref bits );
+			Unit( ref bits );
+
+			var point = ( a * w ) + ( b * u ) + ( c * v );
+			var clear = true;
+
+			foreach ( var modifier in near )
+			{
+				if ( !modifier.Bounds.Contains( point ) || !modifier.Clears( point ) ) continue;
+
+				clear = false;
+				break;
+			}
+
+			if ( clear ) keep |= 1u << n;
+		}
+
+		return keep;
+	}
+
+	//A patch on the card: the buffer the shader reads it from, filled here but for the record every copy starts from, which is written as it places them.
+	private sealed class Placed : IInstanceRun, IDisposable
+	{
+		private readonly Terrain terrain;
+		private readonly int triangles;
+		private GpuBuffer<uint> buffer;
+
+		private static ComputeShader Shader => field ??= new ComputeShader( "shaders/engine/terrain_clutter.shader", "MainCs" );
+
+		public Placed( Terrain terrain, Laid laid )
+		{
+			this.terrain = terrain;
+			triangles = laid.Triangles;
+			buffer = new GpuBuffer<uint>( laid.Words.Length, GpuBuffer.UsageFlags.Structured, "terrain clutter" );
+			buffer.SetData( laid.Words.AsSpan() );
+		}
+
+		public bool Place( ulong instances, int head, int count, in CoreSceneTables.InstanceRecord template, System.Numerics.Vector4 bound )
+		{
+			if ( buffer is null || triangles == 0 ) return true;
+
+			Span<uint> header = stackalloc uint[RulesAt * 4];
+			header.Clear();
+
+			MemoryMarshal.Write( MemoryMarshal.AsBytes( header[( TemplateAt * 4 )..] ), in template );
+			MemoryMarshal.Write( MemoryMarshal.AsBytes( header[( BoundAt * 4 )..] ), in bound );
+
+			header[( RunAt * 4 ) + 0] = (uint)head;
+			header[( RunAt * 4 ) + 1] = (uint)count;
+			header[( RunAt * 4 ) + 2] = (uint)triangles;
+
+			if ( !CoreRenderDevice.FrameWrite( buffer.Handle, 0, MemoryMarshal.AsBytes( header ) ) ) return false;
+
+			//The numbers picture is where the paint mask is said to be; without one only the corners' paint counts.
+			Shader.Attributes.Set( "Clutter", new Vector4( terrain.IsValid() ? terrain.ParamsMap?.Index ?? 0 : 0, 0.0f, 0.0f, 0.0f ) );
+
+			Span<ulong> buffers = stackalloc ulong[2] { buffer.Handle, instances };
+
+			return Shader.RunApartOver( buffers, triangles, 1, 1 );
+		}
+
+		public void Dispose()
+		{
+			buffer?.Dispose();
+			buffer = null;
+		}
 	}
 
 	private static uint Mix( uint seed, uint x, uint z )

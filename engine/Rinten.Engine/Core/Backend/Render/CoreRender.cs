@@ -1002,6 +1002,18 @@ internal static unsafe class CoreRender
 	//Whether this device draws blend shapes; WebGL2 lacks storage buffers, so a page draws the rest shape
 	internal static bool DrawsMorphs => !web;
 
+	//The portable frame's pose pass, which on Vulkan computes where the rest of that frame does not - see VkFrame.Posed
+	internal static ulong PoseCreate( byte* code, int byteCount )
+		=> web ? 0 : VkPipelines.ComputeCreate( code, byteCount );
+
+	internal static ulong PoseVertices( ulong pipeline, ulong vertices, ulong skin, ulong runs, ulong deltas, int vertexCount,
+		int deltaCount, float* bones, int boneCount, float* weights, int weightCount, out int firstVertex )
+	{
+		firstVertex = 0;
+		return web ? 0 : VkFrame.PoseVertices( pipeline, vertices, skin, runs, deltas, vertexCount, deltaCount,
+			bones, boneCount, weights, weightCount, out firstVertex );
+	}
+
 	internal static unsafe uint MorphWeights( float* weights, int count )
 		=> web ? 0 : VkFrame.MorphWeights( weights, count );
 

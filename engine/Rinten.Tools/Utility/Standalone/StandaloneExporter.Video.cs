@@ -3,22 +3,7 @@ using System.IO;
 
 namespace Editor;
 
-/// <summary>
-/// FFmpeg, in an export: <c>bin/&lt;platform&gt;/ffmpeg</c>, carried only by a game
-/// that plays or writes video.
-/// </summary>
-/// <remarks>
-/// Eighty megabytes of codecs that a game without video never opens - and without
-/// them a player plays nothing and a writer writes nothing, saying why once (see
-/// Rinten.FFmpeg). So the question is whether the game has video in it, which is
-/// asked of two things: its code, for a player or a writer it makes itself, and
-/// its files, for a video that is only ever a picture on something - a material,
-/// a panel's background - and is named by no code at all.
-/// <para>
-/// The licence goes with the libraries. They are LGPL, and a game that ships them
-/// ships that too.
-/// </para>
-/// </remarks>
+//FFmpeg, in an export: bin/<platform>/ffmpeg, only for a game with video in its code or its files; the LGPL licence goes with it
 partial class StandaloneExporter
 {
 	//The types whose use means a game has video.
@@ -49,27 +34,36 @@ partial class StandaloneExporter
 	{
 		var platform = _exportConfig.Platform ?? ExportPlatform.Host;
 
-		//A phone and a page have no FFmpeg: video there does nothing.
-		if ( platform.IsAndroid || platform.IsWeb ) return [];
+		//A page has the browser's video
+		if ( platform.IsWeb ) return [];
 
-		if ( !GameUsesVideo() ) return [];
-
-		var folder = Path.Combine( engineDir, platform.BinFolder, "ffmpeg" );
-		var codecs = Directory.Exists( folder )
-			? Directory.EnumerateFiles( folder ).Any( file => Path.GetFileName( file ).Contains( "avcodec", StringComparison.OrdinalIgnoreCase ) )
-			: false;
-
-		if ( !codecs )
-		{
-			Problem( $"the game has video, but there is no FFmpeg for {platform.Title} in {folder} - " +
-				"its videos will play nothing. Fetch it with: " +
-				$"dotnet run --project engine/Tools/RintenBuild -- fetch-natives --platform {platform.Id}" );
-
-			return [];
-		}
+		if ( !HasVideoCodecs( engineDir, platform, out var folder ) ) return [];
 
 		Logger.Info( "The game has video: FFmpeg goes with it." );
 
+		//A phone's libraries go in the package itself - see AndroidVideo - and only the licence with the game's files
+		if ( platform.IsAndroid ) return Directory.EnumerateFiles( folder, "LICENSE*", SearchOption.TopDirectoryOnly );
+
 		return Directory.EnumerateFiles( folder, "*", SearchOption.TopDirectoryOnly );
+	}
+
+	//Whether the game has video and FFmpeg is there to carry for the platform; says why not where the game has video.
+	private bool HasVideoCodecs( string engineDir, ExportPlatform platform, out string folder )
+	{
+		folder = Path.Combine( engineDir, platform.BinFolder, "ffmpeg" );
+
+		if ( !GameUsesVideo() ) return false;
+
+		var codecs = Directory.Exists( folder ) &&
+			Directory.EnumerateFiles( folder ).Any( file => Path.GetFileName( file ).Contains( "avcodec", StringComparison.OrdinalIgnoreCase ) );
+
+		if ( codecs ) return true;
+
+		Problem( $"the game has video, but there is no FFmpeg for {platform.Title} in {folder} - " +
+			"its videos will play nothing. " + ( platform.IsAndroid
+				? "Build it with: engine/Core/build-android-ffmpeg.sh"
+				: $"Fetch it with: dotnet run --project engine/Tools/RintenBuild -- fetch-natives --platform {platform.Id}" ) );
+
+		return false;
 	}
 }

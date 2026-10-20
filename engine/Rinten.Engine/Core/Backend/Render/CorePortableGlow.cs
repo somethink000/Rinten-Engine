@@ -52,6 +52,9 @@ internal sealed class CorePortableGlow
 	/// <summary>The world as drawn aside this frame, kept past white - what the first pass and the finish read.</summary>
 	internal ulong World => world;
 
+	/// <summary>Whether this frame's world drawn aside has a glow made from it.</summary>
+	internal bool Glows => glowing;
+
 	/// <summary>The two pictures of light passes alternate between this frame; nought where none were asked for.</summary>
 	internal (ulong First, ulong Second) Passes => ( passPictures[0], passPictures[1] );
 
@@ -87,7 +90,7 @@ internal sealed class CorePortableGlow
 
 	/// <summary>The world's pass back on the screen, then what reads holds - the world, or a pass's picture of light - with
 	/// its glow where there is one, finished onto it through the run of point effects, if any.</summary>
-	internal void Finish( float curve, string chain, ulong reads = 0, bool light = false )
+	internal void Finish( float curve, string chain, ulong reads = 0, bool light = false, bool finished = false )
 	{
 		CoreRenderDevice.WorldAside( false, out _, out _ );
 
@@ -95,6 +98,14 @@ internal sealed class CorePortableGlow
 		{
 			reads = world;
 			light = false;
+		}
+
+		//A world drawn finished is read as it is and written out unchanged: the linear curve at an exposure of one
+		if ( finished )
+		{
+			exposure = 1.0f;
+			curve = (float)(int)Tonemapping.TonemappingMode.Linear;
+			light = true;
 		}
 
 		var lit = light ? 1.0f : 0.0f;

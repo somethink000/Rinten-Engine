@@ -748,6 +748,8 @@ internal static class CoreShaderCache
 
 			foreach ( var (entry, stage) in stages )
 			{
+				if ( stage == CoreShaderCompiler.Stage.Compute && portable && Target != CoreShaderCompiler.Format.SpirvPortable ) continue;
+
 				if ( Pass( file, entry, stage, defines ) is not null ) continue;
 
 				log.Error( $"{file} {entry}{( string.IsNullOrEmpty( defines ) ? "" : " with " + defines.Trim().Replace( '\n', ' ' ) )} " +
@@ -968,6 +970,7 @@ internal static class EngineShaders
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";
 	internal const string MeshSkin = "shaders/engine/mesh_skin.slang";
+	internal const string ClassicPose = "shaders/engine/classic_pose.slang";
 	internal const string Particles = "shaders/engine/particles.slang";
 	internal const string MeshShapes = "shaders/engine/mesh_shapes.slang";
 	internal const string ShadingRate = "shaders/engine/shading_rate.slang";
@@ -1068,6 +1071,8 @@ internal static class EngineShaders
 		( MeshRaster, View, Draws, false ),
 		( MeshCull, "", Runs, false ),
 		( MeshSkin, "", Runs, false ),
+		//The portable frame's on Vulkan; a page computes nothing - see BakePasses
+		( ClassicPose, "", Runs, true ),
 		( Particles, "", ParticleRuns, false ),
 		( MeshShapes, "", Runs, false ),
 		( ShadingRate, "", Runs, false ),

@@ -107,6 +107,15 @@ partial class StandaloneExporter
 	private bool IsVr()
 		=> _exportConfig.Project.Config.TryGetMeta( "ControlModes", out ControlModeSettings modes ) && modes.IsVROnly;
 
+	//Whether FFmpeg's libraries go in the package, for a game with video; GetVideoFiles says where they are missing.
+	private bool AndroidVideo()
+		=> GameUsesVideo() &&
+			File.Exists( Path.Combine( Environment.CurrentDirectory, ExportPlatform.Android.BinFolder, "ffmpeg", "libavcodec.so" ) );
+
+	//Whether the build page lets the game ask for the microphone (Build.Microphone), which puts RECORD_AUDIO in its manifest.
+	private bool Microphone()
+		=> _exportConfig.Project?.Config?.GetMetaOrDefault( "Build.Microphone", false ) ?? false;
+
 	//Asks the SDK for the package, and says which file it wrote.
 	private string BuildApk( string project, string payload, string into )
 	{
@@ -122,6 +131,8 @@ partial class StandaloneExporter
 			$"-p:RintenLabel=\"{Label()}\" " +
 			$"-p:RintenOrientation={Orientation()} " +
 			( IsVr() ? "-p:RintenVr=true " : "" ) +
+			( Microphone() ? "-p:RintenMicrophone=true " : "" ) +
+			( AndroidVideo() ? "-p:RintenVideo=true " : "" ) +
 			$"-p:RintenBin=\"{Path.Combine( Environment.CurrentDirectory, ExportPlatform.Android.BinFolder )}{Path.DirectorySeparatorChar}\" " +
 			$"{ExportToolchain.AndroidProperties()}-o \"{output}\"";
 

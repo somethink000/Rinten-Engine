@@ -82,6 +82,7 @@ public sealed class MainActivity : Activity, ISurfaceHolderCallback
 		//What the engine asks of the phone, from its own thread: the keyboard is the activity's to show, and the motor is anybody's to run.
 		CoreInput.HostKeyboard = shown => current?.RunOnUiThread( () => current?.view?.ShowKeyboard( shown ) );
 		CoreInput.HostVibrate ??= DeviceVibrator.For( ApplicationContext ?? this );
+		VoiceManager.HostMicrophone ??= Microphone.For( this, () => current );
 
 		Immersive();
 	}
@@ -117,6 +118,14 @@ public sealed class MainActivity : Activity, ISurfaceHolderCallback
 		if ( current == this ) current = null;
 
 		base.OnDestroy();
+	}
+
+	public override void OnRequestPermissionsResult( int requestCode, string[] permissions, Permission[] grantResults )
+	{
+		base.OnRequestPermissionsResult( requestCode, permissions, grantResults );
+
+		if ( requestCode == Microphone.RequestCode )
+			Microphone.Answered( grantResults is { Length: > 0 } && grantResults[0] == Permission.Granted );
 	}
 
 	public override void OnWindowFocusChanged( bool hasFocus )

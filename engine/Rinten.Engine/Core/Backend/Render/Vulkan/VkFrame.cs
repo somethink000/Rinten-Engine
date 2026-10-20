@@ -63,6 +63,10 @@ internal static unsafe partial class VkFrame
 		public ulong FrameBlock;
 		public ulong NullBones;
 
+		/// <summary>Morphed models' vertices posed for this frame, a VkBuffers handle - see VkFrame.Posed.</summary>
+		public ulong Posed;
+		public ulong PosedCapacity, PosedUsed, PosedPeak;
+
 		/// <summary>Scratch outgrown mid-frame, kept until the frame's fence proves the GPU done with it.</summary>
 		public readonly List<(VkBuffer Buffer, DeviceMemory Memory)> RetiredScratch = new();
 
@@ -1229,6 +1233,7 @@ internal static unsafe partial class VkFrame
 		frame.Submitted = false;
 
 		DestroyScratch( frame );
+		DestroyPosed( frame );
 
 		if ( frame.Queries.Handle != 0 ) vk.DestroyQueryPool( device, frame.Queries, null );
 		if ( frame.Stats.Handle != 0 ) vk.DestroyQueryPool( device, frame.Stats, null );
@@ -1642,6 +1647,7 @@ internal static unsafe partial class VkFrame
 		vk.ResetCommandPool( device, frame.Pool, 0 );
 		frame.ScratchUsed = 0;
 		DestroyRetiredScratch( frame );
+		ReadyPosed( frame );
 
 		//Where a recording begins is where "a frame" is counted from, under -drawtrace - see DrawTrace.
 		DrawTrace.Frame();

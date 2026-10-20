@@ -247,6 +247,9 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>How many shapes the model has, which is how many weights a draw writes.</summary>
 		public int MorphCount;
 
+		/// <summary>How many vertices the runs cover and how many deltas there are, for the portable frame's pose pass.</summary>
+		public int MorphVertexCount, MorphDeltaCount;
+
 		/// <summary>Deltas sorted by shape, for the pose pass (mesh_shapes.slang), which walks set shapes.</summary>
 		public ulong ShapeDeltas;
 		public int[] ShapeRuns;
@@ -2409,6 +2412,8 @@ internal static unsafe class CoreSceneRenderer
 				mesh.MorphDeltas = CoreRenderDevice.CreateBuffer( deltas );
 				mesh.MorphRuns = CoreRenderDevice.CreateBuffer( runs );
 				mesh.MorphCount = morphCount;
+				mesh.MorphVertexCount = vertexCount;
+				mesh.MorphDeltaCount = deltaCount;
 
 				if ( !CoreRenderDevice.PortableFrame ) ShapeMajor( mesh, deltas, deltaCount, runs, vertexCount, morphCount );
 
@@ -2421,6 +2426,7 @@ internal static unsafe class CoreSceneRenderer
 					mesh.MorphDeltas = 0;
 					mesh.MorphRuns = 0;
 					mesh.MorphCount = 0;
+					mesh.MorphVertexCount = mesh.MorphDeltaCount = 0;
 
 					CoreRenderDevice.DestroyBuffer( mesh.ShapeDeltas );
 					mesh.ShapeDeltas = 0;

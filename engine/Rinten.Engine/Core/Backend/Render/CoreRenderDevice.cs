@@ -405,6 +405,7 @@ internal static unsafe class CoreRenderDevice
 	{
 		poses.Clear();
 		morphs.Clear();
+		posed.Clear();
 
 		KeepPipelineCache();
 
@@ -531,6 +532,7 @@ internal static unsafe class CoreRenderDevice
 		//Last frame's poses live in last frame's scratch, which this one is about to write over.
 		poses.Clear();
 		morphs.Clear();
+		posed.Clear();
 
 		if ( !CoreNative.Available || CoreRender.ViewFrameBegin( view, clear.r, clear.g, clear.b, clear.a ) == 0 ) return false;
 
@@ -1545,6 +1547,60 @@ internal static unsafe class CoreRenderDevice
 				boneOffset, morphOffset, pushBytes, push.Length ) != 0;
 		}
 	}
+
+	/// <summary>A compute pipeline for the portable frame's pose pass; nought on a page.</summary>
+	public static ulong CreatePoseCompute( byte[] spirv )
+	{
+		if ( !CoreNative.Available || spirv is null || spirv.Length == 0 ) return 0;
+
+		fixed ( byte* code = spirv )
+		{
+			return CoreRender.PoseCreate( code, spirv.Length );
+		}
+	}
+
+	/// <summary>Poses a morphed mesh once for the frame - shapes, then bones where there are any - and says where its vertices went.</summary>
+	public static bool PoseAhead( ulong pipeline, CoreSceneRenderer.SceneMesh mesh, System.Numerics.Matrix4x4[] bones, float[] weights,
+		out ulong room, out int firstVertex )
+	{
+		room = 0;
+		firstVertex = 0;
+
+		if ( !CoreNative.Available || pipeline == 0 || weights is null || weights.Length == 0 ) return false;
+
+		if ( posed.TryGetValue( weights, out var found ) )
+		{
+			( room, firstVertex ) = found;
+			return room != 0;
+		}
+
+		fixed ( System.Numerics.Matrix4x4* pose = bones )
+		fixed ( float* shapes = weights )
+		{
+			room = CoreRender.PoseVertices( pipeline, mesh.Vertices, mesh.Skin, mesh.MorphRuns, mesh.MorphDeltas,
+				mesh.MorphVertexCount, mesh.MorphDeltaCount, (float*)pose, bones?.Length ?? 0, shapes, weights.Length, out firstVertex );
+		}
+
+		//A miss is kept too, so the passes after this one draw it the way it will be drawn this frame
+		posed[weights] = ( room, firstVertex );
+		return room != 0;
+	}
+
+	/// <summary>Where PoseAhead put a mesh posed with these weights this frame; false where it did not.</summary>
+	public static bool PosedFor( float[] weights, out ulong room, out int firstVertex )
+	{
+		room = 0;
+		firstVertex = 0;
+
+		if ( weights is null || !posed.TryGetValue( weights, out var found ) ) return false;
+
+		( room, firstVertex ) = found;
+		return room != 0;
+	}
+
+	//The morphed meshes posed ahead this frame, by their weights - see PoseAhead.
+	private static readonly Dictionary<float[], (ulong Room, int First)> posed =
+		new( ReferenceEqualityComparer.Instance as IEqualityComparer<float[]> );
 
 	//Where each pose handed over this frame was put.
 	private static readonly Dictionary<System.Numerics.Matrix4x4[], uint> poses =

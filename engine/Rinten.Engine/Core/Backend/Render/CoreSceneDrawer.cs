@@ -1283,6 +1283,9 @@ internal sealed partial class CoreSceneDrawer
 	//The same with the pipeline given, for a pass drawing a named thing its own way - see DrawRendererNow
 	private void SubmitAs( in Queued queued, in CoreSceneRenderer.PipelineKind kind )
 	{
+		//Posed ahead, it is drawn still and its posing pipeline is never asked for
+		if ( queued.Kind.Morphed && queued.Instances <= 1 && queued.CountFrom == 0 && DrawPosed( in queued, in kind, PushOf( queued.PushAt ) ) ) return;
+
 		var baked = CoreResources.Pipeline( kind );
 		if ( baked == 0 ) return;
 
@@ -1354,6 +1357,64 @@ internal sealed partial class CoreSceneDrawer
 			queued.Part.FirstIndex, queued.Part.FirstVertex, queued.Part.Texture );
 	}
 
+
+	//The portable frame's pose pass - see engine/classic_pose.slang; nought where there is none
+	private static ulong posePipeline;
+	private static bool poseTried;
+
+	//Morphed models posed once by compute before the view's first pass, so each of its passes - the lamps' faces, the
+	//world - draws them as still meshes rather than adding up their shapes and bones in its vertex stage again
+	private void PoseAhead()
+	{
+		if ( !CoreRenderDevice.PortableFrame || !CoreRender.DrawsMorphs ) return;
+
+		var begun = false;
+
+		foreach ( var list in (ReadOnlySpan<List<Queued>>)[opaque, translucent, overlayLayer, afterUiLayer] )
+		{
+			foreach ( ref readonly var queued in CollectionsMarshal.AsSpan( list ) )
+			{
+				if ( !queued.Kind.Morphed || queued.Instances > 1 || queued.Mesh.MorphDeltas == 0 || queued.Mesh.MorphVertexCount <= 0 ) continue;
+
+				if ( !poseTried )
+				{
+					poseTried = true;
+
+					var code = CoreShaderCache.Pass( EngineShaders.ClassicPose, "main", CoreShaderCompiler.Stage.Compute );
+					posePipeline = code is null ? 0 : CoreRenderDevice.CreatePoseCompute( code );
+
+					if ( posePipeline == 0 ) Log.Warning( $"the pose pass did not compile, morphed models pose in every pass: {CoreRenderDevice.ShaderError}" );
+				}
+
+				if ( posePipeline == 0 ) return;
+
+				if ( !begun )
+				{
+					CoreRenderDevice.ZoneBegin( "pose" );
+					begun = true;
+				}
+
+				CoreRenderDevice.PoseAhead( posePipeline, queued.Mesh, queued.Skinned ? queued.Pose : null, queued.Morphs, out _, out _ );
+			}
+		}
+
+		if ( begun ) CoreRenderDevice.ZoneEnd();
+	}
+
+	//A morphed part drawn still out of what PoseAhead posed, with its material's pipeline for a still mesh. False where it was
+	//not posed or that pipeline is not there, and it is drawn posing in its vertex stage.
+	private static bool DrawPosed( in Queued queued, in CoreSceneRenderer.PipelineKind kind, ReadOnlySpan<byte> push )
+	{
+		if ( queued.Morphs is null || !CoreRenderDevice.PosedFor( queued.Morphs, out var room, out var first ) ) return false;
+
+		var still = CoreResources.Pipeline( kind with { Skinned = false, Morphed = false } );
+		if ( still == 0 ) return false;
+
+		CoreRenderDevice.DrawIndexed( still, room, queued.Mesh.Indices, queued.Part.IndexCount, push,
+			queued.Part.FirstIndex, first + queued.Part.FirstVertex, queued.Part.Texture );
+
+		return true;
+	}
 
 	//Where a part's vertices start in its own model, which is where its blend shape runs start: the runs are the
 	//model's, one per vertex from nought, while the part's first vertex counts from the start of the shared pool.
@@ -1720,6 +1781,9 @@ internal sealed partial class CoreSceneDrawer
 	//The portable frame's bloom and passes, and whether this frame draws the world aside for them - see CorePortableGlow
 	private readonly CorePortableGlow glow = new();
 	private bool aside;
+
+	//Drawn aside only for its edges to be softened: the world finishes itself, and the finish writes it out as it is
+	private bool asideFinished;
 
 	//Last frame's run for the world's shading: where its surfaces had no build of it, the finish carries it from the next frame
 	private string lastFoldKey;
@@ -2114,6 +2178,9 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.DestroyPipeline( pyramidPipeline );
 		CoreRenderDevice.DestroyPipeline( composePipeline );
 		CoreMeshRender.ReleasePipelines();
+		CoreRenderDevice.DestroyPipeline( posePipeline );
+		posePipeline = 0;
+		poseTried = false;
 		ParticleGpuRun.ForgetPipelines();
 		CorePasses.ReleasePipelines();
 
@@ -2411,7 +2478,10 @@ internal sealed partial class CoreSceneDrawer
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
 
-		CoreSceneRenderer.SetFinish( frame, exposure, aside ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
+		//Kept past white in the screen's eight bits a colour comes back a step off, so a world with nothing to glow or pass over keeps its curve
+		asideFinished = aside && !passes && !carry && !glow.Glows && foldKey is null;
+
+		CoreSceneRenderer.SetFinish( frame, exposure, aside && !asideFinished ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
 
 		//Next frame's exposure, taken here since the compose may not run when shading straight to screen
 		exposure = Rinten.Rendering.DrawSettings.Exposure;
@@ -2478,6 +2548,8 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneBegin( "gather" );
 			Gather( scene, position, everything, immediateModels );
 			CoreRenderDevice.ZoneEnd();
+
+			PoseAhead();
 		}
 
 		var meshes = !everything && !overlayOnly && tables is not null && CoreMeshRender.EnsurePipelines();
@@ -2944,7 +3016,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			//No sky and nothing to fill what the world left: the clear its own picture would have had
 			CoreRenderDevice.ZoneBegin( "background" );
-			DrawBackground( camera, aside ? CorePortableGlow.KeepCurve : frameCurve );
+			DrawBackground( camera, aside && !asideFinished ? CorePortableGlow.KeepCurve : frameCurve );
 			CoreRenderDevice.ZoneEnd();
 		}
 
@@ -3002,7 +3074,7 @@ internal sealed partial class CoreSceneDrawer
 		if ( aside )
 		{
 			var (reads, light) = passes ? RunPortablePasses( camera, near, far ) : ( 0ul, false );
-			glow.Finish( frameCurve, foldKey, reads, light );
+			glow.Finish( frameCurve, foldKey, reads, light, asideFinished );
 		}
 
 		if ( offscreen )

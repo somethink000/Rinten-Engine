@@ -82,6 +82,19 @@ internal static unsafe class FFmpeg
 			];
 		}
 
+		//In the package's own library folder, by the plain names a package carries
+		if ( OperatingSystem.IsAndroid() )
+		{
+			return
+			[
+				("avutil", "libavutil.so"),
+				("swresample", "libswresample.so"),
+				("swscale", "libswscale.so"),
+				("avcodec", "libavcodec.so"),
+				("avformat", "libavformat.so"),
+			];
+		}
+
 		return
 		[
 			("avutil", $"libavutil.so.{AvUtilMajor}"),
@@ -132,10 +145,9 @@ internal static unsafe class FFmpeg
 
 	static string Load()
 	{
-		//A page in a browser has the browser's video and not ours, and a phone has nothing fetched
-		//for it: FFmpeg for Android is a build of its own that nobody publishes as an LGPL library.
+		//A page in a browser has the browser's video and not ours; Android's is built by build-android-ffmpeg.sh
 		if ( OperatingSystem.IsBrowser() ) return "a game in a browser has no FFmpeg";
-		if ( OperatingSystem.IsAndroid() || OperatingSystem.IsIOS() ) return "there is no FFmpeg for a phone";
+		if ( OperatingSystem.IsIOS() ) return "there is no FFmpeg for an iPhone";
 
 		var files = Files();
 		var handles = new Dictionary<string, nint>();
@@ -160,6 +172,8 @@ internal static unsafe class FFmpeg
 
 			if ( handle == 0 )
 			{
+				if ( OperatingSystem.IsAndroid() ) return $"the package has no {file}: its export carries FFmpeg only for a game that uses video";
+
 				return found is null
 					? $"{Folder} has no {file} - fetch it with: dotnet run --project engine/Tools/RintenBuild -- fetch-natives"
 					: $"{Path.Combine( found, file )} would not load";

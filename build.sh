@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the engine on Linux without re-bootstrapping. ./build.sh            this machine's core + managed engine + shaders ./build.sh linux      only rintencore.so for this machine  (native: the old name) ./build.sh macos      only rintencore.dylib ./build.sh web        only the wasm core and the page around it ./build.sh android    only rintencore.so for a phone       (needs the NDK) ./build.sh natives    every core this machine can build ./build.sh managed    only the .NET engine ./build.sh shaders    only the shader step Add --steam to any of them (before or after the
+# Builds the engine on Linux without re-bootstrapping. ./build.sh            this machine's core + managed engine + shaders ./build.sh linux      only rintencore.so for this machine  (native: the old name) ./build.sh macos      only rintencore.dylib ./build.sh web        only the wasm core and the page around it ./build.sh android    only rintencore.so for a phone       (needs the NDK) ./build.sh android-ffmpeg  FFmpeg for a phone's video     (needs the NDK) ./build.sh natives    every core this machine can build ./build.sh managed    only the .NET engine ./build.sh shaders    only the shader step Add --steam to any of them (before or after the
 # target) and a build that succeeds is staged and pushed to the Steam depot. It needs steamcmd, logged in once by hand, and these in the environment: RINTEN_STEAM_USER     the Steam build account RINTEN_STEAM_BRANCH   branch to set the build live on (optional: left off, the build is uploaded and set live from the Builds page) The four core scripts each install into game/bin/<platform>, so a game exported for another desktop is that folder copied next to the assets. Which is why they are worth being able to run from one machine. Keep LF line endings or Linux will not execute this.
 
 set -e
@@ -57,6 +57,9 @@ case "${1:-all}" in
   android)
     ./engine/Core/build-android.sh
     ;;
+  android-ffmpeg)
+    ./engine/Core/build-android-ffmpeg.sh
+    ;;
   natives)
     # Every core this machine can build. The three that need something the machine may not have - a Mac, the NDK, Emscripten
     # - say so and are skipped rather than failing the lot: a person asking for all of them wants the ones they can have.
@@ -80,7 +83,7 @@ case "${1:-all}" in
     ;;
   *)
     echo "Unknown target: $1" >&2
-    echo "Usage: ./build.sh [linux|macos|web|android|natives|managed|shaders|all] [--steam]" >&2
+    echo "Usage: ./build.sh [linux|macos|web|android|android-ffmpeg|natives|managed|shaders|all] [--steam]" >&2
     exit 1
     ;;
 esac

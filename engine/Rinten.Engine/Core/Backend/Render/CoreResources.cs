@@ -790,6 +790,11 @@ internal static class CoreResources
 
 	private const string InternalMarker = "#define ENGINE_INTERNAL";
 
+	//Whether a pass is drawn by the full frame alone (ENGINE_FULL_FRAME): it reads what the portable frame has no table for
+	internal static bool IsFullFrameOnly( string onDisk ) => Mentions( onDisk, 0, FullFrameMarker );
+
+	private const string FullFrameMarker = "#define ENGINE_FULL_FRAME";
+
 	//Whether a shader file is a compute pass, which no material draws with
 	internal static bool IsCompute( string onDisk ) => Mentions( onDisk, 0, ComputeMarker );
 

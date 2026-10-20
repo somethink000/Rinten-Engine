@@ -209,7 +209,7 @@ public partial class RenderSettings
 		Borderless = true;
 		VSync = true;
 
-		//Four samples: only a page's canvas is multisampled; the desktop smooths with DrawSettings.Fxaa
+		//Four samples: a page's canvas and the portable frame's pass are multisampled; the full frame does not read it
 		AntiAliasQuality = MultisampleAmount.Multisample4x;
 		MaxFrameRate = 144;
 		MaxFrameRateInactive = 60;

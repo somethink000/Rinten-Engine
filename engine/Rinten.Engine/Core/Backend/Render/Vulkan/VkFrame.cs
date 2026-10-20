@@ -787,7 +787,7 @@ internal static unsafe partial class VkFrame
 	private static uint MainSamples( VkSwapchain.Pictures p, bool scaled )
 	{
 		if ( Current.MainBegun ) return Current.MainSamples;
-		if ( VkDevice.mostSamples <= 1 || scaled || p.SceneDrawn || p.DepthFilled ) return 1;
+		if ( VkDevice.mostSamples <= 1 || VkDevice.Tier != RenderTier.Portable || scaled || p.SceneDrawn || p.DepthFilled ) return 1;
 
 		var asked = Rinten.Rendering.DrawSettings.Msaa;
 		if ( asked < 2 ) return 1;

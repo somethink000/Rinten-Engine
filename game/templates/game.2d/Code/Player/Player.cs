@@ -8,13 +8,13 @@ public sealed partial class Player : Component
 	[Property, Category( "Relatives" )] public CameraComponent Camera { get; set; }
 
 
-	//Units a second.
+	/// <summary>Units a second.</summary>
 	[Property, Category( "Movement" )] public float Speed { get; set; } = 4.0f;
 
-	//What holding Run multiplies that by.
+	/// <summary>What holding Run multiplies the speed by.</summary>
 	[Property, Category( "Movement" )] public float RunScale { get; set; } = 2.0f;
 
-	//Pixels of the picture to a unit of the world.
+	/// <summary>Pixels of the picture to a unit of the world.</summary>
 	[Property, Category( "Look" )] public float PixelsPerUnit { get; set; } = 8.0f;
 
 

@@ -85,12 +85,9 @@ internal static partial class JobSystem
 
 		work.Run();
 
+		//Only batches already running are left: another loop's work taken up here would only make this one later
 		var spin = new SpinWait();
-
-		while ( Volatile.Read( ref work.Done ) < count )
-		{
-			if ( !RunOne() ) spin.SpinOnce( -1 );
-		}
+		while ( Volatile.Read( ref work.Done ) < count ) spin.SpinOnce( -1 );
 
 		//Nobody may still be inside it when it goes back to be handed out again.
 		Interlocked.Increment( ref work.Generation );

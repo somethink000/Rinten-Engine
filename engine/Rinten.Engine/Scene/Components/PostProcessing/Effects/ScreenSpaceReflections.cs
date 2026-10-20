@@ -61,7 +61,8 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 
 	public override void Render()
 	{
-		if ( DownsampleRatio < 1 || !Reflections ) return;
+		//The portable frame has no table of pictures for the trace to read the depth and the world through
+		if ( DownsampleRatio < 1 || !Reflections || CoreRenderDevice.PortableFrame ) return;
 
 		var cl = NextList( "Reflections" );
 

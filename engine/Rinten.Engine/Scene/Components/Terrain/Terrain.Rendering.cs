@@ -469,10 +469,13 @@ public partial class Terrain
 	private const float SolidEvery = 0.1f;
 
 	private RealTimeSince solidLooked;
-	private readonly List<Vector3> solidFrom = new();
+
+	//Per chunk this look: 2 within the reach of something, 1 only within a chunk more of it - see Mark.
+	private byte[] solidNear = [];
 
 	//Which chunks the physics world holds. All of them in the editor, whose tools trace wherever they are pointed; in play those within
-	//SolidReach of the eye and of every body that moves and every character - a chunk further out keeps its triangles for the navigation mesh.
+	//SolidReach of the eye, of every body that is not still - a ragdoll's and code's as much as a component's - and of every character.
+	//A chunk further out keeps its triangles for the navigation mesh, and one solid stays so until a chunk past the reach.
 	private void Solidify( bool now )
 	{
 		if ( chunks.Length == 0 || Scene is null ) return;
@@ -484,21 +487,25 @@ public partial class Terrain
 		var scale = MathF.Max( WorldTransform.UniformScale, 1e-4f );
 		var reach = MathF.Max( SolidReach / scale, chunkSpan * 2.0f );
 
-		solidFrom.Clear();
+		if ( solidNear.Length != chunks.Length ) solidNear = new byte[chunks.Length];
+		Array.Clear( solidNear );
 
 		if ( !every )
 		{
 			if ( Looked( out var eye, out var whole ) )
 			{
-				solidFrom.Add( eye );
 				reach = MathF.Max( reach, whole );
+				Mark( eye, reach );
 			}
 
-			foreach ( var body in Scene.GetAll<Rigidbody>() )
-				if ( body.IsValid() && body.MotionEnabled ) solidFrom.Add( WorldTransform.PointToLocal( body.WorldPosition ) );
+			if ( Scene.HasPhysicsWorld )
+			{
+				foreach ( var body in Scene.PhysicsWorld.BodySet )
+					if ( body.IsValid() && body.BodyType != PhysicsBodyType.Static ) Mark( WorldTransform.PointToLocal( body.Position ), reach );
+			}
 
 			foreach ( var walker in Scene.GetAll<CharacterController>() )
-				if ( walker.IsValid() ) solidFrom.Add( WorldTransform.PointToLocal( walker.WorldPosition ) );
+				if ( walker.IsValid() ) Mark( WorldTransform.PointToLocal( walker.WorldPosition ), reach );
 		}
 
 		var changed = false;
@@ -506,7 +513,7 @@ public partial class Terrain
 		for ( var i = 0; i < chunks.Length; i++ )
 		{
 			var chunk = chunks[i];
-			var solid = every || Near( i, chunk.Solid ? reach + chunkSpan : reach );
+			var solid = every || solidNear[i] == 2 || ( chunk.Solid && solidNear[i] == 1 );
 
 			if ( solid == chunk.Solid ) continue;
 
@@ -522,21 +529,34 @@ public partial class Terrain
 		if ( changed ) ConfigureShapes();
 	}
 
-	//Whether a chunk stands within a reach of any of solidFrom, across the ground's plane.
-	private bool Near( int index, float reach )
+	//The chunks round a point of the terrain's own across its plane: 2 within reach, 1 within a chunk more.
+	private void Mark( Vector3 at, float reach )
 	{
-		var x0 = chunkOrigin.x + ( ( index % chunksWide ) * chunkSpan );
-		var z0 = chunkOrigin.y + ( ( index / chunksWide ) * chunkSpan );
+		var outer = reach + chunkSpan;
 
-		foreach ( var at in solidFrom )
+		var x0 = Math.Max( (int)MathF.Floor( ( at.x - outer - chunkOrigin.x ) / chunkSpan ), 0 );
+		var x1 = Math.Min( (int)MathF.Floor( ( at.x + outer - chunkOrigin.x ) / chunkSpan ), chunksWide - 1 );
+		var z0 = Math.Max( (int)MathF.Floor( ( at.z - outer - chunkOrigin.y ) / chunkSpan ), 0 );
+		var z1 = Math.Min( (int)MathF.Floor( ( at.z + outer - chunkOrigin.y ) / chunkSpan ), chunksDeep - 1 );
+
+		for ( var z = z0; z <= z1; z++ )
 		{
-			var dx = MathF.Max( MathF.Max( x0 - at.x, at.x - ( x0 + chunkSpan ) ), 0.0f );
-			var dz = MathF.Max( MathF.Max( z0 - at.z, at.z - ( z0 + chunkSpan ) ), 0.0f );
+			var cz = chunkOrigin.y + ( z * chunkSpan );
+			var dz = MathF.Max( MathF.Max( cz - at.z, at.z - ( cz + chunkSpan ) ), 0.0f );
 
-			if ( ( dx * dx ) + ( dz * dz ) <= reach * reach ) return true;
+			for ( var x = x0; x <= x1; x++ )
+			{
+				var i = ( z * chunksWide ) + x;
+				if ( solidNear[i] == 2 ) continue;
+
+				var cx = chunkOrigin.x + ( x * chunkSpan );
+				var dx = MathF.Max( MathF.Max( cx - at.x, at.x - ( cx + chunkSpan ) ), 0.0f );
+				var apart = ( dx * dx ) + ( dz * dz );
+
+				if ( apart <= reach * reach ) solidNear[i] = 2;
+				else if ( apart <= outer * outer ) solidNear[i] = 1;
+			}
 		}
-
-		return false;
 	}
 
 	/// <summary>The collision of the chunks under a box of the world that the physics world does not hold now, as world triangles - what the navigation mesh reads where the ground is not solid.</summary>

@@ -20,8 +20,8 @@ internal static unsafe partial class VkPipelines
 	private static bool saidUnkept;
 
 	//Whether what a pipeline is made of is kept: where the device can draw both eyes at once and a headset is wanted (CoreXr.Wanted),
-	//or where the portable frame's pass may be multisampled
-	internal static bool KeepRecipes => ( VkDevice.multiview && CoreXr.Wanted ) || VkDevice.mostSamples > 1;
+	//or where the portable frame's pass may be multisampled - see VkFrame.MainSamples
+	internal static bool KeepRecipes => ( VkDevice.multiview && CoreXr.Wanted ) || ( VkDevice.mostSamples > 1 && VkDevice.Tier == RenderTier.Portable );
 
 	private static void Remember( Pipeline pipeline, Recipe recipe )
 	{

@@ -26,7 +26,6 @@ internal static unsafe class VkSubmitter
 		public bool Generated;
 		public VkSemaphore GeneratedSignal;
 		public uint GeneratedImage;
-		public ulong GeneratedId;
 		public long Spacing;
 		public Result GeneratedPresented;
 	}
@@ -225,7 +224,7 @@ internal static unsafe class VkSubmitter
 		{
 			var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
-			one.GeneratedPresented = Present( one.GeneratedSignal, one.Handle, one.GeneratedImage, one.GeneratedId );
+			one.GeneratedPresented = Present( one.GeneratedSignal, one.Handle, one.GeneratedImage, 0 );
 
 			if ( one.Spacing > 0 )
 			{

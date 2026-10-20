@@ -542,8 +542,7 @@ internal static unsafe partial class VkFrame
 				var swapchain = Current.Handle;
 				var index = Current.ImageIndex;
 
-				//The generated frame's id first: it is shown first
-				var generatedId = generated ? CorePresent.Next( Current ) : 0ul;
+				//The generated frame goes without an id: ids are the loop's frames, which both latency drivers tie its stages to
 				var spacing = generated ? GeneratedSpacing() : 0L;
 				var id = CorePresent.Next( Current );
 
@@ -561,7 +560,6 @@ internal static unsafe partial class VkFrame
 						Generated = generated,
 						GeneratedSignal = signal[1].Semaphore,
 						GeneratedImage = generatedImage,
-						GeneratedId = generatedId,
 						Spacing = spacing,
 					} );
 
@@ -574,7 +572,7 @@ internal static unsafe partial class VkFrame
 					var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
 					//What it answers is what the frame's own present answers a moment later
-					VkSubmitter.Present( signal[1].Semaphore, swapchain, generatedImage, generatedId );
+					VkSubmitter.Present( signal[1].Semaphore, swapchain, generatedImage, 0 );
 					VkSubmitter.Hold( began + spacing );
 				}
 

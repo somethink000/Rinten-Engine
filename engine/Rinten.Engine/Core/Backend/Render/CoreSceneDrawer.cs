@@ -2181,6 +2181,7 @@ internal sealed partial class CoreSceneDrawer
 		CoreRenderDevice.DestroyPipeline( posePipeline );
 		posePipeline = 0;
 		poseTried = false;
+		CoreFrameGeneration.DestroyPipelines();
 		ParticleGpuRun.ForgetPipelines();
 		CorePasses.ReleasePipelines();
 
@@ -3211,6 +3212,8 @@ internal sealed partial class CoreSceneDrawer
 			{
 				RunStage( camera, Rinten.Rendering.Stage.AfterPostProcess, CoreRender.TargetKind.Screen, near, far );
 			}
+
+			CoreFrameGeneration.LetGoUnwanted();
 
 			//The finished world before panels and the interface go over it: what a frame generated ahead of this one is made of
 			if ( upscaled != 0 && !editorOverlays && CoreFrameGeneration.Wanted )

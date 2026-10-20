@@ -78,7 +78,8 @@ internal sealed class TerrainRelief : IDisposable
 		shape.Wears = wears;
 		shape.Transform = terrain;
 
-		Hold( lift );
+		//The drawer reads the mesh's parts as it queues, so they are laid again only when they change
+		if ( lift != this.lift ) Hold( lift );
 	}
 
 	private float lift;

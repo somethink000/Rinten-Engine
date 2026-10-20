@@ -173,6 +173,12 @@ internal static class CoreFrameGeneration
 		first = true;
 	}
 
+	//Switched off by the player: its pictures let go, made again at the next frame it is wanted
+	internal static void LetGoUnwanted()
+	{
+		if ( constants != 0 && !Rinten.Rendering.DrawSettings.FrameGeneration ) Release();
+	}
+
 	//What ffxFrameInterpolationContextCreate and ffxOpticalflowContextCreate make, at these sizes.
 	private static bool Make( (int Width, int Height) render, (int Width, int Height) display )
 	{

@@ -117,6 +117,11 @@ internal static unsafe class CorePresent
 	//Waits in a row that ran out, and the swapchain given up on for it.
 	private static int missed;
 	private static ulong unpaced;
+	private static RealTimeSince sinceUnpaced;
+	private static bool saidUnpaced;
+
+	//Seconds before a swapchain given up on is tried again: a window minimised or covered for a moment shows again
+	private const float RetryUnpaced = 10.0f;
 
 	/// <summary>How many frames waited for the screen, and for how long all told - for the report.</summary>
 	internal static long Waits, WaitTicks;
@@ -124,7 +129,16 @@ internal static unsafe class CorePresent
 	/// <summary>At the top of a frame, held to the refresh: waits until the frame before the last one handed over has been shown.</summary>
 	internal static void Pace()
 	{
-		if ( !Available || lastId < 2 || last.Handle == 0 || last.Handle == unpaced ) return;
+		if ( !Available || lastId < 2 || last.Handle == 0 ) return;
+
+		if ( last.Handle == unpaced )
+		{
+			if ( sinceUnpaced < RetryUnpaced ) return;
+
+			//One wait more that runs out gives it up again
+			unpaced = 0;
+			missed = 2;
+		}
 
 		//The driver's own pacing, where it is on, is the one that counts.
 		if ( CoreLatency.Mode != 0 && ( CoreLatency.AntiLag || CoreLatency.Reflex ) ) return;
@@ -151,8 +165,10 @@ internal static unsafe class CorePresent
 		if ( ++missed >= 3 )
 		{
 			unpaced = last.Handle;
+			sinceUnpaced = 0;
 			missed = 0;
-			Log.Info( "frames are not paced to this window's screen: it never says when one was shown" );
+			if ( !saidUnpaced ) Log.Info( "frames are not paced to this window's screen: it never says when one was shown" );
+			saidUnpaced = true;
 		}
 	}
 }

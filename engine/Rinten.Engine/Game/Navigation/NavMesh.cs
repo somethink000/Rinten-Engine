@@ -388,6 +388,9 @@ public sealed partial class NavMesh : IDisposable
 	//Whether a terrain's ground outside the physics world counts, as its static body would with its tags.
 	internal bool IsTerrainRelevantForNavmesh( Terrain terrain )
 	{
+		//A ground that is off or collides with nothing is walked on by nothing
+		if ( !terrain.Active || !terrain.EnableCollision ) return false;
+
 		var bodyType = terrain.PhysicsBody?.NavmeshBodyTypeOverride ?? PhysicsBodyType.Static;
 		if ( bodyType == PhysicsBodyType.Dynamic ) return false;
 		if ( bodyType == PhysicsBodyType.Static && !IncludeStaticBodies ) return false;

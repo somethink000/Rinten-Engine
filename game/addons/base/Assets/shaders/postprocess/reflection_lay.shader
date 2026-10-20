@@ -3,6 +3,9 @@
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1
 
+//The full frame's alone: it reads the table of pictures - see ScreenSpaceReflections
+#define ENGINE_FULL_FRAME 1
+
 STATE
 {
 	Blend( Additive );

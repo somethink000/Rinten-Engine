@@ -917,7 +917,7 @@ internal static class CoreShaderCache
 
 	//Whether a shipped shader is a pass over the frame the portable frame draws as one, rather than a point effect it carries
 	private static bool PortablePass( string shader )
-		=> CoreShaderFile.IsPass( shader ) && !CorePointChain.IsPoint( shader );
+		=> CoreShaderFile.IsPass( shader ) && !CorePointChain.IsPoint( shader ) && !CoreResources.IsFullFrameOnly( shader );
 
 	//The shipped passes a page draws as passes of their own, in Baking's language; one that will not is said and left out
 	private static void BakeShippedPasses()

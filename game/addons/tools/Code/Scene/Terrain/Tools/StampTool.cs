@@ -52,7 +52,8 @@ public class StampTool : BaseBrushTool
 		if ( Load( Settings.HeightMap ) is not { } map ) return;
 
 		var mode = Settings.Mode;
-		if ( amount < 0.0f ) mode = mode == TerrainMesh.StampMode.Raise ? TerrainMesh.StampMode.Lower : TerrainMesh.StampMode.Raise;
+		//Ctrl turns raise and lower about; a set stamp has no other way round
+		if ( amount < 0.0f && mode != TerrainMesh.StampMode.Set ) mode = mode == TerrainMesh.StampMode.Raise ? TerrainMesh.StampMode.Lower : TerrainMesh.StampMode.Raise;
 
 		var turn = _parent.BrushSettings.Rotation;
 		var height = Settings.Height;

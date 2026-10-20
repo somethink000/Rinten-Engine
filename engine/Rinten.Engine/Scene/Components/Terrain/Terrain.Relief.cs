@@ -42,7 +42,7 @@ public partial class Terrain
 		if ( Scene is null ) return;
 
 		//The eye the scene's detail is reckoned from - the editor's camera in an editor scene
-		var seen = Scene.Detail.Looking ? Scene.Detail.Eye : ( Scene.EditorCamera ?? Scene.Camera )?.WorldPosition;
+		var seen = Scene.Detail.Looking ? Scene.Detail.Eye : Scene.DetailCamera?.WorldPosition;
 
 		if ( seen is not { } at ) return;
 

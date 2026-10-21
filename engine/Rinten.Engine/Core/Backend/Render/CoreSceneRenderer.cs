@@ -398,11 +398,14 @@ internal static unsafe class CoreSceneRenderer
 	//a component - null where the light is a component's. See SceneWorld.InternalLights.
 	private static readonly List<SceneLight> looseScratch = new();
 
-	//Every light of the frame, as the buffer has them - see CoreLights.
+	//Every light of the frame, nearest reach first; CoreLights sorts them again as it sends them
 	internal static readonly float[] LightBlock = new float[CoreLights.MostLights * CoreLights.LightFloats];
 
 	//How many of them the last block was built with - which may be more than the block itself holds.
 	internal static int LightsInFrame;
+
+	//Whether the last frame had more lights than CoreLights.MostLights
+	private static bool lightsOver;
 
 	//Which light each of the last block's records is, in the same order - see CoreLampMaps.
 	//Null for a light put into the world without a component, which casts no shadow.
@@ -506,11 +509,7 @@ internal static unsafe class CoreSceneRenderer
 
 		CoreRenderDevice.ZoneBegin( "block lights" );
 
-		//A light that cannot reach anything in view is not worth a slot: distance to the camera less its radius
-
-		//Measured from the eye, as a lamp three rooms behind the camera is not worth a slot
-		var from = camera;
-
+		//Nearest first by distance from the eye less the light's radius, as the slots run out from the far end
 		var wanted = lightScratch;
 		wanted.Clear();
 
@@ -518,7 +517,7 @@ internal static unsafe class CoreSceneRenderer
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
 
-			var reach = Reach( light, from );
+			var reach = Reach( light, camera );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
 		}
 
@@ -532,7 +531,7 @@ internal static unsafe class CoreSceneRenderer
 				{
 					if ( loose.Component is Light || !loose.RenderingEnabled ) continue;
 
-					var reach = Reach( loose, from );
+					var reach = Reach( loose, camera );
 					if ( reach < float.MaxValue ) wanted.Add( (null, loose, reach) );
 				}
 			}
@@ -551,12 +550,15 @@ internal static unsafe class CoreSceneRenderer
 			looseLights.Add( wanted[i].Loose );
 		}
 
-		//Said out loud rather than found out from a dark corner of the level.
-		if ( wanted.Count > CoreLights.MostLights )
+		//Said once as the frame starts dropping lights, rather than found out from a dark corner of the level
+		var over = wanted.Count > CoreLights.MostLights;
+		if ( over && !lightsOver )
 		{
 			Log.Warning( $"the frame has {wanted.Count} lights and the card holds {CoreLights.MostLights} - " +
 				$"the {wanted.Count - CoreLights.MostLights} furthest away are not in it" );
 		}
+
+		lightsOver = over;
 
 		//The block's count is the browser's and holds sixteen; everything else reads the buffer, which holds all
 		LightsInFrame = lights.Count;
@@ -1651,7 +1653,7 @@ internal static unsafe class CoreSceneRenderer
 	internal static int ShadeSpecialize()
 		=> ( CoreEnvmap.Written > 0 ? 1 : 0 )
 			| ( DebugViewOn ? 2 : 0 )
-			| ( CoreLights.Cells > 0 ? 4 : 0 )
+			| ( CoreLights.Tiles > 0 ? 4 : 0 )
 			| ( CoreLights.Lamps > 0 ? 8 : 0 )
 			| ( SkyTableOn ? 16 : 0 )
 			| ( FogOn ? 32 : 0 )

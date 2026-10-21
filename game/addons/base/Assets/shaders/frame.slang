@@ -409,66 +409,108 @@ void LightLamp( uint index, inout Light one )
 #endif
 }
 
-//The lights a pixel walks: its grid cell, or all of them without a grid - see CoreLights
+//The lights a pixel walks (CoreLights): every light one by one without a grid; with one, the suns one by one and
+//then the bits of its tile's lamp mask, cut to the run of lamps its depth bin holds
 struct LightWalk
 {
-	//How many to walk.
-	uint count;
+	//The next light walked one by one, and where that stops
+	uint next;
+	uint end;
 
-	//Where its cell's list starts, in words; nothing where there is no cell.
-	uint first;
+	//The mask word in hand with the bits still to walk, the next word to load and the one past the last
+	uint bits;
+	uint word;
+	uint lastWord;
 
-	bool celled;
+	//Where the tile's mask starts in words, and the bin's first and last lamp
+	uint maskAt;
+	uint lo;
+	uint hi;
 };
 
 LightWalk LightsHere( float2 screen, float viewDepth )
 {
 	LightWalk walk;
-	walk.count = LightCount();
-	walk.first = 0;
-	walk.celled = false;
+	walk.next = 0;
+	walk.end = LightCount();
+	walk.bits = 0;
+	walk.word = 0;
+	walk.lastWord = 0;
+	walk.maskAt = 0;
+	walk.lo = 0;
+	walk.hi = 0;
+
+	//With one light at most a pixel the walk is no loop: a trip count of one drops the back edge
+	if ( kManyLights == 0 ) walk.end = min( walk.end, 1u );
 
 #ifndef PORTABLE
-	if ( kGridOn == 0 ) return walk;
+	if ( kGridOn == 0 || kManyLights == 0 ) return walk;
 
-	uint cellsX = g_lightData.Load( 4 );
-	if ( cellsX == 0 ) return walk;
+	uint tilesX = g_lightData.Load( 4 );
+	if ( tilesX == 0 ) return walk;
 
-	uint cellsY = g_lightData.Load( 8 );
-	uint cellsZ = g_lightData.Load( 12 );
-	uint perCell = g_lightData.Load( 16 );
-	uint cellsAt = g_lightData.Load( 20 );
+	uint tilesY = g_lightData.Load( 8 );
+	uint bins = g_lightData.Load( 12 );
+	uint suns = g_lightData.Load( 16 );
+	uint masksAt = g_lightData.Load( 20 );
 	float near = asfloat( g_lightData.Load( 24 ) );
 	float scale = asfloat( g_lightData.Load( 28 ) );
-
-	if ( cellsY == 0 || cellsZ == 0 || near <= 0.0 ) return walk;
-
-	//How wide a cell is, out of the header rather than written down here: the grid is cut by CoreLights.TileSize
-	//and this is the one place that has to agree with it. Sixteen where a block was written before that word was.
 	uint tile = max( g_lightData.Load( 40 ), 1u );
+	uint binsAt = g_lightData.Load( 44 );
+	uint maskWords = g_lightData.Load( 48 );
 
-	//Along the depth in the logarithm, which is how the cull cut it.
-	uint cx = min( uint( max( screen.x, 0.0 ) ) / tile, cellsX - 1 );
-	uint cy = min( uint( max( screen.y, 0.0 ) ) / tile, cellsY - 1 );
-	uint cz = min( uint( max( log( max( viewDepth, near ) / near ) * scale, 0.0 ) ), cellsZ - 1 );
+	uint tx = min( uint( max( screen.x, 0.0 ) ) / tile, tilesX - 1 );
+	uint ty = min( uint( max( screen.y, 0.0 ) ) / tile, tilesY - 1 );
+	uint bin = min( uint( max( log( max( viewDepth, near ) / near ) * scale, 0.0 ) ), bins - 1 );
 
-	uint at = cellsAt + ( ( cx + ( cy * cellsX ) + ( cz * cellsX * cellsY ) ) * ( perCell + 1 ) );
+	uint run = g_lightData.Load( ( binsAt + bin ) * 4 );
 
-	walk.count = min( g_lightData.Load( at * 4 ), perCell );
-	walk.first = at + 1;
-	walk.celled = true;
+	walk.end = suns;
+	walk.lo = run & 0xFFFFu;
+	walk.hi = run >> 16;
+	walk.maskAt = masksAt + ( ( tx + ( ty * tilesX ) ) * maskWords );
+
+	if ( walk.lo <= walk.hi )
+	{
+		walk.word = walk.lo >> 5;
+		walk.lastWord = ( walk.hi >> 5 ) + 1;
+	}
 #endif
 
 	return walk;
 }
 
-//The number of the light at one step of that walk.
-uint LightHere( LightWalk walk, uint step )
+//The next light of the walk into which; false when it is done
+bool NextLight( inout LightWalk walk, out uint which )
 {
-#ifdef PORTABLE
-	return step;
+	which = walk.next;
+
+	if ( walk.next < walk.end )
+	{
+		walk.next++;
+		return true;
+	}
+
+#ifndef PORTABLE
+	while ( walk.bits == 0u )
+	{
+		if ( walk.word >= walk.lastWord ) return false;
+
+		uint bits = g_lightData.Load( ( walk.maskAt + walk.word ) * 4 );
+
+		//The ends of the bin's run cut out of its first and last word
+		if ( walk.word == ( walk.lo >> 5 ) ) bits &= 0xFFFFFFFFu << ( walk.lo & 31u );
+		if ( walk.word == ( walk.hi >> 5 ) ) bits &= 0xFFFFFFFFu >> ( 31u - ( walk.hi & 31u ) );
+
+		walk.bits = bits;
+		walk.word++;
+	}
+
+	which = ( ( walk.word - 1u ) << 5 ) + firstbitlow( walk.bits );
+	walk.bits &= walk.bits - 1u;
+	return true;
 #else
-	return walk.celled ? g_lightData.Load( ( walk.first + step ) * 4 ) : step;
+	return false;
 #endif
 }
 
@@ -1758,14 +1800,12 @@ float3 FogLampLight( float3 here, float3 view, float2 screen )
 	float viewDepth = mul( float4( here, 1.0 ), EYE_FRAME( worldToClip ) ).w;
 
 	LightWalk walk = LightsHere( screen, viewDepth );
-	int count = int( walk.count );
-	if ( kManyLights == 0 ) count = min( count, 1 );
+	uint which;
 
 	float3 arriving = 0.0;
 
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
 		Light light = LightAt( which );
 
 		//The sun is taken by VolumeFog itself, with its shadow.

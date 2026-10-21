@@ -1,7 +1,9 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader is - includes
 //and all - and a project may put its own file of this name in its assets to replace it. See CoreShaderCache.Pass.
 
-//Clustered light culling: per tile against side planes, then per cell against its view-space box
+//Tiled and depth-binned light culling (CoreLights): a group per screen tile writes a bitmask of the lamps whose
+//sphere touches its column, and the groups after the tiles write each depth bin's first and last lamp - the lamps
+//come sorted by view depth, so a bin's lamps are one run of indices and a pixel walks its tile's mask over that run
 
 [[vk::binding(0,0)]] RWByteAddressBuffer g_lights;
 
@@ -10,69 +12,85 @@ cbuffer Push
 {
 	row_major float4x4 g_worldToView;
 
-	//How wide the view is at unit depth, where it starts, and how many slices a factor of e of depth is worth.
+	//How wide the view is at unit depth, where the bins start, and how many bins a factor of e of depth is worth
 	float4 g_screen;
+	//Tiles across and down, bins, lights
 	float4 g_cells;
+	//Suns before the lamps, where the masks and the bins start in words, and words a mask
 	float4 g_where;
 };
 
-//How many lights one tile may carry into its slices.
-static const uint MostPerTile = 64;
+//Words of the largest mask, CoreLights.MostLights over 32
+static const uint MostWords = 128;
 
-groupshared uint s_count;
+groupshared uint s_mask[MostWords];
 
-//Where each of them is in view space, and how far it reaches - negative for the sun, which reaches everywhere.
-groupshared float4 s_where[MostPerTile];
-groupshared uint s_index[MostPerTile];
+//How far the light at this index reaches, and where it is in view space
+float4 LampInView( uint index )
+{
+	float4 position = asfloat( g_lights.Load4( 64 + ( index * 80 ) ) );
+	return float4( mul( float4( position.xyz, 1.0 ), g_worldToView ).xyz, position.w );
+}
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void main( uint3 group : SV_GroupID, uint thread : SV_GroupIndex )
 {
-	uint cellsX = uint( g_cells.x );
-	uint cellsY = uint( g_cells.y );
-	uint cellsZ = uint( g_cells.z );
-	if ( cellsX == 0 || cellsY == 0 || cellsZ == 0 ) return;
+	uint tilesX = uint( g_cells.x );
+	uint tilesY = uint( g_cells.y );
+	uint bins = uint( g_cells.z );
+	uint lightCount = uint( g_cells.w );
 
-	uint tiles = cellsX * cellsY;
-	if ( group.x >= tiles ) return;
-
-	uint tx = group.x % cellsX;
-	uint ty = group.x / cellsX;
+	uint suns = uint( g_where.x );
+	uint masksAt = uint( g_where.y );
+	uint binsAt = uint( g_where.z );
+	uint maskWords = min( uint( g_where.w ), MostWords );
 
 	float hx = g_screen.x;
 	float hy = g_screen.y;
 	float near = g_screen.z;
 	float scale = g_screen.w;
-	//The tile is a column to infinity, because its last slice is.
-	float far = 1e9;
 
-	uint lightCount = uint( g_cells.w );
-	uint perCell = uint( g_where.x );
-	uint cellsAt = uint( g_where.y );
+	uint tiles = tilesX * tilesY;
 
-	//Directional lights go first, in order, unculled, so an overfull tile never drops the sun
-	if ( thread == 0 )
+	if ( group.x >= tiles )
 	{
-		s_count = 0;
+		uint bin = ( ( group.x - tiles ) * 64 ) + thread;
+		if ( bin >= bins ) return;
 
-		for ( uint sun = 0; sun < lightCount; ++sun )
+		//Bin 0 takes everything nearer than the grid's start, the last everything past its end
+		float first = bin == 0 ? 0.0 : near * exp( float( bin ) / scale );
+		float past = bin + 1 >= bins ? 1e9 : near * exp( float( bin + 1 ) / scale );
+
+		uint lo = 0xFFFF;
+		uint hi = 0;
+
+		for ( uint i = suns; i < lightCount; ++i )
 		{
-			if ( asfloat( g_lights.Load4( 64 + ( sun * 80 ) + 16 ) ).w >= 0.5 ) continue;
-			if ( s_count >= MostPerTile ) break;
+			float4 lamp = LampInView( i );
+			float deep = -lamp.z;
 
-			s_where[s_count] = float4( 0.0, 0.0, 0.0, -1.0 );
-			s_index[s_count] = sun;
-			s_count++;
+			if ( deep + lamp.w < first || deep - lamp.w > past ) continue;
+
+			lo = min( lo, i );
+			hi = max( hi, i );
 		}
+
+		g_lights.Store( ( binsAt + bin ) * 4, lo | ( hi << 16 ) );
+		return;
 	}
+
+	for ( uint w = thread; w < maskWords; w += 64 ) s_mask[w] = 0;
 
 	GroupMemoryBarrierWithGroupSync();
 
-	float x0 = ( float( tx ) / cellsX ) * 2.0 - 1.0;
-	float x1 = ( float( tx + 1 ) / cellsX ) * 2.0 - 1.0;
-	float y0 = ( float( ty ) / cellsY ) * 2.0 - 1.0;
-	float y1 = ( float( ty + 1 ) / cellsY ) * 2.0 - 1.0;
+	uint tx = group.x % tilesX;
+	uint ty = group.x / tilesX;
+
+	float x0 = ( float( tx ) / tilesX ) * 2.0 - 1.0;
+	float x1 = ( float( tx + 1 ) / tilesX ) * 2.0 - 1.0;
+	float y0 = ( float( ty ) / tilesY ) * 2.0 - 1.0;
+	float y1 = ( float( ty + 1 ) / tilesY ) * 2.0 - 1.0;
 
 	//The four sides of the tile, as planes through the eye. A point at depth d sits at ndc.x = p.x / ( hx * d ), so the edge at x0 is p.x + x0
 	//* hx * p.z = nought - and which side of it is inside depends on the sign of hx, because the projection turns the picture over on its y.
@@ -84,75 +102,21 @@ void main( uint3 group : SV_GroupID, uint thread : SV_GroupIndex )
 	float3 planeC = normalize( float3( 0.0, sy, sy * y0 * hy ) );
 	float3 planeD = normalize( float3( 0.0, -sy, -sy * y1 * hy ) );
 
-	//What reaches this tile at all, decided once for the whole column rather than again in every
-	//slice of it - and turned into view space here, which is the only matrix multiply a light gets.
-	for ( uint i = thread; i < lightCount; i += 64 )
+	for ( uint i = suns + thread; i < lightCount; i += 64 )
 	{
-		uint lightAt = 64 + ( i * 80 );
-		float4 position = asfloat( g_lights.Load4( lightAt ) );
-		float kind = asfloat( g_lights.Load4( lightAt + 16 ) ).w;
+		float4 lamp = LampInView( i );
 
-		//Already placed, above.
-		if ( kind < 0.5 ) continue;
+		if ( -lamp.z + lamp.w < near ) continue;
+		if ( dot( planeA, lamp.xyz ) < -lamp.w ) continue;
+		if ( dot( planeB, lamp.xyz ) < -lamp.w ) continue;
+		if ( dot( planeC, lamp.xyz ) < -lamp.w ) continue;
+		if ( dot( planeD, lamp.xyz ) < -lamp.w ) continue;
 
-		float3 where = mul( float4( position.xyz, 1.0 ), g_worldToView ).xyz;
-		float range = position.w;
-
-		float deep = -where.z;
-		if ( deep - range > far || deep + range < near ) continue;
-		if ( dot( planeA, where ) < -range ) continue;
-		if ( dot( planeB, where ) < -range ) continue;
-		if ( dot( planeC, where ) < -range ) continue;
-		if ( dot( planeD, where ) < -range ) continue;
-
-		uint at = 0;
-		InterlockedAdd( s_count, 1, at );
-		if ( at >= MostPerTile ) continue;
-
-		s_where[at] = float4( where, range );
-		s_index[at] = i;
+		InterlockedOr( s_mask[i >> 5], 1u << ( i & 31u ) );
 	}
 
 	GroupMemoryBarrierWithGroupSync();
 
-	uint kept = min( s_count, MostPerTile );
-
-	//And then the slices of the column, a thread at a time, against what the tile kept.
-	for ( uint cz = thread; cz < cellsZ; cz += 64 )
-	{
-		//Where this slice begins and ends, in metres from the eye. Even in the logarithm rather than
-		//in the depth, so a cell near the camera is small and one far away is not needlessly so.
-		float first = near * exp( float( cz ) / scale );
-		float past = cz + 1 >= cellsZ ? 1e9 : near * exp( float( cz + 1 ) / scale );
-
-		//The four corners of the cell at both depths; the view looks down its own negative z, so the near end is the larger.
-		float2 a = float2( x0, y0 ) * float2( hx, hy ) * first;
-		float2 b = float2( x0, y0 ) * float2( hx, hy ) * past;
-		float2 c = float2( x1, y1 ) * float2( hx, hy ) * first;
-		float2 d = float2( x1, y1 ) * float2( hx, hy ) * past;
-
-		float3 boxMin = float3( min( min( a, b ), min( c, d ) ), -past );
-		float3 boxMax = float3( max( max( a, b ), max( c, d ) ), -first );
-
-		uint at = cellsAt + ( ( group.x + ( cz * tiles ) ) * ( perCell + 1 ) );
-		uint got = 0;
-
-		for ( uint k = 0; k < kept; ++k )
-		{
-			float4 one = s_where[k];
-
-			if ( one.w >= 0.0 )
-			{
-				float3 nearest = clamp( one.xyz, boxMin, boxMax );
-				float3 away = one.xyz - nearest;
-
-				if ( dot( away, away ) > one.w * one.w ) continue;
-			}
-
-			if ( got < perCell ) g_lights.Store( ( at + 1 + got ) * 4, s_index[k] );
-			got++;
-		}
-
-		g_lights.Store( at * 4, min( got, perCell ) );
-	}
+	uint at = masksAt + ( group.x * maskWords );
+	for ( uint w = thread; w < maskWords; w += 64 ) g_lights.Store( ( at + w ) * 4, s_mask[w] );
 }

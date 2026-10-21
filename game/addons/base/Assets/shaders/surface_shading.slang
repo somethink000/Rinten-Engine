@@ -295,8 +295,8 @@ struct Shaded
 	float roughness;
 };
 
-//The world's second picture, eight bits a channel: the normal in rgb shortened by the roughness - so a mirror keeps the
-//normal's whole precision, and a writer that keeps a whole normal says a mirror - and the mirror weight in a. See SceneRoughness
+//The world's second picture in 8 bits: the normal in rgb shortened by roughness (a mirror keeps full precision)
+//and the mirror weight in a - see SceneRoughness
 float4 SurfaceWord( float3 normal, float roughness, float mirror )
 {
 	return float4( ( normal * ( 1.0 - ( 0.8 * min( roughness, 0.625 ) ) ) ) * 0.5 + 0.5, mirror );
@@ -446,20 +446,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//View depth, which cuts the light grid and picks the sun's cascade, worked out once
 	float viewDepth = mul( float4( s.world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
 
-	//The lights reaching it: a grid cell where the frame built one, else every light - see CoreLights
+	//The lights reaching it - see LightsHere
 	LightWalk walk = LightsHere( s.screen, viewDepth );
-	int count = int( walk.count );
-
-	//With one light at most per pixel this is no loop: a trip count of one drops the back edge - see kManyLights
-	if ( kManyLights == 0 ) count = min( count, 1 );
+	uint which;
 
 	//A surface with its own lightmap has the baked lights in it already - see LightBaked
 	bool sheetLit = HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0;
 
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
-
 		Light light = LightAt( which );
 
 		float3 l;
@@ -902,7 +897,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	Shaded o;
 	o.colour = shaded;
 
-	//Mirror weight for the SSR pass: the exact environment weight used here, gone by 0.625 rough, where its rays are GGX's - see reflection.shader
+	//Mirror weight for SSR: this environment weight, gone by 0.625 rough where its rays are GGX's - see reflection.shader
 	float mirror = LightStrength( reflectance ) * reach;
 
 	o.mirror = mirror * saturate( 1.0 - ( roughness * 1.6 ) );

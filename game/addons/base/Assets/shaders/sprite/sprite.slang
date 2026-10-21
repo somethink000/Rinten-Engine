@@ -344,14 +344,10 @@ float3 LightOn( float3 world, float3 normal, float2 screen )
 	float viewDepth = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
 
 	LightWalk walk = LightsHere( screen, viewDepth );
-	int count = int( walk.count );
+	uint which;
 
-	if ( kManyLights == 0 ) count = min( count, 1 );
-
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
-
 		Light light = LightAt( which );
 
 		float3 l;

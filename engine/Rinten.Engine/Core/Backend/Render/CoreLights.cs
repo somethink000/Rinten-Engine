@@ -161,7 +161,6 @@ internal static class CoreLights
 		scratch[7] = BitConverter.SingleToUInt32Bits( scale );
 		scratch[8] = (uint)decalCount;
 		scratch[9] = (uint)decalWords;
-		scratch[10] = TileSize;
 		scratch[11] = (uint)binsAt;
 		scratch[12] = (uint)maskWords;
 

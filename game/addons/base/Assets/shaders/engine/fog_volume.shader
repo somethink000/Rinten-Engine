@@ -137,7 +137,7 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 			float3 light = ambient;
 
 			if ( g_vTiles.w > 0.5 )
-				light += FogLampLight( centre, view, uv * float2( g_frame[0].settings.y, g_frame[0].settings.z ) );
+				light += FogLampLight( centre, view );
 
 			if ( sun ) light += sunLight * phase * SunShadow( centre, sunDirection, sunDirection, false );
 

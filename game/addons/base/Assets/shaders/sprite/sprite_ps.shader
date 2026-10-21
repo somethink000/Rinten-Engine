@@ -63,7 +63,7 @@ Out MainPs( V2F i )
 
 	if ( ( sprite.Lighting & 0xFF ) != 0 )
 	{
-		o.colour.rgb *= LightOn( i.world, i.normal, i.position.xy );
+		o.colour.rgb *= LightOn( i.world, i.normal );
 	}
 
 	if ( ( sprite.Lighting & Lit2DFlag ) != 0 )

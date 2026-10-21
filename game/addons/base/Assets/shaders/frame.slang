@@ -409,8 +409,8 @@ void LightLamp( uint index, inout Light one )
 #endif
 }
 
-//The lights a pixel walks (CoreLights): every light one by one without a grid; with one, the suns one by one and
-//then the bits of its tile's lamp mask, cut to the run of lamps its depth bin holds
+//The lights a point walks (CoreLights): every light one by one without a grid; with one, the suns one by one and then
+//the bits of its tile's lamp mask, cut to the run of lamps its depth bin holds
 struct LightWalk
 {
 	//The next light walked one by one, and where that stops
@@ -428,7 +428,8 @@ struct LightWalk
 	uint hi;
 };
 
-LightWalk LightsHere( float2 screen, float viewDepth )
+//Its tile from where the frame's matrix puts it, as the cull cut the tiles, whatever picture or window offset it is drawn into
+LightWalk LightsHere( float3 world )
 {
 	LightWalk walk;
 	walk.next = 0;
@@ -455,12 +456,15 @@ LightWalk LightsHere( float2 screen, float viewDepth )
 	uint masksAt = g_lightData.Load( 20 );
 	float near = asfloat( g_lightData.Load( 24 ) );
 	float scale = asfloat( g_lightData.Load( 28 ) );
-	uint tile = max( g_lightData.Load( 40 ), 1u );
 	uint binsAt = g_lightData.Load( 44 );
 	uint maskWords = g_lightData.Load( 48 );
 
-	uint tx = min( uint( max( screen.x, 0.0 ) ) / tile, tilesX - 1 );
-	uint ty = min( uint( max( screen.y, 0.0 ) ) / tile, tilesY - 1 );
+	float4 clip = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
+	float viewDepth = clip.w;
+	float2 ndc = clip.xy / max( abs( clip.w ), 1e-6 );
+
+	uint tx = min( uint( saturate( ndc.x * 0.5 + 0.5 ) * tilesX ), tilesX - 1 );
+	uint ty = min( uint( saturate( ndc.y * 0.5 + 0.5 ) * tilesY ), tilesY - 1 );
 	uint bin = min( uint( max( log( max( viewDepth, near ) / near ) * scale, 0.0 ) ), bins - 1 );
 
 	uint run = g_lightData.Load( ( binsAt + bin ) * 4 );
@@ -1795,11 +1799,9 @@ float FogPhase( float cosine )
 }
 
 //Lamp light in fog via the light grid, with falloff and cone but no shadow
-float3 FogLampLight( float3 here, float3 view, float2 screen )
+float3 FogLampLight( float3 here, float3 view )
 {
-	float viewDepth = mul( float4( here, 1.0 ), EYE_FRAME( worldToClip ) ).w;
-
-	LightWalk walk = LightsHere( screen, viewDepth );
+	LightWalk walk = LightsHere( here );
 	uint which;
 
 	float3 arriving = 0.0;
@@ -1977,7 +1979,7 @@ float3 VolumeFog( float3 lit, float3 world, float3 eye, float2 screen )
 			float density = strength * kFogVolumeDensity * pow( edge, fade );
 
 			float3 here = eye + ray * t;
-			float3 light = ambient + FogLampLight( here, view, screen );
+			float3 light = ambient + FogLampLight( here, view );
 
 			//One sun shadow tap per march step; a point in air needs no plane or soft edge
 			if ( sun )

@@ -443,11 +443,8 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 litDiffuse = float3( 0.0, 0.0, 0.0 );
 	float3 litSpecular = float3( 0.0, 0.0, 0.0 );
 
-	//View depth, which cuts the light grid and picks the sun's cascade, worked out once
-	float viewDepth = mul( float4( s.world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
-
 	//The lights reaching it - see LightsHere
-	LightWalk walk = LightsHere( s.screen, viewDepth );
+	LightWalk walk = LightsHere( s.world );
 	uint which;
 
 	//A surface with its own lightmap has the baked lights in it already - see LightBaked

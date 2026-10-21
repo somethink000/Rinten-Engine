@@ -1257,14 +1257,11 @@ internal sealed class CoreMeshRender
 			Log.Warning( $"{lost} clusters of the depth have a material with nothing to shade them -{said}" );
 	}
 
-	//Depth pre-pass for self-moving surfaces using their own vertex shader and alpha cut only
-	//so the shading pass writes no depth and gets early depth rejection
-	internal void DrawMoverDepth()
+	//The buffers a material's draw reads, in cluster_main.slang's order; empty where the pool has no vertices yet
+	private Span<ulong> MaterialBound()
 	{
-		if ( !Ready || materials <= 0 ) return;
-
 		var vertices = CoreGeometryPool.Vertices.Buffer;
-		if ( vertices == 0 ) return;
+		if ( vertices == 0 ) return default;
 
 		bound[0] = paramsBuffer;
 		bound[1] = tables.InstanceBuffer;
@@ -1275,10 +1272,43 @@ internal sealed class CoreMeshRender
 		bound[6] = visibleBuffer;
 		bound[7] = paramsBuffer;
 
-		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang.
+		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang
 		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
 		bound[9] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.FrameSide );
-		var drawBound = bound.AsSpan( 0, 10 );
+
+		return bound.AsSpan( 0, 10 );
+	}
+
+	//A material's push block: its bin and number, the screen, and its tint in g_visSpare0, which ClusterInstance multiplies in
+	private byte[] MaterialPush( int m, Color tint )
+	{
+		Array.Clear( visPush );
+
+		var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>( visPush.AsSpan() );
+		words[0] = (uint)binnedAt;
+		words[1] = (uint)m;
+		words[2] = (uint)pixels.Width;
+		words[3] = (uint)pixels.Height;
+		words[4] = (uint)entriesAt;
+		words[5] = (uint)binOffsetsAt;
+
+		var floats = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( visPush.AsSpan() );
+		floats[16] = tint.r;
+		floats[17] = tint.g;
+		floats[18] = tint.b;
+		floats[19] = tint.a;
+
+		return visPush;
+	}
+
+	//Depth pre-pass for self-moving surfaces using their own vertex shader and alpha cut only
+	//so the shading pass writes no depth and gets early depth rejection
+	internal void DrawMoverDepth()
+	{
+		if ( !Ready || materials <= 0 ) return;
+
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return;
 
 		CoreRenderDevice.ZoneBegin( "mover depth" );
 
@@ -1321,25 +1351,12 @@ internal sealed class CoreMeshRender
 				continue;
 			}
 
-			Array.Clear( visPush );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 0 ), (uint)binnedAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 4 ), (uint)m );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 8 ), (uint)pixels.Width );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 12 ), (uint)pixels.Height );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 16 ), (uint)entriesAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 20 ), (uint)binOffsetsAt );
-
-			BitConverter.TryWriteBytes( visPush.AsSpan( 64 ), material.Tint.r );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 68 ), material.Tint.g );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 72 ), material.Tint.b );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 76 ), material.Tint.a );
-
 			//Whole run in one call, far spans included; letting them write depth while shading was slower
 			for ( var span = 0; span < binDraws; span++ )
 			{
 				if ( CoreRenderDevice.DrawPulledIndexedIndirect( material.DepthPipeline, visibleBuffer,
 					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
-					visPush, material.Texture, drawBound ) )
+					MaterialPush( m, material.Tint ), material.Texture, drawBound ) )
 					MoverDepthDraws++;
 			}
 		}
@@ -1368,20 +1385,8 @@ internal sealed class CoreMeshRender
 	{
 		if ( !Ready || materials <= 0 ) return false;
 
-		var vertices = CoreGeometryPool.Vertices.Buffer;
-		if ( vertices == 0 ) return false;
-
-		bound[0] = paramsBuffer;
-		bound[1] = tables.InstanceBuffer;
-		bound[2] = CoreClusters.Clusters.Buffer;
-		bound[3] = CoreClusters.ClusterVertices.Buffer;
-		bound[4] = CoreClusters.ClusterTriangles.Buffer;
-		bound[5] = vertices;
-		bound[6] = visibleBuffer;
-		bound[7] = paramsBuffer;
-		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
-		bound[9] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.FrameSide );
-		var drawBound = bound.AsSpan( 0, 10 );
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return false;
 
 		var drew = false;
 		var most = Math.Min( materials, ushort.MaxValue - 1 );
@@ -1409,24 +1414,11 @@ internal sealed class CoreMeshRender
 
 			if ( material.VelocityPipeline == 0 ) continue;
 
-			Array.Clear( visPush );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 0 ), (uint)binnedAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 4 ), (uint)m );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 8 ), (uint)pixels.Width );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 12 ), (uint)pixels.Height );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 16 ), (uint)entriesAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 20 ), (uint)binOffsetsAt );
-
-			BitConverter.TryWriteBytes( visPush.AsSpan( 64 ), material.Tint.r );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 68 ), material.Tint.g );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 72 ), material.Tint.b );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 76 ), material.Tint.a );
-
 			for ( var span = 0; span < binDraws; span++ )
 			{
 				drew |= CoreRenderDevice.DrawPulledIndexedIndirect( material.VelocityPipeline, visibleBuffer,
 					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
-					visPush, material.Texture, drawBound );
+					MaterialPush( m, material.Tint ), material.Texture, drawBound );
 			}
 		}
 
@@ -1445,22 +1437,8 @@ internal sealed class CoreMeshRender
 		//all whole branches of that stage which the ordinary frame never takes and pays for anyway - see CoreSceneRenderer.ShadeSpecialize.
 		var specialize = CoreSceneRenderer.ShadeSpecialize();
 
-		var vertices = CoreGeometryPool.Vertices.Buffer;
-		if ( vertices == 0 ) return;
-
-		bound[0] = paramsBuffer;
-		bound[1] = tables.InstanceBuffer;
-		bound[2] = CoreClusters.Clusters.Buffer;
-		bound[3] = CoreClusters.ClusterVertices.Buffer;
-		bound[4] = CoreClusters.ClusterTriangles.Buffer;
-		bound[5] = vertices;
-		bound[6] = visibleBuffer;
-		bound[7] = paramsBuffer;
-
-		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang.
-		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
-		bound[9] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.FrameSide );
-		var drawBound = bound.AsSpan( 0, 10 );
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return;
 
 		CoreRenderDevice.ZoneBegin( "materials" );
 
@@ -1544,20 +1522,6 @@ internal sealed class CoreMeshRender
 				continue;
 			}
 
-			Array.Clear( visPush );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 0 ), (uint)binnedAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 4 ), (uint)m );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 8 ), (uint)pixels.Width );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 12 ), (uint)pixels.Height );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 16 ), (uint)entriesAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 20 ), (uint)binOffsetsAt );
-
-			//Material tint in g_visSpare0, multiplied with the instance tint in ClusterInstance
-			BitConverter.TryWriteBytes( visPush.AsSpan( 64 ), material.Tint.r );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 68 ), material.Tint.g );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 72 ), material.Tint.b );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 76 ), material.Tint.a );
-
 			//One call per span, nearest first; far spans use the far pass, or the full one if it will not build
 			for ( var span = 0; span < binDraws; span++ )
 			{
@@ -1567,7 +1531,7 @@ internal sealed class CoreMeshRender
 
 				if ( CoreRenderDevice.DrawPulledIndexedIndirect( pipeline, visibleBuffer,
 					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
-					visPush, material.Texture, drawBound ) )
+					MaterialPush( m, material.Tint ), material.Texture, drawBound ) )
 					MaterialDraws++;
 			}
 		}

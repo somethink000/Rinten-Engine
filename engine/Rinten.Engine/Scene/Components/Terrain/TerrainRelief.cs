@@ -2,13 +2,11 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//The ring of relief round the eye: the ground's triangles near it cut finer the nearer they are, and lifted along their normal by the
-//layers' height maps times their displacement on the card - see terrain_relief.shader - then drawn with the ground's own material over
-//the ground, whose corners sink a little under it, as a mesh made on the card (CoreCardMeshes): in every view of the world and the maps
-//of what moves, so it casts. The full frame alone; collision never sees it.
+//The relief ring: ground near the eye cut finer the nearer and lifted by layer heights (terrain_relief.shader), drawn
+//as a card mesh (CoreCardMeshes) with the ground's material so it casts. Full frame only; collision never sees it
 internal sealed class TerrainRelief : IDisposable
 {
-	/// <summary>Metres from the eye the lift reaches, the last of which it fades over, and how far the ground's own corners sink under it.</summary>
+	/// <summary>Metres the lift reaches and fades over, and how far the ground's corners sink under it.</summary>
 	public const float Reach = 16.0f;
 	public const float Fade = 4.0f;
 	public const float Sink = 0.02f;
@@ -48,6 +46,9 @@ internal sealed class TerrainRelief : IDisposable
 	private BBox box;
 
 	private static readonly List<TerrainRelief> live = new();
+
+	//What ExpandAll walks, copied out of live under its lock
+	private static readonly List<TerrainRelief> expanding = new();
 	private static long expandedFrame = -1;
 
 	/// <summary>The numbers the ring's draw carries - where the paint mask is; see Terrain.Mask.</summary>
@@ -71,7 +72,7 @@ internal sealed class TerrainRelief : IDisposable
 		CoreCardMeshes.Add( shape );
 	}
 
-	/// <summary>Where the ring is drawn: the world, the ground's material, where the terrain stands, and how far its layers can lift it in its metres.</summary>
+	/// <summary>Where the ring is drawn: world, material, the terrain's place, and its layers' greatest lift.</summary>
 	public void Stand( SceneWorld world, Material wears, Transform terrain, float lift )
 	{
 		shape.World = world;
@@ -96,7 +97,7 @@ internal sealed class TerrainRelief : IDisposable
 	/// <summary>Whether the eye has gone far enough from where the ring was built that it wants building again.</summary>
 	public bool Wants( Vector3 eye ) => !built || eye.Distance( builtAt ) > Moved;
 
-	/// <summary>Builds the ring round the eye out of the grounds near it and their chunks' palettes, in the terrain's metres.</summary>
+	/// <summary>Builds the ring from the ground near the eye and its chunks' palettes, in the terrain's metres.</summary>
 	public void Build( Vector3 eye, IEnumerable<(TerrainSoup Ground, byte[] Palette)> grounds )
 	{
 		builtAt = eye;
@@ -245,19 +246,22 @@ internal sealed class TerrainRelief : IDisposable
 
 	private static ComputeShader Expand => field ??= new ComputeShader( "shaders/engine/terrain_relief.shader", "MainCs" );
 
-	/// <summary>Makes every ring built since the last. Between targets, before anything shades; once a turn of the loop, whichever view asks first.</summary>
+	/// <summary>Makes every ring built since the last, between targets before shading, once a turn.</summary>
 	internal static void ExpandAll()
 	{
 		if ( expandedFrame == EngineLoop.LoopFrames || CoreRenderDevice.PortableFrame || !CoreNative.Available ) return;
 
 		expandedFrame = EngineLoop.LoopFrames;
 
-		TerrainRelief[] all;
-		lock ( live ) all = live.ToArray();
+		lock ( live )
+		{
+			expanding.Clear();
+			expanding.AddRange( live );
+		}
 
 		Span<ulong> buffers = stackalloc ulong[4];
 
-		foreach ( var one in all )
+		foreach ( var one in expanding )
 		{
 			if ( !one.waiting || one.ParamsIndex == 0 ) continue;
 

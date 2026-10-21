@@ -3,11 +3,14 @@ using System.Threading;
 
 namespace Rinten;
 
-/// <summary>Ticks the physics in FrameStage.PhysicsStep</summary>
+/// <summary>Steps the scene's particle effects, on the card where they can be and on the job workers otherwise.</summary>
 [Expose]
 sealed class ParticleGameSystem : GameObjectSystem
 {
 	private List<ParticleEffect.ParticleWork> workList = new( 64 );
+
+	//The parallel step's body, made once: a lambda over workList made every frame is a closure every frame
+	private Func<int, System.Threading.Tasks.ParallelLoopState, long, long> stepOne;
 
 	//Reused so we don't re-enumerate Scene.GetAll (iterator allocs) three times per frame
 	private readonly List<ParticleEffect> _effects = new();
@@ -105,14 +108,14 @@ sealed class ParticleGameSystem : GameObjectSystem
 		var work = Rinten.Diagnostics.FrameProfiler.Push( "particle work" );
 
 		//Parallelise only with enough particles; Parallel.ForEach setup costs a few microseconds
-		if ( stepped >= ParallelParticles && !Rinten.Utility.Parallel.InOrder )
+		if ( stepped >= ParallelParticles )
 		{
 			//Timed per worker, not per item: a slice a thread, on the engine's job workers
-			var list = workList;
+			stepOne ??= ( i, _, began ) => { ProcessWork( workList[i] ); return began; };
 
-			Rinten.Utility.Parallel.For( 0, list.Count,
+			Rinten.Utility.Parallel.For( 0, workList.Count,
 				static () => Stopwatch.GetTimestamp(),
-				( i, _, began ) => { ProcessWork( list[i] ); return began; },
+				stepOne,
 				static began =>
 				{
 					Interlocked.Add( ref StepTicks, Stopwatch.GetTimestamp() - began );
@@ -192,7 +195,7 @@ sealed class ParticleGameSystem : GameObjectSystem
 	//Bumped when the report's window opens: each effect counts its steps afresh from there - see ParticleEffect.StepTicks
 	internal static long CountedFrom;
 
-	/// <summary>The effects of a scene that cost the most processor since the window opened: name, ticks, particles stepped.</summary>
+	/// <summary>A scene's dearest effects on the processor since the window opened: name, ticks, particles.</summary>
 	internal static List<(string Name, long Ticks, long Particles)> Costliest( Scene scene, int most )
 	{
 		var found = new List<ParticleEffect>();

@@ -119,7 +119,7 @@ float3 AroundAt( float3 at, float3 n )
 {
 	if ( HasBakedVolume() )
 	{
-		float3 spot = BakedVolumeSpot( at + ( n * ( 0.35 / g_frame[0].volumeOrigin.w ) ), n );
+		float3 spot = BakedVolumeSpot( at, n );
 		float3 around = BakedVolume( spot, n ) + BakedGlowVolumes( spot );
 
 		if ( HasBakedBounce() ) around += BakedBounce( spot, n );

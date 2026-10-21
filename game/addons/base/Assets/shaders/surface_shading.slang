@@ -792,9 +792,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	}
 	else if ( HasBakedVolume() )
 	{
-		//A step off the surface, so a floor reads the room above it rather than the lattice's layer below.
-		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
-		float3 spot = BakedVolumeSpot( lifted, geometric );
+		float3 spot = BakedVolumeSpot( s.world, geometric );
 
 		ambientSky = BakedVolume( spot, normal ) + BakedGlowVolumes( spot );
 		if ( HasBakedBounce() ) ambientSky += BakedBounce( spot, normal );

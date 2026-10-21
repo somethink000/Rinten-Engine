@@ -2168,23 +2168,27 @@ void BakedLayer( float2 uv, out float4 red, out float4 green, out float4 blue )
 	blue = g_textures[uint( g_frame[0].bakedVolume.z )].SampleLevel( uv, 0.0 );
 }
 
-//Four corners' weights at one x end of a cell: trilinear, times how far past their walls the point is not, times
-//how far in front of the surface they stand as DDGI weighs probes; d is the point's distance from each per axis
-float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float4 reachX, float4 reachY, float4 reachZ, float3 normal )
+//How far past their walls a point is not, for four corners at one x end of a cell; d is its distance from each per
+//axis. An eighth of a cell of give past a wall, more than a nibble's rounding
+float4 BakedSeen( float dx, float4 dy, float4 dz, float4 reachX, float4 reachY, float4 reachZ )
+{
+	return saturate( ( ( reachX - dx ) * 8.0 ) + 1.0 ) * saturate( ( ( reachY - dy ) * 8.0 ) + 1.0 ) * saturate( ( ( reachZ - dz ) * 8.0 ) + 1.0 );
+}
+
+//Four corners' weights at one x end of a cell: trilinear, times how far in front of the surface they stand as DDGI
+//weighs probes
+float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float3 normal )
 {
 	float4 sy = float4( -1.0, 1.0, -1.0, 1.0 );
 	float4 sz = float4( -1.0, -1.0, 1.0, 1.0 );
 
 	float4 trilinear = ( 1.0 - dx ) * ( 1.0 - dy ) * ( 1.0 - dz );
 
-	//An eighth of a cell of give past a wall, more than a nibble's rounding
-	float4 seen = saturate( ( ( reachX - dx ) * 8.0 ) + 1.0 ) * saturate( ( ( reachY - dy ) * 8.0 ) + 1.0 ) * saturate( ( ( reachZ - dz ) * 8.0 ) + 1.0 );
-
 	float4 along = ( sx * dx * normal.x ) + ( sy * dy * normal.y ) + ( sz * dz * normal.z );
 	float4 apart = sqrt( ( dx * dx ) + ( dy * dy ) + ( dz * dz ) );
 	float4 facing = saturate( ( along / max( apart, 1e-4 ) * 0.5 ) + 0.5 );
 
-	return trilinear * seen * ( ( facing * facing ) + 0.2 );
+	return trilinear * ( ( facing * facing ) + 0.2 );
 }
 
 //A point's place in the lattice, clamped inside it
@@ -2195,8 +2199,9 @@ float3 BakedLatticeAt( float3 world )
 }
 
 //How much each of a lattice point's cell's eight corners counts for it (BakeVolume.Walls, BakedCorners): x's near
-//corners in nearSide, far in farSide, each along y then z. False where the bake has no walls
-bool BakedCornerWeights( float3 at, float3 normal, out float3 cell, out float4 nearSide, out float4 farSide )
+//corners in nearSide, far in farSide, each along y then z. A corner must see the surface `from` too, held to the
+//cell, so a read stepped through a wall takes neither side of it. False where the bake has no walls
+bool BakedCornerWeights( float3 at, float3 from, float3 normal, out float3 cell, out float4 nearSide, out float4 farSide )
 {
 	float3 count = g_frame[0].volumeCount.xyz;
 	cell = min( floor( at ), count - 2.0 );
@@ -2208,6 +2213,7 @@ bool BakedCornerWeights( float3 at, float3 normal, out float3 cell, out float4 n
 	if ( walls == 0u ) return false;
 
 	float3 f = at - cell;
+	float3 g = saturate( from - cell );
 
 	//A row of cells an axis; each texel that axis's reach of the cell's eight corners, a nibble each
 	float u = ( ( cell.y * count.x ) + cell.x + 0.5 ) / ( count.x * count.y );
@@ -2222,34 +2228,56 @@ bool BakedCornerWeights( float3 at, float3 normal, out float3 cell, out float4 n
 	float4 yFar = floor( y / 16.0 );
 	float4 zFar = floor( z / 16.0 );
 
+	float4 nearX = ( x - ( xFar * 16.0 ) ) / 15.0;
+	float4 nearY = ( y - ( yFar * 16.0 ) ) / 15.0;
+	float4 nearZ = ( z - ( zFar * 16.0 ) ) / 15.0;
+
 	float4 dy = lerp( f.yyyy, 1.0 - f.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
 	float4 dz = lerp( f.zzzz, 1.0 - f.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
+	float4 gy = lerp( g.yyyy, 1.0 - g.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
+	float4 gz = lerp( g.zzzz, 1.0 - g.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
 
-	nearSide = BakedCorners( f.x, -1.0, dy, dz, ( x - ( xFar * 16.0 ) ) / 15.0, ( y - ( yFar * 16.0 ) ) / 15.0, ( z - ( zFar * 16.0 ) ) / 15.0, normal );
-	farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0, normal );
+	nearSide = BakedCorners( f.x, -1.0, dy, dz, normal ) * BakedSeen( f.x, dy, dz, nearX, nearY, nearZ )
+		* BakedSeen( g.x, gy, gz, nearX, nearY, nearZ );
+	farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, normal ) * BakedSeen( 1.0 - f.x, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0 )
+		* BakedSeen( 1.0 - g.x, gy, gz, xFar / 15.0, yFar / 15.0, zFar / 15.0 );
 
 	return true;
 }
 
-//Where in the lattice a point reads: moved within its cell towards the corners it sees and that face it (BakeVolume.Walls),
-//so one filtered read takes their light and not the other side of a wall's - as Unity's probe volumes warp theirs
-float3 BakedVolumeSpot( float3 world, float3 normal )
+//The middle of the corners' weights at lattice point at, seen from the surface from, in spot; false where no corner
+//counts or the bake has no walls
+bool BakedMoved( float3 at, float3 from, float3 normal, out float3 spot )
 {
-	float3 at = BakedLatticeAt( world );
+	spot = at;
 
 	float3 cell;
 	float4 nearSide, farSide;
-	if ( !BakedCornerWeights( at, normal, cell, nearSide, farSide ) ) return at;
+	if ( !BakedCornerWeights( at, from, normal, cell, nearSide, farSide ) ) return false;
 
 	float4 both = nearSide + farSide;
 	float total = dot( both, float4( 1.0, 1.0, 1.0, 1.0 ) );
+	if ( total < 1e-5 ) return false;
+
+	spot = cell + ( float3( dot( farSide, float4( 1.0, 1.0, 1.0, 1.0 ) ), both.y + both.w, both.z + both.w ) / total );
+	return true;
+}
+
+//Cells a surface's read steps off it along its normal, past BakedSeen's give, so a floor reads the room above it
+static const float BakedLift = 0.35;
+
+//Where in the lattice a surface point reads: stepped off, then moved within its cell towards the corners that see it and
+//face it (BakeVolume.Walls), as Unity's probe volumes warp theirs; a step into what the surface rests on reads from it
+float3 BakedVolumeSpot( float3 world, float3 normal )
+{
+	float3 from = BakedLatticeAt( world );
+	float3 at = BakedLatticeAt( world + ( normal * ( BakedLift / g_frame[0].volumeOrigin.w ) ) );
+
+	float3 spot;
+	if ( BakedMoved( at, from, normal, spot ) || BakedMoved( from, from, normal, spot ) ) return spot;
 
 	//No corner sees it: inside a wall, where the plain read is as good as any
-	if ( total < 1e-5 ) return at;
-
-	float3 moved = float3( dot( farSide, float4( 1.0, 1.0, 1.0, 1.0 ) ), both.y + both.w, both.z + both.w ) / total;
-
-	return cell + moved;
+	return at;
 }
 
 //One of the volume's per-point pictures at a spot (BakedVolumeSpot), its layers lerped, half a texel inside each

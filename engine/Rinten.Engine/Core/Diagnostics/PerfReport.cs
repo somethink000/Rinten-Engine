@@ -16,6 +16,13 @@ internal static class PerfReport
 	//-perfwarmup: seconds to wait after the first frame before measuring (default 30, past JIT/compiler)
 	private static readonly int warmup = Rinten.Utility.CommandLine.GetSwitchInt( "-perfwarmup", 30 );
 
+	//With -perfscene or -perfplay the warm-up starts once the tools have opened the scene - see ScenarioReady
+	private static bool scenarioPending = Rinten.Utility.CommandLine.HasSwitch( "-perfscene" ) ||
+		Rinten.Utility.CommandLine.HasSwitch( "-perfplay" );
+
+	/// <summary>The run's scene is open, and playing where asked: the warm-up may start.</summary>
+	internal static void ScenarioReady() => scenarioPending = false;
+
 	//-perfwindowshot: path to save the actual presented window image (PPM plus alpha PGM)
 	private static string WindowShot =>
 		Rinten.Utility.CommandLine.GetSwitch( "-perfwindowshot", "" ).TrimQuoted();
@@ -336,8 +343,8 @@ internal static class PerfReport
 		//window: the editor's, or the game's own, which is the only one a browser or a standalone build has.
 		if ( CoreUiWindow.FramesPresented == 0 && CoreGameRenderer.FramesPresented == 0 ) return;
 
-		//Nor a scene still coming down a page: its frames until then draw a scene that is not there.
-		if ( WebContent.ScenesWaiting > 0 ) return;
+		//Nor a scene still coming down a page or still to be opened: its frames until then draw a scene that is not there.
+		if ( WebContent.ScenesWaiting > 0 || scenarioPending ) return;
 
 		if ( firstFrameAt == 0 )
 		{
@@ -581,7 +588,7 @@ internal static class PerfReport
 			report.AppendLine( $"  card idle between recordings {VkFrame.CardIdleMs / frameMs.Count:F3} ms a frame " +
 				$"({VkFrame.CardIdleRecordings / (double)frameMs.Count:F1} recordings a frame)" );
 
-		//How long the top of a frame waited for the screen to show the frame before last - see CorePresent. Only held to the refresh.
+		//How long a frame's top waited for the screen to show the frame before last (CorePresent); held to the refresh only
 		var generatedShown = VkFrame.GeneratedShown - generatedAtArm;
 
 		if ( generatedShown > 0 )

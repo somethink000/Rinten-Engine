@@ -215,6 +215,8 @@ public static class PerfScenario
 		{
 			Log.Warning( e, "-perfplay: could not start the game" );
 		}
+
+		Rinten.Diagnostics.PerfReport.ScenarioReady();
 	}
 
 	//Brings up the docks the run asked for, in the layout on screen.

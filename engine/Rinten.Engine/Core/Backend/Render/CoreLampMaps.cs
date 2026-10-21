@@ -367,7 +367,9 @@ internal sealed class CoreLampMaps : IDisposable
 		{
 			lamp = new Lamp { Light = light, Faces = wanted, Spot = spot, Class = -1 };
 
-			if ( !Place( lamp, sizeClass, coarser: true ) || lamp.Class != sizeClass ) crowding = true;
+			while ( !Place( lamp, sizeClass, coarser: true ) && Demote() ) { }
+
+			if ( lamp.Class != sizeClass ) crowding = true;
 
 			if ( lamp.Class < 0 )
 			{
@@ -434,6 +436,30 @@ internal sealed class CoreLampMaps : IDisposable
 			if ( SizeOf( sizeClass ) >= pixels ) return sizeClass;
 
 		return 0;
+	}
+
+	//Room made by the lamp with the finest squares going a size coarser, to be baked again there; false where all are coarsest
+	private bool Demote()
+	{
+		for ( var sizeClass = 0; sizeClass < Sizes - 1; sizeClass++ )
+		{
+			foreach ( var lamp in lamps.Values )
+			{
+				if ( lamp.Class != sizeClass ) continue;
+
+				Release( lamp );
+
+				//Where a layer it shared keeps its class, the smaller squares may not fit: it takes its own back
+				var moved = Place( lamp, sizeClass + 1, coarser: true );
+				if ( !moved ) Place( lamp, sizeClass, coarser: false );
+
+				Forget( lamp );
+
+				if ( moved ) return true;
+			}
+		}
+
+		return false;
 	}
 
 	//Finds a run of squares for a lamp's faces at this size (or coarser if allowed); false if no room

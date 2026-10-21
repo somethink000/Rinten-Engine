@@ -47,9 +47,8 @@ internal static unsafe class VkSubmitter
 	//Whether anything is in the worker's hands - cheap to ask, and the whole of what most callers need.
 	internal static bool Busy => Volatile.Read( ref handed );
 
-	//The worker between a generated frame's present and its own: what is left waits for its time and the render lock, so the
-	//recording thread, which holds that lock, may use the queue meanwhile - see Yield. Each hand-over is numbered, so a job whose
-	//present was made by another thread first is known to be over - see TakeOver.
+	//Parked between a generated frame's present and its own, the worker waits for its time and the render lock (Yield)
+	//Hand-overs are numbered, so a job presented first by another thread is known to be over - see TakeOver
 	private static bool parked;
 	private static long handing;
 
@@ -97,7 +96,7 @@ internal static unsafe class VkSubmitter
 		}
 	}
 
-	/// <summary>Until the worker is not inside a call to the queue - a job left waiting to be shown stays waiting. Only under the render lock, which that job takes before it touches the queue.</summary>
+	/// <summary>Waits until the worker is out of the queue; a parked job stays parked. Under the render lock only.</summary>
 	internal static void Yield()
 	{
 		if ( !Volatile.Read( ref handed ) ) return;
@@ -217,7 +216,7 @@ internal static unsafe class VkSubmitter
 		}
 	}
 
-	//The call the frame end used to make itself. False where another thread made the frame's own present first - see TakeOver.
+	//The frame's presents; false where another thread made its own present first - see TakeOver
 	private static bool Perform( ref Job one, long number )
 	{
 		if ( one.Generated )
@@ -288,20 +287,5 @@ internal static unsafe class VkSubmitter
 		CorePresent.Stamp( &present, &told, &id );
 
 		return VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
-	}
-
-	/// <summary>Until a stopwatch time: asleep for most of it, spinning the last millisecond, which a sleep cannot hit.</summary>
-	internal static void Hold( long until )
-	{
-		while ( true )
-		{
-			var left = until - System.Diagnostics.Stopwatch.GetTimestamp();
-			if ( left <= 0 ) return;
-
-			var ms = left * 1000 / System.Diagnostics.Stopwatch.Frequency;
-
-			if ( ms > 1 ) Thread.Sleep( (int)( ms - 1 ) );
-			else Thread.SpinWait( 64 );
-		}
 	}
 }

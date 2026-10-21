@@ -5,8 +5,8 @@ using static Rinten.Rendering.SpriteBatchSceneObject;
 
 namespace Rinten;
 
-//An effect stepped and drawn on the card: its particles are made here as ever, handed over at its next step, and moved, coloured
-//and written out as sprites by particles.slang. Which effects - see ParticleEffect.OnCard. The full frame only: a page has no compute
+//An effect stepped and drawn on the card: particles made here go over at its next step, and particles.slang moves
+//and colours them into sprites. Which effects: ParticleEffect.OnCard. Full frame only
 internal sealed class ParticleGpuRun : IDisposable
 {
 	//One particle as the card holds it - Particle in particles.slang
@@ -173,7 +173,7 @@ internal sealed class ParticleGpuRun : IDisposable
 		return true;
 	}
 
-	/// <summary>A step of the effect: what its slots age by, which of them end, and the table the card reads this frame.</summary>
+	/// <summary>A step of the effect: what its slots age by, which end, and the table the card reads.</summary>
 	internal void Step( float delta )
 	{
 		owed += delta;
@@ -199,7 +199,7 @@ internal sealed class ParticleGpuRun : IDisposable
 		effect.ParticleBounds = BBox.FromPositionAndSize( effect.WorldPosition, MathF.Max( reach, 1.0f ) * 2.0f );
 		drawer.Bounds = effect.ParticleBounds;
 
-		//Once until it is stepped on the card: effects step side by side on the workers, and a search of the list under the lock was each one's wait.
+		//Listed once until stepped: effects step on the workers side by side, so no search under the lock
 		if ( Interlocked.Exchange( ref listed, 1 ) == 0 )
 		{
 			lock ( Runs ) Runs.Add( this );
@@ -270,7 +270,7 @@ internal sealed class ParticleGpuRun : IDisposable
 	//Everything the card reads that is the effect's rather than a particle's, as it stands now
 	private void Lay( float[] into )
 	{
-		//The headers alone: a baked curve or the shape past them is read only where a header below says where it is, and every header is laid again.
+		//Headers only: what is past them is read only where a header says, and every header is laid again
 		Array.Clear( into, 0, TableShape );
 
 		var gravity = Gravity( effect );
@@ -588,11 +588,11 @@ internal sealed class ParticleGpuRun : IDisposable
 	/// <summary>Whether the card can step particles here at all.</summary>
 	internal static bool Possible => CoreNative.Available && !CoreRenderDevice.PortableFrame;
 
-	//Where the view that steps them stands and looks, which a sorted effect is ordered for - the first view drawn in a turn; others take its order
+	//Where the turn's first view stands and looks, which sorted effects are ordered for
 	private static Vector3 eye;
 	private static Vector3 looking;
 
-	/// <summary>Steps every run that has work, once a turn of the loop, into the frame being recorded - before the world that draws them.</summary>
+	/// <summary>Steps every run with work once a turn, into the frame recorded, before the world draws them.</summary>
 	internal static void Simulate( Vector3 position, Vector3 forward )
 	{
 		if ( simulatedAt == EngineLoop.LoopFrames ) return;
@@ -616,18 +616,57 @@ internal sealed class ParticleGpuRun : IDisposable
 
 		frames++;
 
-		foreach ( var run in stepping ) run.Dispatch();
+		//Each stage of every run together and a barrier between stages: no run reads what another writes
+		Stage( static run => run.Upload() );
+		Stage( static run => run.Spawn() );
+		Stage( static run => run.Step() );
+		Stage( static run => run.Sort() );
 
 		stepping.Clear();
 
 		CoreRenderDevice.ZoneEnd();
 	}
 
+	private static void Stage( Action<ParticleGpuRun> each )
+	{
+		CoreRenderDevice.HoldBarriers( true );
+
+		try
+		{
+			foreach ( var run in stepping ) each( run );
+		}
+		finally
+		{
+			CoreRenderDevice.HoldBarriers( false );
+		}
+	}
+
 	private readonly ulong[] bound = new ulong[6];
 	private readonly byte[] push = new byte[64];
 
-	private void Dispatch()
+	//Push in particles.slang: a float3 starts on the next sixteen bytes
+	[StructLayout( LayoutKind.Explicit, Size = 64 )]
+	private struct Push
 	{
+		[FieldOffset( 0 )] public uint Capacity;
+		[FieldOffset( 4 )] public uint SpawnCount;
+		[FieldOffset( 8 )] public float Delta;
+		[FieldOffset( 12 )] public uint Frame;
+		[FieldOffset( 16 )] public uint SpriteStride;
+		[FieldOffset( 32 )] public System.Numerics.Vector3 Eye;
+		[FieldOffset( 44 )] public uint Sorted;
+		[FieldOffset( 48 )] public System.Numerics.Vector3 Forward;
+	}
+
+	//Whether this turn's buffers are all there and written, and how many particles it spawns
+	private bool ready;
+	private int spawning;
+
+	//What the card reads this turn written into its buffers, and the push block laid
+	private void Upload()
+	{
+		ready = false;
+
 		bound[0] = particles.Handle;
 		bound[1] = sprites.Handle;
 		bound[2] = table.Handle;
@@ -644,7 +683,7 @@ internal sealed class ParticleGpuRun : IDisposable
 			tableWritten = true;
 		}
 
-		var count = Math.Min( pending.Count, capacity );
+		var count = spawning = Math.Min( pending.Count, capacity );
 
 		if ( count > 0 )
 		{
@@ -652,35 +691,42 @@ internal sealed class ParticleGpuRun : IDisposable
 			CoreRenderDevice.FrameWrite( spawnSlots.Handle, 0, MemoryMarshal.AsBytes( CollectionsMarshal.AsSpan( pendingSlots )[..count] ) );
 		}
 
-		BitConverter.TryWriteBytes( push.AsSpan( 0 ), (uint)capacity );
-		BitConverter.TryWriteBytes( push.AsSpan( 4 ), (uint)count );
-		BitConverter.TryWriteBytes( push.AsSpan( 8 ), owed );
-		BitConverter.TryWriteBytes( push.AsSpan( 12 ), frames );
-		BitConverter.TryWriteBytes( push.AsSpan( 16 ), (uint)Marshal.SizeOf<SpriteData>() );
-
-		//A float3 starts on the next sixteen bytes in the push block - see Push in particles.slang
-		BitConverter.TryWriteBytes( push.AsSpan( 32 ), eye.x );
-		BitConverter.TryWriteBytes( push.AsSpan( 36 ), eye.y );
-		BitConverter.TryWriteBytes( push.AsSpan( 40 ), eye.z );
-		BitConverter.TryWriteBytes( push.AsSpan( 44 ), unsorted is not null ? 1u : 0u );
-		BitConverter.TryWriteBytes( push.AsSpan( 48 ), looking.x );
-		BitConverter.TryWriteBytes( push.AsSpan( 52 ), looking.y );
-		BitConverter.TryWriteBytes( push.AsSpan( 56 ), looking.z );
-
-		if ( count > 0 ) CoreRenderDevice.Dispatch( spawnPipeline, bound, ( count + 63 ) / 64, 1, 1, push );
-
-		CoreRenderDevice.Dispatch( stepPipeline, bound, ( capacity + 63 ) / 64, 1, 1, push );
-
-		if ( unsorted is not null ) CoreRenderDevice.Dispatch( sortPipeline, bound, 1, 1, 1, push );
+		MemoryMarshal.Write( push, new Push
+		{
+			Capacity = (uint)capacity,
+			SpawnCount = (uint)count,
+			Delta = owed,
+			Frame = frames,
+			SpriteStride = (uint)Marshal.SizeOf<SpriteData>(),
+			Eye = new( eye.x, eye.y, eye.z ),
+			Sorted = unsorted is not null ? 1u : 0u,
+			Forward = new( looking.x, looking.y, looking.z ),
+		} );
 
 		pending.Clear();
 		pendingSlots.Clear();
 		owed = 0.0f;
+		ready = true;
+	}
+
+	private void Spawn()
+	{
+		if ( ready && spawning > 0 ) CoreRenderDevice.Dispatch( spawnPipeline, bound, ( spawning + 63 ) / 64, 1, 1, push );
+	}
+
+	private void Step()
+	{
+		if ( ready ) CoreRenderDevice.Dispatch( stepPipeline, bound, ( capacity + 63 ) / 64, 1, 1, push );
+	}
+
+	private void Sort()
+	{
+		if ( ready && unsorted is not null ) CoreRenderDevice.Dispatch( sortPipeline, bound, 1, 1, 1, push );
 	}
 
 	//-- the drawing ---------------------------------------------------------------------------------------------------
 
-	//The effect's sprites drawn as the sprite batches draw theirs, out of what the card wrote - a slot with nothing in it is a sprite of no size
+	//The sprites drawn as the sprite batches draw theirs, from what the card wrote; an empty slot has no size
 	private sealed class Drawer : SceneCustomObject
 	{
 		private readonly ParticleGpuRun run;

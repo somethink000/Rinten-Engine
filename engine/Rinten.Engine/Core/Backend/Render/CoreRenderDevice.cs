@@ -337,7 +337,7 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.WorldShades( surfaces ? 1 : 0 );
 	}
 
-	/// <summary>The world drawn next's clip space into its frame before's, which its adaptive rates follow the view by.</summary>
+	/// <summary>The next world's clip space into the frame before's, which its adaptive rates follow the view by.</summary>
 	public static void WorldBack( in System.Numerics.Matrix4x4 clipToPrevious )
 	{
 		if ( CoreNative.Available ) CoreRender.WorldBack( clipToPrevious );
@@ -484,7 +484,7 @@ internal static unsafe class CoreRenderDevice
 	public static bool CaptureBackdrop()
 		=> CoreNative.Available && CoreRender.BackdropCapture() != 0;
 
-	/// <summary>Copies the window's picture as it stands into a picture, for a frame generated before this one - see CoreFrameGeneration.</summary>
+	/// <summary>Copies the window's picture as it stands, for a generated frame - see CoreFrameGeneration.</summary>
 	public static bool CaptureForGeneration( ulong picture )
 		=> CoreNative.Available && picture != 0 && CoreRender.GenerationCapture( picture ) != 0;
 
@@ -979,6 +979,12 @@ internal static unsafe class CoreRenderDevice
 			return CoreRender.PyramidBuild( pipeline, pyramid, lod, count, source,
 				pushBytes, push.Length, argsBuffer, argsOffset ) != 0;
 		}
+	}
+
+	/// <summary>Frame writes and dispatches until released read nothing another of them writes: one barrier after them all.</summary>
+	internal static void HoldBarriers( bool hold )
+	{
+		if ( CoreNative.Available ) CoreRender.HoldBarriers( hold );
 	}
 
 	/// <summary>Runs one over a grid of groups, inside a begun frame.</summary>
@@ -1559,7 +1565,7 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>Poses a morphed mesh once for the frame - shapes, then bones where there are any - and says where its vertices went.</summary>
+	/// <summary>Poses a morphed mesh once a frame - shapes, then any bones - and says where its vertices went.</summary>
 	public static bool PoseAhead( ulong pipeline, CoreSceneRenderer.SceneMesh mesh, System.Numerics.Matrix4x4[] bones, float[] weights,
 		out ulong room, out int firstVertex )
 	{

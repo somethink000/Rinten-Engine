@@ -562,6 +562,11 @@ internal static unsafe class CoreRender
 		=> Portable ? 0 : VkFrame.ComputeDispatch( pipeline, buffers, bufferCount, texture,
 			pushData, pushSize, groupsX, groupsY, groupsZ );
 
+	internal static void HoldBarriers( bool hold )
+	{
+		if ( !Portable ) VkFrame.HoldBarriers( hold );
+	}
+
 	internal static int DrawObjects( ulong pipeline, int vertexCount, byte* push, int pushSize,
 		ulong texture, ulong* buffers, int bufferCount )
 		=> Portable ? 0 : VkFrame.DrawObjects( pipeline, vertexCount, push, pushSize, texture, buffers, bufferCount );

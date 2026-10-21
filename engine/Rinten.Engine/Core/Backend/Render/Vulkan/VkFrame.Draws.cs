@@ -353,7 +353,7 @@ internal static unsafe partial class VkFrame
 				VkDevice.dialect.EndRendering( frame.Commands );
 				Current.MainPass = false;
 
-				//The frame between the last one and this, in a second image of its own, where the world was kept for one - see VkFrame.Generation.
+				//The frame between the last and this one, in a second image, where the world was kept for one
 				var generated = GenerateBeforeEnd( frame, out var generatedImage );
 
 				//The buffers somebody asked to have back, read after everything the frame did to them - see VkReadbacks.
@@ -573,7 +573,7 @@ internal static unsafe partial class VkFrame
 
 					//What it answers is what the frame's own present answers a moment later
 					VkSubmitter.Present( signal[1].Semaphore, swapchain, generatedImage, 0 );
-					VkSubmitter.Hold( began + spacing );
+					PreciseSleep.Until( began + spacing );
 				}
 
 				CoreLatency.Presenting( id );
@@ -1753,26 +1753,9 @@ internal static unsafe partial class VkFrame
 
 			VkDevice.vk.CmdCopyBuffer( frame.Commands, frame.Scratch, into, 1, &copy );
 
-			//One barrier per write on purpose; batching them was measured slower (barriers inside a pass)
-			var barrier = new MemoryBarrier2
-			{
-				SType = StructureType.MemoryBarrier2,
-				SrcStageMask = PipelineStageFlags2.CopyBit,
-				SrcAccessMask = AccessFlags2.TransferWriteBit,
-				DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
-					PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.CopyBit,
-				DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
-					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit,
-			};
-
-			var dependency = new DependencyInfo
-			{
-				SType = StructureType.DependencyInfo,
-				MemoryBarrierCount = 1,
-				PMemoryBarriers = &barrier,
-			};
-
-			VkDevice.dialect.Barrier( frame.Commands, &dependency );
+			//One barrier per write on purpose, unless held; batching them inside a pass was measured slower
+			if ( barriersHeld ) copyOwed = true;
+			else Barriers( frame, copies: true, dispatches: false );
 
 			return 1;
 		}
@@ -2019,8 +2002,60 @@ internal static unsafe partial class VkFrame
 				vk.CmdDispatch( frame.Commands, (uint)groupsX, (uint)groupsY, (uint)groupsZ );
 			}
 
-			//Broad barrier after the dispatch on purpose; narrowing it was measured slower
-			var barrier = new MemoryBarrier2
+			if ( barriersHeld ) dispatchOwed = true;
+			else Barriers( frame, copies: false, dispatches: true );
+
+			frame.StatDispatches++;
+
+			DrawTrace.End( DrawTrace.Kind.Dispatch, traced, inside );
+
+			return 1;
+		}
+	}
+
+	//Set while what is recorded - frame writes and dispatches - reads nothing another of them writes: one barrier
+	//after the lot, for what is owed - see HoldBarriers
+	private static bool barriersHeld, copyOwed, dispatchOwed;
+
+	/// <summary>Holds the barrier after each frame write and dispatch until released, then records one for them all.</summary>
+	internal static void HoldBarriers( bool hold )
+	{
+		lock ( VkDevice.renderLock )
+		{
+			barriersHeld = hold;
+
+			if ( hold ) return;
+
+			if ( ( copyOwed || dispatchOwed ) && Current.Recording ) Barriers( CurrentFrame, copyOwed, dispatchOwed );
+
+			copyOwed = dispatchOwed = false;
+		}
+	}
+
+	//What copies and dispatches wrote made visible to every later stage that may read it; broad on purpose, as
+	//narrowing it was measured slower
+	private static void Barriers( Frame frame, bool copies, bool dispatches )
+	{
+		var barriers = stackalloc MemoryBarrier2[2];
+		var count = 0u;
+
+		if ( copies )
+		{
+			barriers[count++] = new MemoryBarrier2
+			{
+				SType = StructureType.MemoryBarrier2,
+				SrcStageMask = PipelineStageFlags2.CopyBit,
+				SrcAccessMask = AccessFlags2.TransferWriteBit,
+				DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
+					PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.CopyBit,
+				DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
+					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit,
+			};
+		}
+
+		if ( dispatches )
+		{
+			barriers[count++] = new MemoryBarrier2
 			{
 				SType = StructureType.MemoryBarrier2,
 				SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
@@ -2033,22 +2068,16 @@ internal static unsafe partial class VkFrame
 					AccessFlags2.VertexAttributeReadBit | AccessFlags2.IndexReadBit |
 					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit,
 			};
-
-			var dependency = new DependencyInfo
-			{
-				SType = StructureType.DependencyInfo,
-				MemoryBarrierCount = 1,
-				PMemoryBarriers = &barrier,
-			};
-
-			VkDevice.dialect.Barrier( frame.Commands, &dependency );
-
-			frame.StatDispatches++;
-
-			DrawTrace.End( DrawTrace.Kind.Dispatch, traced, inside );
-
-			return 1;
 		}
+
+		var dependency = new DependencyInfo
+		{
+			SType = StructureType.DependencyInfo,
+			MemoryBarrierCount = count,
+			PMemoryBarriers = barriers,
+		};
+
+		VkDevice.dialect.Barrier( frame.Commands, &dependency );
 	}
 
 	internal static int ComputeDispatch( ulong pipeline, ulong* buffers, int bufferCount,

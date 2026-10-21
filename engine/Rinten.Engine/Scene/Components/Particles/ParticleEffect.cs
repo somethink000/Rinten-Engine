@@ -289,6 +289,11 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	/// <summary>The total number of particles in the effect, including both active and delayed particles.</summary>
 	public int ParticleCount => Particles.Count + DelayedParticles.Count + ( Card?.Alive ?? 0 );
 
+	//Played through with nothing left alive: a child effect kept idle to be played again - see ParticleChildEffects
+	internal bool Finished => ( runner ??= Components.Get<ParticleModuleRunner>() ) is { } played && played.IsValid() && played.IsFinished;
+
+	private ParticleModuleRunner runner;
+
 	/// <summary>Whether the particle effect has reached its maximum capacity. This is determined by comparing the total particle count to the <see cref="MaxParticles"/> property.</summary>
 	public bool IsFull => ParticleCount >= MaxParticles;
 

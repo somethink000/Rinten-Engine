@@ -53,12 +53,16 @@ sealed class ParticleGameSystem : GameObjectSystem
 		var turn = EngineLoop.LoopFrames;
 		var stepped = 0L;
 
-		Asked += _effects.Count;
-
 		var before = Rinten.Diagnostics.FrameProfiler.Push( "particle prestep" );
+
+		var live = 0;
 
 		foreach ( var p in _effects )
 		{
+			if ( p.Finished ) continue;
+
+			live++;
+
 			var delta = p.Timing switch
 			{
 				ParticleEffect.TimingMode.GameTime => timeDelta,
@@ -102,7 +106,8 @@ sealed class ParticleGameSystem : GameObjectSystem
 		before.Dispose();
 
 		Stepped += stepped;
-		Effects += _effects.Count;
+		Asked += live;
+		Effects += live;
 		Steps++;
 
 		var work = Rinten.Diagnostics.FrameProfiler.Push( "particle work" );
@@ -139,7 +144,7 @@ sealed class ParticleGameSystem : GameObjectSystem
 		foreach ( var p in _effects )
 		{
 			//Only the ones that stepped: the rest were not touched this frame and have nothing to spawn, nothing to push and nothing to put back.
-			if ( p.Owed != 0.0f ) continue;
+			if ( p.Owed != 0.0f || p.Finished ) continue;
 
 			p.SpawnDeferredParticleCollisionPrefabs();
 			p.ApplyDeferredParticleForces();

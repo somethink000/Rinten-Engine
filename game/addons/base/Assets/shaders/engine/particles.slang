@@ -99,7 +99,7 @@ float Lut( uint at, float x )
 	return lerp( T( at + i ), T( at + i + 1 ), place - float( i ) );
 }
 
-//Where on a curve a value is read: its life, a number for the frame, its own number, or its place - ParticleFloat.EvaluationType
+//Where on a curve a value is read: life, the frame's number, its own, or place - ParticleFloat.EvaluationType
 float ReadAt( float eval, float life, float index, uint seed, uint salt, float random )
 {
 	if ( eval < 0.5 ) return life;
@@ -241,7 +241,7 @@ void Nothing( uint sprite )
 	Put( sprite + 8, 0u );
 }
 
-//The particle as IBatchedParticleSpriteRenderer.ProcessParticlesDirectly writes it - word by word, see SpriteBatchSceneObject.SpriteData
+//The particle as ProcessParticlesDirectly writes it, word by word - see SpriteBatchSceneObject.SpriteData
 void Sprite( uint sprite, Particle p, float3 velocity, float4 colour, float alpha, float3 size )
 {
 	float scale = T( TableSprite );
@@ -348,7 +348,7 @@ void main( uint3 id : SV_DispatchThreadID )
 		velocity += Curl( at, p.place.w * T( TableCurl + 2 ) ) * T( TableCurl ) * ts;
 	}
 
-	//On a shape: where the shape is at its place along it, drawn there by the weight, and moving by what that took - FollowShapeModule
+	//On a shape: drawn by the weight towards its place along it, moving by what that took - FollowShapeModule
 	if ( T( TableFollow ) > 0.5 )
 	{
 		float along = ( Channel( ChannelAlong, life, index, seed ) * T( TableFollow + 7 ) ) + p.follow.x + ( p.place.w * T( TableFollow + 2 ) );

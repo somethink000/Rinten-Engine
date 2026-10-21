@@ -1,5 +1,5 @@
-//One patch of a terrain's clutter placed on the card: each triangle of a chunk's ground its copies, as many as TerrainClutter counted for it,
-//each kept by the paint under it and stood up into its own slot of the scene's instance table - see TerrainClutter.Placed.
+//One clutter patch placed on the card: each ground triangle's counted copies, kept by the paint under them,
+//each into its own instance slot - see TerrainClutter.Placed
 
 FEATURES
 {
@@ -24,7 +24,7 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 
 #include "engine/terrain_layers.slang"
 
-//The record every copy starts from, the model's sphere, the run, the rules, then six a triangle - laid out by TerrainClutter.Placed.
+//The copies' record, the model's sphere, the run, the rules, six a triangle - see TerrainClutter.Placed
 [[vk::binding( 12, 2 )]] StructuredBuffer<uint4> g_patch;
 
 //The scene's instance table, a record of 256 bytes a slot - see CoreSceneTables.InstanceRecord.

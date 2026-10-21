@@ -45,7 +45,7 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 		}
 	}
 
-	//This one's two resolves, one written while the other is read - see ResolvePs - named for it alone, as every view gathers its own
+	//Its two resolves, one written while the other is read (ResolvePs), named for it alone as each view gathers its own
 	private readonly string[] resolves = [$"ReflectionResolve{++made}a", $"ReflectionResolve{made}b"];
 	private static int made;
 

@@ -3,7 +3,7 @@ using System;
 namespace Rinten;
 
 //A byte apiece, the weights coming to one.
-/// <summary>What a point of the ground is painted with: up to four of the terrain's layers, by number, and how much of each.</summary>
+/// <summary>What a ground point is painted with: up to four layers by number, and how much of each.</summary>
 public struct TerrainPaint : IEquatable<TerrainPaint>
 {
 	/// <summary>How many layers one point carries.</summary>
@@ -113,7 +113,7 @@ public struct TerrainPaint : IEquatable<TerrainPaint>
 		return paint;
 	}
 
-	/// <summary>More of one layer by an amount, nought to one, and the rest scaled back so the whole still comes to one.</summary>
+	/// <summary>More of one layer by an amount, nought to one, the rest scaled back to keep a sum of one.</summary>
 	public readonly TerrainPaint With( int layer, float amount )
 	{
 		if ( amount <= 0.0f || layer < 0 || layer >= Terrain.MostLayers ) return this;

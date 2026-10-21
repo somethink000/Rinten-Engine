@@ -25,7 +25,7 @@ public partial class Terrain
 	private readonly List<int> queried = new();
 
 	//Out of the paint mask where it covers the point, the nearest vertex's paint for the rest.
-	/// <summary>What the ground is painted with nearest a point of the world: its two heaviest layers. Null where there is no ground near.</summary>
+	/// <summary>The two heaviest layers painted nearest a world point; null where there is no ground near.</summary>
 	public TerrainMaterialInfo? GetMaterialAtWorldPosition( Vector3 worldPosition )
 	{
 		if ( Storage?.Mesh is not { } mesh ) return null;

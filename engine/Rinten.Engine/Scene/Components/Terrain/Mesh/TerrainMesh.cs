@@ -41,7 +41,7 @@ public sealed partial class TerrainMesh
 	private int[] tVertex = [];
 	private ushort[] tMaterial = [];
 
-	//A triangle's corners' own numbers - see Corner - for the triangles that have any: what was set in. The ground's own say nothing.
+	//The corners' own numbers (Corner) of triangles that have any - what was set in; the ground's own have none
 	private readonly Dictionary<int, (Corner A, Corner B, Corner C)> worn = new();
 	private bool[] tAlive = [];
 
@@ -982,7 +982,7 @@ public sealed partial class TerrainMesh
 	//How much of the stamp's half-width its edge blends into the ground over.
 	private const float StampEdge = 0.1f;
 
-	/// <summary>Lays a shape over a square of the ground: <paramref name="shapeAt"/> answers nought to one across it, from (0, 0) to (1, 1), and <paramref name="height"/> is what one comes to. Only ground facing up is moved, so a cave under it keeps its roof.</summary>
+	/// <summary>Lays shapeAt (0 to 1 over the square) times height over the ground; only upward ground moves.</summary>
 	public void Stamp( Vector3 centre, float half, float turn, Func<float, float, float> shapeAt, float height, StampMode mode )
 	{
 		if ( !( half > 0.0f ) || shapeAt is null ) return;

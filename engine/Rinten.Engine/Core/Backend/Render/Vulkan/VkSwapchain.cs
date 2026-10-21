@@ -86,7 +86,7 @@ internal static unsafe partial class VkSwapchain
 		public ImageView VelocityView;
 		public ulong VelocityHandle;
 
-		/// <summary>The screen's pass multisampled: its colour and depth, resolved into the screen and DepthImage as it ends - see VkFrame.MainSamples.</summary>
+		/// <summary>The screen pass's multisampled colour and depth, resolved into the screen and DepthImage.</summary>
 		public VkImage SampledColourImage, SampledDepthImage;
 		public DeviceMemory SampledColourMemory, SampledDepthMemory;
 		public ImageView SampledColourView, SampledDepthView;

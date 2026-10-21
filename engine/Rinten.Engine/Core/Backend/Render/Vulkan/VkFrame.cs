@@ -20,7 +20,7 @@ internal static unsafe partial class VkFrame
 		/// <summary>Signalled when the image this frame drew into is free.</summary>
 		public VkSemaphore ImageAvailable;
 
-		/// <summary>The same for the second image a frame takes when a generated frame goes before it - see VkFrame.Generation.</summary>
+		/// <summary>The same for the second image a frame takes for a generated frame before it.</summary>
 		public VkSemaphore GeneratedAvailable;
 
 		/// <summary>Signalled when the GPU finishes the frame, so its command buffer may be recorded over.</summary>

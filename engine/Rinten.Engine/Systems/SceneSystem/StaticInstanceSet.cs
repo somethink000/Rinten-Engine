@@ -24,7 +24,7 @@ internal sealed class StaticInstanceSet : IDisposable
 		if ( slot >= 0 ) slots.Add( slot );
 	}
 
-	/// <summary>A run of copies the card places itself, all inside a sphere - see CoreSceneTables.AddRun. False where the tables will not take it.</summary>
+	/// <summary>A run of copies in a sphere the card places (CoreSceneTables.AddRun); false where not taken.</summary>
 	public bool AddRun( Model model, int count, System.Numerics.Vector4 sphere, in Transform frame, IInstanceRun placer, bool castShadows, float lodScale, string lodGroup )
 	{
 		if ( Application.IsHeadless || scene is null || model is null ) return false;
@@ -36,7 +36,7 @@ internal sealed class StaticInstanceSet : IDisposable
 		return true;
 	}
 
-	/// <summary>Whether its runs are drawn from clusters: false where one cannot be, null while a model is not loaded yet.</summary>
+	/// <summary>Whether its runs are drawn from clusters: false where not, null while a model loads.</summary>
 	public bool? RunsDrawn
 	{
 		get

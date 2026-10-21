@@ -4,8 +4,8 @@ namespace Rinten;
 
 public partial class Terrain
 {
-	//The paint mask on the card: every tile in an atlas, and a table over the ground saying which tile of the atlas each tile of the ground
-	//is - read by MaskInto in terrain_layers.slang, written here out of the mesh's own tiles. The portable frame reads no mask.
+	//The paint mask on the card: the mesh's tiles in an atlas and a table of where each is, read by MaskInto
+	//in terrain_layers.slang. The portable frame reads no mask
 	private Texture maskAtlas, maskTable;
 	private TerrainMesh maskOf;
 
@@ -25,8 +25,8 @@ public partial class Terrain
 	//How many tiles stand side by side in the atlas - the shader's MaskAtlasSlots.
 	private const int MaskAtlasSlots = 32;
 
-	//Texels a point of the mask takes, side by side: its paint packed into 32 bits - see PackPoint - and the top's float as four bytes.
-	//Bytes, because a picture made here is eight bits or halves a channel on the card, and neither holds a layer or a height exactly.
+	//Texels a mask point takes: its paint in 32 bits (PackPoint) and its top's float as four bytes
+	//Bytes, as a picture made here is 8-bit or half a channel on the card, neither exact for a layer or a height
 	private const int MaskPointTexels = 2;
 
 	//Tiles of room left round what is painted when the table is laid out, so a stroke past its edge does not lay it out again.
@@ -225,8 +225,8 @@ public partial class Terrain
 			side * MaskPointTexels, side );
 	}
 
-	//A point's three heaviest layers in five bits each, the first two's weights in a byte each - the third's is what is left of one -
-	//and the top bit set where anything is painted. A fourth layer, rare on a point a quarter of a metre across, is let go of on the card.
+	//Three heaviest layers in five bits each, two weights in a byte each (the third's the rest), top bit where painted
+	//A rare fourth layer is dropped on the card
 	private static uint PackPoint( TerrainPaint paint )
 	{
 		if ( !paint.Painted ) return 0u;

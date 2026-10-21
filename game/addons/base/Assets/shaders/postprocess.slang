@@ -11,7 +11,7 @@ cbuffer Push
 	//Width, height, and one over each.
 	float4 g_vFrameSize;
 
-	//The near and far planes, then which stage this is; then, in the portable frame, whether the colour is kept - see FramePicture.
+	//Near and far planes, the stage, and in the portable frame whether the colour is kept - see FramePicture
 	float4 g_vFrameRange;
 
 	//Where the frame's pictures are in the indexed table: the colour, the world normals, the depth, and the motion. Zero for one this frame does not have.

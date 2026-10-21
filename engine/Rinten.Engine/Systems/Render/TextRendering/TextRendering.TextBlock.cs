@@ -124,8 +124,8 @@ public static partial class TextRendering
 		Topten.RichTextKit.Style ownStyle;
 		int ownKey;
 
-		//Set up for another string, shaped in the same RichTextKit block as the last: one that is drawn once and let go has no use for the
-		//table of shaped text, and a block made for each string was its buffers made and thrown away each time - the garbage changing text made
+		//Set up for another string in the same RichTextKit block: text drawn once needs no shaped-text table,
+		//and a block a string would make its buffers anew each time
 		internal void Reuse( in Scope scope, TextFlag flags )
 		{
 			reusing = true;

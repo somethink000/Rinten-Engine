@@ -20,7 +20,7 @@ public partial class Panel
 	{
 		keyframes = null;
 
-		//The same walk as AllStyleSheets, up to the nearest boundary, without its two iterators: asked every frame of every animation
+		//AllStyleSheets' walk to the nearest boundary without its two iterators: asked every animation frame
 		for ( var panel = this; panel is not null; panel = panel.Parent )
 		{
 			if ( panel.StyleSheet.List is { } sheets )

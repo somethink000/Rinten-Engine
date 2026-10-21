@@ -73,7 +73,7 @@ public partial class SceneObject
 				//No-op: nothing to hand it to.
 			}
 
-			//By token, and nothing at all where the two already agree - a pooled object takes its owner's tags every time it is handed out
+			//By token, nothing where they agree: a pooled object takes its owner's tags each time it is handed out
 			public override void SetFrom( ITagSet set )
 			{
 				if ( set is null || set == this ) return;

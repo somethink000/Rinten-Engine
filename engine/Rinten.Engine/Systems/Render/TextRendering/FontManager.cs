@@ -43,7 +43,7 @@ internal class FontManager : FontMapper, ICharacterMatcher
 		return SKFontManager.Default.MatchCharacter( familyName, weight, width, slant, bcp47, character );
 	}
 
-	//The loaded faces as they stand, copied again only once Generation says they changed: asked for every character a fallback is looked for
+	//The loaded faces, copied again only when Generation changes: asked for every fallback character
 	private Face[] Faces()
 	{
 		lock ( LoadedFonts )

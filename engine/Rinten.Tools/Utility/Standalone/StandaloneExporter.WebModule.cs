@@ -358,8 +358,8 @@ partial class StandaloneExporter
 	[return: MarshalAs( UnmanagedType.Bool )]
 	private static extern bool GlobalMemoryStatusEx( ref MemoryStatus status );
 
-	//Runs the SDK with these arguments and this environment; true where it finished well. On Linux inside a scope of its own
-	//with a ceiling on memory, so the desktop keeps what it needs; past the ceiling the build swaps and is slower rather than killed
+	//Runs the SDK; true where it finished well. On Linux in its own scope with a memory ceiling, so the desktop
+	//keeps what it needs and the build swaps rather than being killed
 	private static bool RunDotnet( string arguments, Dictionary<string, string> environment, int ceilingGB, out string log )
 	{
 		var capped = OperatingSystem.IsLinux() && File.Exists( "/usr/bin/systemd-run" );

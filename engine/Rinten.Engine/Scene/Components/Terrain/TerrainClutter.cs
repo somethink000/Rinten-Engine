@@ -82,7 +82,7 @@ public sealed class TerrainClutterLayer
 	}
 }
 
-/// <summary>Models scattered over a terrain by paint and slope, read from baked chunks, placed and culled on the card.</summary>
+/// <summary>Models scattered on a terrain by paint and slope from baked chunks, placed and culled on the card.</summary>
 [Expose]
 [Title( "Terrain Clutter" )]
 [Category( "World" )]
@@ -133,7 +133,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public Laid Laid;
 	}
 
-	//Whether patches are placed on the card: the full frame's clusters, which the portable frame and a headless run have none of.
+	//Whether patches are placed on the card: full frame clusters only, none portable or headless
 	private static bool OnCard => !Application.IsHeadless && CoreNative.Available && !CoreRenderDevice.PortableFrame && Rendering.DrawSettings.Clusters;
 
 	//Layers whose model the tables would not draw from clusters - translucent, say - placed here instead.
@@ -625,8 +625,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		return places;
 	}
 
-	//What the card places one patch from - see terrain_clutter.shader, whose layout this is in fours of words: the record every copy starts from
-	//and the model's sphere, written when it places them; the run; the rules; six a triangle.
+	//What the card places a patch from, in fours of words as terrain_clutter.shader reads them: the record and sphere
+	//it writes as it places, the run, the rules, six a triangle
 	private const int TemplateAt = 0;
 	private const int BoundAt = 16;
 	private const int RunAt = 17;
@@ -647,8 +647,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public System.Numerics.Vector4 Sphere;
 	}
 
-	//One patch as the card places it: each triangle its corners, which way it faces, its corners' paint, how many copies, where their
-	//slots start and the numbers they are drawn from - the same as Work's, so a patch is the same whichever places it.
+	//One patch as the card places it: each triangle's corners, facing, paint, copies, first slot and numbers
+	//The same as Work's, so a patch is the same whichever places it
 	private static Laid Lay( Ask ask )
 	{
 		var ground = ask.Ground;
@@ -795,7 +795,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		return false;
 	}
 
-	//A bit a copy, set where no modifier clears the ground it would stand on - worked out here, as the card cannot ask a modifier.
+	//A bit a copy, set where no modifier clears its ground - here, as the card cannot ask a modifier
 	private static uint Cleared( Ask ask, Vector3 a, Vector3 b, Vector3 c, Vector3 min, Vector3 max, uint bits, ref int count )
 	{
 		TerrainModifier[] near = null;
@@ -845,7 +845,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		return keep;
 	}
 
-	//A patch on the card: the buffer the shader reads it from, filled here but for the record every copy starts from, which is written as it places them.
+	//A patch on the card: the buffer the shader reads, filled here but for the record it writes as it places
 	private sealed class Placed : IInstanceRun, IDisposable
 	{
 		private readonly Terrain terrain;

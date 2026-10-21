@@ -130,7 +130,7 @@ public sealed partial class SceneModel : SceneObject
 			OnAnimTagEvent?.Invoke( new AnimTagEvent( name, AnimTagStatus.Start ) );
 		}
 
-		//Gone since the last dispatch, listed before any is told: the callback is the game's, and it may ask this object about its tags
+		//Gone since the last dispatch, listed before any is told, as the game's callback may ask about tags
 		gone.Clear();
 
 		foreach ( var name in tagged )

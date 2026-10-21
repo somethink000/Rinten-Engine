@@ -1,6 +1,6 @@
 namespace Editor.TerrainEditor;
 
-//Onto the vertices, so a cave's floor and the hill over it are painted apart, and over the top of the ground onto the paint mask too.
+//Onto the vertices, so a cave's floor and the hill over it differ, and onto the mask over the ground's top
 /// <summary>Paint the selected layer onto the ground, a quarter of a metre fine.</summary>
 [Title( "Paint Texture" )]
 [Icon( "brush" )]

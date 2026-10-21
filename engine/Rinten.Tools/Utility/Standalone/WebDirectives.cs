@@ -72,7 +72,7 @@ internal static class WebDirectives
 		return text.ToString();
 	}
 
-	//An ILLink descriptor for types made by name - what the type library and the serializer hold - kept as far as reflection reads them
+	//An ILLink descriptor keeping types made by name (type library, serializer) as far as reflection reads them
 	internal static string Descriptor( IEnumerable<Type> kept, ISet<string> inModule )
 	{
 		var text = new StringBuilder( "<linker>\n" );
@@ -91,8 +91,8 @@ internal static class WebDirectives
 		return text.Append( "</linker>\n" ).ToString();
 	}
 
-	//What reflection reads off a type made by name: its fields, constructors, property and event accessors, methods an attribute marks
-	//(RPCs, commands, graph nodes), and overrides and interface methods, which "does it override OnDraw" asks. The rest only where called
+	//What reflection reads off a type made by name: fields, constructors, accessors, attributed methods, overrides
+	//and interface methods; the rest only where called
 	private static string Reflected( Type type )
 	{
 		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;

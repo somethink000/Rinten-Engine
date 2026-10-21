@@ -64,7 +64,7 @@ public static partial class TextRendering
 
 	[ThreadStatic] static TextBlock scratch;
 
-	//A block on this thread for text measured or drawn once and let go, shaped in the same RichTextKit block every time - see TextBlock.Reuse
+	//One block on this thread for text measured or drawn once, reused every time - see TextBlock.Reuse
 	internal static TextBlock Scratch( in Scope scope, TextFlag flags )
 	{
 		var block = scratch ??= new TextBlock();

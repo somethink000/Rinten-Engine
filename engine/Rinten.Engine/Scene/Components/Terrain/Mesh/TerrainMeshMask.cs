@@ -5,7 +5,7 @@ using System.IO;
 namespace Rinten;
 
 //Never changed once made - a change makes another - so a worker can read one while the mesh is painted.
-/// <summary>One square of the paint mask: what each of its points is painted with, and the top of the ground there.</summary>
+/// <summary>One square of the paint mask: each point's paint and the top of the ground there.</summary>
 public sealed class TerrainMaskTile
 {
 	/// <summary>Points a side, the far edge's shared with the next tile over.</summary>
@@ -13,7 +13,7 @@ public sealed class TerrainMaskTile
 
 	public readonly TerrainPaint[] Paint;
 
-	/// <summary>The highest ground over each point, in the terrain's metres; <see cref="TerrainMesh.NoGround"/> where there is none.</summary>
+	/// <summary>The highest ground over each point in the terrain's metres; TerrainMesh.NoGround for none.</summary>
 	public readonly float[] Top;
 
 	internal TerrainMaskTile( TerrainPaint[] paint, float[] top )
@@ -23,8 +23,8 @@ public sealed class TerrainMaskTile
 	}
 }
 
-//The paint mask: over the top of the ground, paint at a quarter of a metre whatever the edges are, in tiles only where a brush has been. Below the
-//top - a cave's floor, the foot of a cliff - the vertices' paint is what there is. Where a tile is, it is the whole of the paint on the top surface.
+//The paint mask: paint on the ground's top at a quarter metre, in tiles only where a brush has been and whole there
+//Below the top - a cave's floor, a cliff's foot - the vertices' paint is all there is
 public sealed partial class TerrainMesh
 {
 	/// <summary>Metres between two points of the mask.</summary>
@@ -36,7 +36,7 @@ public sealed partial class TerrainMesh
 	/// <summary>Metres along a tile's side.</summary>
 	public const float MaskSpan = MaskStep * MaskCells;
 
-	/// <summary>How far under the top of the ground the mask still paints; below it is a cave's floor, painted by its vertices.</summary>
+	/// <summary>How far under the ground's top the mask still paints; below, a cave's floor has its vertices'.</summary>
 	public const float MaskUnder = 1.0f;
 
 	/// <summary>What a point of the mask with no ground over it says the top is.</summary>
@@ -81,14 +81,14 @@ public sealed partial class TerrainMesh
 		return tile;
 	}
 
-	/// <summary>Hands over which tiles changed since last asked - painted, made, gone, or their ground moved - and forgets them.</summary>
+	/// <summary>Hands over and forgets the tiles painted, made, gone or moved since last asked.</summary>
 	public void TakeMaskChanged( List<long> into )
 	{
 		into.AddRange( maskChanged );
 		maskChanged.Clear();
 	}
 
-	/// <summary>The tiles over a rectangle of the ground plane, their tops up to date, for a worker to read - or null where there are none.</summary>
+	/// <summary>The tiles over a ground rectangle, tops current, for a worker to read; null for none.</summary>
 	public Dictionary<long, TerrainMaskTile> MaskAround( Vector2 min, Vector2 max )
 	{
 		if ( mask.Count == 0 ) return null;
@@ -113,7 +113,7 @@ public sealed partial class TerrainMesh
 	public static float MaskAt( IReadOnlyDictionary<long, TerrainMaskTile> tiles, Vector3 point, float facingUp, Span<float> layers )
 		=> tiles is null || tiles.Count == 0 ? 0.0f : MaskAt( key => tiles.GetValueOrDefault( key ), point, facingUp, layers );
 
-	//Bilinear over the four points round it, where the nearest one's top says the point is on top - as terrain_layers.slang reads it.
+	//Bilinear over the four points round it where the nearest says it is on top, as terrain_layers.slang reads it
 	private static float MaskAt( Func<long, TerrainMaskTile> tileAt, Vector3 point, float facingUp, Span<float> layers )
 	{
 		var ax = point.x / MaskStep;
@@ -167,7 +167,7 @@ public sealed partial class TerrainMesh
 		z1 = (int)MathF.Floor( Math.Clamp( maxZ / MaskSpan, -1e8f, 1e8f ) );
 	}
 
-	//The top of the ground over each point of a tile, out of the triangles over it; and, where asked, what the vertices paint there.
+	//The ground's top over each point of a tile from the triangles over it; and where asked the vertices' paint
 	private float[] Tops( long key, TerrainPaint[] paintInto )
 	{
 		var top = new float[TerrainMaskTile.Side * TerrainMaskTile.Side];
@@ -229,8 +229,8 @@ public sealed partial class TerrainMesh
 		return top;
 	}
 
-	//The mask's half of a dab. A tile is made wherever the brush comes near the top of the ground - out to an edge past the brush, so the vertices'
-	//paint blurring past it lands inside tiles too - filled from what the vertices paint, and then the brush paints its points as it does the vertices.
+	//The mask's half of a dab: tiles made near the brush and an edge past it, filled from the vertices' paint,
+	//then painted point by point as the vertices are
 	private void PaintMask( Vector3 centre, float radius, int layer, float strength )
 	{
 		if ( strength <= 0.0f || radius <= 0.0f ) return;

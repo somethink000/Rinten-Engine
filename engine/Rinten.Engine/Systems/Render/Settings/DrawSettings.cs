@@ -87,7 +87,7 @@ internal static partial class DrawSettings
 		Help = "FSR3 sharpening, 0 off to 1 the most." )]
 	internal static float Fsr3Sharpness { get; set; } = 0.5f;
 
-	/// <summary>Whether a frame is made between every two the world draws - AMD's FSR 3 frame generation; it needs a temporal upscaler.</summary>
+	/// <summary>Whether FSR 3 makes a frame between every two drawn; needs a temporal upscaler.</summary>
 	[ConVar( "r_frame_generation", ConVarFlags.Saved,
 		Help = "Generate a frame between every two drawn (FSR3 frame generation, needs FSR3, DLSS or TAA)." )]
 	internal static bool FrameGeneration { get; set; } = false;

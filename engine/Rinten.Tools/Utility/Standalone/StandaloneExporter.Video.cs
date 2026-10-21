@@ -3,7 +3,7 @@ using System.IO;
 
 namespace Editor;
 
-//FFmpeg, in an export: bin/<platform>/ffmpeg, only for a game with video in its code or its files; the LGPL licence goes with it
+//FFmpeg in bin/<platform>/ffmpeg, only for a game with video, with its LGPL licence
 partial class StandaloneExporter
 {
 	//The types whose use means a game has video.

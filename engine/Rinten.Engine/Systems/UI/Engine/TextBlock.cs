@@ -733,8 +733,8 @@ internal sealed class TextBlock : IDisposable
 			Gradient.Center = new SKPoint( centerX, centerY );
 		}
 
-		//The picture a step of 32 bigger than the text, the rest clear, drawn the same: changing text is mostly a few pixels wider or
-		//narrower, and at the same step its picture is written over rather than a new one made - the garbage a changing label made
+		//The picture rounded up to a step of 32, the rest clear: changing text mostly stays in the step,
+		//so its picture is written over rather than remade
 		width = ( width + 31 ) & ~31;
 		height = ( height + 31 ) & ~31;
 
@@ -742,8 +742,7 @@ internal sealed class TextBlock : IDisposable
 		var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
 		long t2 = 0;
 
-		//Into the top left of one bitmap kept for it, grown when a label is bigger than any before it, and read out row by row - a bitmap
-		//and a canvas made for every change of text was its garbage
+		//Into the top left of one kept bitmap, grown for a bigger label, read out row by row - not a bitmap and canvas a change
 		var scratch = Scratch( width, height );
 		var canvas = scratch.Canvas;
 
@@ -875,7 +874,7 @@ internal sealed class TextBlock : IDisposable
 		if ( debugName.Length > 10 ) debugName = $"{debugName.Substring( 0, 8 )}..";
 		if ( debugName.Contains( ':' ) ) debugName = debugName.Replace( ':', '-' );
 
-		//RGBA8 for both: it goes to the device as the bytes it is, where any other order was converted into a new array at every upload
+		//RGBA8 for both: it goes to the device as it is, with no conversion into a new array an upload
 		var builder = Texture.Create( width, height, ImageFormat.RGBA8888 )
 			.WithName( $"skiatextblock[{debugName}]" );
 

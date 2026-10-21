@@ -7,8 +7,8 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//On-disk cache of baked chunk models, keyed by everything the bake reads, so it never goes stale; and a pack of them beside the
-//terrain or scene, which a game is shipped with and reads first. Flat brush bakes and headless bakes are not cached
+//Baked chunk models on disk keyed by all the bake reads, and a shipped pack beside the terrain or scene read first
+//Flat brush bakes and headless bakes are not cached
 internal static class TerrainBakeCache
 {
 	private static readonly Logger log = new( "Terrain" );
@@ -43,7 +43,7 @@ internal static class TerrainBakeCache
 		}
 	}
 
-	/// <summary>What this job would be filed under, or null where it is not to be cached at all. Asked once its modifiers have shaped the ground.</summary>
+	/// <summary>The key this job is filed under, null where not cached; asked once modifiers shaped the ground.</summary>
 	public static string Key( TerrainChunkJob job )
 	{
 		if ( off || folder is null || job is null ) return null;
@@ -83,7 +83,7 @@ internal static class TerrainBakeCache
 		foreach ( var material in job.Materials )
 			Feed( System.Text.Encoding.UTF8.GetBytes( ( material?.ResourcePath ?? material?.Name ?? "" ) + "\n" ) );
 
-		//A modifier's shaping is in the ground already; what it sets in is its solid, carved or joined, its materials from ModifierMaterialsAt
+		//A modifier's shaping is in the ground already; it adds its solid, carved or joined, and its materials
 		var told = new byte[12];
 
 		for ( var m = 0; m < job.Modifiers.Length; m++ )
@@ -118,7 +118,7 @@ internal static class TerrainBakeCache
 
 	private static int hits, misses;
 
-	/// <summary>What was filed under that key - shipped, else on this machine - or null; not <paramref name="whole"/>, a far chunk's part.</summary>
+	/// <summary>What was filed under that key, shipped or local, or null; not whole reads a far chunk's part.</summary>
 	public static TerrainChunkBake Read( string key, string shipped, bool whole )
 	{
 		if ( key is null ) return null;
@@ -324,7 +324,7 @@ internal static class TerrainBakeCache
 		}
 	}
 
-	//What each holder's terrain chunks are baked under now, by where the chunk is - written as its pack when it is saved. The editor's alone
+	//Each holder's chunk keys by place, written as its pack when saved. The editor's alone
 	private static readonly Dictionary<string, Dictionary<Vector2, string>> current = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>Whether a chunk of anything this resource holds was baked here - what saving it packs.</summary>
@@ -349,7 +349,7 @@ internal static class TerrainBakeCache
 		}
 	}
 
-	/// <summary>Writes a holder's pack out of this machine's cache, every chunk as it now stands; nothing where none was baked here.</summary>
+	/// <summary>Writes a holder's pack from this machine's cache; nothing where none was baked here.</summary>
 	public static void WritePack( string shipped, string path )
 	{
 		if ( string.IsNullOrEmpty( shipped ) || string.IsNullOrEmpty( path ) ) return;

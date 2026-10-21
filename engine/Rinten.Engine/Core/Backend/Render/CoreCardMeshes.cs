@@ -1,7 +1,7 @@
 namespace Rinten;
 
-//Geometry the engine makes on the card - a vertex and an index buffer written by a compute pass - drawn the classic way with a material
-//in the world it stands in: the camera's passes and the maps of what moves, so it casts as it is drawn. See TerrainRelief
+//Geometry a compute pass writes into a vertex and an index buffer, drawn the classic way with a material
+//by the camera's passes and the movers' shadow maps, so it casts as it is drawn. See TerrainRelief
 internal static class CoreCardMeshes
 {
 	/// <summary>One such mesh: where it is drawn, with what, and whether its buffers hold anything yet.</summary>
@@ -14,7 +14,7 @@ internal static class CoreCardMeshes
 		public Func<bool> Ready;
 		public Transform Transform = Transform.Zero;
 
-		/// <summary>Points the mesh at its buffers, the first <paramref name="indices"/> indices drawn, inside <paramref name="bounds"/>.</summary>
+		/// <summary>Points the mesh at its buffers: the first count indices drawn, inside bounds.</summary>
 		public void Hold( GpuBuffer vertices, GpuBuffer indices, int count, BBox bounds )
 		{
 			Mesh.Vertices = vertices?.Handle ?? 0;

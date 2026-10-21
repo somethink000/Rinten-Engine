@@ -81,8 +81,8 @@ internal static unsafe partial class VkFrame
 		VkDevice.vk.CmdBlitImage( commands, from, fromLayout, into, intoLayout, 1, &blit, same ? Filter.Nearest : Filter.Linear );
 	}
 
-	//At the frame's end, the main pass closed: the window's picture as shown copied out, the frame between made, and a second image
-	//acquired and filled with it. False where there is none - nothing captured, nothing made, or no image to be had in time.
+	//At the frame's end: the window's picture copied out, the frame between made into a second image
+	//False where nothing was captured or made, or no image came in time
 	private static bool GenerateBeforeEnd( Frame frame, out uint image )
 	{
 		image = 0;

@@ -230,7 +230,7 @@ internal static class CorePostBlit
 		onScreen = frame.Target == CoreRender.TargetKind.Screen;
 	}
 
-	/// <summary>Opens the portable frame's passes over the world drawn aside, which alternate between the two pictures.</summary>
+	/// <summary>Opens the portable frame's passes over the world drawn aside, alternating its two pictures.</summary>
 	internal static void BeginPortable( in Frame frame, ulong world, (ulong First, ulong Second) pictures )
 	{
 		open = frame;

@@ -16,8 +16,8 @@ PARAMETERS
 	//- the portable one. Set by Terrain there and not otherwise; see NamePortablePictures.
 	Texture2D g_tParams < Default( 0.0 ); UiGroup( "Terrain" ); >;
 
-	//Which layer each of the vertex's eight weights is for, set on each chunk: six bits a slot, four slots a number - see
-	//TerrainChunkBaker.PaletteNumbers; layers 0 to 7 where nothing set it. Then the paint mask's table and atlas, nought for none.
+	//The layer of each of the vertex's eight weights, six bits a slot, four a number (PaletteNumbers); 0 to 7 unset
+	//Then the paint mask's table and atlas, nought for none
 	float4 g_vPalette < Attribute( "TerrainPalette" ); Default4( 794688.0, 1859908.0, 0.0, 0.0 ); >;
 
 	//And the tile the mask's table starts at, x then z, and how many tiles it is across and deep - see Terrain.Mask.
@@ -100,9 +100,8 @@ V2F Vertex( VIn i )
 #else
 	Ring ring = RingOf();
 
-	//A corner of the ring of relief, marked so in the second coordinate's third place: in the terrain's metres, drawn with no
-	//matrix of its own - see terrain_relief.shader. The ground's own corners under the ring sink a little along their normal,
-	//so the lifted ground, which only ever rises, is over them; nothing sinks past the ring's edge, where the two are one surface.
+	//A relief ring corner (marked in uv1.z) is in the terrain's metres with no matrix; the ground's corners under the ring
+	//sink a little so the lifted ground stays over them, and nothing sinks past the ring's edge
 	if ( i.texCoord1.z > 0.5 )
 	{
 		world = ( local * ring.scale ) + ring.at;

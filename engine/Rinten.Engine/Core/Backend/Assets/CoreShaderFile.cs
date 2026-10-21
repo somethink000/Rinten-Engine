@@ -79,7 +79,7 @@ internal static partial class CoreShaderFile
 		SkyCapturePixel = 22,
 
 		//Full frame only, and only for a surface that moves its vertices - see cluster_surface.slang
-		/// <summary>The cluster pass's corner run now and a frame back, and its motion on the screen, for the velocity picture.</summary>
+		/// <summary>The cluster pass's corners now and a frame back, and their screen motion, for the velocity picture.</summary>
 		ClusterVelocityVertex = 23,
 		ClusterVelocityPixel = 24,
 	}
@@ -430,7 +430,7 @@ internal static partial class CoreShaderFile
 		return ( pass, pass );
 	}
 
-	//Compiles one named entry of a multi-pass file, with the same preludes, for the frame being drawn or baked; null if unavailable
+	//One named entry of a multi-pass file, same preludes, for the frame drawn or baked; null if unavailable
 	internal static byte[] EntryWords( string path, string combo, string entry, CoreShaderCompiler.Stage kind,
 		CoreShaderCompiler.Format? language = null )
 	{

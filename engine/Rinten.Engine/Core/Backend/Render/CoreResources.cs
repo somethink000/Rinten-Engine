@@ -429,7 +429,7 @@ internal static class CoreResources
 	//A pass's materials with a picture of the frame in the colour slot, by material and picture - see LiveReading
 	private static readonly Dictionary<(Material Material, ulong Picture), (int Revision, int Values, ulong Handle)> reading = new();
 
-	/// <summary>A pass's material with a picture of the frame in its colour slot, for a frame with no table to read it from.</summary>
+	/// <summary>A pass's material with a frame picture in its colour slot, for a frame with no table.</summary>
 	internal static ulong LiveReading( Material material, ulong picture )
 	{
 		var core = material?.core;
@@ -1516,7 +1516,7 @@ internal static class CoreResources
 	//Generation bumps that were only texture swaps, so scene tables needn't rebake shadows for them
 	internal static int PictureGeneration { get; private set; } = 1;
 
-	//Bumped only when everything on the device goes - see Clear - for what holds device pictures of its own across Generation's other bumps
+	//Bumped only when the whole device goes (Clear), for holders of device pictures across Generation's other bumps
 	internal static int Cleared { get; private set; } = 1;
 
 	/// <summary>Lets go of all of it, for device shutdown and for tests starting from nothing.</summary>

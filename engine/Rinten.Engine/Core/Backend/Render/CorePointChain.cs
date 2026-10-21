@@ -903,9 +903,8 @@ internal static partial class CorePointChain
 			runs++;
 		}
 
-		//And the finishes of a frame drawn aside, which carry the run beside bloom or passes - see CorePortableGlow. For every run an
-		//effect switched off makes as well, as the compose is baked: a camera whose effect fades to nothing lays a shorter run, and
-		//two stages a run cost little against a page that would draw it with the curve alone
+		//And the finishes of a frame drawn aside, which carry the run beside bloom or passes (CorePortableGlow) - also for
+		//every shorter run an effect fading to nothing makes, so a page never falls back to the curve alone
 		foreach ( var run in asked.Values.ToArray() )
 		{
 			if ( run.Length == 0 || run.Length > 30 ) continue;

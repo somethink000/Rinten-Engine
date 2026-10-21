@@ -19,7 +19,7 @@ internal struct VkPassFormats
 	/// <summary>Layers one draw goes to, a bit each; nought for every pass but a headset's.</summary>
 	public uint ViewMask;
 
-	/// <summary>Samples a pixel, its colour and depth resolved in the pass; nought or one for none - see VkFrame.MainSamples.</summary>
+	/// <summary>Samples a pixel, resolved in the pass; nought or one for none - see VkFrame.MainSamples.</summary>
 	public uint Samples;
 
 	public static VkPassFormats Of( Format colour, Format depth = Format.Undefined )

@@ -64,7 +64,7 @@ public static class ExportToolchain
 			var found = new[] { Path.Combine( LocalRoot, ExeName ), "dotnet" }
 				.FirstOrDefault( x => ( listed = Run( x, "--list-sdks" ) ) is { } sdks && sdks.Split( '\n' ).Any( l => l.StartsWith( "10." ) ) );
 
-			//Where the SDK really is, which a dotnet behind a version manager's shim (mise, asdf) does not say by its own path: "10.0.100 [/root/sdk]"
+			//Where the SDK is, which a shimmed dotnet (mise, asdf) does not say by its path: "10.0.100 [/root/sdk]"
 			var sdkLine = found is null ? null : listed?.Split( '\n' ).FirstOrDefault( l => l.StartsWith( "10." ) );
 			var open = sdkLine?.IndexOf( '[' ) ?? -1;
 			sdkRoot = open < 0 ? null : Path.GetDirectoryName( sdkLine[( open + 1 )..].TrimEnd( ']', '\r', ' ' ) );

@@ -83,12 +83,12 @@ internal static unsafe class CorePresent
 		if ( last.Handle == swapchain.Handle ) last = default;
 	}
 
-	/// <summary>The id the next present of a swapchain goes with, nought where there are none. Remembered as the one to pace against where it shows at the refresh.</summary>
+	/// <summary>The next present's id, nought for none; paced against where the swapchain shows at the refresh.</summary>
 	internal static ulong Next( VkSwapchain.Swapchain swapchain )
 	{
 		if ( !Available || swapchain is null ) return 0;
 
-		//The loop's frame where it can be, so a frame's id is known before it is presented - see CoreLatency.FrameId; still rising when one window presents twice.
+		//The loop's frame, so the id is known before the present (CoreLatency.FrameId); rising still for two presents a frame
 		var id = Math.Max( swapchain.PresentIds + 1, CoreLatency.FrameId );
 		swapchain.PresentIds = id;
 
@@ -105,7 +105,7 @@ internal static unsafe class CorePresent
 		return id;
 	}
 
-	/// <summary>A present told which id it is: where there is one, its info points at it. The id lives in the caller's frame until the present is made.</summary>
+	/// <summary>Chains the id, if any, into a present's info; it lives in the caller's frame until then.</summary>
 	internal static void Stamp( PresentInfoKHR* present, PresentIdKHR* holder, ulong* id )
 	{
 		if ( *id == 0 ) return;
@@ -126,7 +126,7 @@ internal static unsafe class CorePresent
 	/// <summary>How many frames waited for the screen, and for how long all told - for the report.</summary>
 	internal static long Waits, WaitTicks;
 
-	/// <summary>At the top of a frame, held to the refresh: waits until the frame before the last one handed over has been shown.</summary>
+	/// <summary>At a frame's top, held to the refresh: waits until the frame before the last handed over is shown.</summary>
 	internal static void Pace()
 	{
 		if ( !Available || lastId < 2 || last.Handle == 0 ) return;
@@ -148,7 +148,7 @@ internal static unsafe class CorePresent
 
 		var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
-		//Two refreshes at most: a frame shown late is still shown by then, and a window that stopped showing - minimised, covered - cannot hold the game.
+		//Two refreshes at most: a late frame is shown by then, and a minimised or covered window cannot hold the game
 		var refresh = EngineLoop.DisplayRefreshRate > 1.0f ? EngineLoop.DisplayRefreshRate : 30.0f;
 		var waited = waitForPresent( VkDevice.device, last, lastId - 1, (ulong)( 2.0e9 / refresh ) );
 
@@ -161,7 +161,7 @@ internal static unsafe class CorePresent
 			return;
 		}
 
-		//A compositor that never says a frame was shown - a headless one, some remote desktops - is not paced against at all after a few.
+		//A compositor that never says a frame was shown (headless, some remote desktops) stops being paced against
 		if ( ++missed >= 3 )
 		{
 			unpaced = last.Handle;

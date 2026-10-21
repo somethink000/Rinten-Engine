@@ -131,8 +131,8 @@ public class ComputeShader
 		}
 	}
 
-	//Runs over buffers alone outside any stage, a pass written against postprocess.slang binding them after the pictures' places - see
-	//VkFrame.PassDispatch. False where it did not run.
+	//Runs over buffers alone outside any stage, bound after the pictures' places - see VkFrame.PassDispatch
+	//False where it did not run
 	internal bool RunApartOver( ReadOnlySpan<ulong> buffers, int threadsX, int threadsY, int threadsZ )
 	{
 		var built = Pipeline;

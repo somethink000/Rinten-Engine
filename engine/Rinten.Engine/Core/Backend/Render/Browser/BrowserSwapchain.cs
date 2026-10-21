@@ -73,7 +73,7 @@ internal static unsafe class BrowserSwapchain
 		/// <summary>The second eye's frame block (SecondFrameBinding); holds the first eye's copy until written.</summary>
 		public int Second;
 
-		/// <summary>Frame blocks for draws through another view - a light's, in the camera's place - a slot a put, and a group a slot.</summary>
+		/// <summary>Frame blocks for draws through another view, such as a light's: a slot a put, a group a slot.</summary>
 		public int Aside;
 		public int[] AsideGroups = [];
 		public int AsideUsed;

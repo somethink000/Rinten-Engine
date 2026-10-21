@@ -108,7 +108,7 @@ public record struct CompactTerrainMaterial
 [AssetType( Name = "Terrain", Extension = "terrain", Category = "World", Icon = "terrain" )]
 public partial class TerrainStorage : GameResource
 {
-	//The mesh, and in a file from before there was one the height and control maps it is made from once and never written again - see MakeMesh
+	//The mesh; an old file's height and control maps are read to make it once, never written - see MakeMesh
 	[JsonInclude, JsonPropertyName( "Maps" )] private TerrainMapBlob Maps { get; set; } = new();
 
 	//How many cells a side such a file's maps are; nought once the mesh is made
@@ -132,7 +132,7 @@ public partial class TerrainStorage : GameResource
 	/// <summary>How long an edge of the ground is kept under a brush, in metres: longer ones are split and shorter ones folded as the ground is pulled about, so a cave's walls are as finely made as the hill it was dug into.</summary>
 	public float EdgeLength { get; set; } = 1.0f;
 
-	/// <summary>The ground made again from a height map - <paramref name="side"/> by <paramref name="side"/> heights over the terrain's size, the full range its height - painted with its first layer. Whatever was sculpted is gone.</summary>
+	/// <summary>Remakes the ground from side by side heights over the terrain's size, painted with its first layer.</summary>
 	public void MakeFromHeights( ushort[] heights, int side )
 	{
 		Maps.Mesh = TerrainMesh.FromHeights( heights, null, side, TerrainSize, TerrainHeight );

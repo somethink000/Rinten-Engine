@@ -140,8 +140,8 @@ public sealed class ParticleModelRenderer : ParticleController, Component.Execut
 		p.AddListener( spareListeners.TryTake( out var kept ) ? kept : new ParticleModel( this ), this );
 	}
 
-	//Drawn objects of particles that died, by what they draw, and their listeners, kept for the next particles: each was an object
-	//made and deleted. Taken and given back from the threads the effect steps on.
+	//Dead particles' drawn objects and listeners, by what they draw, kept for the next particles rather than remade
+	//Taken and given back from the threads the effect steps on
 	readonly System.Collections.Concurrent.ConcurrentDictionary<(Model Model, bool Morphed), System.Collections.Concurrent.ConcurrentBag<SceneObject>> spare = new();
 	readonly System.Collections.Concurrent.ConcurrentBag<Particle.BaseListener> spareListeners = new();
 

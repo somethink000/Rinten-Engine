@@ -849,8 +849,8 @@ public sealed unsafe partial class CommandList
 		AddEntry( &Execute, new Entry { Object1 = indexBuffer, Object2 = material, Object3 = indirectBuffer, Data1 = new Vector4( bufferOffset, (int)primitiveType, drawCount, stride ), Object4 = attributes } );
 	}
 
-	//Vertices as a mesh lays them out on the device (PackedVertex) and their indices, drawn with a material's own stages and the draw's own numbers
-	//into the world as it is drawn - for geometry the engine makes on the card, the terrain's ring of relief. Nothing where ready says no.
+	//PackedVertex vertices and indices drawn with a material's stages and the draw's numbers into the world
+	//For card-made geometry such as the relief ring; nothing where ready says no
 	internal void DrawMesh( GpuBuffer vertices, GpuBuffer indices, int count, Material material, Func<bool> ready, RenderAttributes attributes = null )
 	{
 		static void Execute( ref Entry entry, CommandList commandList )

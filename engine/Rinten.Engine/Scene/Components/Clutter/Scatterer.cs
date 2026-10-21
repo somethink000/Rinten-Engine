@@ -45,7 +45,7 @@ public abstract class Scatterer
 		return hash.ToHashCode();
 	}
 
-	//The [Property] members of each kind of scatterer, found once: the hash is how a clutter layer sees its settings change, asked every frame
+	//Each scatterer kind's [Property] members, found once for the hash a clutter layer checks every frame
 	private static PropertyDescription[] Hashed( TypeDescription type )
 	{
 		lock ( hashed )

@@ -135,7 +135,7 @@ float4 UpPs( V2F i ) : SV_Target
 
 float Luma( float3 colour ) { return dot( colour, float3( 0.299, 0.587, 0.114 ) ); }
 
-//The world read with its edges softened where g_finish.w asks: compose.slang's FXAA, which the portable frame has no compose for
+//The world read with edges softened where g_finish.w asks: compose.slang's FXAA, as portable has no compose
 float3 World( float2 uv, float3 middle )
 {
 	if ( g_finish.w < 0.5 ) return middle;

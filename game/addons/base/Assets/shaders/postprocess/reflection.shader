@@ -25,7 +25,7 @@ PARAMETERS
 	//This frame's turn of the rough rays, a whole number.
 	float g_flTurn < Attribute( "Turn" ); >;
 
-	//For ResolvePs: what MainPs traced this frame, what it resolved the frame before, and whether that is this view's at this size.
+	//For ResolvePs: this frame's trace, the last resolve, and whether that is this view's at this size
 	float g_flReflection < Attribute( "Reflection" ); >;
 	float g_flHistory < Attribute( "History" ); >;
 	float g_flAccumulate < Attribute( "Accumulate" ); >;
@@ -173,7 +173,7 @@ float4 Reflected( PostV2F i, bool rays )
 	float3 toEye = normalize( camera - place );
 	float3 ray = reflect( -toEye, normal );
 
-	//A rough surface reflects about a normal drawn from what of its microfacets the eye sees, a different one a texel and a frame
+	//A rough surface reflects about a visible-microfacet normal, drawn anew each texel and frame
 	float rough = SceneRoughness( uv );
 
 	if ( rough > RoughFrom )
@@ -230,8 +230,8 @@ float4 RayPs( PostV2F i ) : SV_Target0
 	return Reflected( i, true );
 }
 
-//MainPs's rays gathered: a rough texel takes its neighbours on its own plane, then the frame before's resolve where its point was
-//kept to what the neighbours span; a mirror's one ray is already right and is passed on. Alpha stays the plane, which the lay weighs by
+//MainPs's rays gathered: a rough texel takes neighbours on its plane, then history clamped to their span
+//A mirror's one ray passes on; alpha stays the plane the lay weighs by
 [shader("fragment")]
 float4 ResolvePs( PostV2F i ) : SV_Target0
 {
@@ -278,7 +278,7 @@ float4 ResolvePs( PostV2F i ) : SV_Target0
 
 	if ( g_flAccumulate < 0.5 ) return float4( mean, now.a );
 
-	//Where this point was a frame ago - the view's move; what it reflects moves with it near enough at the roughness that is gathered
+	//Where this point was a frame ago by the view's move; its reflection moves near enough with it when rough
 	float4 before = mul( float4( place, 1.0 ), EYE_FRAME( previousWorldToClip ) );
 	float2 was = before.w > 1e-6 ? ( ( before.xy / before.w ) * 0.5 ) + 0.5 : float2( -1.0, -1.0 );
 

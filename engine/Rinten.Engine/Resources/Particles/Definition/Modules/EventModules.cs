@@ -323,7 +323,7 @@ public sealed class ParticleEventRelay : ParticleController
 	readonly Dictionary<EventModule, ParticleChildEffects> _spawned = new();
 	readonly List<EventModule> _events = new();
 
-	//The context rows' values come from a shared pool and go back once spawned: an event is often, and each wanted an array of its own.
+	//The context rows' values come from a shared pool and go back once spawned: events are frequent
 	readonly record struct Pending( EventModule Event, Vector3 Position, Vector3 Velocity, Vector4[] Context, Particle Particle, float Scale );
 
 	//An event module of this emitter, told so death can reach it.

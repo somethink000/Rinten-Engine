@@ -31,7 +31,7 @@ V2F MainClusterVs( uint vid : SV_VertexID )
 	return o;
 }
 
-//The depth-only build writes no colour, as its pass has none: Shade runs for its cut-out alone - see CoreShaderFile.Stage.ClusterDepthPixel
+//The depth-only build writes no colour: Shade runs for its cut-out alone - see Stage.ClusterDepthPixel
 #ifdef DEPTH_ONLY
 #define CLUSTER_OUT void
 #define CLUSTER_RETURN( shaded ) shaded

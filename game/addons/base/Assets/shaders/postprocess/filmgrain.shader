@@ -25,7 +25,7 @@ float3 Apply( float3 colour, float2 uv )
 {
 	if ( g_flIntensity <= 0.0 ) return colour;
 
-	//An integer hash of pixel and frame: sin of pixel coordinates in the thousands lost its precision on the GPU and drew stripes
+	//An integer hash of pixel and frame: sin of large pixel coordinates loses precision and stripes
 	uint3 v = uint3( uint2( uv * g_vFrameSize.xy ), uint( g_flTime * 60.0 ) );
 
 	v = v * 1664525u + 1013904223u;

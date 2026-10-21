@@ -11,7 +11,7 @@ public partial class Terrain
 	//Whether the numbers picture last told the ground's corners of a ring to sink under
 	private bool reliefWritten;
 
-	//The full frame alone, and a terrain that is not turned: the ring's corners are placed by the terrain's scale and position alone.
+	//Full frame and an unturned terrain only: the ring's corners are placed by its scale and position alone
 	private bool Relieved => !Application.IsHeadless && CoreNative.Available && !CoreRenderDevice.PortableFrame
 		&& MathF.Abs( WorldRotation.w ) > 0.99999f
 		&& Storage is { } storage && storage.Materials.Any( Displaces );
@@ -91,8 +91,8 @@ public partial class Terrain
 		UpdateParamsMap();
 	}
 
-	//The ring into the numbers picture: where it was built, how far it reaches and fades, how far the ground sinks under it, and where the
-	//terrain stands - see Ring in terrain_layers.slang. Nothing where there is no ring, and the ground's corners sink nowhere.
+	//The ring into the numbers picture: where it was built, its reach and fade, the ground's sink and the terrain's place
+	//(Ring in terrain_layers.slang); without a ring nothing sinks
 	private void FillRelief()
 	{
 		reliefWritten = relief is not null;

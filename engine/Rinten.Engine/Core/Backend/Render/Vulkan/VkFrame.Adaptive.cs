@@ -70,8 +70,8 @@ internal static unsafe partial class VkFrame
 		if ( zone != 0 ) ZoneEnd();
 	}
 
-	//The picture in table slot slot, in a layout a shader reads, read into map: the words cleared, the analysis run at the
-	//world's size whatever the picture's, moved by the view's last step, and the words copied into the map the world's passes take.
+	//The picture in a table slot analysed into map at the world's size, moved by the view's last step,
+	//and copied into the map the world's passes take
 	private static void LayRates( Frame frame, VkFovea.Map map, uint slot, Format format )
 	{
 		VkPipelines.GetBoth( AdaptivePipeline, out var bound, out var layout );

@@ -1,6 +1,5 @@
-//The ring of relief round the eye: each triangle of the ground near it cut into smaller ones, so many a side as Terrain.Relief asked,
-//and every corner lifted along its normal by the layers it wears - their height maps times their displacement - fading to nought at
-//the ring's edge. Written as the vertices a mesh carries, in the terrain's metres, marked as the ring's; see Vertex in terrain.shader.
+//The relief ring: ground triangles near the eye cut as Terrain.Relief asked, corners lifted by their layers' heights
+//fading at the edge; written as mesh vertices in the terrain's metres, marked as the ring's - see terrain.shader
 
 FEATURES
 {

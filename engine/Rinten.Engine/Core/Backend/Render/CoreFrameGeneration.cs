@@ -2,16 +2,15 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//FSR 3.1 frame generation host side as engine compute passes - AMD's optical flow and frame interpolation dispatches; see
-//framegen.slang. The world is kept as it is before the interface is drawn (Capture); at the frame's end the frame between the
-//last one and this one is made from the two, and VkFrame shows it half a frame before this one
+//FSR 3.1 frame generation as engine compute passes (framegen.slang): the world is kept before the interface (Capture),
+//and at the frame's end the frame between the last and this one is made and shown half a frame early by VkFrame
 internal static class CoreFrameGeneration
 {
 	//-- whether it runs ----------------------------------------------------------
 
 	internal static bool Available => CoreNative.Available && !CoreRenderDevice.PortableFrame && EnsurePipelines() && formatsRight;
 
-	/// <summary>Whether a frame is generated between every two the game draws: the player's setting, where this device runs it.</summary>
+	/// <summary>Whether a frame is generated between every two drawn: the player's setting, where it runs.</summary>
 	internal static bool Wanted => Rinten.Rendering.DrawSettings.FrameGeneration && Available;
 
 	//-- the passes ---------------------------------------------------------------
@@ -220,7 +219,7 @@ internal static class CoreFrameGeneration
 		reconstructedPrevious = Make( CoreRender.PictureKind.Whole, rw, rh );
 		reconstructedInterpolated = Make( CoreRender.PictureKind.Whole, rw, rh );
 
-		//Each field's X and Y side by side - see the callbacks. The flow's field is read at the flow's size, which may pass the world's.
+		//Each field's X and Y side by side - see the callbacks; the flow's field is read at the flow's size
 		gameField = Make( CoreRender.PictureKind.Whole, rw * 2, rh );
 		flowField = Make( CoreRender.PictureKind.Whole, Math.Max( rw, flowSizes[0].Width ) * 2, Math.Max( rh, flowSizes[0].Height ) );
 
@@ -281,7 +280,7 @@ internal static class CoreFrameGeneration
 	private static bool reset;
 	private static long lastCaptured = -2;
 
-	/// <summary>Keeps this frame's world as it is before the interface is drawn over it, and readies its depth and motion - AMD's prepare. The window's picture must hold the finished world.</summary>
+	/// <summary>Keeps the finished world before the interface and readies its depth and motion - AMD's prepare.</summary>
 	internal static void Capture( ulong depth, ulong motion, (int Width, int Height) render, (int Width, int Height) display,
 		Vector2 jitter, float near, float far, float field, float delta, bool restart )
 	{
@@ -332,7 +331,7 @@ internal static class CoreFrameGeneration
 			( rw + 7 ) / 8, ( rh + 7 ) / 8 );
 	}
 
-	/// <summary>The frame between the last one and this, made from what Capture kept and PresentPicture - recorded at the frame's end, and nought where none was made.</summary>
+	/// <summary>The frame between the last and this one from Capture and PresentPicture; nought for none.</summary>
 	internal static ulong Generate()
 	{
 		if ( !Available || constants == 0 ) return 0;
@@ -350,7 +349,7 @@ internal static class CoreFrameGeneration
 		return ok ? output : 0;
 	}
 
-	//AMD's optical flow dispatch: this frame's luma and its pyramid, the scene change, then the flow level by level from the coarsest.
+	//AMD's optical flow: luma and its pyramid, the scene change, then the flow level by level from the coarsest
 	private static bool OpticalFlow( ulong colour, int dw, int dh )
 	{
 		var odd = ( flowFrame & 1 ) != 0;
@@ -433,7 +432,7 @@ internal static class CoreFrameGeneration
 		return ok;
 	}
 
-	//AMD's frame interpolation dispatch, after its setup: the game's motion and the flow's as fields, what was hidden, the frame, and its holes filled.
+	//AMD's interpolation: the game's and the flow's motion fields, what was hidden, the frame, its holes filled
 	private static bool Interpolate( ulong cur, ulong prev, int rw, int rh, int dw, int dh )
 	{
 		var renderX = ( rw + 7 ) / 8;
@@ -514,7 +513,7 @@ internal static class CoreFrameGeneration
 
 	private static ulong Texture( ulong picture ) => picture == 0 ? 0 : CoreRenderDevice.PictureTexture( picture );
 
-	//One pass: reads by texture at the slots its SRV numbers name, outputs in binding order, the pass's own numbers in the push block's last line.
+	//One pass: reads at the slots its SRV numbers name, outputs in binding order, its numbers in the push block's last row
 	private static bool Dispatch( Pass pass, ReadOnlySpan<ulong> reads, ReadOnlySpan<ulong> writes, ReadOnlySpan<int> levels,
 		int groupsX, int groupsY, int groupsZ = 1, (uint, uint, uint, uint) steps = default, bool counted = false )
 	{

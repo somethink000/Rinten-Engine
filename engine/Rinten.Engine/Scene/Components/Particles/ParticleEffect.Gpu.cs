@@ -21,7 +21,7 @@ public sealed partial class ParticleEffect
 		return onCard = OffCard is null;
 	}
 
-	/// <summary>Why the processor steps this effect rather than the card, as OnCard last found; null where the card does.</summary>
+	/// <summary>Why the processor steps this effect, as OnCard last found; null where the card does.</summary>
 	internal string OffCard { get; private set; }
 
 	private string WhyNotOnCard()
@@ -85,7 +85,7 @@ public sealed partial class ParticleEffect
 		return null;
 	}
 
-	//A shape whose place depends on how far along it alone, followed by numbers no particle changes - see ParticleGpuRun's shape table
+	//A shape placed by its progress alone, then numbers no particle changes - see ParticleGpuRun's shape table
 	private bool Followed( FollowShapeModule follow, ParticleDefinition.Emitter data )
 	{
 		if ( follow.AlignToShape || !follow.Speed.Uniform || !follow.Weight.Uniform ) return false;
@@ -114,7 +114,7 @@ public sealed partial class ParticleEffect
 	private static bool Fixed( in ParticleFloat value )
 		=> value.IsPlainConstant || value.Evaluation is ParticleFloat.EvaluationType.Seed or ParticleFloat.EvaluationType.Index;
 
-	/// <summary>Steps this effect on the card where it can be: what it made since the last step goes over, and nothing of it stays here. False where it is stepped on the processor.</summary>
+	/// <summary>Steps this effect on the card where it can, what it made going over; false where it cannot.</summary>
 	internal bool CardStep()
 	{
 		if ( !OnCard() )

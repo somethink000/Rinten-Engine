@@ -15,7 +15,7 @@ internal sealed class CoreUpscaler
 	//The translation after the projection that draws the world there - identity where not temporal.
 	internal System.Numerics.Matrix4x4 JitterMatrix { get; private set; } = System.Numerics.Matrix4x4.Identity;
 
-	//This frame's clip space straight into last frame's, as the frame block's two matrices make it - the temporal pass's reprojection
+	//This frame's clip space into last frame's, from the frame block's two matrices - the temporal reprojection
 	internal System.Numerics.Matrix4x4 ClipToPrevious { get; set; } = System.Numerics.Matrix4x4.Identity;
 
 	//How much sharper textures are read this frame - see CoreUpscale.MipBias.
@@ -95,7 +95,7 @@ internal sealed class CoreUpscaler
 	//What an edge pass or FSR 3 wrote.
 	private ulong carried;
 
-	//The world before glass and sprites were laid over it this frame, whether it was kept, and how much they changed each texel - see ReactiveCs
+	//The world before glass and sprites, whether it was kept, and how much they changed each texel - see ReactiveCs
 	private ulong opaque;
 	private bool opaqueKept;
 	private ulong reactive;
@@ -235,7 +235,7 @@ internal sealed class CoreUpscaler
 	//The last Run's picture as a texture, for a pass that reads it by its place in the table - see CoreSceneDrawer.
 	internal ulong LastTexture { get; private set; }
 
-	//How far the compose sharpens the last Run's picture by RCAS, nought none - it reads every pixel anyway, so no pass of its own
+	//How far the compose sharpens by RCAS, nought none; it reads every pixel anyway, so no pass of its own
 	internal float ComposeSharpening { get; private set; }
 
 	//A picture this keeps, acquired the first time it is wanted at this size.
@@ -380,7 +380,7 @@ internal sealed class CoreUpscaler
 	//Whether this frame's motion has been made.
 	private bool motionMade;
 
-	//This frame's motion as a texture, made here where the upscaler did not need it - for the generated frame, see CoreFrameGeneration.
+	//This frame's motion as a texture where the upscaler made none, for the generated frame
 	internal ulong MotionTexture( ulong depth, ulong velocity, float near, float far )
 	{
 		if ( !Temporal || depth == 0 || !EnsurePipelines() ) return 0;

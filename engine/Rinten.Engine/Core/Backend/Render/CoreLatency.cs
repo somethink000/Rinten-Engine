@@ -20,8 +20,8 @@ internal static unsafe class CoreLatency
 	//Whether the device was opened with Reflex's low latency.
 	internal static bool Reflex { get; private set; }
 
-	//Whether the instance asks for Mesa's Anti-Lag layer by name, where it is installed: always, since it does nothing until told to and the
-	//saved setting is read only after the device is made - asked for only with the setting on, it was never there at a start.
+	//Mesa's Anti-Lag layer is asked for whenever installed: it idles until told to, and the saved setting
+	//is read only after the instance is made
 	internal static bool WantsMesaLayer => OperatingSystem.IsLinux();
 
 	//The device extensions to ask for, of those this card has - see VkDevice.CreateDevice.
@@ -221,7 +221,7 @@ internal static unsafe class CoreLatency
 		Mark( LatencyMarkerNV.InputSampleNV, frame );
 	}
 
-	/// <summary>The frame the loop is on, as the id its presents go with - see CorePresent.Next. What both drivers tie a frame's stages together by.</summary>
+	/// <summary>The loop's frame as its presents' id, which both drivers tie a frame's stages by - see CorePresent.</summary>
 	internal static ulong FrameId => (ulong)EngineLoop.LoopFrames;
 
 	private static void UpdateAntiLag( bool on, AntiLagStageAMD stage, ulong frame )

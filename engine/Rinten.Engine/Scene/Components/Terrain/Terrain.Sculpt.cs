@@ -47,7 +47,7 @@ public partial class Terrain
 		return edit;
 	}
 
-	/// <summary>Paints the mesh from a control map <paramref name="side"/> texels a side over the terrain's size (packed as <see cref="CompactTerrainMaterial"/>), read across it by where each vertex stands on the ground plane - what an imported splat map comes to. A cave's floor and the hill over it get the same paint; they are one texel of a map.</summary>
+	/// <summary>Paints the mesh from a side by side control map (CompactTerrainMaterial) by where vertices stand.</summary>
 	public TerrainMeshEdit RepaintFromControlMap( uint[] control, int side )
 	{
 		if ( Storage?.Mesh is not { } mesh || control is null ) return null;

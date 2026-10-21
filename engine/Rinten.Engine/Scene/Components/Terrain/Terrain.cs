@@ -9,7 +9,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 {
 	public override bool IsConcave => true;
 
-	//Between OnEnabled and OnDisabled. A storage set while the scene is read comes before OnEnabled, and laying it out then lays it out twice
+	//Between OnEnabled and OnDisabled: storage set while the scene is read comes first and would be laid out twice
 	private bool running;
 
 	protected override void OnEnabled()
@@ -76,7 +76,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 			return;
 		}
 
-		//Whatever is waiting to be baked, and whatever the workers finished; then the ring of relief over what stands, and the paint mask.
+		//What waits to be baked and what the workers finished; then the relief ring and the paint mask
 		PumpChunks();
 		PumpRelief();
 		PumpMask();

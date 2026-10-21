@@ -20,7 +20,7 @@ public sealed class ParticleModuleRunner : ParticleController
 	[ThreadStatic]
 	static ParticleModuleContext _stepContext;
 
-	//Apart from the step's: a module stepping a particle can make others, and that must not repoint the context it is being run with
+	//Apart from the step's: a module may make particles, which must not repoint the context it runs with
 	[ThreadStatic]
 	static ParticleModuleContext _createContext;
 
@@ -277,7 +277,7 @@ public sealed class ParticleModuleRunner : ParticleController
 	Dictionary<EventModule, ulong> _eventBits;
 
 	/// <summary>A context for this runner, with everything but the particle filled in.</summary>
-	//The thread's own context, pointed at this particle: made and stepped particles are many a frame, and a module only reads it while applied
+	//The thread's own context pointed at this particle: particles are many a frame, and a module reads it only while applied
 	ParticleModuleContext Reused( ref ParticleModuleContext slot, Particle particle )
 	{
 		var context = slot ??= new ParticleModuleContext();

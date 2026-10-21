@@ -16,7 +16,7 @@ public sealed class GravityModule : ParticleModule, IParticleModuleStep, IPartic
 	public void Step( ParticleModuleContext context, float delta )
 		=> context.Particle.Velocity += ( context.Frame is Held held ? held.Force : Force.Evaluate( context.Particle, context.Player ) ) * delta;
 
-	//The force worked out once for the effect where no particle changes it - its parameter is two lookups by name a particle otherwise
+	//The force worked out once an effect where no particle changes it, not two lookups by name a particle
 	private sealed class Held
 	{
 		internal Vector3 Force;
@@ -285,7 +285,7 @@ public sealed class CurlNoiseModule : ParticleModule, IParticleModuleStep, IPart
 		return held;
 	}
 
-	//The curl of the potential field, worked out exactly: the field is a sum of sines of straight lines, whose gradients are cosines
+	//The potential field's exact curl: the field is a sum of sines of lines, whose gradients are cosines
 	static Vector3 Curl( Vector3 position, float time )
 	{
 		var x = Gradient( position, time );
@@ -295,8 +295,8 @@ public sealed class CurlNoiseModule : ParticleModule, IParticleModuleStep, IPart
 		return new Vector3( z.y - y.z, x.z - z.x, y.x - x.y );
 	}
 
-	//The gradient of Noise at a point - Noise being 0.5 sin(x + 1.3y) + 0.3 sin(1.7y + 0.9z) + 0.2 sin(2.1z + 1.1x) + 0.15 sin(3.7x + 2.3y + 1.9z),
-	//over the point moved on by time along (1, 0.7, 0.5)
+	//Noise's gradient at the point moved by time along (1, 0.7, 0.5); Noise is 0.5 sin(x + 1.3y) + 0.3 sin(1.7y + 0.9z)
+	//+ 0.2 sin(2.1z + 1.1x) + 0.15 sin(3.7x + 2.3y + 1.9z)
 	static Vector3 Gradient( Vector3 position, float time )
 	{
 		var p = position + new Vector3( time, time * 0.7f, time * 0.5f );

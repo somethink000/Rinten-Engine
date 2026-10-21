@@ -1625,7 +1625,6 @@ internal sealed partial class CoreSceneDrawer
 		return CorePointChain.Foldable( CollectionsMarshal.AsSpan( foldPoints ) ) ? CorePointChain.ScreenKeyFor( CollectionsMarshal.AsSpan( foldPoints ) ) : null;
 	}
 
-	//The stages that must hold nothing for a run to be carried, and the ones it is laid at.
 	//Whether anything the portable frame draws as a pass over the world is hung before the compose; a point effect is carried
 	private bool PortablePasses( CameraComponent camera )
 	{
@@ -1649,7 +1648,7 @@ internal sealed partial class CoreSceneDrawer
 		return false;
 	}
 
-	//The portable frame's passes over the world drawn aside, between the glow's two pictures: what the finish reads, and whether it is light
+	//The portable frame's passes over the world drawn aside: the picture the finish reads, and whether it is light
 	private (ulong Reads, bool Light) RunPortablePasses( CameraComponent camera, float near, float far )
 	{
 		var (width, height) = glow.PassSize;
@@ -1693,6 +1692,7 @@ internal sealed partial class CoreSceneDrawer
 		Rinten.Rendering.Stage.BeforePostProcess, Rinten.Rendering.Stage.Tonemapping,
 	};
 
+	//The stages that must hold nothing for a run to be carried, and the ones it is laid at.
 	private static readonly Rinten.Rendering.Stage[] unfolded =
 	{
 		Rinten.Rendering.Stage.AfterDepthPrepass, Rinten.Rendering.Stage.AfterPostProcess,
@@ -1714,10 +1714,10 @@ internal sealed partial class CoreSceneDrawer
 	//Where this viewport was looking the frame before, and whether there was one. Per drawer,
 	//which is per viewport: two views of one scene are two cameras and each has its own last frame.
 	private System.Numerics.Matrix4x4 previousViewProjection;
+	private bool hasPrevious;
 
 	//Which turn of the hashed cut-outs this frame is - see SetHashedCut
 	private int hashedTurn;
-	private bool hasPrevious;
 
 	//Pipelines for viewport furniture (lines, gizmos, billboards, UI); static so previews reuse them
 	private static ulong linePipeline;
@@ -2479,7 +2479,7 @@ internal sealed partial class CoreSceneDrawer
 		var foldAt = foldKey is null ? -1 : CorePointChain.UploadInto( frame, CollectionsMarshal.AsSpan( foldPoints ) );
 		if ( foldAt < 0 ) foldKey = null;
 
-		//Kept past white in the screen's eight bits a colour comes back a step off, so a world with nothing to glow or pass over keeps its curve
+		//Kept past white in eight bits a colour comes back a step off, so a world with nothing over it keeps its curve
 		asideFinished = aside && !passes && !carry && !glow.Glows && foldKey is null;
 
 		CoreSceneRenderer.SetFinish( frame, exposure, aside && !asideFinished ? CorePortableGlow.KeepCurve : frameCurve, Math.Max( foldAt, 0 ) );
@@ -2560,7 +2560,7 @@ internal sealed partial class CoreSceneDrawer
 		{
 			casters.Note( tables );
 
-			//What this frame draws by hand and moves - code's models, geometry made on the card - into the maps of what moves, beside the tables' movers.
+			//What this frame draws by hand and moves (code's models, card geometry) into the movers' maps beside the tables'
 			casters.Hand.Clear();
 
 			foreach ( ref readonly var queued in CollectionsMarshal.AsSpan( opaque ) )
@@ -3030,7 +3030,7 @@ internal sealed partial class CoreSceneDrawer
 
 		Between( camera, offscreen, near, far, Rinten.Rendering.Stage.AfterSkybox );
 
-		//What the upscaler's history must not trust is what is laid over the opaque world next: the world as it stands is kept to tell it by
+		//The opaque world kept, so the upscaler can tell what is laid over it next and not trust its history there
 		if ( upscaling && offscreen && ( translucent.Count > 0 || CoreImmediate.Instanced.Length > 0 || CoreImmediate.Blocks.Length > 0 ) )
 		{
 			CoreRenderDevice.EndTarget();
@@ -4681,8 +4681,8 @@ internal sealed partial class CoreSceneDrawer
 		}
 	}
 
-	//Textures of retired strings, kept to be written over rather than one made and one destroyed for each string - on a page a texture
-	//made is also its bind group described as text
+	//Retired strings' textures, written over rather than one made and destroyed a string; on a page each made texture
+	//is also a bind group described as text
 	private static readonly System.Collections.Generic.List<(ulong Texture, int Width, int Height)> textSpare = new();
 	private const int TextSpares = 64;
 

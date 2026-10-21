@@ -28,7 +28,7 @@ internal sealed class TerrainChunkBake
 	/// <summary>The ground alone, with what it is painted with - what is scattered over a chunk is scattered over this.</summary>
 	public TerrainSoup Ground;
 
-	/// <summary>Which of the terrain's layers each of the drawn vertex's weights is for - see TerrainChunkBaker.Palette.</summary>
+	/// <summary>Which terrain layer each weight of the drawn vertex is for - see TerrainChunkBaker.Palette.</summary>
 	public byte[] Palette;
 
 	/// <summary>The two models as compiled bytes, written on the worker that baked the chunk. The main thread turns them into models and lets them go - see Terrain.Rendering.Stand.</summary>
@@ -38,7 +38,7 @@ internal sealed class TerrainChunkBake
 	/// <summary>What those models are called.</summary>
 	public string GroundName, SetInName;
 
-	/// <summary>The two drawn past where the chunk is kept whole - see TerrainChunkBaker.Thinned. Null where there is nothing of that kind.</summary>
+	/// <summary>The two drawn past where the chunk is kept whole (Thinned); null for none.</summary>
 	public byte[] FarGroundBytes;
 	public byte[] FarSetInBytes;
 
@@ -84,7 +84,7 @@ internal sealed class TerrainChunkJob
 
 	public TerrainChunkBake Result;
 
-	/// <summary>What holds the terrain this chunk is of - its own resource, or the scene it is set in - whose shipped pack is looked in first. See TerrainBakeCache.</summary>
+	/// <summary>The terrain's resource or scene, whose shipped pack is looked in first - see TerrainBakeCache.</summary>
 	public string Shipped;
 
 	/// <summary>Whether anybody is going to draw this - false where the game runs without a window.</summary>
@@ -93,7 +93,7 @@ internal sealed class TerrainChunkJob
 	/// <summary>Skip coarse LOD levels while sculpting; the chunk is rebaked properly when the edit ends</summary>
 	public bool Coarse;
 
-	/// <summary>Whether the chunk is kept whole; a far one reads back only its far models and collision - see TerrainChunkBake.Whole.</summary>
+	/// <summary>Whether the chunk is kept whole; a far one reads back only far models and collision.</summary>
 	public bool Whole = true;
 
 	/// <summary>Whether its ground changed since it was last baked, rather than it only being read again whole or far.</summary>
@@ -212,14 +212,14 @@ internal static class TerrainChunkBaker
 		if ( any ) bake.FarSetInBytes = far.WithLockedBorder().ToBytes();
 	}
 
-	/// <summary>How far a far chunk's model may stray from the ground, as a share of the chunk's side - see Terrain.WholeReach.</summary>
+	/// <summary>How far a far chunk's model may stray from the ground, a share of its side.</summary>
 	public const float FarShare = 1.0f / 128.0f;
 
 	//How much a whole change of paint or texture coordinate counts against the error, in metres.
 	private const float FarAttributeWeight = 0.25f;
 
-	//One material's geometry thinned to within an error of metres, its border kept where it is so it meets a whole neighbour without a
-	//crack; the vertices kept are the ones it had, paint and all. Null where nothing is left.
+	//One material's geometry thinned to an error in metres, its border kept to meet a whole neighbour without a crack
+	//Kept vertices are its own, paint and all; null where nothing is left
 	private static Mesh Thinned( List<Vertex> vertices, List<int> indices, Material material, float error, bool painted )
 	{
 		if ( indices.Count < 3 ) return null;
@@ -400,8 +400,8 @@ internal static class TerrainChunkBaker
 		{
 			Slots( bake.Ground.Vertices[i].Paint, bake.Palette, slots );
 
-			//Spread over colour and UVs, since the simplifier keeps UVs but not colour. Slots 6 and 7 go in the colour's spare two: the cluster
-			//vertex has no more coordinates to give, and the last two wandering a little across a collapse is the price.
+			//Over colour and UVs, as the simplifier keeps UVs but not colour; slots 6 and 7 take the colour's spare two
+			//and may wander a little across a collapse
 			var drawn = bake.Vertices[i];
 			drawn.Color = new Color32( Byte01( slots[0] ), Byte01( slots[1] ), Byte01( slots[6] ), Byte01( slots[7] ) );
 			drawn.TexCoord0 = new Vector4( slots[2], slots[3], 0.0f, 0.0f );
@@ -448,7 +448,7 @@ internal static class TerrainChunkBaker
 		return palette;
 	}
 
-	/// <summary>How much of each palette slot's layer a paint holds. A slot past the palette's last, which repeats layer nought, weighs nothing.</summary>
+	/// <summary>How much of each palette slot's layer a paint holds; slots past the palette weigh nothing.</summary>
 	public static void Slots( in TerrainPaint paint, byte[] palette, Span<float> into )
 	{
 		into.Clear();

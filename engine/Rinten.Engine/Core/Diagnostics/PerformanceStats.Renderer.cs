@@ -20,7 +20,7 @@ public static partial class PerformanceStats
 		}
 	}
 
-	/// <summary>How the edges of the world are smoothed right now: MSAA on a page or the portable frame, the edge filter or a temporal upscaler, or "off".</summary>
+	/// <summary>How the world's edges are smoothed now: MSAA, the edge filter, a temporal upscaler, or "off".</summary>
 	public static string AntiAliasing
 	{
 		get

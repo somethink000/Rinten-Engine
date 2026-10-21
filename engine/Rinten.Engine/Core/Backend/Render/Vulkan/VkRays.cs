@@ -464,7 +464,7 @@ internal static unsafe class VkRays
 		internal Owned BottomStorage, TopStorage, Corners, Placed, Scratch;
 	}
 
-	/// <summary>Builds a structure over triangles of three corners each, the first `solid` opaque; null where it will not build.</summary>
+	/// <summary>Builds a structure over triangles, the first `solid` opaque; null where it will not build.</summary>
 	internal static Soup BuildSoup( CommandBuffer commands, ReadOnlySpan<float> corners, int solid )
 	{
 		var triangles = corners.Length / 9;

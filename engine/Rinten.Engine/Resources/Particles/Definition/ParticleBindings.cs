@@ -144,7 +144,7 @@ public sealed class ParticleFloatBinding
 	/// <summary>Whether this actually names a parameter that could be read.</summary>
 	public bool IsBound => UseParameter && !string.IsNullOrEmpty( ParameterName );
 
-	//The same for every particle of a player this frame: no slot, and a value that is a plain number - see Evaluate( ParticlePlayer )
+	//The same for every particle of a player this frame: no slot, a plain number - see Evaluate( ParticlePlayer )
 	internal bool Uniform => !HasSlot && Value.IsPlainConstant;
 
 	/// <summary>This as something the engine can hold: a parameter collapses to the constant it is worth for this player.</summary>
@@ -231,8 +231,8 @@ public sealed class ParticleFloatBinding
 		return Kept( Resolve( player ), scale );
 	}
 
-	//Scale, with the last scaled curves kept by the frames they came from and the scale: a scaled curve is a new curve, asked for with
-	//every particle a module starts. One reference, written whole, so a step on another thread reads a matching pair
+	//Scale, with the last scaled curves kept by their frames and scale - a module asks for one every particle it starts
+	//One reference written whole, so a step on another thread reads a matching pair
 	ParticleFloat Kept( ParticleFloat value, float scale )
 	{
 		if ( value.Type is not ( ParticleFloat.ValueType.Curve or ParticleFloat.ValueType.CurveRange ) )

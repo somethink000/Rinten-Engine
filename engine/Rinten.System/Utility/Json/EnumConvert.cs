@@ -14,7 +14,7 @@ internal sealed class EnumConvert : JsonConverterFactory
 
 	public override JsonConverter CreateConverter( Type typeToConvert, JsonSerializerOptions options ) => new EnumByName( Nullable.GetUnderlyingType( typeToConvert ) ?? typeToConvert );
 
-	//Over object rather than Enum: the serializer wants the converter's type related to the member's, and a nullable enum is not an Enum
+	//Over object not Enum: the serializer relates the converter's type to the member's, and a nullable enum is no Enum
 	private sealed class EnumByName( Type type ) : JsonConverter<object>
 	{
 		private readonly bool Unsigned = Type.GetTypeCode( Enum.GetUnderlyingType( type ) ) is TypeCode.Byte or TypeCode.UInt16 or TypeCode.UInt32 or TypeCode.UInt64;

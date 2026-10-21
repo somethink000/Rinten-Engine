@@ -1,7 +1,7 @@
 namespace Rinten;
 
-//Effects one effect plays - where a particle died, or on an event of one. An effect is a tree of objects and components, so one that
-//has played through is kept, standing idle, and played again for the next rather than built again. Main thread only.
+//Effects an effect plays where a particle died or on its events; a finished one is kept idle and played again
+//rather than its object tree built again. Main thread only
 internal sealed class ParticleChildEffects
 {
 	//A playing effect, the particle it follows, and the frame it began - it is not over before it has stepped once.
@@ -13,7 +13,7 @@ internal sealed class ParticleChildEffects
 	/// <summary>How many are playing.</summary>
 	public int Playing => playing.Count;
 
-	/// <summary>One for this effect, idle or new, not yet started: placed and given its parameters by the caller, then <see cref="Start"/>.</summary>
+	/// <summary>One for this effect, idle or new, unstarted: the caller places it, then calls Start.</summary>
 	public ParticlePlayer Take( ParticleDefinition effect, string name )
 	{
 		while ( idle.TryPop( out var kept ) )
@@ -72,7 +72,7 @@ internal sealed class ParticleChildEffects
 		}
 	}
 
-	/// <summary>A particle has died: what followed it stays where it is - the particle goes back to the pool and would be another's next.</summary>
+	/// <summary>A particle died: what followed it stays put, as the particle goes back to the pool.</summary>
 	public void LetGo( Particle p )
 	{
 		for ( var i = 0; i < playing.Count; i++ )

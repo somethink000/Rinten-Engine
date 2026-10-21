@@ -105,7 +105,7 @@ float2 BackwardsFrom( int2 texel, float2 size, float depth, float4 written )
 	return was - uv;
 }
 
-//BackwardsFrom for the temporal pass: one matrix from this frame's clip space to the last's, three of its columns in the push block
+//BackwardsFrom for the temporal pass: this frame's clip space to the last's, three columns in the push block
 float2 Reprojected( int2 texel, float2 size, float depth, float4 written )
 {
 	float2 uv = ( float2( texel ) + 0.5 ) / size;
@@ -314,7 +314,7 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 
 	if ( !reset && onScreen )
 	{
-		//Catmull-Rom only where the history is read between its texels; a pixel that stood still reads its own one, and one tap is exact there
+		//Catmull-Rom only between history texels; a still pixel reads its own, where one tap is exact
 		float2 between = abs( frac( was * outSize ) - 0.5 );
 		float4 history = all( between < 0.01 ) ? At( g_vFramePictures.y, was ) : HistoryAt( was, outSize );
 

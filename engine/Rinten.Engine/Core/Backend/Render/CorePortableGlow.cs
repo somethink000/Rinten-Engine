@@ -61,7 +61,7 @@ internal sealed class CorePortableGlow
 	/// <summary>Their size, which is the screen's and the world's drawn aside.</summary>
 	internal (int Width, int Height) PassSize => ( passWidth, passHeight );
 
-	/// <summary>Sends the world aside for this frame's glow, its passes, a run of point effects only the finish carries, or its edges to soften; false where it cannot.</summary>
+	/// <summary>Sends the world aside for glow, passes, a finish-only run or soft edges; false where it cannot.</summary>
 	internal bool Open( Settings? wanted, bool passes, bool carry, bool soften, float frameExposure )
 	{
 		softening = soften;
@@ -88,8 +88,7 @@ internal sealed class CorePortableGlow
 		return true;
 	}
 
-	/// <summary>The world's pass back on the screen, then what reads holds - the world, or a pass's picture of light - with
-	/// its glow where there is one, finished onto it through the run of point effects, if any.</summary>
+	//The world's pass closed, then what reads holds - the world or a pass's picture - finished onto the screen with its glow
 	internal void Finish( float curve, string chain, ulong reads = 0, bool light = false, bool finished = false )
 	{
 		CoreRenderDevice.WorldAside( false, out _, out _ );
@@ -177,7 +176,7 @@ internal sealed class CorePortableGlow
 		return made;
 	}
 
-	/// <summary>The compose's or the finish's pixel stage carrying the run known by key - see CorePointChain.ScreenText.</summary>
+	/// <summary>The compose's or finish's pixel stage carrying the run keyed so - see CorePointChain.ScreenText.</summary>
 	internal static CoreShaderJobs.Request? ChainRequest( string key, string entry )
 		=> CorePointChain.ScreenText( key ) is { } chain &&
 			CoreShaderCache.PassText( EngineShaders.Glow, "#define ENGINE_SCREEN_CHAIN 1\n", chain ) is { } made

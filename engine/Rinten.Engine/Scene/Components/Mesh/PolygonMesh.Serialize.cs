@@ -45,8 +45,8 @@ public partial class PolygonMesh
 		throw new JsonException( "JSON object did not end correctly." );
 	}
 
-	//One property of a written mesh. Position, Rotation and the texture parameters are no longer written: they are read for old data that
-	//has no TextureCoord, and the parameters are otherwise worked out again from it - see ComputeFaceTextureParametersFromCoordinates
+	//One property of a written mesh; Position, Rotation and texture parameters are only read, for data without TextureCoord
+	//Otherwise the parameters come from the coordinates - see ComputeFaceTextureParametersFromCoordinates
 	private static void ReadProperty( PolygonMesh mesh, string propertyName, ref Utf8JsonReader reader, ref bool hasTextureCoords )
 	{
 		switch ( propertyName )
@@ -97,8 +97,8 @@ public partial class PolygonMesh
 
 	private static T Read<T>( ref Utf8JsonReader reader ) => JsonSerializer.Deserialize<T>( ref reader, EnumConvert.Plain );
 
-	//One slot per entry, in the order they were written, whether or not the file behind the name is here to load. The faces index
-	//this list by position: skipping an entry renumbers every material after it and the mesh comes back wearing somebody else's.
+	//One slot per entry in written order, loadable or not: faces index by position, and a skipped entry would
+	//renumber every material after it
 	private static void ReadMaterials( PolygonMesh mesh, string[] materials )
 	{
 		mesh._materialsById.Clear();

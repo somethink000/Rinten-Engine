@@ -22,10 +22,10 @@ public partial class Terrain
 		public Model FarGroundModel;
 		public Model FarSetInModel;
 
-		/// <summary>Whether it is kept whole: drawn at its finest and its ground kept for what is scattered over it - see Keep.</summary>
+		/// <summary>Whether it is kept whole: drawn finest, its ground kept for the scatter - see Keep.</summary>
 		public bool Whole = true;
 
-		/// <summary>Whether its ground has changed since it was last gathered, rather than it only being wanted whole or far.</summary>
+		/// <summary>Whether its ground changed since last gathered, not only wanted whole or far.</summary>
 		public bool Changed;
 
 		/// <summary>Whether the physics world holds its collision - see Solidify. Its triangles are kept either way.</summary>
@@ -345,7 +345,7 @@ public partial class Terrain
 	//Pixels a metre covers a metre away, for a window as tall as most, where no camera has said yet.
 	private const float UnseenPixelsAtAMetre = 1000.0f;
 
-	//Where the ground is looked at from, in its own metres, and out to where a chunk is kept whole; false where nobody is looking yet.
+	//Where the ground is seen from in its metres, and how far chunks are kept whole; false where nobody looks yet
 	private bool Looked( out Vector3 eye, out float reach )
 	{
 		eye = default;
@@ -372,7 +372,7 @@ public partial class Terrain
 
 		eye = WorldTransform.PointToLocal( eye );
 
-		//Where a far model's error comes to the pixels a model's chain is allowed to be off by. Both are in the terrain's own metres.
+		//Where a far model's error reaches the pixels a model's chain may be off by, in the terrain's metres
 		reach = chunkSpan * TerrainChunkBaker.FarShare * pixels / MathF.Max( Rendering.DrawSettings.MeshLodPixels, 0.1f );
 		reach = MathF.Max( reach, TerrainRelief.Reach + TerrainRelief.Fade );
 
@@ -394,8 +394,8 @@ public partial class Terrain
 	private Vector3? keptFrom;
 	private float keptReach;
 
-	//Which chunks are kept whole for an eye here. One coming within reach is read again whole; one going a chunk further out than that
-	//lets go of its finest models and its ground and is drawn by its far models. Asked again once the eye has gone an eighth of a chunk.
+	//Chunks kept whole for an eye here: one in reach is read whole, one a chunk past drops to its far models
+	//Asked again once the eye moves an eighth of a chunk
 	private void Keep()
 	{
 		if ( chunks.Length == 0 || !Looked( out var eye, out var reach ) ) return;
@@ -473,9 +473,8 @@ public partial class Terrain
 	//Per chunk this look: 2 within the reach of something, 1 only within a chunk more of it - see Mark.
 	private byte[] solidNear = [];
 
-	//Which chunks the physics world holds. All of them in the editor, whose tools trace wherever they are pointed; in play those within
-	//SolidReach of the eye, of every body that is not still - a ragdoll's and code's as much as a component's - and of every character.
-	//A chunk further out keeps its triangles for the navigation mesh, and one solid stays so until a chunk past the reach.
+	//Chunks the physics world holds: all in the editor; in play those within SolidReach of the eye, every non-static body
+	//and every character. Further ones keep triangles for the navigation mesh; a solid one stays so a chunk past reach
 	private void Solidify( bool now )
 	{
 		if ( chunks.Length == 0 || Scene is null ) return;
@@ -559,7 +558,7 @@ public partial class Terrain
 		}
 	}
 
-	/// <summary>The collision of the chunks under a box of the world that the physics world does not hold now, as world triangles - what the navigation mesh reads where the ground is not solid.</summary>
+	/// <summary>World triangles of chunks under a box the physics world does not hold, for the navigation mesh.</summary>
 	internal void UnheldCollision( BBox world, List<Vector3> points, List<int> indices )
 	{
 		if ( chunks.Length == 0 ) return;
@@ -713,8 +712,8 @@ public partial class Terrain
 
 	private readonly List<int> gathered = new();
 
-	//Copies out of the mesh what the baking of one chunk reads: its own triangles, the neighbours' under any solid that reaches it, and
-	//the modifiers over it. On the main thread, so a worker never reads a mesh that is being sculpted - but for the layout's first bake.
+	//Copies what a chunk's bake reads: its triangles, neighbours' under solids reaching it, the modifiers over it
+	//On the main thread, so a worker never reads a mesh being sculpted - but for the layout's first bake
 	private TerrainChunkJob Gather( int index, TerrainMesh mesh, List<int> gathered = null )
 	{
 		gathered ??= this.gathered;

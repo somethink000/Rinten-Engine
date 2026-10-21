@@ -1,6 +1,5 @@
-//The terrain's painted layers - the numbers picture, a layer's pictures, its triplanar read, its height and how far it lifts the
-//ground - and the ring of relief round the eye. Shared by the ground's own stages and the pass that builds the relief, see terrain_relief.shader.
-//Included after frame.slang; reads the numbers picture by g_flParams, or g_tParams in the portable frame.
+//The terrain's painted layers and relief ring, shared by the ground's stages and terrain_relief.shader
+//Included after frame.slang; reads the numbers picture by g_flParams, or g_tParams in the portable frame
 
 #ifndef ENGINE_TERRAIN_LAYERS_INCLUDED
 #define ENGINE_TERRAIN_LAYERS_INCLUDED
@@ -65,14 +64,14 @@ Ground GroundPaint()
 	return g;
 }
 
-//Metres to one turn of a layer's texture at a scale of one: thirty-two inches, which is what these materials were authored against.
+//Metres to one repeat of a layer's texture at scale one: 32 inches, as the materials were authored
 static const float LayerTile = 0.8128;
 
 //And a square of the unpainted grid: sixty-four inches, on the same terms.
 static const float GridSquare = 1.6256;
 
-//A painted layer: which pictures it is made of, how often it repeats, and what it does with the light. Nought is not a picture
-//- the device's table hands out slots from one - so a layer that named no map reads the default beside it instead. See SampleOr.
+//A painted layer: its pictures, repeat and lighting; slot nought is no picture (the table starts at one),
+//so a layer naming no map reads the default instead - see SampleOr
 struct Layer
 {
 	uint colour;      //base colour in rgb
@@ -133,8 +132,8 @@ struct Splatted
 static const uint MaxLayers = 8u;
 
 #ifdef PORTABLE
-//The portable frame has no table of pictures, so a layer is its colour alone and only the first three layers have one: bound as the material's
-//own three pictures, white where the layer named none - see Terrain.NamePortablePictures. Their normals and heights are the flat stand-ins.
+//Portable has no picture table: only the first three layers have a colour, bound as the material's three
+//(white for none; Terrain.NamePortablePictures), with flat normals and heights
 static const uint PortableLayers = 3u;
 
 float4 LayerColour( uint index, float2 uv, float2 dx, float2 dy )
@@ -190,15 +189,15 @@ float2 CornerShift( int2 corner )
 	return frac( sin( r ) * 43758.5453 );
 }
 
-//Where to read the three corners' worth of a layer's pictures, and how much of each to keep. A weight of nought is a corner that is not read at all.
+//Where to read a layer's pictures for the three corners and how much of each; a zero weight is not read
 struct Untiled
 {
 	float2 uv1, uv2, uv3;
 	float3 weights;
 };
 
-//How much of a whole repeat of the picture one pixel may cover before the untiling is dropped. Past this the chain has averaged
-//the picture down to a few texels, every one of the three samples reads the same thing, and their blend is any one of them.
+//How much of a repeat one pixel may cover before untiling is dropped: past it the mips leave a few texels
+//and the three samples read the same
 static const float UntileFootprint = 0.5;
 
 //Below this a corner's share would not move a byte of the answer, and reading it is a fetch of three pictures for
@@ -209,7 +208,7 @@ Untiled UntileAt( float2 uv, float2 dx, float2 dy )
 {
 	Untiled o;
 
-	//Far enough away, one sample, unshifted - which is what the tiled path reads, so there is nothing to see where it changes over.
+	//Far enough away one unshifted sample, as the tiled path reads, so the change-over does not show
 	if ( max( dot( dx, dx ), dot( dy, dy ) ) > UntileFootprint * UntileFootprint )
 	{
 		o.uv1 = uv;
@@ -299,7 +298,7 @@ Splatted SampleLayer( uint index, float2 local, float2 ddxLocal, float2 ddyLocal
 	}
 #endif
 
-	//Sideways is what says which way the surface tilts, so scaling that half and normalising again is what makes a map bite harder or less.
+	//The sideways half says the tilt, so scaling it and normalising makes a map bite harder or less
 	float3 normal = mapped.rgb * 2.0 - 1.0;
 	normal.xy *= layer.normalStrength;
 
@@ -359,7 +358,7 @@ Splatted SampleLayerAround( uint index, float3 local, float3 facing, float3 dxLo
 		bend += float3( side.normal.x, side.normal.y, 0.0 ) * sides.z;
 	}
 
-	//The surface's own facing with the bend laid against it - the bend only ever leans it, which is all a normal map on a surface this rough is for.
+	//The surface's facing leaned by the bend, all a normal map on ground this rough is for
 	o.normal = normalize( facing + bend );
 
 	return o;
@@ -413,9 +412,8 @@ float3 TriplanarSides( float3 facing )
 	return sides;
 }
 
-//Where row 0 says the paint mask is, for a pass with no draw of its own: the table of its tiles and the atlas they are in, low and high; the
-//tile the table's corner is, x then z; and how many tiles the table is across and deep, low and high. A draw is told the same by its
-//attributes - see the terrain shader's g_vPalette and g_vMask. See Terrain.Mask and TerrainMesh.MaskAt, which reads it the same.
+//Row 0's paint mask for a pass with no draw: table and atlas (low, high), the corner tile (x, z), tiles across and deep
+//A draw gets the same by attributes (g_vPalette, g_vMask) - see Terrain.Mask and TerrainMesh.MaskAt
 static const int MaskColumnPictures = 7;
 static const int MaskColumnOriginX = 8;
 static const int MaskColumnOriginZ = 9;
@@ -445,12 +443,12 @@ MaskPlace MaskPlaceOfParams()
 	return o;
 }
 
-//Metres between two of its points, steps along a tile's side, and the points a tile has a side - its far edge is the next tile's near one.
+//Metres between points, steps along a tile's side, and points a side - a tile's far edge is the next one's near
 static const float MaskStep = 0.25;
 static const int MaskCells = 32;
 static const int MaskSide = 33;
 
-//How many tiles stand side by side in the atlas, and the texels a point takes in it: its paint in 32 bits, and the top's float as four bytes.
+//Tiles across the atlas, and a point's texels: its paint in 32 bits and its top's float as four bytes
 static const uint MaskAtlasSlots = 32u;
 static const int MaskPointTexels = 2;
 
@@ -540,8 +538,8 @@ uint MaskBits( uint picture, int2 texel )
 		| ( uint( bytes.a * 255.0 + 0.5 ) << 24 );
 }
 
-//The mask's four points round a place into its last four places, counted only where the place stands near the top of the ground - the
-//nearest point's top - and faces up; says how much of the place they cover, nought to one. See Terrain.Mask for how a point is written.
+//The mask's four points round a place into its last four, only near the ground's top and facing up
+//Returns how much they cover, nought to one; see Terrain.Mask for a point's layout
 float MaskInto( MaskPlace where, float3 local, float facingUp, inout Painted p )
 {
 	uint table = where.table;
@@ -585,7 +583,7 @@ float MaskInto( MaskPlace where, float3 local, float facingUp, inout Painted p )
 
 		int2 point = base + step;
 
-		//Three layers in five bits each, the first two's weights in a byte each and the third's what is left; the top bit says it is painted.
+		//Three layers in five bits each, two weights in a byte each (the third the rest), top bit where painted
 		uint packed = MaskBits( atlas, corner + int2( point.x * MaskPointTexels, point.y ) );
 
 		if ( share <= 0.0 || ( packed >> 31 ) == 0u ) continue;
@@ -605,8 +603,8 @@ float MaskInto( MaskPlace where, float3 local, float facingUp, inout Painted p )
 }
 #endif
 
-//What is painted at a place, as the heaviest four layers coming to one: the drawn vertex's eight weights by the chunk's palette, and where
-//the mask covers the place, the mask instead. Ground nobody painted wears the first layer; layers from the count on are not there.
+//The heaviest four layers at a place: the vertex's weights by the chunk's palette, or the mask where it covers
+//Unpainted ground wears the first layer; layers past the count are not there
 Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, float3 local, float facingUp, uint layers )
 {
 	Painted p;
@@ -714,8 +712,8 @@ Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, fl
 	return o;
 }
 
-//How far a layer lifts the ground where it is, in metres: its height map, nought to one, times its displacement. Nought where it has
-//no height map or does not displace. The map read at a footprint of <paramref name="texel"/> metres, so a coarse lift reads a coarse level.
+//Metres a layer lifts the ground: its height map times displacement, nought without either
+//Read at a footprint of texel metres, so a coarse lift reads a coarse level
 float LayerLift( uint index, float2 local, float texel )
 {
 	Layer layer = LayerAt( index );
@@ -749,9 +747,8 @@ float LayerLiftAround( uint index, float3 local, float3 sides, float texel )
 	return lift;
 }
 
-//The ring of relief round the eye, as Terrain.Relief writes it: where the eye was when it was built, in the terrain's metres, how far
-//it reaches and over how much of that the lift fades to nought, how far the ground's own corners sink under it, and where the terrain
-//stands - a ring's corners are in the terrain's metres and drawn with no matrix of their own. Reaching nought where there is none.
+//The relief ring as Terrain.Relief writes it: the eye at build, reach and fade, the ground's sink, and the terrain's place
+//(ring corners have no matrix); reach is nought without a ring
 struct Ring
 {
 	float3 eye;

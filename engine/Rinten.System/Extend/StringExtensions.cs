@@ -44,7 +44,7 @@ public static partial class RintenSystemExtensions
 	{
 		if ( string.IsNullOrEmpty( str ) ) return str;
 
-		//The usual case, nothing to collapse, answered without the regex: every lone space is one of its matches, and text with any made a new string
+		//Nothing to collapse answered without the regex, which matches every lone space and makes a new string
 		if ( !HasWhiteSpaceToCollapse( str ) ) return str;
 
 		str = CollapseWhiteSpaceRegex().Replace( str, " " );

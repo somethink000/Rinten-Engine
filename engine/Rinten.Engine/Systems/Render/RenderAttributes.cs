@@ -14,7 +14,7 @@ public partial class RenderAttributes
 	//Says the bag has been written to. Public setters all go through it.
 	private void Wrote() => Version++;
 
-	//A number put in: the same number again is no change, so what reads the bag by its version - a scene object's draw - is not made again
+	//The same number again is no change, so what reads the bag by version is not remade
 	private void Put( in StringToken k, in Held held )
 	{
 		if ( values.TryGetValue( k, out var had ) && had.Same( held ) ) return;
@@ -419,7 +419,7 @@ public partial class RenderAttributes
 		public static Held Of( Vector2Int value ) => new( HeldKind.Vector2Int, integers: new Vector3Int( value.x, value.y, 0 ) );
 		public static Held Of( Vector3Int value ) => new( HeldKind.Vector3Int, integers: value );
 
-		/// <summary>Whether two hold the same number set the same way; never true of a reference, which may have changed inside.</summary>
+		/// <summary>Whether two hold the same number set the same way; never for a reference.</summary>
 		public bool Same( in Held other )
 			=> Kind == other.Kind && Kind != HeldKind.Reference && Numbers == other.Numbers && Integers == other.Integers;
 

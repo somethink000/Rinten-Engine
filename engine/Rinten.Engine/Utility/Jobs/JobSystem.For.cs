@@ -4,7 +4,7 @@ namespace Rinten.Jobs;
 
 internal static partial class JobSystem
 {
-	//One loop: its body and state, the next index to hand out, and how many are done. Kept in a pool a state type, so a loop allocates nothing.
+	//One loop: body, state, next index, how many done; pooled per state type, so a loop allocates nothing
 	private sealed class ForWork<TState> : Work
 	{
 		public TState State;
@@ -55,7 +55,7 @@ internal static partial class JobSystem
 	/// <summary>Runs a body that keeps its own state - a delegate made once and kept - for every index below count.</summary>
 	internal static void For( int count, Action<int> body, int most = -1 ) => For( count, body, static ( run, i ) => run( i ), most );
 
-	/// <summary>Runs body for every index below count, spread over the workers and this thread; returns once all are done. A body throwing is thrown again here, wrapped as Parallel would.</summary>
+	//Runs body for every index below count on the workers and this thread; a throw comes back wrapped as Parallel's
 	internal static void For<TState>( int count, TState state, Action<TState, int> body, int most = -1 )
 	{
 		if ( count <= 0 ) return;

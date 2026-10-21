@@ -2,8 +2,8 @@ using System.Threading;
 
 namespace Rinten.Jobs;
 
-//Worker threads that run the engine's parallel loops and its scheduled jobs, made once and kept. The thread that asks always
-//runs its share, so a loop inside a loop never waits on a worker that is waiting on it; and nothing is allocated once warm
+//Worker threads that run the engine's parallel loops, made once and kept. The thread that asks always runs its share,
+//so a loop inside a loop never waits on a worker that is waiting on it; and nothing is allocated once warm
 internal static partial class JobSystem
 {
 	//One piece of queued work, as a worker sees it: run it if it is still the same piece - see Work.Generation.
@@ -13,8 +13,8 @@ internal static partial class JobSystem
 		public int Generation;
 	}
 
-	/// <summary>Something a worker can run, kept in a pool and handed out again; a run of it is told apart from the next by its generation.</summary>
-	internal abstract class Work
+	//Something a worker can run, kept in a pool and handed out again; a run of it is told apart from the next by its generation.
+	private abstract class Work
 	{
 		public int Generation;
 
@@ -32,7 +32,7 @@ internal static partial class JobSystem
 	private static Thread[] workers = [];
 	private static int asleep;
 
-	/// <summary>How many threads besides the caller's take a share of a loop - nought where there are none, as on a page.</summary>
+	//Threads besides the caller's that take a share of a loop; nought on a page
 	internal static int Workers => workers.Length;
 
 	static JobSystem()
@@ -50,7 +50,7 @@ internal static partial class JobSystem
 	}
 
 	//Queues one piece for as many workers as are to help with it, and wakes that many.
-	internal static void Post( Work work, int helpers )
+	private static void Post( Work work, int helpers )
 	{
 		if ( helpers <= 0 || workers.Length == 0 ) return;
 
@@ -97,8 +97,8 @@ internal static partial class JobSystem
 		}
 	}
 
-	//Runs one queued piece on this thread, if there is one still current - what a worker does, and what a caller waiting on something does meanwhile.
-	internal static bool RunOne()
+	//Runs one queued piece on this thread, if there is one still current.
+	private static bool RunOne()
 	{
 		if ( !TryTake( out var entry ) ) return false;
 
@@ -131,7 +131,7 @@ internal static partial class JobSystem
 				continue;
 			}
 
-			//A little spinning first: loops come in bursts a frame, and a thread put to sleep between two of them costs more than it saves.
+			//A little spinning first: loops come in bursts a frame, and sleeping between two costs more than it saves
 			if ( !spin.NextSpinWillYield )
 			{
 				spin.SpinOnce();

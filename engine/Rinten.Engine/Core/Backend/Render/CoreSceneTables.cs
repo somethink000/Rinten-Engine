@@ -7,8 +7,8 @@ namespace Rinten;
 //What places a run of copies on the card - see CoreSceneTables.AddRun.
 internal interface IInstanceRun
 {
-	//Writes every slot of the run, from its first, into the instance buffer: each copy the template where it stands, a slot holding none with
-	//InstanceDrawn left out of its flags. Between targets, after the tables went up. False where it could not yet, to be asked again next frame.
+	//Writes a run's slots into the instance buffer: each copy the template where it stands, an empty one undrawn
+	//Between targets, after the tables went up; false where it could not yet, asked again next frame
 	bool Place( ulong instances, int head, int count, in CoreSceneTables.InstanceRecord template, System.Numerics.Vector4 bound );
 }
 
@@ -80,10 +80,10 @@ internal sealed class CoreSceneTables
 		/// <summary>The detail group it was added with, or null for its model's own - see LodGroupOf.</summary>
 		public string StaticLodGroup;
 
-		/// <summary>How many slots from this one on a run of copies placed on the card holds - nought for one instance; see AddRun.</summary>
+		/// <summary>Slots from this one in a run the card places, nought for one instance - see AddRun.</summary>
 		public int Run;
 
-		/// <summary>A run's flags as its copies are drawn with: its own record leaves InstanceDrawn out until the card has placed them.</summary>
+		/// <summary>The flags a run's copies are drawn with; its record lacks InstanceDrawn until the card placed them.</summary>
 		public uint RunFlags;
 
 		/// <summary>Where a run's copies stand, all of them inside it, and what places them.</summary>
@@ -169,7 +169,7 @@ internal sealed class CoreSceneTables
 		public long SkinnedAt = -1;
 		public int SkinnedGeneration = -1;
 
-		/// <summary>Where its positions as posed before the last posing are, a PosedCount range of <see cref="Was"/>; -1 for none.</summary>
+		/// <summary>Its positions as posed before the last posing, a PosedCount range of Was; -1 for none.</summary>
 		public long WasAt = -1;
 
 		/// <summary>The loop turn whose posing moved it from what <see cref="WasAt"/> holds - see CoreMeshRender.Skin.</summary>
@@ -789,17 +789,8 @@ internal sealed class CoreSceneTables
 
 		var runs = ( objectSlots.Count + ObjectRun - 1 ) / ObjectRun;
 
-		if ( Rinten.Utility.Parallel.InOrder )
-		{
-			//A page's one thread: the same runs in order, with one set of marks.
-			var marks = takeMarks();
-			for ( var c = 0; c < runs; c++ ) marks = askOne( c, null, marks );
-			giveMarks( marks );
-		}
-		else
-		{
-			Rinten.Utility.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
-		}
+		//On a page's one thread the runs go in order with one set of marks
+		Rinten.Utility.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
 
 		for ( var i = 0; i < heldMarks.Count; i++ )
 		{
@@ -844,15 +835,15 @@ internal sealed class CoreSceneTables
 		Give( slot );
 	}
 
-	//Each slot's run as its first slot plus one, nought for none; the runs' gaps once let go of; the runs the card has to place again.
+	//Each slot's run as its first slot plus one, nought for none; gaps runs left; runs the card must place again
 	private int[] runOf = Array.Empty<int>();
 	private readonly List<(int At, int Count)> runHoles = new();
 	private readonly HashSet<int> runs = new();
 	private readonly HashSet<int> unplaced = new();
 	private readonly List<int> placing = new();
 
-	//Adds a run of copies of one model in slots side by side, all inside a sphere, placed by the card rather than here: one record
-	//resolved for them all, written into each slot by the placer - see PlaceRuns. The first slot, or -1 where the model is not drawn from clusters.
+	//Adds copies of one model in adjacent slots inside a sphere, placed by the card from one record (PlaceRuns)
+	//The first slot, or -1 where the model is not drawn from clusters
 	internal int AddRun( Model model, int count, System.Numerics.Vector4 sphere, in Transform frame, IInstanceRun placer, Material over, bool castShadows, float lodScale, string lodGroup )
 	{
 		if ( model is null || placer is null || count < 1 || !Rinten.Rendering.DrawSettings.Clusters ) return -1;
@@ -968,7 +959,7 @@ internal sealed class CoreSceneTables
 		}
 	}
 
-	//Has the card place every run whose slots were written from here since it last did - after Upload, before the cull reads them.
+	//Has the card place every run written since it last did - after Upload, before the cull reads them
 	internal void PlaceRuns()
 	{
 		if ( unplaced.Count == 0 || instanceBuffer == 0 ) return;
@@ -1596,7 +1587,7 @@ internal sealed class CoreSceneTables
 			LodGroup = LodGroupOf( entry ),
 		};
 
-		//A run is drawn from clusters or not at all, and only once the card has placed it: its record is what each copy's starts from.
+		//A run is drawn from clusters or not at all, once the card placed it: each copy's record starts from its own
 		if ( entry.Run > 0 )
 		{
 			Loose.Remove( slot );

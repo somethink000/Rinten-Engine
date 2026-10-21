@@ -2168,27 +2168,25 @@ void BakedLayer( float2 uv, out float4 red, out float4 green, out float4 blue )
 	blue = g_textures[uint( g_frame[0].bakedVolume.z )].SampleLevel( uv, 0.0 );
 }
 
-//How far past their walls a point is not, for four corners at one x end of a cell; d is its distance from each per
-//axis. An eighth of a cell of give past a wall, more than a nibble's rounding
-float4 BakedSeen( float dx, float4 dy, float4 dz, float4 reachX, float4 reachY, float4 reachZ )
+//A lattice point's reach towards +x +y +z (ahead) and -x -y -z (behind) before a wall, in cells - see
+//BakeVolume.ReachByPoint
+void BakedReach( uint walls, float3 point, out float3 ahead, out float3 behind )
 {
-	return saturate( ( ( reachX - dx ) * 8.0 ) + 1.0 ) * saturate( ( ( reachY - dy ) * 8.0 ) + 1.0 ) * saturate( ( ( reachZ - dz ) * 8.0 ) + 1.0 );
+	float3 count = g_frame[0].volumeCount.xyz;
+	float3 packed = round( g_textures[walls].Load( int3( int( point.x + ( point.y * count.x ) ), int( point.z ), 0 ) ).xyz * 255.0 );
+
+	behind = floor( packed / 16.0 );
+	ahead = ( packed - ( behind * 16.0 ) ) / 15.0;
+	behind /= 15.0;
 }
 
-//Four corners' weights at one x end of a cell: trilinear, times how far in front of the surface they stand as DDGI
-//weighs probes
-float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float3 normal )
+//How far a lattice point sees a place d from it, by its reach the way d lies on each axis. An eighth of a cell of
+//give past a wall, more than a nibble's rounding; whole at d nought, so it never jumps where d changes sign
+float BakedSees( float3 ahead, float3 behind, float3 d )
 {
-	float4 sy = float4( -1.0, 1.0, -1.0, 1.0 );
-	float4 sz = float4( -1.0, -1.0, 1.0, 1.0 );
-
-	float4 trilinear = ( 1.0 - dx ) * ( 1.0 - dy ) * ( 1.0 - dz );
-
-	float4 along = ( sx * dx * normal.x ) + ( sy * dy * normal.y ) + ( sz * dz * normal.z );
-	float4 apart = sqrt( ( dx * dx ) + ( dy * dy ) + ( dz * dz ) );
-	float4 facing = saturate( ( along / max( apart, 1e-4 ) * 0.5 ) + 0.5 );
-
-	return trilinear * ( ( facing * facing ) + 0.2 );
+	float3 reach = lerp( behind, ahead, step( 0.0, d ) );
+	float3 seen = saturate( ( ( reach - abs( d ) ) * 8.0 ) + 1.0 );
+	return seen.x * seen.y * seen.z;
 }
 
 //A point's place in the lattice, clamped inside it
@@ -2198,86 +2196,68 @@ float3 BakedLatticeAt( float3 world )
 	return clamp( at, float3( 0.0, 0.0, 0.0 ), g_frame[0].volumeCount.xyz - 1.0 );
 }
 
-//How much each of a lattice point's cell's eight corners counts for it (BakeVolume.Walls, BakedCorners): x's near
-//corners in nearSide, far in farSide, each along y then z. A corner must see the surface `from` too, held to the
-//cell, so a read stepped through a wall takes neither side of it. False where the bake has no walls
-bool BakedCornerWeights( float3 at, float3 from, float3 normal, out float3 cell, out float4 nearSide, out float4 farSide )
-{
-	float3 count = g_frame[0].volumeCount.xyz;
-	cell = min( floor( at ), count - 2.0 );
-	nearSide = 0.0;
-	farSide = 0.0;
-
-	//Frame-uniform - see SkyTableAt.
-	uint walls = uint( g_frame[0].bakedMore.x );
-	if ( walls == 0u ) return false;
-
-	float3 f = at - cell;
-	float3 g = saturate( from - cell );
-
-	//A row of cells an axis; each texel that axis's reach of the cell's eight corners, a nibble each
-	float u = ( ( cell.y * count.x ) + cell.x + 0.5 ) / ( count.x * count.y );
-	float rows = count.z * 3.0;
-
-	float4 x = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
-	float4 y = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + count.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
-	float4 z = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + ( count.z * 2.0 ) + 0.5 ) / rows ), 0.0 ) * 255.0 );
-
-	//High nibbles are the far x corners, low the near; the channels go along y, then z
-	float4 xFar = floor( x / 16.0 );
-	float4 yFar = floor( y / 16.0 );
-	float4 zFar = floor( z / 16.0 );
-
-	float4 nearX = ( x - ( xFar * 16.0 ) ) / 15.0;
-	float4 nearY = ( y - ( yFar * 16.0 ) ) / 15.0;
-	float4 nearZ = ( z - ( zFar * 16.0 ) ) / 15.0;
-
-	float4 dy = lerp( f.yyyy, 1.0 - f.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
-	float4 dz = lerp( f.zzzz, 1.0 - f.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
-	float4 gy = lerp( g.yyyy, 1.0 - g.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
-	float4 gz = lerp( g.zzzz, 1.0 - g.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
-
-	nearSide = BakedCorners( f.x, -1.0, dy, dz, normal ) * BakedSeen( f.x, dy, dz, nearX, nearY, nearZ )
-		* BakedSeen( g.x, gy, gz, nearX, nearY, nearZ );
-	farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, normal ) * BakedSeen( 1.0 - f.x, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0 )
-		* BakedSeen( 1.0 - g.x, gy, gz, xFar / 15.0, yFar / 15.0, zFar / 15.0 );
-
-	return true;
-}
-
-//The middle of the corners' weights at lattice point at, seen from the surface from, in spot; false where no corner
-//counts or the bake has no walls
-bool BakedMoved( float3 at, float3 from, float3 normal, out float3 spot )
+//The middle of at's cell's eight corners, each trilinear, as far in front of the surface as DDGI weighs probes, and as
+//far as it sees both at and the surface from; returns their weights' sum, nought where the bake has no walls
+float BakedMoved( float3 at, float3 from, float3 normal, out float3 spot )
 {
 	spot = at;
 
-	float3 cell;
-	float4 nearSide, farSide;
-	if ( !BakedCornerWeights( at, from, normal, cell, nearSide, farSide ) ) return false;
+	//Frame-uniform - see SkyTableAt.
+	uint walls = uint( g_frame[0].bakedMore.x );
+	if ( walls == 0u ) return 0.0;
 
-	float4 both = nearSide + farSide;
-	float total = dot( both, float4( 1.0, 1.0, 1.0, 1.0 ) );
-	if ( total < 1e-5 ) return false;
+	float3 cell = min( floor( at ), g_frame[0].volumeCount.xyz - 2.0 );
+	float3 f = at - cell;
 
-	spot = cell + ( float3( dot( farSide, float4( 1.0, 1.0, 1.0, 1.0 ) ), both.y + both.w, both.z + both.w ) / total );
-	return true;
+	float3 sum = 0.0;
+	float total = 0.0;
+
+	[unroll]
+	for ( uint k = 0u; k < 8u; ++k )
+	{
+		float3 corner = float3( float( k & 1u ), float( ( k >> 1u ) & 1u ), float( k >> 2u ) );
+		float3 point = cell + corner;
+		float3 w3 = lerp( 1.0 - f, f, corner );
+
+		float3 ahead, behind;
+		BakedReach( walls, point, ahead, behind );
+
+		float3 toward = point - at;
+		float facing = saturate( ( dot( toward, normal ) / max( length( toward ), 1e-4 ) * 0.5 ) + 0.5 );
+
+		float weight = w3.x * w3.y * w3.z * ( ( facing * facing ) + 0.2 )
+			* BakedSees( ahead, behind, at - point ) * BakedSees( ahead, behind, from - point );
+
+		sum += corner * weight;
+		total += weight;
+	}
+
+	if ( total > 1e-5 ) spot = cell + ( sum / total );
+	return total;
 }
 
-//Cells a surface's read steps off it along its normal, past BakedSeen's give, so a floor reads the room above it
+//Cells a surface's read steps off it along its normal, past BakedSees' give, so a floor reads the room above it
 static const float BakedLift = 0.35;
 
+//Corner weight below which a read gives way to the next - a few percent of what an open cell's corners sum to
+static const float BakedFirm = 0.05;
+
 //Where in the lattice a surface point reads: stepped off, then moved within its cell towards the corners that see it and
-//face it (BakeVolume.Walls), as Unity's probe volumes warp theirs; a step into what the surface rests on reads from it
+//face it, as Unity's probe volumes warp theirs. Where too few do - a step into what the surface rests on, or a point
+//inside a wall - it eases to the read at the surface itself, then to the plain one
 float3 BakedVolumeSpot( float3 world, float3 normal )
 {
 	float3 from = BakedLatticeAt( world );
 	float3 at = BakedLatticeAt( world + ( normal * ( BakedLift / g_frame[0].volumeOrigin.w ) ) );
 
-	float3 spot;
-	if ( BakedMoved( at, from, normal, spot ) || BakedMoved( from, from, normal, spot ) ) return spot;
+	float3 lifted;
+	float seen = BakedMoved( at, from, normal, lifted );
+	if ( seen >= BakedFirm ) return lifted;
 
-	//No corner sees it: inside a wall, where the plain read is as good as any
-	return at;
+	float3 rested;
+	float held = BakedMoved( from, from, normal, rested );
+
+	return lerp( lerp( at, rested, saturate( held / BakedFirm ) ), lifted, seen / BakedFirm );
 }
 
 //One of the volume's per-point pictures at a spot (BakedVolumeSpot), its layers lerped, half a texel inside each

@@ -1422,7 +1422,56 @@ struct LampTap
 	float far;
 	float b;
 	float texelWorld;
+
+	//The stepped point from the lamp, and what the movers' frustum projects again - see LampMovers
+	float3 d;
+	float3 normal;
+	float distance;
 };
+
+//Projects the stepped point t.d into a lamp's square of a map, down `forward`, halfTan wide a metre out; false where it
+//falls behind the lamp or past its reach, or with `within` off the square
+bool LampProject( float3 forward, float halfTan, uint square, uint sizeClass, Light light, bool within, inout LampTap t )
+{
+	float size = LampLayerTexels / float( 1u << sizeClass );
+	float fit = ( size - ( 2.0 * LampGuardTexels ) ) / size;
+
+	t.texelWorld = 2.0 * max( t.distance, LampNear ) * halfTan / ( size * fit );
+	float steadyWorld = t.texelWorld * size / LampSteadyTexels;
+
+	t.along = dot( t.d, forward );
+	if ( t.along <= LampNear ) return false;
+
+	float3 right;
+	float3 up;
+	LampAxes( forward, right, up );
+
+	float2 uv = ( float2( dot( t.d, right ), dot( t.d, up ) ) * ( fit / ( halfTan * t.along ) ) * 0.5 ) + 0.5;
+	if ( within && ( any( uv < 0.0 ) || any( uv > 1.0 ) ) ) return false;
+
+	//The square's place in the map, counted layer by layer in squares of its size
+	uint perRow = 1u << sizeClass;
+	uint inLayer = square % ( perRow * perRow );
+	float2 corner = float2( float( inLayer % perRow ), float( inLayer / perRow ) );
+	t.at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
+
+	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
+	//that projection's derivative, as a depth step differs at every range
+	t.far = max( light.position.w, LampNear + 0.01 );
+	t.b = LampNear * t.far / ( t.far - LampNear );
+	float depth = ( t.far / ( t.far - LampNear ) ) - ( t.b / t.along );
+	if ( depth >= 1.0 ) return false;
+
+	float perMetre = t.b / ( t.along * t.along );
+	float bias = LampBiasTexels * steadyWorld * perMetre;
+
+	//Receiver plane slope on the square, constant across it in perspective depth; clamped at grazing
+	float facing = max( -dot( t.normal, t.d ), 0.1 * length( t.d ) );
+	t.slope = float2( dot( t.normal, right ), dot( t.normal, up ) ) * ( t.b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
+
+	t.compare = depth - bias;
+	return true;
+}
 
 //The face chosen for the stepped lookup point; false where the lamp has no faces or the point is outside them
 bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float distance, out LampTap t )
@@ -1441,9 +1490,12 @@ bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float dis
 	float size = LampLayerTexels / float( 1u << sizeClass );
 	float fit = ( size - ( 2.0 * LampGuardTexels ) ) / size;
 
-	t.texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
-	float steadyWorld = t.texelWorld * size / LampSteadyTexels;
-	float3 d = world + ( step * ( steadyWorld * LampLiftTexels ) ) - light.position.xyz;
+	float texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
+	float steadyWorld = texelWorld * size / LampSteadyTexels;
+
+	t.d = world + ( step * ( steadyWorld * LampLiftTexels ) ) - light.position.xyz;
+	t.normal = normal;
+	t.distance = distance;
 
 	float3 forward = light.direction.xyz;
 	t.face = 0u;
@@ -1451,45 +1503,14 @@ bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float dis
 	if ( !spot )
 	{
 		//Down the largest of the three axes, in the order the faces are laid.
-		float3 extent = abs( d );
+		float3 extent = abs( t.d );
 
-		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( d.x ), 0.0, 0.0 ); t.face = d.x > 0.0 ? 0u : 1u; }
-		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( d.y ), 0.0 ); t.face = d.y > 0.0 ? 2u : 3u; }
-		else { forward = float3( 0.0, 0.0, sign( d.z ) ); t.face = d.z > 0.0 ? 4u : 5u; }
+		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( t.d.x ), 0.0, 0.0 ); t.face = t.d.x > 0.0 ? 0u : 1u; }
+		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( t.d.y ), 0.0 ); t.face = t.d.y > 0.0 ? 2u : 3u; }
+		else { forward = float3( 0.0, 0.0, sign( t.d.z ) ); t.face = t.d.z > 0.0 ? 4u : 5u; }
 	}
 
-	t.along = dot( d, forward );
-	if ( t.along <= LampNear ) return false;
-
-	float3 right;
-	float3 up;
-	LampAxes( forward, right, up );
-
-	float2 uv = ( float2( dot( d, right ), dot( d, up ) ) * ( fit / ( halfTan * t.along ) ) * 0.5 ) + 0.5;
-
-	//The face's place in the map: the lamp's first square plus the face, counted layer by layer in squares of its size
-	uint perRow = 1u << sizeClass;
-	uint square = uint( first ) + t.face;
-	uint within = square % ( perRow * perRow );
-	float2 corner = float2( float( within % perRow ), float( within / perRow ) );
-	t.at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
-
-	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
-	//that projection's derivative, as a depth step differs at every range
-	t.far = max( light.position.w, LampNear + 0.01 );
-	t.b = LampNear * t.far / ( t.far - LampNear );
-	float depth = ( t.far / ( t.far - LampNear ) ) - ( t.b / t.along );
-	if ( depth >= 1.0 ) return false;
-
-	float perMetre = t.b / ( t.along * t.along );
-	float bias = LampBiasTexels * steadyWorld * perMetre;
-
-	//Receiver plane slope on the face, constant across it in perspective depth; clamped at grazing
-	float facing = max( -dot( normal, d ), 0.1 * length( d ) );
-	t.slope = float2( dot( normal, right ), dot( normal, up ) ) * ( t.b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
-
-	t.compare = depth - bias;
-	return true;
+	return LampProject( forward, halfTan, uint( first ) + t.face, sizeClass, light, false, t );
 }
 
 //What the still world lets through of a lamp at a tap
@@ -1503,10 +1524,21 @@ float LampStill( LampTap t, Light light )
 float LampMovers( LampTap t, Light light )
 {
 	uint moversMap = uint( g_frame[0].sunDepth.z );
-	if ( ( uint( light.shape.y ) & ( 1u << t.face ) ) == 0u || moversMap == 0u ) return 1.0;
+	if ( moversMap == 0u ) return 1.0;
 
-	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), t.at, t.compare, 1.0 / LampLayerTexels, t.slope,
-		light, t.along, t.far, t.b, t.texelWorld );
+	float drawn = light.shape.y;
+	LampTap m = t;
+
+	if ( drawn < 0.0 )
+	{
+		//One frustum round what moves near the lamp, in its first square; off it nothing moving stands between
+		float4 frustum = g_frame[0].lampMovers[min( uint( -drawn ) - 1u, 15u )];
+		if ( !LampProject( frustum.xyz, frustum.w, uint( light.cone.z ), uint( light.cone.w ), light, true, m ) ) return 1.0;
+	}
+	else if ( ( uint( drawn ) & ( 1u << t.face ) ) == 0u ) return 1.0;
+
+	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), m.at, m.compare, 1.0 / LampLayerTexels, m.slope,
+		light, m.along, m.far, m.b, m.texelWorld );
 }
 
 //Lamp visibility (1 lit) from its cube faces; face chosen for the stepped lookup point

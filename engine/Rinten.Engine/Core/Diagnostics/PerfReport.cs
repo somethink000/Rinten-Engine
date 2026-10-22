@@ -158,7 +158,7 @@ internal static class PerfReport
 	//The text counters as the window opened - see the text lines of the report
 	private static Rinten.UI.TextStats.Snapshot textAtArm;
 	private static long pagesAtArm;
-	private static long lampFacesAtArm;
+	private static long lampFacesAtArm, moverFacesAtArm, moverFrustumsAtArm;
 
 	//The collector's counts as the window opened.
 	private static long allocatedAtArm;
@@ -417,6 +417,8 @@ internal static class PerfReport
 			bakesAtArm = CoreSunPages.Bakes;
 			pagesAtArm = CoreSunPages.PagesBaked;
 			lampFacesAtArm = CoreLampMaps.FacesDrawn;
+			moverFacesAtArm = CoreLampMaps.MoverFacesDrawn;
+			moverFrustumsAtArm = CoreLampMaps.MoverFrustumsDrawn;
 
 			lock ( Scene.EditorTicks ) Scene.EditorTicks.Clear();
 
@@ -1230,6 +1232,7 @@ internal static class PerfReport
 		report.AppendLine( $"  {CoreSunPages.Bakes - bakesAtArm} bakes of the sun's pages in the window, " +
 			$"{CoreSunPages.PagesBaked - pagesAtArm} pages" );
 		report.AppendLine( $"  {CoreLampMaps.FacesDrawn - lampFacesAtArm} lamp faces drawn in the window" );
+		report.AppendLine( $"  what moves: {CoreLampMaps.MoverFacesDrawn - moverFacesAtArm} faces, {CoreLampMaps.MoverFrustumsDrawn - moverFrustumsAtArm} frustums" );
 		report.AppendLine();
 	}
 

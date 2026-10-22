@@ -9,7 +9,7 @@ struct Light
 	float4 colour;    //Colour rgb times brightness, kind w (0 sun, 1 point, 2 spot)
 	float4 direction; //Direction xyz, inner cone cosine w - a point's shape (AreaShape)
 	float4 cone;      //Outer cosine x (a point's half width), source width y, spare zw
-	float4 shape;     //Falloff power x, faces reading movers y (a bit each), half height z, turn w
+	float4 shape;     //Falloff power x, faces reading movers y (a bit each; below nought a frustum slot), half height z, turn w
 };
 
 //Envmap probe: an octahedral 2D picture of all directions with blurred mips stacked below
@@ -159,6 +159,10 @@ struct FrameData
 	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is
 	//w; which way a spot points on the plane xy, half its cone z (pi shines every way), how much of its edge fades w
 	float4 lights2d[96];
+
+	//The lamps' movers frustums by slot, which a light's shape.y names below nought: down xyz, how wide a metre out w -
+	//see CoreLampMaps.FitMovers
+	float4 lampMovers[16];
 };
 
 #ifdef WEBGL

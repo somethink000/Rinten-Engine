@@ -36,6 +36,12 @@ internal sealed class CoreLampMaps : IDisposable
 	//The widest a spot's shadow is kept for, as a half-angle: past it the texels spread too thin to be worth drawing.
 	private const float WidestSpotDegrees = 80.0f;
 
+	//The widest a movers frustum may be, as a half-angle; wider and the faces they cross take them instead
+	private const float WidestMoversDegrees = 60.0f;
+
+	//Texels kept clear round what a movers frustum holds, as wide as the softest filter reaches - ShadowSoftestTexels
+	private const float MoversMargin = 16.0f;
+
 	private readonly CoreCasters casters;
 
 	private ulong map;
@@ -72,6 +78,18 @@ internal sealed class CoreLampMaps : IDisposable
 
 		/// <summary>Which faces have what moves in them drawn this frame, a bit each - the record's shape.y.</summary>
 		public int Moving;
+
+		/// <summary>Whether what moves in reach is in one frustum this frame rather than the faces - see FitMovers.</summary>
+		public bool Fitted;
+
+		/// <summary>The frame block's slot of the frustum drawn this frame; below nought for none.</summary>
+		public int Slot = -1;
+
+		/// <summary>The movers frustum: down its middle, how wide a metre out, its projection and planes.</summary>
+		public Vector3 MoverForward;
+		public float MoverTan;
+		public System.Numerics.Matrix4x4 MoverClip;
+		public readonly System.Numerics.Vector4[] MoverPlanes = new System.Numerics.Vector4[6];
 
 		/// <summary>Whether it moved this frame: its faces are drawn whole each frame instead of baked.</summary>
 		public bool Travelling;
@@ -127,7 +145,8 @@ internal sealed class CoreLampMaps : IDisposable
 		}
 	}
 
-	//One face this frame: its still world baked into the map, and what moves drawn into the movers' map
+	//One face this frame: its still world baked into the map, and what moves drawn into the movers' map;
+	//Index below nought is the lamp's movers frustum, drawn in its first square
 	private readonly struct Face
 	{
 		public readonly Lamp Lamp;
@@ -145,7 +164,7 @@ internal sealed class CoreLampMaps : IDisposable
 		public Face( Lamp lamp, int index, int bakeView, int moverView, Area clear, Area movers )
 		{
 			Lamp = lamp; Index = index; BakeView = bakeView; MoverView = moverView; Clear = clear; Movers = movers;
-			WasHeld = lamp.Held[index];
+			WasHeld = index >= 0 && lamp.Held[index];
 		}
 	}
 
@@ -153,8 +172,14 @@ internal sealed class CoreLampMaps : IDisposable
 	private readonly CoreMeshRender.ViewSetup[] planned = new CoreMeshRender.ViewSetup[MostFaces];
 	private int viewCount;
 
+	//Movers frustums given a slot this frame
+	private int slots;
+
 	//Faces drawn since the process started, for the report - a bake or what moves, each one.
 	internal static long FacesDrawn;
+
+	//Of what moves, the faces drawn and the frustums drawn instead, for the report - see FitMovers
+	internal static long MoverFacesDrawn, MoverFrustumsDrawn;
 
 	//How many views this frame adds to the cull.
 	internal int ViewCount => viewCount;
@@ -176,7 +201,15 @@ internal sealed class CoreLampMaps : IDisposable
 		viewCount = 0;
 		Triangles = 0;
 
-		foreach ( var lamp in lamps.Values ) lamp.Moving = 0;
+		slots = 0;
+
+		foreach ( var lamp in lamps.Values )
+		{
+			lamp.Moving = 0;
+			lamp.Fitted = false;
+			lamp.Slot = -1;
+		}
+
 		frameNumber++;
 		Frustum( seen, clipToWorld );
 		crowded = crowding;
@@ -247,7 +280,11 @@ internal sealed class CoreLampMaps : IDisposable
 				if ( !lamps.TryGetValue( asking, out var lamp ) || lamp.Seen != frameNumber ) continue;
 
 				if ( pass == 0 && lamp.Travelling ) PlanTravelling( lamp, room, lodPixels );
-				else if ( !lamp.Travelling ) PlanStill( lamp, room, lodPixels, bakes: pass == 1 );
+				else if ( !lamp.Travelling )
+				{
+					if ( pass == 0 ) PlanFrustum( lamp, frame, room, lodPixels );
+					PlanStill( lamp, room, lodPixels, bakes: pass == 1 );
+				}
 			}
 		}
 
@@ -270,8 +307,9 @@ internal sealed class CoreLampMaps : IDisposable
 				records[at + 14] = lamp.First;
 				records[at + 15] = lamp.Class;
 
-				//Which faces read the movers' map too - only where the squares read are the ones movers were drawn into
-				records[at + 17] = lamp.Moving;
+				//Which faces read the movers' map too - only where the squares read are the ones movers were drawn into;
+				//below nought, the slot of the one frustum they were drawn in instead
+				records[at + 17] = lamp.Slot >= 0 ? -( lamp.Slot + 1 ) : lamp.Moving;
 			}
 			else if ( lamp.OldClass >= 0 )
 			{
@@ -320,7 +358,7 @@ internal sealed class CoreLampMaps : IDisposable
 		{
 			if ( !lamp.Visible[f] || lamp.Baked[f] != !bakes ) continue;
 
-			var moving = Moving( lamp, f );
+			var moving = !lamp.Fitted && Moving( lamp, f );
 			if ( !moving && !bakes ) continue;
 
 			var wanted = ( bakes ? 1 : 0 ) + ( moving ? 1 : 0 );
@@ -344,6 +382,93 @@ internal sealed class CoreLampMaps : IDisposable
 				lamp.Moved[f] = movers;
 			}
 		}
+	}
+
+	//What moves in a still lamp's reach, in one frustum of its own where it fits - drawn once, where the faces it
+	//crosses would draw it up to three times, and finer for the frustum being only as wide as it
+	private void PlanFrustum( Lamp lamp, float[] frame, int room, float lodPixels )
+	{
+		lamp.Fitted = FitMovers( lamp );
+
+		if ( !lamp.Fitted || viewCount >= room || slots >= CoreSceneRenderer.MostMoverFrustums ) return;
+
+		//Nothing the camera sees is in its shadow
+		if ( !Meets( lamp, lamp.MoverForward, lamp.MoverTan, lamp.MoverPlanes ) ) return;
+
+		var size = lamp.Size;
+		var view = View( lamp, lamp.MoverClip, lamp.MoverPlanes, lamp.MoverTan, MovingOnly, lodPixels );
+
+		faces.Add( new Face( lamp, -1, -1, view, Area.Whole( size ), Area.Whole( size ) ) );
+
+		lamp.Slot = slots++;
+
+		//Its square is face nought's, so the next of that face's movers draws clears all of it
+		lamp.Moved[0] = Area.Whole( size );
+
+		var at = CoreSceneRenderer.LampMoversAt + ( lamp.Slot * 4 );
+		frame[at + 0] = lamp.MoverForward.x;
+		frame[at + 1] = lamp.MoverForward.y;
+		frame[at + 2] = lamp.MoverForward.z;
+		frame[at + 3] = lamp.MoverTan;
+	}
+
+	//One frustum from the lamp round everything moving in its reach, as UE's per-object shadows are. False where
+	//nothing moves in reach, or something stands too near the lamp or too far round it for one frustum to hold
+	private bool FitMovers( Lamp lamp )
+	{
+		//Grown round each in turn, as Ritter's sphere is: the axis turned toward one outside by as much as it widens
+		var forward = Vector3.Zero;
+		var widest = -1.0f;
+
+		for ( var i = 0; i < casters.MovingCount; i++ )
+		{
+			var sphere = casters.MovingSphere( i );
+			if ( sphere.W < 0.0f ) continue;
+
+			var to = new Vector3( sphere.X, sphere.Y, sphere.Z ) - lamp.Position;
+			var away = to.Length;
+
+			if ( away - sphere.W > lamp.Range ) continue;
+			if ( away - sphere.W <= Near ) return false;
+
+			var toward = to / away;
+			var round = MathF.Asin( Math.Min( sphere.W / away, 1.0f ) );
+
+			if ( widest < 0.0f )
+			{
+				forward = toward;
+				widest = round;
+				continue;
+			}
+
+			var off = MathF.Acos( Math.Clamp( forward.Dot( toward ), -1.0f, 1.0f ) );
+			if ( off + round <= widest ) continue;
+
+			var grown = ( widest + off + round ) * 0.5f;
+			if ( grown > WidestMoversDegrees * ( MathF.PI / 180.0f ) ) return false;
+
+			//Turned toward it along the great circle between the two, by what the cone grew
+			if ( off > 1e-5f )
+			{
+				var turn = ( grown - widest ) / off;
+				forward = ( ( forward * MathF.Sin( ( 1.0f - turn ) * off ) ) + ( toward * MathF.Sin( turn * off ) ) ) / MathF.Sin( off );
+				forward = forward.Normal;
+			}
+
+			widest = grown;
+		}
+
+		if ( widest < 0.0f || widest > WidestMoversDegrees * ( MathF.PI / 180.0f ) ) return false;
+
+		//Widened so its edge lies the margin inside the square's fit, where the filter's taps still find the square
+		var fitted = FitOf( lamp.Size ) * lamp.Size;
+
+		lamp.MoverForward = forward;
+		lamp.MoverTan = MathF.Tan( widest ) * fitted / MathF.Max( fitted - ( 2.0f * MoversMargin ), 1.0f );
+		lamp.MoverClip = ClipOf( lamp, forward, lamp.MoverTan );
+		CoreSceneRenderer.FrustumPlanes( lamp.MoverClip, lamp.MoverPlanes );
+
+		return true;
 	}
 
 	//A light's lamp: made if new, given squares at its wanted size, marked to bake where it or its size changed
@@ -646,14 +771,16 @@ internal sealed class CoreLampMaps : IDisposable
 		return MathF.Sqrt( 1.0f - ( outer * outer ) ) / outer;
 	}
 
-	//A face's projection: across and up over its half-width less the border, depth from Near to its reach
+	private static System.Numerics.Matrix4x4 FaceClip( Lamp lamp, int face ) => ClipOf( lamp, FaceForward( lamp, face ), HalfTan( lamp ) );
+
+	//A square's projection down `down`: across and up over its half-width less the border, depth from Near to its reach
 	//Written out rather than look-at times perspective so LampShadow can invert the same sums
-	private static System.Numerics.Matrix4x4 FaceClip( Lamp lamp, int face )
+	private static System.Numerics.Matrix4x4 ClipOf( Lamp lamp, Vector3 down, float halfTan )
 	{
-		var ( right, up, forward ) = CoreSunPages.LightAxes( FaceForward( lamp, face ) );
+		var ( right, up, forward ) = CoreSunPages.LightAxes( down );
 		var p = lamp.Position;
 
-		var s = FitOf( lamp.Size ) / HalfTan( lamp );
+		var s = FitOf( lamp.Size ) / halfTan;
 		var far = lamp.Range;
 		var a = far / ( far - Near );
 		var b = Near * far / ( far - Near );
@@ -688,12 +815,15 @@ internal sealed class CoreLampMaps : IDisposable
 
 	//Whether a face's pyramid and the camera's frustum can meet - not where all of one lies outside a plane of
 	//the other. Where they cannot, no pixel on the screen reads the face. True where there is no frustum to ask.
-	private bool Meets( Lamp lamp, int face )
+	private bool Meets( Lamp lamp, int face ) => Meets( lamp, FaceForward( lamp, face ), HalfTan( lamp ), lamp.PlanesOf( face ) );
+
+	//The same for any square's pyramid: down `down`, halfTan wide a metre out, bounded by these planes
+	private bool Meets( Lamp lamp, Vector3 down, float halfTan, ReadOnlySpan<System.Numerics.Vector4> planes )
 	{
 		if ( !hasFrustum ) return true;
 
-		var ( right, up, forward ) = CoreSunPages.LightAxes( FaceForward( lamp, face ) );
-		var across = lamp.Range * HalfTan( lamp );
+		var ( right, up, forward ) = CoreSunPages.LightAxes( down );
+		var across = lamp.Range * halfTan;
 		var far = lamp.Position + ( forward * lamp.Range );
 
 		Span<Vector3> pyramid = stackalloc Vector3[5];
@@ -706,7 +836,7 @@ internal sealed class CoreLampMaps : IDisposable
 		foreach ( var plane in frustum )
 			if ( Outside( plane, pyramid ) ) return false;
 
-		foreach ( var plane in lamp.PlanesOf( face ) )
+		foreach ( var plane in planes )
 			if ( Outside( plane, corners ) ) return false;
 
 		return true;
@@ -837,6 +967,10 @@ internal sealed class CoreLampMaps : IDisposable
 
 	//A view of one face for this frame's cull: of the still world, to bake, of what moves, for the movers' map, or of both.
 	private int View( Lamp lamp, int face, int casters, float lodPixels )
+		=> View( lamp, lamp.Clip[face], lamp.PlanesOf( face ), HalfTan( lamp ), casters, lodPixels );
+
+	private int View( Lamp lamp, in System.Numerics.Matrix4x4 clip, ReadOnlySpan<System.Numerics.Vector4> planes, float halfTan,
+		int casters, float lodPixels )
 	{
 		if ( casters != MovingOnly && lamp.Triangles < 0 ) lamp.Triangles = TrianglesNear( lamp );
 
@@ -844,18 +978,18 @@ internal sealed class CoreLampMaps : IDisposable
 
 		var view = new CoreMeshRender.ViewSetup
 		{
-			WorldToClip = lamp.Clip[face],
+			WorldToClip = clip,
 			Camera = false,
 			Perspective = true,
 			Casters = casters,
 			Eye = lamp.Position,
-			ErrorScale = FitOf( lamp.Size ) / HalfTan( lamp ) * lamp.Size * 0.5f,
+			ErrorScale = FitOf( lamp.Size ) / halfTan * lamp.Size * 0.5f,
 			LodPixels = lodPixels,
 			Near = Near,
 			Far = lamp.Range,
 		};
 
-		view.SetPlanes( lamp.PlanesOf( face ) );
+		view.SetPlanes( planes );
 		planned[viewCount] = view;
 
 		return viewCount++;
@@ -901,10 +1035,15 @@ internal sealed class CoreLampMaps : IDisposable
 			foreach ( var face in faces )
 			{
 				Unbake( face );
-				if ( face.MoverView >= 0 ) face.Lamp.Moved[face.Index] = Area.Whole( face.Lamp.Size );
+				if ( face.MoverView >= 0 ) face.Lamp.Moved[Math.Max( face.Index, 0 )] = Area.Whole( face.Lamp.Size );
 			}
 
-			foreach ( var lamp in lamps.Values ) lamp.Moving = 0;
+			foreach ( var lamp in lamps.Values )
+			{
+				lamp.Moving = 0;
+				lamp.Slot = -1;
+			}
+
 			return;
 		}
 
@@ -912,7 +1051,7 @@ internal sealed class CoreLampMaps : IDisposable
 
 		foreach ( var face in faces )
 		{
-			var ( layer, x, y ) = WhereIs( face.Lamp, face.Index );
+			var ( layer, x, y ) = WhereIs( face.Lamp, Math.Max( face.Index, 0 ) );
 			var size = face.Lamp.Size;
 
 			//The still world into the map, where it is kept.
@@ -933,7 +1072,9 @@ internal sealed class CoreLampMaps : IDisposable
 				CoreRenderDevice.ZoneEnd();
 
 				//Not drawn: what is there is stale, so the next draw clears all of it.
-				if ( !drawn ) face.Lamp.Moved[face.Index] = Area.Whole( size );
+				if ( !drawn ) face.Lamp.Moved[Math.Max( face.Index, 0 )] = Area.Whole( size );
+				else if ( face.Index < 0 ) MoverFrustumsDrawn++;
+				else MoverFacesDrawn++;
 			}
 		}
 
@@ -965,6 +1106,8 @@ internal sealed class CoreLampMaps : IDisposable
 	//A face whose bake did not happen: baked next frame, and its old picture read meanwhile
 	private static void Unbake( in Face face )
 	{
+		if ( face.Index < 0 ) return;
+
 		face.Lamp.Baked[face.Index] = false;
 		face.Lamp.Held[face.Index] = face.WasHeld;
 	}

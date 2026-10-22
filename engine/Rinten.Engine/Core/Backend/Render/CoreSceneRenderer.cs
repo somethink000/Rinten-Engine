@@ -933,7 +933,11 @@ internal static unsafe class CoreSceneRenderer
 	internal const int Lights2DAt = Light2DInfoAt + 4;
 	internal const int Light2DFloats = 12;
 
-	internal const int FrameFloats = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
+	//The lamps' movers frustums, a float4 each by slot - see lampMovers in frame_data.slang and CoreLampMaps.FitMovers.
+	internal const int LampMoversAt = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
+	internal const int MostMoverFrustums = 16;
+
+	internal const int FrameFloats = LampMoversAt + ( MostMoverFrustums * 4 );
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]

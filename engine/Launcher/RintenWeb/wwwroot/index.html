@@ -274,6 +274,31 @@ async function packedModule(url) {
 // again from its own cache of compiled code rather than from nothing. A new export
 // is a new hash; the old copy goes. Without a cache to keep it in (a page not on
 // https or localhost), every visit downloads it.
+//A start that failed on a download the network cut off - it changed under the page, as a phone's does
+//between networks - rather than on the game
+function cutOff(why) {
+	return /fetch|network|ReadableStream/i.test(why);
+}
+
+//The page loaded anew, twice at most a visit: a module that failed to load stays failed in this page
+function loadAgain() {
+	try {
+		var tries = Number(sessionStorage.getItem("rinten.retries") || 0);
+		if (tries >= 2) return false;
+		sessionStorage.setItem("rinten.retries", String(tries + 1));
+	} catch (e) {
+		return false;
+	}
+
+	say("Connection dropped - loading again…");
+	setTimeout(function () { location.reload(); }, 1000);
+	return true;
+}
+
+function forgetRetries() {
+	try { sessionStorage.removeItem("rinten.retries"); } catch (e) { }
+}
+
 async function moduleResponse(url) {
 	var hash = manifest && manifest.Module;
 	var store = null;
@@ -491,6 +516,7 @@ function watchWebgpu(table) {
 
 		const runtime = await dotnet.create();
 		say("Starting engine…");
+		forgetRetries();
 
 		// Anything on the address that begins with a dash is handed to the engine
 		// as a command-line switch, so ?-perfreport=8 is -perfreport 8. A browser
@@ -507,8 +533,10 @@ function watchWebgpu(table) {
 		await runtime.runMain(undefined, switches);
 	} catch (e) {
 		console.error(e);
+		var why = String(e && e.message ? e.message : e);
+		if (cutOff(why) && loadAgain()) return;
 		say("");
-		fail(String(e && e.message ? e.message : e));
+		fail(why);
 	}
 })();
 	</script>

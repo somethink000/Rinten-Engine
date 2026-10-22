@@ -31,6 +31,12 @@ public static partial class PerformanceStats
 	/// <summary>How many draws the last frame issued, where the renderer counts them - the web's.</summary>
 	public static int FrameDraws { get; internal set; }
 
+	/// <summary>Triangles the GPU was handed in the last counted frame, every pass of it; below nought where nothing counted them - see MeasureTriangles.</summary>
+	public static long FrameTriangles { get; internal set; } = -1;
+
+	/// <summary>Ask the renderer to count the triangles each frame hands the GPU, for something that is showing them. A query over the whole frame, kept off while nobody looks; desktop only.</summary>
+	public static bool MeasureTriangles { get; set; }
+
 	/// <summary>Ask the renderer to time the GPU and count draws, for something that is showing them. A page times the GPU with a query per frame and reads it back through the page, which is not free, so it is done only while this is set.</summary>
 	public static bool MeasureGpu { get; set; }
 
@@ -234,6 +240,7 @@ public static partial class PerformanceStats
 		}
 
 		GpuMemoryUsage = (ulong)Math.Max( 0, frame.TextureBytes + frame.BufferBytes );
+		FrameTriangles = MeasureTriangles ? frame.Triangles : -1;
 	}
 
 	//How much of the machine's processors this process is using, from how much processor time it got between two readings. Sampled a couple of times a

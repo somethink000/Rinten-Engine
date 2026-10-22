@@ -1532,6 +1532,17 @@ public partial class DockManager
 		return true;
 	}
 
+	//Brings a floating dock back into this layout, in front of its tab group. False where it is not floating
+	internal bool DockFloating( DockWidget dock )
+	{
+		if ( !floating.TryGetValue( dock, out var window ) || !window.IsValid() ) return false;
+
+		window.DockBack();
+		SetDockState( dock.Title, true );
+
+		return true;
+	}
+
 	//A window holding one dock of this layout: no tab, only the panel. Pulled by its caption it is carried, and put down on the layout
 	//it docks there - see Landed. Its close puts the panel away, as a tab's cross does
 	private sealed class FloatingDock : Window
@@ -1563,6 +1574,10 @@ public partial class DockManager
 			this.dock = dock;
 
 			living.Add( this );
+
+			//One press puts it back in the layout, where dragging it there by its caption would
+			if ( MenuWidget is TitleBar bar )
+				bar.TitleBarButtons.AddButton( "push_pin", Pin ).ToolTip = "Dock into the layout";
 		}
 
 		internal DockWidget Dock => dock;
@@ -1576,6 +1591,11 @@ public partial class DockManager
 
 			if ( living.FirstOrDefault( x => x.IsValid() && x.Shell == shell ) is { } window )
 				window.docks?.Landed( window, CoreUiWindow.Of( on ), at );
+		}
+
+		private void Pin()
+		{
+			if ( dock.IsValid() ) docks?.DockFloating( dock );
 		}
 
 		//Back into the layout, open; the caller places it

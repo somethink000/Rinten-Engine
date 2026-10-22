@@ -78,7 +78,7 @@ internal static unsafe partial class VkFrame
 		/// <summary>The pool, or null when the queue cannot timestamp at all.</summary>
 		public QueryPool Queries;
 
-		/// <summary>One pipeline statistics query per frame for RINTEN_ZONE_STATS's zone; such queries can't nest</summary>
+		/// <summary>One pipeline statistics query per frame, for RINTEN_ZONE_STATS's zone or the whole frame; such queries can't nest</summary>
 		public QueryPool Stats;
 
 		/// <summary>Whether this frame's one statistics query has been taken, and at what zone depth it was opened.</summary>
@@ -171,6 +171,9 @@ internal static unsafe partial class VkFrame
 		/// <summary>How many copies the instanced draws drew between them.</summary>
 		public uint Instances;
 		public ulong Triangles;
+
+		/// <summary>Triangles the frame handed the assembler - see VkDevice.CountsFrame; below nought where nothing counted.</summary>
+		public long Counted = -1;
 		public ulong ScratchUsed;
 		public uint SkippedBinds;
 
@@ -1388,9 +1391,9 @@ internal static unsafe partial class VkFrame
 				frame.Queries = queries;
 		}
 
-		//And the one statistics query, where the device has the feature and somebody asked for a zone by name.
+		//And the one statistics query, where the device has the feature; begun only when asked for - see VkDevice.CountsFrame.
 		//Five counters: what the assembler was handed, what the clipper kept, and the two stages' invocations.
-		if ( VkDevice.StatsZone is not null && VkDevice.statsQueries )
+		if ( VkDevice.statsQueries )
 		{
 			var statsInfo = new QueryPoolCreateInfo
 			{
@@ -1501,15 +1504,20 @@ internal static unsafe partial class VkFrame
 			CountCardIdle( ticks[0], ticks[1], toMs );
 		}
 
-		//And the named zone's cost where asked, in the log every 120th frame: a diagnostic for one question,
-		//not a number the report carries for everyone
+		//The frame's triangles, or where a run named a zone, its five counts in the log every 120th frame
+		into.Counted = -1;
+
 		if ( frame.Stats.Handle != 0 && frame.StatsTaken )
 		{
 			var counts = stackalloc ulong[5];
 
-			if ( VkDevice.vk.GetQueryPoolResults( VkDevice.device, frame.Stats, 0, 1,
+			var counted = VkDevice.vk.GetQueryPoolResults( VkDevice.device, frame.Stats, 0, 1,
 				(nuint)( sizeof( ulong ) * 5 ), counts, sizeof( ulong ) * 5,
-				QueryResultFlags.Result64Bit ) == Result.Success && ( ++VkDevice.statsFrame % 120 ) == 5 )
+				QueryResultFlags.Result64Bit ) == Result.Success;
+
+			if ( counted && VkDevice.StatsZone is null ) into.Counted = (long)counts[0];
+
+			if ( counted && VkDevice.StatsZone is not null && ( ++VkDevice.statsFrame % 120 ) == 5 )
 			{
 				Log.Info( $"zone stats '{VkDevice.StatsZone}': {counts[0]:N0} primitives in, {counts[2]:N0} kept by the clipper, " +
 					$"{counts[1]:N0} vertex stages, {counts[3]:N0} fragment stages, {counts[4]:N0} compute stages" );
@@ -1601,15 +1609,16 @@ internal static unsafe partial class VkFrame
 					frame.Queries, zone.End );
 			}
 
-			//A counted zone closed by the frame ending rather than by its own end: the query has to be ended
-			//all the same, or the pool is left with a query open and the next frame's reset is refused.
-			if ( frame.StatsRunning && frame.StatsDepth == frame.ZoneDepth )
-			{
-				VkDevice.vk.CmdEndQuery( frame.Commands, frame.Stats, 0 );
-				frame.StatsRunning = false;
-			}
-
 			PopLabel( frame );
+		}
+
+		//The whole frame's count, or a counted zone closed by the frame ending rather than by its own end: ended
+		//here outside any pass, or the pool is left with a query open and the next frame's reset is refused
+		if ( frame.StatsRunning )
+		{
+			CloseOpenPasses( frame );
+			VkDevice.vk.CmdEndQuery( frame.Commands, frame.Stats, 0 );
+			frame.StatsRunning = false;
 		}
 
 		frame.DroppedOpen = 0;
@@ -1723,6 +1732,15 @@ internal static unsafe partial class VkFrame
 		frame.StatsRunning = false;
 
 		if ( frame.Stats.Handle != 0 ) vk.CmdResetQueryPool( frame.Commands, frame.Stats, 0, 1 );
+
+		//Counted from here to CloseOpenZones; a depth no zone has, so no zone's end closes it
+		if ( frame.Stats.Handle != 0 && VkDevice.CountsFrame )
+		{
+			vk.CmdBeginQuery( frame.Commands, frame.Stats, 0, 0 );
+			frame.StatsTaken = true;
+			frame.StatsRunning = true;
+			frame.StatsDepth = -1;
+		}
 
 		return true;
 	}

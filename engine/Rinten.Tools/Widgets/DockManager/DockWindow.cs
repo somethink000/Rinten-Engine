@@ -117,10 +117,12 @@ public partial class DockWindow : Window
 
 			//Floated in a window of its own rather than put into the layout - see DockManager.OpenPanelWindow. A
 			//panel already docked here is raised where it is instead, because that is where somebody put it.
+			//Right-clicked, it goes straight into the layout instead
 			var o = menu.AddOption( title, dock.Icon );
 			o.Checkable = true;
 			o.Checked = target.IsPanelOpen( title );
 			o.Toggled += ( b ) => target.SetPanelOpen( title, b );
+			o.RightClicked = () => target.OpenPanelDocked( title );
 		}
 
 		IToolsDll.Current?.RunEvent( "tools.editorwindow.postcreateview", menu );

@@ -5,8 +5,6 @@
 	width: 152px;
 	flex-shrink: 0;
 	padding: 6px;
-	border-radius: 6px;
-	background-color: $glass;
 	pointer-events: none;
 
 	&.hidden
@@ -26,10 +24,13 @@
 		font-size: $type-small;
 		font-weight: 500;
 
+		//No plate behind it, so the shadow keeps it readable over a bright scene
+		text-shadow: 0px 0px 3px rgba( 0, 0, 0, 1 );
+
 		> .name
 		{
 			flex-grow: 1;
-			color: $ink-faint;
+			color: white;
 		}
 
 		> .value

@@ -33,6 +33,14 @@ public partial class DockManager
 			FloatManaged( dock );
 	}
 
+	/// <summary>Open a registered panel docked in this layout, where it was registered to go; one floating in a window of its own comes back in.</summary>
+	public void OpenPanelDocked( string name )
+	{
+		if ( FindDockWidget( name ) is { } existing ) DockFloating( existing );
+
+		SetDockState( name, true );
+	}
+
 	/// <summary>Put a panel away, wherever it is, if the panel agrees - see DockWidget.CanClose.</summary>
 	public void ClosePanel( string name )
 	{

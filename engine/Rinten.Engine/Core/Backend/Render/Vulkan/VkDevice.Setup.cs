@@ -546,8 +546,8 @@ internal static unsafe partial class VkDevice
 		//no geometry shader is made, but without it that read is undefined
 		features.Features.GeometryShader = supported.GeometryShader;
 
-		//Pipeline statistics queries, only when a run asked for them (see VkDevice.StatsZone)
-		statsQueries = StatsZone is not null && supported.PipelineStatisticsQuery;
+		//Pipeline statistics queries, for RINTEN_ZONE_STATS and the world's triangle count (see VkDevice.CountsFrame)
+		statsQueries = supported.PipelineStatisticsQuery;
 		features.Features.PipelineStatisticsQuery = statsQueries;
 
 		if ( StatsZone is not null && !statsQueries )

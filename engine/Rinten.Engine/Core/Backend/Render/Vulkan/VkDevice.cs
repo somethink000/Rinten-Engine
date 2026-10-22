@@ -89,7 +89,10 @@ internal static unsafe partial class VkDevice
 	//Zone to collect pipeline statistics for (RINTEN_ZONE_STATS), or null for none
 	internal static readonly string StatsZone = Environment.GetEnvironmentVariable( "RINTEN_ZONE_STATS" );
 
-	//Whether the device has the statistics feature and it was asked for.
+	//Whether a frame's statistics query counts the whole frame: while its triangles are shown, unless a run named a zone
+	internal static bool CountsFrame => StatsZone is null && Rinten.Diagnostics.PerformanceStats.MeasureTriangles;
+
+	//Whether the device has the statistics feature.
 	internal static bool statsQueries;
 
 	//How many frames have read their statistics back, for saying one in a hundred and twenty.

@@ -873,18 +873,19 @@ internal static unsafe class CoreRenderDevice
 			zones );
 	}
 
-	/// <summary>What a frame cost and what our resources hold, without the zones.</summary>
-	public readonly record struct FrameSummary( float GpuMs, float CpuMs, long TextureBytes, long BufferBytes );
+	/// <summary>What a frame cost, its triangles where counted (else below nought) and what our resources hold, without the zones.</summary>
+	public readonly record struct FrameSummary( float GpuMs, float CpuMs, long TextureBytes, long BufferBytes, long Triangles );
 
 	/// <summary>GPU/CPU time and memory of the viewport's last finished frame, without allocating</summary>
 	public static FrameSummary? ReadFrameSummary( ulong viewport )
 	{
 		if ( !CoreNative.Available || viewport == 0 ) return null;
 
-		var stats = stackalloc float[14];
-		if ( CoreRender.ProfileStats( viewport, stats, 14 ) < 14 ) return null;
+		var stats = stackalloc float[18];
+		var given = CoreRender.ProfileStats( viewport, stats, 18 );
+		if ( given < 14 ) return null;
 
-		return new FrameSummary( stats[0], stats[1], (long)stats[10], (long)stats[11] );
+		return new FrameSummary( stats[0], stats[1], (long)stats[10], (long)stats[11], given >= 18 ? (long)stats[17] : -1 );
 	}
 
 	//-- pipelines -------------------------------------------------------------

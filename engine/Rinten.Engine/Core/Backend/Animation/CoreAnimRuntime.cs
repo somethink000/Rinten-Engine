@@ -185,6 +185,9 @@ internal static class CoreAnimRuntime
 		public AnimTrs[] Model;
 		public AnimTrs[] Previous;
 
+		/// <summary>Counts every change to the model space pose, for what is worked out from it to know when to work it out again.</summary>
+		public int Stamp;
+
 		/// <summary>Bones driven from outside - physics, or a game object moving one by hand. They survive a pose being rebuilt, which is the point of them.</summary>
 		public bool[] Overridden;
 		public AnimTrs[] Overrides;
@@ -330,6 +333,7 @@ internal static class CoreAnimRuntime
 		var swap = instance.Previous;
 		instance.Model.CopyTo( swap, 0 );
 		instance.Previous = swap;
+		++instance.Stamp;
 
 		foreach ( var bone in skeleton.Order )
 		{
@@ -543,6 +547,7 @@ internal static class CoreAnimRuntime
 		//Refresh this bone's model pose now, so a child override set later this frame reads the new parent
 		var parent = instance.Skeleton.Bones[bone].Parent;
 		instance.Model[bone] = parent >= 0 ? AnimTrs.Then( trs, instance.Model[parent] ) : trs;
+		++instance.Stamp;
 	}
 
 	public static void ClearBones( Instance instance )
@@ -573,6 +578,7 @@ internal static class CoreAnimRuntime
 		var binding = SkeletonBinding( skeleton, theirs.Skeleton );
 
 		mine.Model.CopyTo( mine.Previous, 0 );
+		++mine.Stamp;
 
 		var merged = 0;
 

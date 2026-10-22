@@ -416,49 +416,44 @@ internal sealed class CoreLampMaps : IDisposable
 	//nothing moves in reach, or something stands too near the lamp or too far round it for one frustum to hold
 	private bool FitMovers( Lamp lamp )
 	{
-		//Grown round each in turn, as Ritter's sphere is: the axis turned toward one outside by as much as it widens
 		var forward = Vector3.Zero;
 		var widest = -1.0f;
+		var widestAllowed = WidestMoversDegrees * ( MathF.PI / 180.0f );
 
 		for ( var i = 0; i < casters.MovingCount; i++ )
 		{
 			var sphere = casters.MovingSphere( i );
 			if ( sphere.W < 0.0f ) continue;
 
-			var to = new Vector3( sphere.X, sphere.Y, sphere.Z ) - lamp.Position;
-			var away = to.Length;
+			var centre = new Vector3( sphere.X, sphere.Y, sphere.Z );
+			var away = ( centre - lamp.Position ).Length;
 
 			if ( away - sphere.W > lamp.Range ) continue;
-			if ( away - sphere.W <= Near ) return false;
 
-			var toward = to / away;
-			var round = MathF.Asin( Math.Min( sphere.W / away, 1.0f ) );
+			//Nearer the lamp than its maps begin, or round it: no one frustum holds it
+			var boxed = casters.MovingBox( i );
+			if ( boxed is { } near ? near.Grow( Near ).Contains( lamp.Position ) : away - sphere.W <= Near ) return false;
 
-			if ( widest < 0.0f )
+			//Round its box's corners where it has one - the box lies inside the sphere, so the cone is never wider
+			if ( boxed is { } box )
 			{
-				forward = toward;
-				widest = round;
+				for ( var corner = 0; corner < 8; corner++ )
+				{
+					var point = new Vector3(
+						( corner & 1 ) != 0 ? box.Maxs.x : box.Mins.x,
+						( corner & 2 ) != 0 ? box.Maxs.y : box.Mins.y,
+						( corner & 4 ) != 0 ? box.Maxs.z : box.Mins.z );
+
+					if ( !Grow( ref forward, ref widest, ( point - lamp.Position ).Normal, 0.0f, widestAllowed ) ) return false;
+				}
+
 				continue;
 			}
 
-			var off = MathF.Acos( Math.Clamp( forward.Dot( toward ), -1.0f, 1.0f ) );
-			if ( off + round <= widest ) continue;
-
-			var grown = ( widest + off + round ) * 0.5f;
-			if ( grown > WidestMoversDegrees * ( MathF.PI / 180.0f ) ) return false;
-
-			//Turned toward it along the great circle between the two, by what the cone grew
-			if ( off > 1e-5f )
-			{
-				var turn = ( grown - widest ) / off;
-				forward = ( ( forward * MathF.Sin( ( 1.0f - turn ) * off ) ) + ( toward * MathF.Sin( turn * off ) ) ) / MathF.Sin( off );
-				forward = forward.Normal;
-			}
-
-			widest = grown;
+			if ( !Grow( ref forward, ref widest, ( centre - lamp.Position ) / away, MathF.Asin( Math.Min( sphere.W / away, 1.0f ) ), widestAllowed ) ) return false;
 		}
 
-		if ( widest < 0.0f || widest > WidestMoversDegrees * ( MathF.PI / 180.0f ) ) return false;
+		if ( widest < 0.0f ) return false;
 
 		//Widened so its edge lies the margin inside the square's fit, where the filter's taps still find the square
 		var fitted = FitOf( lamp.Size ) * lamp.Size;
@@ -468,6 +463,35 @@ internal sealed class CoreLampMaps : IDisposable
 		lamp.MoverClip = ClipOf( lamp, forward, lamp.MoverTan );
 		CoreSceneRenderer.FrustumPlanes( lamp.MoverClip, lamp.MoverPlanes );
 
+		return true;
+	}
+
+	//A cone grown round a cap of directions - toward, round wide - as Ritter's sphere is grown round a point: the axis turned
+	//toward one outside by as much as it widens. False past the widest allowed
+	private static bool Grow( ref Vector3 forward, ref float widest, Vector3 toward, float round, float allowed )
+	{
+		if ( widest < 0.0f )
+		{
+			forward = toward;
+			widest = round;
+			return widest <= allowed;
+		}
+
+		var off = MathF.Acos( Math.Clamp( forward.Dot( toward ), -1.0f, 1.0f ) );
+		if ( off + round <= widest ) return true;
+
+		var grown = ( widest + off + round ) * 0.5f;
+		if ( grown > allowed ) return false;
+
+		//Turned along the great circle between the two, by what the cone grew
+		if ( off > 1e-5f )
+		{
+			var turn = ( grown - widest ) / off;
+			forward = ( ( forward * MathF.Sin( ( 1.0f - turn ) * off ) ) + ( toward * MathF.Sin( turn * off ) ) ) / MathF.Sin( off );
+			forward = forward.Normal;
+		}
+
+		widest = grown;
 		return true;
 	}
 

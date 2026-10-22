@@ -85,6 +85,13 @@ internal sealed class CoreCasters
 
 	internal System.Numerics.Vector4 MovingSphere( int at ) => at < movers.Count ? SphereOf( movers[at] ) : Hand[at - movers.Count];
 
+	//The world box of the moving caster at an index, inside its sphere; null for the hand-drawn, which have only spheres
+	internal BBox? MovingBox( int at )
+		=> at < movers.Count && seen?.EntryAt( movers[at] )?.Renderer is { } renderer && renderer.IsValid() ? renderer.Bounds : null;
+
+	//The tables last looked at, which the boxes are asked of
+	private CoreSceneTables seen;
+
 	//Where a slot's caster is - w below nought where it casts nothing.
 	internal System.Numerics.Vector4 SphereOf( int slot ) => slot < Count ? sphere[slot] : Nothing;
 
@@ -96,6 +103,8 @@ internal sealed class CoreCasters
 	//What the tables say changed since the last look, into Changes.
 	internal void Note( CoreSceneTables tables )
 	{
+		seen = tables;
+
 		Changes.Clear();
 		Whole = false;
 

@@ -185,31 +185,55 @@ internal static unsafe class CoreRenderDevice
 
 		savedPipelines = baked;
 
-		SavePipelineCache();
+		SavePipelineCache( inBackground: true );
 	}
 
 	//The count this saw last frame, to tell "still baking" from "settled".
 	private static int bakedPipelines;
 
-	//Writes out what the driver compiled this run, while the device is still open
-	private static void SavePipelineCache()
+	//The cache still on its way to disk; the next save goes after it, so the newer cache is the one left
+	private static Task writingCache = Task.CompletedTask;
+
+	//Reads what the driver compiled this run while the device is open; the file is written off the main thread
+	//during play, where closing a few MB over the old file stalls a frame for tens of milliseconds
+	private static void SavePipelineCache( bool inBackground = false )
+	{
+		//Asked how much room it wants before being given any.
+		var size = CoreRender.PipelineCacheSave( null, 0 );
+		if ( size <= 0 ) return;
+
+		var bytes = new byte[size];
+		int written;
+
+		fixed ( byte* data = bytes )
+		{
+			written = CoreRender.PipelineCacheSave( data, size );
+		}
+
+		if ( written <= 0 ) return;
+
+		if ( written < bytes.Length )
+			Array.Resize( ref bytes, written );
+
+		if ( !inBackground )
+		{
+			writingCache.Wait();
+			WritePipelineCache( bytes );
+			return;
+		}
+
+		var before = writingCache;
+		writingCache = Task.Run( () =>
+		{
+			before.Wait();
+			WritePipelineCache( bytes );
+		} );
+	}
+
+	private static void WritePipelineCache( byte[] bytes )
 	{
 		try
 		{
-			//Asked how much room it wants before being given any.
-			var size = CoreRender.PipelineCacheSave( null, 0 );
-			if ( size <= 0 ) return;
-
-			var bytes = new byte[size];
-			int written;
-
-			fixed ( byte* data = bytes )
-			{
-				written = CoreRender.PipelineCacheSave( data, size );
-			}
-
-			if ( written <= 0 ) return;
-
 			var path = PipelineCachePath;
 			Directory.CreateDirectory( Path.GetDirectoryName( path ) );
 
@@ -219,7 +243,7 @@ internal static unsafe class CoreRenderDevice
 
 			try
 			{
-				File.WriteAllBytes( temporary, bytes.AsSpan( 0, written ).ToArray() );
+				File.WriteAllBytes( temporary, bytes );
 				File.Move( temporary, path, overwrite: true );
 			}
 			catch ( Exception ) when ( File.Exists( temporary ) )

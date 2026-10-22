@@ -55,6 +55,12 @@ internal sealed unsafe class ModelFile : IDisposable
 		var held = new byte[read.Length < ModelFormat.HeaderSize ? ModelFormat.HeaderSize : read.Length];
 		read.CopyTo( held );
 
+		return Adopt( held, read.Length );
+	}
+
+	//Reads a model out of bytes it now owns and may rewrite; the file is the first fileLength of them
+	private static ModelFile Adopt( byte[] held, int fileLength )
+	{
 		var model = new ModelFile( held );
 
 		ref var header = ref MemoryMarshal.AsRef<ModelFormat.Header>( held.AsSpan() );
@@ -62,7 +68,7 @@ internal sealed unsafe class ModelFile : IDisposable
 		//Three ways a file can be wrong, all of which would otherwise be read as a valid model made of whatever the bytes happened to be.
 		if ( header.magic != ModelFormat.Magic ) return null;
 		if ( header.version < ModelFormat.VersionOldest || header.version > ModelFormat.Version ) return null;
-		if ( header.byteCount != (uint)read.Length ) return null;
+		if ( header.byteCount != (uint)fileLength ) return null;
 
 		//A file from before the clusters: the words where they would be are the text's, and are cleared so the reads below see none.
 		if ( header.version < ModelFormat.VersionClusters )
@@ -186,7 +192,8 @@ internal sealed unsafe class ModelFile : IDisposable
 
 		if ( read.Length < ModelFormat.HeaderSize ) return null;
 
-		return LoadMemory( read );
+		//Read for this alone, so it is held as it is rather than copied a second time
+		return Adopt( read, read.Length );
 	}
 
 	/// <summary>Which build of the importers this engine writes - see <see cref="ModelFormat.ImportGeneration"/>.</summary>

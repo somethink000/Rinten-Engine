@@ -83,7 +83,12 @@ internal sealed class CoreCasters
 	//How many moving casters there are this frame, the tables' and the hand-drawn, and where the one at an index is.
 	internal int MovingCount => movers.Count + Hand.Count;
 
-	internal System.Numerics.Vector4 MovingSphere( int at ) => at < movers.Count ? SphereOf( movers[at] ) : Hand[at - movers.Count];
+	//One thrown to NaN casts nothing: every test against it fails, and a frustum fitted round it is NaN too
+	internal System.Numerics.Vector4 MovingSphere( int at )
+	{
+		var found = at < movers.Count ? SphereOf( movers[at] ) : Hand[at - movers.Count];
+		return float.IsFinite( found.X + found.Y + found.Z + found.W ) ? found : Nothing;
+	}
 
 	//The world box of the moving caster at an index, inside its sphere; null for the hand-drawn, which have only spheres
 	internal BBox? MovingBox( int at )

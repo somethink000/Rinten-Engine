@@ -65,6 +65,12 @@ public class PreviewScenePanel : EditorPanel
 	private Rinten.Physics.ControlJoint _mouseJoint;
 	private float _grabDistance;
 
+	//Whether a left drag on the model carries the whole model, for what swings on its own motion: jiggle bones
+	protected bool ModelDraggable { get; set; }
+
+	//Where on the model the drag took hold, from its origin; null while nothing is dragging it
+	private Vector3? _modelGrabOffset;
+
 	//Toolbar strip above the viewport for preview controls.
 	protected Panel Toolbar { get; }
 
@@ -321,9 +327,9 @@ public class PreviewScenePanel : EditorPanel
 		}
 		else
 		{
-			SetViewCursor( _mouseJoint.IsValid() ? CursorShape.ClosedHand
+			SetViewCursor( _mouseJoint.IsValid() || _modelGrabOffset is not null ? CursorShape.ClosedHand
 				: GizmoWantsMouse ? CursorShape.Finger
-				: IsHoveringDynamicBody() ? CursorShape.OpenHand : CursorShape.None );
+				: IsHoveringDynamicBody() || IsHoveringDraggableModel() ? CursorShape.OpenHand : CursorShape.None );
 		}
 
 		Camera.WorldRotation = new Angles( _angles.y, -_angles.x, 0 );
@@ -367,7 +373,7 @@ public class PreviewScenePanel : EditorPanel
 			}
 
 			//Ragdoll bodies win over gizmo hits: joint EditorHandle sprites sit at body origins
-			if ( TryStartGrab() )
+			if ( TryStartGrab() || TryStartModelDrag() )
 			{
 				//handled below
 			}
@@ -427,12 +433,14 @@ public class PreviewScenePanel : EditorPanel
 
 		//There is no implicit grab on a panel, and a camera drag pins the pointer where it started rather than letting it travel - so the
 		//release is read from the buttons themselves as well, or a drag that ended anywhere but squarely on the picture would run for ever.
-		if ( !CameraDragging && _mouseBody is null )
+		var grabbing = _mouseBody is not null || _modelGrabOffset is not null;
+
+		if ( !CameraDragging && !grabbing )
 			return;
 
 		var held = Application.MouseButtons;
 
-		if ( (_orbit || _mouseBody is not null) && !held.HasFlag( MouseButtons.Left ) ) EndDrag( MouseButtons.Left );
+		if ( (_orbit || grabbing) && !held.HasFlag( MouseButtons.Left ) ) EndDrag( MouseButtons.Left );
 		if ( _zoom && !held.HasFlag( MouseButtons.Right ) ) EndDrag( MouseButtons.Right );
 		if ( _pan && !held.HasFlag( MouseButtons.Middle ) ) EndDrag( MouseButtons.Middle );
 	}
@@ -485,6 +493,9 @@ public class PreviewScenePanel : EditorPanel
 		return tr.Hit && tr.Body.IsValid() && tr.Body.BodyType == PhysicsBodyType.Dynamic;
 	}
 
+	private bool IsHoveringDraggableModel()
+		=> ModelDraggable && _renderView.IsUnderMouse && Renderer.IsValid() && Renderer.Bounds.Trace( CursorRay, 254f, out _ );
+
 	private bool TryStartGrab()
 	{
 		var tr = Scene.Trace.Ray( CursorRay, 254f ).Run();
@@ -508,8 +519,32 @@ public class PreviewScenePanel : EditorPanel
 		return true;
 	}
 
+	//Takes hold of the model itself where the cursor meets its bounds
+	private bool TryStartModelDrag()
+	{
+		if ( !ModelDraggable || !Renderer.IsValid() || !ModelObject.IsValid() )
+			return false;
+
+		if ( !Renderer.Bounds.Trace( CursorRay, 254f, out var hitDistance ) )
+			return false;
+
+		var hit = CursorRay.Project( hitDistance );
+		_grabDistance = hit.Dot( Camera.WorldRotation.Forward );
+		_modelGrabOffset = hit - ModelObject.WorldPosition;
+		return true;
+	}
+
 	private void UpdateGrab()
 	{
+		if ( _modelGrabOffset is { } offset )
+		{
+			var dragPlane = new Plane( Camera.WorldRotation.Forward, _grabDistance );
+			if ( ModelObject.IsValid() && dragPlane.TryTrace( CursorRay, out var dragPoint, true ) )
+				ModelObject.WorldPosition = dragPoint - offset;
+
+			return;
+		}
+
 		if ( _mouseBody is null )
 			return;
 
@@ -528,6 +563,8 @@ public class PreviewScenePanel : EditorPanel
 
 	private void EndGrab()
 	{
+		_modelGrabOffset = null;
+
 		if ( _mouseJoint.IsValid() )
 			_mouseJoint.Remove();
 

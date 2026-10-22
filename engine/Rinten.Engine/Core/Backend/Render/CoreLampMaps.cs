@@ -453,7 +453,7 @@ internal sealed class CoreLampMaps : IDisposable
 			if ( !Grow( ref forward, ref widest, ( centre - lamp.Position ) / away, MathF.Asin( Math.Min( sphere.W / away, 1.0f ) ), widestAllowed ) ) return false;
 		}
 
-		if ( widest < 0.0f ) return false;
+		if ( widest < 0.0f || !float.IsFinite( widest ) || !float.IsFinite( forward.x + forward.y + forward.z ) ) return false;
 
 		//Widened so its edge lies the margin inside the square's fit, where the filter's taps still find the square
 		var fitted = FitOf( lamp.Size ) * lamp.Size;

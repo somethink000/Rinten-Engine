@@ -59,10 +59,13 @@ public partial class Preview : PreviewScenePanel
 	private float _fovViewModel;
 	private ModelPhysics _ragdoll;
 	private GameObject _ragdollFloor;
-	private PreviewToolButton _ragdollToggle;
+	private PreviewToolButton _simulateToggle;
 
-	//The group the ragdoll button stands in, which is gone with it.
-	private Panel _simulationGroup;
+	//Simulating a model with no bodies but jiggle bones: the model is dragged about and they swing
+	private bool _shaking;
+	private Transform _preShakeTransform;
+
+	private bool IsSimulating => _ragdollActive || _shaking;
 	private Panel _modelPreviewHost;
 	private bool _fillingModelPreview;
 	private string _modelPreviewKey;
@@ -101,7 +104,7 @@ public partial class Preview : PreviewScenePanel
 
 	internal readonly struct PreviewReloadState
 	{
-		public bool Ragdoll { get; init; }
+		public bool Simulating { get; init; }
 		public string ClipPath { get; init; }
 		public string ClipName { get; init; }
 		public bool Looping { get; init; }
@@ -113,7 +116,7 @@ public partial class Preview : PreviewScenePanel
 
 	internal PreviewReloadState CaptureForReload() => new()
 	{
-		Ragdoll = _ragdollActive,
+		Simulating = IsSimulating,
 		ClipPath = _clipPath,
 		ClipName = PickedClipName,
 		Looping = _clipPreview.Looping,
@@ -143,8 +146,8 @@ public partial class Preview : PreviewScenePanel
 			PickedClipName = state.ClipName;
 		}
 
-		if ( state.Ragdoll )
-			SetRagdollEnabled( true );
+		if ( state.Simulating )
+			SetSimulating( true );
 	}
 
 	bool ClipStillPresent( string name )
@@ -231,14 +234,14 @@ public partial class Preview : PreviewScenePanel
 		}
 		else
 		{
-			SetRagdollEnabled( false );
+			SetSimulating( false );
 		}
 
 		//The transport is not on the picture in either half: the model editor stands it in its Timeline dock, over the clip's timeline.
 		SetGraphToolsVisible( !modelMode );
 		FillClipList( _host.ModelDefinition );
 		EnsureModelPreviewTools();
-		UpdateRagdollHint();
+		UpdateSimulateButton();
 		ApplyViewMode();
 	}
 
@@ -319,11 +322,8 @@ public partial class Preview : PreviewScenePanel
 
 		var camRow = Toolbar.AddChild<Panel>( "row" );
 
-		_simulationGroup = AddGroup( camRow );
-		_ragdollToggle = AddToggle( _simulationGroup, "accessibility_new", "Ragdoll - test the model's physics", () => _ragdollActive, SetRagdollEnabled );
-
-		//Shown by RebuildModel when the model has physics to ragdoll
-		_simulationGroup.SetClass( "hidden", true );
+		var simulation = AddGroup( camRow );
+		_simulateToggle = AddToggle( simulation, "sports_basketball", "Simulate physics", () => IsSimulating, SetSimulating );
 
 		_focusHost = camRow.AddChild<Panel>( "row" );
 
@@ -589,7 +589,7 @@ public partial class Preview : PreviewScenePanel
 		so.OnPropertyFinishEdit += p => _host.CommitChange( $"Edit {p?.Name ?? "Graph"}" );
 	}
 
-	private void SetRagdollEnabled( bool enabled )
+	private void SetSimulating( bool enabled )
 	{
 		//The preview's scene goes when the preview does, and everything the ragdoll had was in it. Asked after that - the window hands the preview
 		//between its two halves as it tears down, and handing it back turns model mode off - there is nothing to push and nothing left to undo.
@@ -598,6 +598,7 @@ public partial class Preview : PreviewScenePanel
 			_ragdoll = null;
 			_ragdollFloor = null;
 			_ragdollActive = false;
+			_shaking = false;
 			return;
 		}
 
@@ -611,6 +612,13 @@ public partial class Preview : PreviewScenePanel
 			_ragdollActive = false;
 			ApplyTimeScale();
 
+			//Back where it stood before it was dragged about
+			if ( _shaking && ModelObject.IsValid() )
+				ModelObject.WorldTransform = _preShakeTransform;
+
+			_shaking = false;
+			ModelDraggable = false;
+
 			if ( !enabled || !Renderer.IsValid() )
 			{
 				//Hand the pose back to the graph - without this the renderer keeps whatever UseAnimGraph was left
@@ -622,7 +630,17 @@ public partial class Preview : PreviewScenePanel
 			}
 
 			if ( Model?.Physics is not { Parts.Count: > 0 } )
+			{
+				//No bodies to drop: what swings on its own is the jiggle bones, and moving the model is what swings them
+				if ( JiggleBoneCount() > 0 && ModelObject.IsValid() )
+				{
+					_preShakeTransform = ModelObject.WorldTransform;
+					_shaking = true;
+					ModelDraggable = true;
+				}
+
 				return;
+			}
 
 			_ragdollFloor = new GameObject( true, "floor" );
 			var floor = _ragdollFloor.AddComponent<PlaneCollider>();
@@ -655,17 +673,30 @@ public partial class Preview : PreviewScenePanel
 		}
 	}
 
-	bool HasSimulatablePhysics()
-		=> Model?.Physics is { Parts.Count: > 0 };
+	//Jiggle bones the definition switches on, which the preview swings whether or not anything else simulates
+	int JiggleBoneCount()
+		=> _host.ModelDefinition?.JiggleBones?.Count( j => j is { Enabled: true } && !string.IsNullOrWhiteSpace( j.Bone ) ) ?? 0;
 
 	bool IsModelPreview => _modelMode || _host.IsModelPreview;
 
-	void UpdateRagdollHint()
+	//What the button would run on this model, shown on it; dimmed with what to add when there is nothing
+	void UpdateSimulateButton()
 	{
-		if ( _ragdollToggle is null )
+		if ( _simulateToggle is null )
 			return;
 
-		_ragdollToggle.Tooltip = "Ragdoll - test the model's physics";
+		var physics = Model?.Physics;
+		var jiggles = JiggleBoneCount();
+
+		var tooltip = physics is { Parts.Count: > 0 }
+			? physics.Joints.Count > 0 ? "Simulate physics - ragdoll the model; drag a limb to pull it" : "Simulate physics - drop the model's bodies; drag one to throw it"
+			: jiggles > 0 ? "Simulate - drag the model about to swing its jiggle bones"
+			: "Nothing to simulate - give the model colliders or jiggle bones";
+
+		if ( _simulateToggle.Tooltip != tooltip )
+			_simulateToggle.Tooltip = tooltip;
+
+		_simulateToggle.SetClass( "unavailable", physics is not { Parts.Count: > 0 } && jiggles == 0 );
 	}
 
 	void SyncModelPreviewKey()
@@ -919,8 +950,7 @@ public partial class Preview : PreviewScenePanel
 
 		ApplyViewMode();
 
-		_simulationGroup.SetClass( "hidden", !HasSimulatablePhysics() );
-		UpdateRagdollHint();
+		UpdateSimulateButton();
 		if ( _modelMode )
 			EnsureModelPreviewTools();
 
@@ -1001,7 +1031,7 @@ public partial class Preview : PreviewScenePanel
 		if ( _ragdoll is not null && !_ragdoll.IsValid() )
 		{
 			_ragdoll = null;
-			SetRagdollEnabled( false );
+			SetSimulating( false );
 		}
 
 		if ( IsModelPreview )
@@ -1037,7 +1067,7 @@ public partial class Preview : PreviewScenePanel
 
 		DrawSelection();
 		DrawSimOverlay();
-		UpdateRagdollHint();
+		UpdateSimulateButton();
 		EnsureModelPreviewTools();
 
 		DrawPlacement();
@@ -1350,6 +1380,8 @@ public partial class Preview : PreviewScenePanel
 		string text = null;
 		if ( _ragdollActive && _simBodies > 0 )
 			text = $"Simulating physics with {_simBodies} bodies.";
+		else if ( _shaking )
+			text = $"Drag the model to swing its {JiggleBoneCount()} jiggle bones.";
 
 		if ( text is null )
 			return;
@@ -1371,7 +1403,7 @@ public partial class Preview : PreviewScenePanel
 	//Where the simulation has put a bone, for gizmos that would otherwise sit on the rest pose.
 	Transform? SimulatedBone( string bone )
 	{
-		if ( !_ragdollActive || !Renderer.IsValid() )
+		if ( !IsSimulating || !Renderer.IsValid() )
 			return null;
 
 		if ( string.IsNullOrEmpty( bone ) )

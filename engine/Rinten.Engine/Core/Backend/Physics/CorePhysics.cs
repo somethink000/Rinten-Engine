@@ -159,8 +159,23 @@ internal static unsafe partial class CorePhysics
 
 	private struct BorrowedGeometry
 	{
-		public b3MeshData* Mesh;
+		public CookedMesh Mesh;
 		public b3HeightFieldData* HeightField;
+	}
+
+	/// <summary>A triangle mesh cooked once and borrowed by every shape made from it; freed with the last of them.</summary>
+	public sealed class CookedMesh
+	{
+		internal b3MeshData* Data;
+
+		//Shapes borrowing it, under borrowedLock; nought means freed and not to be borrowed again
+		internal int Users;
+
+		/// <summary>Whether a shape can still be made from it.</summary>
+		public bool IsLive
+		{
+			get { lock ( borrowedLock ) return Users > 0; }
+		}
 	}
 
 	//Guarded, because worlds do not all step on the same thread and a shape can be made on any of them.
@@ -168,9 +183,26 @@ internal static unsafe partial class CorePhysics
 	private static readonly object borrowedLock = new();
 	private static readonly Dictionary<ulong, BorrowedGeometry> borrowedGeometry = new();
 
-	private static void RememberMesh( ulong shape, b3MeshData* mesh )
+	private static void RememberMesh( ulong shape, CookedMesh mesh )
 	{
 		lock ( borrowedLock ) borrowedGeometry[shape] = new BorrowedGeometry { Mesh = mesh };
+	}
+
+	//One shape fewer on the mesh; the last one frees it
+	private static void Release( CookedMesh mesh )
+	{
+		b3MeshData* freed = null;
+
+		lock ( borrowedLock )
+		{
+			if ( mesh.Users <= 0 ) return;
+			if ( --mesh.Users > 0 ) return;
+
+			freed = mesh.Data;
+			mesh.Data = null;
+		}
+
+		if ( freed != null ) b3DestroyMesh( freed );
 	}
 
 	private static void RememberHeightField( ulong shape, b3HeightFieldData* field )
@@ -187,7 +219,7 @@ internal static unsafe partial class CorePhysics
 			if ( !borrowedGeometry.Remove( shape, out found ) ) return;
 		}
 
-		if ( found.Mesh != null ) b3DestroyMesh( found.Mesh );
+		if ( found.Mesh != null ) Release( found.Mesh );
 		if ( found.HeightField != null ) b3DestroyHeightField( found.HeightField );
 	}
 
@@ -314,7 +346,7 @@ internal static unsafe partial class CorePhysics
 		{
 			foreach ( var entry in ours )
 			{
-				if ( entry.Value.Mesh != null ) b3DestroyMesh( entry.Value.Mesh );
+				if ( entry.Value.Mesh != null ) Release( entry.Value.Mesh );
 				if ( entry.Value.HeightField != null ) b3DestroyHeightField( entry.Value.HeightField );
 			}
 		}

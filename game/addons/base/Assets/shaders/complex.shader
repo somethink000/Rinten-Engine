@@ -446,8 +446,8 @@ Out Shade( V2F i, bool front )
 	o.colour = float4( lit.colour, albedo.a );
 
 #ifdef TARGET_SCENE
-	//The normal packed into eight bits a channel, and how much of a mirror this is, for the passes that come after the world and never saw it drawn.
-	o.surface = float4( normal * 0.5 + 0.5, lit.mirror );
+	//The normal, roughness and how much of a mirror this is, for the passes that come after the world and never saw it drawn.
+	o.surface = SurfaceWord( normal, lit.roughness, lit.mirror );
 #endif
 
 	//Tonemap when drawing straight to screen; alpha must be opaque or the Linux window shows through

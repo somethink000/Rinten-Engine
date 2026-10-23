@@ -179,8 +179,22 @@ public partial class RootPanel : Panel
 
 		PushRootValues();
 
+		//A face came since: on a page, one still downloading when text was first set in a stand-in - every label sets its text again
+		if ( fontGeneration != FontManager.Generation )
+		{
+			fontGeneration = FontManager.Generation;
+
+			foreach ( var panel in Descendants )
+			{
+				if ( panel is Label ) panel.SetNeedsPreLayout();
+			}
+		}
+
 		PreLayout( cascade );
 	}
+
+	//The faces this tree's labels were last set in - see FontManager.Generation.
+	int fontGeneration = -1;
 
 	internal void CalculateLayout()
 	{
@@ -270,6 +284,9 @@ public partial class RootPanel : Panel
 	//A list of panels that are waiting to have their styles re-evaluated
 	readonly HashSet<Panel> styleRuleUpdates = new();
 
+	//The queue laid out as a list, for the job workers to share out by index.
+	readonly List<Panel> styleRuleList = new();
+
 	//Throttles the BuildStyleRules readout under tracing.
 	static RealTimeSince sinceSaidRules;
 
@@ -338,7 +355,10 @@ public partial class RootPanel : Panel
 		}
 		else
 		{
-			Parallel.ForEach( styleRuleUpdates, Build );
+			styleRuleList.Clear();
+			styleRuleList.AddRange( styleRuleUpdates );
+
+			Rinten.Jobs.JobSystem.For( styleRuleList.Count, (styleRuleList, (Action<Panel>)Build), static ( s, i ) => s.Item2( s.styleRuleList[i] ) );
 		}
 
 		styleRuleUpdates.Clear();

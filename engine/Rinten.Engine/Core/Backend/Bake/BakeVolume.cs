@@ -20,7 +20,7 @@ internal sealed class BakeVolume
 	/// <summary>Four halves a point: how much sky is seen, then its lean along x, y, z - see SkyLit.</summary>
 	public Half[] Sky;
 
-	/// <summary>Each cell's corners' clear reach into it, a nibble an axis and corner - see BakedVolumeSpot.</summary>
+	/// <summary>Each cell's corners' clear reach into it, a nibble an axis and corner - see ReachByPoint.</summary>
 	public byte[] Walls;
 
 	//Most points along one side.
@@ -314,6 +314,48 @@ internal sealed class BakeVolume
 				}
 			}
 		}
+	}
+
+	/// <summary>Each point's reach each way along each axis from Walls, the least of its octants: a texel a point, + way low.</summary>
+	public static byte[] ReachByPoint( byte[] walls, int countX, int countY, int countZ )
+	{
+		var across = countX * countY;
+		var reach = new byte[across * countZ * 4];
+
+		//A way no cell measured, past the lattice's edge, is open
+		Array.Fill( reach, (byte)0xFF );
+
+		for ( var z = 0; z < countZ - 1; ++z )
+		for ( var y = 0; y < countY - 1; ++y )
+		for ( var x = 0; x < countX - 1; ++x )
+		{
+			for ( var corner = 0; corner < 8; ++corner )
+			{
+				var cx = corner & 1;
+				var cy = ( corner >> 1 ) & 1;
+				var cz = ( corner >> 2 ) & 1;
+
+				var point = x + cx + ( countX * ( y + cy + ( countY * ( z + cz ) ) ) );
+				var channel = cy | ( cz << 1 );
+
+				for ( var axis = 0; axis < 3; ++axis )
+				{
+					var packed = walls[( ( ( ( axis * countZ ) + z ) * across ) + ( y * countX ) + x ) * 4 + channel];
+					var value = cx == 0 ? packed & 15 : packed >> 4;
+
+					//The cell lies the + way from its near corner on this axis
+					var near = ( axis == 0 ? cx : axis == 1 ? cy : cz ) == 0;
+					var at = ( point * 4 ) + axis;
+					var kept = reach[at];
+
+					reach[at] = near
+						? (byte)( ( kept & 0xF0 ) | Math.Min( kept & 15, value ) )
+						: (byte)( ( kept & 15 ) | ( Math.Min( kept >> 4, value ) << 4 ) );
+				}
+			}
+		}
+
+		return reach;
 	}
 
 	//Points that were inside something take the mean of their answered neighbours, a ring at a time.

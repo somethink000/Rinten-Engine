@@ -63,6 +63,17 @@ internal class SceneTrailObject : SceneLineObject
 	}
 
 	public bool IsEmpty => _count <= 1;
+
+	/// <summary>Forget every point and the scroll, keeping the room they took - for a trail handed to another particle.</summary>
+	public void Reset()
+	{
+		_count = 0;
+		_head = 0;
+		lastPoint = null;
+		scrollTime = 0;
+
+		Clear();
+	}
 	public int PointCount => _count;
 
 	/// <summary>Try to add a position to this trail. Returns true on success.</summary>

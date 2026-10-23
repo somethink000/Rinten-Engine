@@ -186,7 +186,7 @@ public partial class ClothingContainer
 		var hiddenParts = set.Select( x => x.Clothing.HideBody ).DefaultIfEmpty().Aggregate( ( a, b ) => a | b );
 
 		//Don't add underwear if legs are hidden
-		if ( !hiddenParts.HasFlag( Rinten.Clothing.BodyGroups.Legs ) )
+		if ( !( ( hiddenParts & Rinten.Clothing.BodyGroups.Legs ) == Rinten.Clothing.BodyGroups.Legs ) )
 		{
 			bool hasUnderwear = set.Any( x => x.Clothing.Category is Rinten.Clothing.ClothingCategory.Underwear or Rinten.Clothing.ClothingCategory.Underpants );
 			if ( !hasUnderwear )
@@ -194,7 +194,7 @@ public partial class ClothingContainer
 		}
 
 		//Don't add bra if chest is hidden
-		if ( isFemale && !hiddenParts.HasFlag( Rinten.Clothing.BodyGroups.Chest ) && !set.Any( x => x.Clothing.Category == Rinten.Clothing.ClothingCategory.Bra ) )
+		if ( isFemale && !( ( hiddenParts & Rinten.Clothing.BodyGroups.Chest ) == Rinten.Clothing.BodyGroups.Chest ) && !set.Any( x => x.Clothing.Category == Rinten.Clothing.ClothingCategory.Bra ) )
 			TryAddDefault( set, DefaultBra.Value, isHuman: true );
 	}
 

@@ -202,8 +202,8 @@ public sealed partial class TileMap
 			var region = set.Region( cell.Tile );
 
 			var flags = SpriteBatchSceneObject.SpriteFlags.Pixelated;
-			if ( cell.Flip.HasFlag( TileFlip.X ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipX;
-			if ( cell.Flip.HasFlag( TileFlip.Y ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipY;
+			if ( ( ( cell.Flip & TileFlip.X ) == TileFlip.X ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipX;
+			if ( ( ( cell.Flip & TileFlip.Y ) == TileFlip.Y ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipY;
 
 			var tint = ( info?.Tint ?? Color.White ) * layer.Tint;
 

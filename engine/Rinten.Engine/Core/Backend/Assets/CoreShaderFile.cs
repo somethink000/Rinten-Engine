@@ -15,7 +15,7 @@ internal static partial class CoreShaderFile
 	public const uint Magic = 0x53535345;
 
 	/// <summary>Blob layout version; older or ambiguous versions are refused and rebuilt</summary>
-	public const uint Version = 21;
+	public const uint Version = 22;
 
 
 	/// <summary>Which stage a blob is.</summary>
@@ -77,9 +77,14 @@ internal static partial class CoreShaderFile
 		/// <summary>The sky drawn into its octahedral capture, for the sky light - see CoreSkyLight.</summary>
 		SkyCaptureVertex = 21,
 		SkyCapturePixel = 22,
+
+		//Full frame only, and only for a surface that moves its vertices - see cluster_surface.slang
+		/// <summary>The cluster pass's corners now and a frame back, and their screen motion, for the velocity picture.</summary>
+		ClusterVelocityVertex = 23,
+		ClusterVelocityPixel = 24,
 	}
 
-	public const int StageCount = 23;
+	public const int StageCount = 25;
 
 	//How many languages a stage is kept in: the full frame's SPIR-V, WGSL, the portable
 	//frame's SPIR-V, GLSL, and the GLSL that draws both of a headset's eyes at once.
@@ -116,6 +121,8 @@ internal static partial class CoreShaderFile
 
 		var capture = IsSkyCapture( stage );
 
+		if ( IsClusterVelocity( stage ) ) return "#define CLUSTER 1\n#define VELOCITY 1\n";
+
 		return ( skinned ? "#define SKINNED 1\n" : "" ) +
 			( cluster ? "#define CLUSTER 1\n" : "" ) +
 			( instanced ? "#define INSTANCED 1\n" : "" ) +
@@ -140,6 +147,10 @@ internal static partial class CoreShaderFile
 	public static bool IsCluster( Stage stage )
 		=> stage is Stage.ClusterVertex or Stage.ClusterPixel or Stage.ClusterScreenPixel
 			or Stage.ClusterDepthPixel;
+
+	/// <summary>Whether a stage is one of the cluster pass's velocity pair.</summary>
+	public static bool IsClusterVelocity( Stage stage )
+		=> stage is Stage.ClusterVelocityVertex or Stage.ClusterVelocityPixel;
 
 	/// <summary>Whether a stage is one of the portable frame's instanced draw's.</summary>
 	public static bool IsInstanced( Stage stage )
@@ -230,6 +241,9 @@ internal static partial class CoreShaderFile
 		if ( stage is Stage.ClusterPixel or Stage.ClusterScreenPixel or Stage.ClusterDepthPixel )
 			return ( "MainClusterPs", CoreShaderCompiler.Stage.Pixel );
 
+		if ( stage is Stage.ClusterVelocityVertex ) return ( "MainClusterVelocityVs", CoreShaderCompiler.Stage.Vertex );
+		if ( stage is Stage.ClusterVelocityPixel ) return ( "MainClusterVelocityPs", CoreShaderCompiler.Stage.Pixel );
+
 		if ( stage is Stage.InstancedVertex ) return ( "MainInstancedVs", CoreShaderCompiler.Stage.Vertex );
 		if ( stage is Stage.InstancedScreenPixel or Stage.InstancedDepthPixel )
 			return ( "MainInstancedPs", CoreShaderCompiler.Stage.Pixel );
@@ -272,6 +286,9 @@ internal static partial class CoreShaderFile
 		var compiling = new Task<(byte[] Words, string Error)>[StageCount];
 		var none = Task.FromResult<(byte[] Words, string Error)>( (null, null) );
 
+		//Only a surface whose corners move by themselves has motion the camera and its matrix do not tell
+		var moves = surface && !CoreShaderCompiler.IsPortable( format ) && CoreResources.MovesVertices( path, combo );
+
 		for ( var i = 0; i < StageCount; i++ )
 		{
 			var stage = (Stage)i;
@@ -313,6 +330,16 @@ internal static partial class CoreShaderFile
 				compiling[i] = CoreResources.IsSky( path ) && !CoreShaderCompiler.IsPortable( format )
 					? After( stage is Stage.SkyCaptureVertex ? null : compiling[(int)Stage.SkyCaptureVertex],
 						() => Build( path, entry, kind, draws + Defines( stage ), format, SkyCapture, instead, build ) )
+					: none;
+
+				continue;
+			}
+
+			if ( IsClusterVelocity( stage ) )
+			{
+				compiling[i] = moves
+					? After( stage is Stage.ClusterVelocityVertex ? null : compiling[(int)Stage.ClusterVelocityVertex],
+						() => Build( path, entry, kind, draws + Defines( stage ), format, ClusterSurface, instead, build ) )
 					: none;
 
 				continue;
@@ -392,21 +419,25 @@ internal static partial class CoreShaderFile
 		if ( !IncludesFile( path, "postprocess.slang" ) )
 			return ( features + CoreShaderParams.Declare( parameters ), features + CoreShaderParams.DeclarePush( parameters ) );
 
-		//What "compact" is on this device, for an output declared in it.
+		//What "compact" is on the device the stage is for - a page's is half floats, whatever the device baking it has
+		var compact = CompactName ?? ( CoreShaderCache.Target is CoreShaderCompiler.Format.Wgsl || CoreShaderCompiler.IsGlsl( CoreShaderCache.Target )
+			? "rgba16f" : CoreRenderDevice.CompactStorageName );
+
 		var pass = features + CoreShaderParams.DeclarePost( parameters ) +
-			$"#define ENGINE_COMPACT_FORMAT \"{CompactName ?? CoreRenderDevice.CompactStorageName}\"\n" +
+			$"#define ENGINE_COMPACT_FORMAT \"{compact}\"\n" +
 			CoreShaderParams.DeclareOutputs( CoreShaderParams.OutputsOf( path ) );
 
 		return ( pass, pass );
 	}
 
-	//Compiles one named entry of a multi-pass file, with the same preludes; null if unavailable
+	//One named entry of a multi-pass file, same preludes, for the frame drawn or baked; null if unavailable
 	internal static byte[] EntryWords( string path, string combo, string entry, CoreShaderCompiler.Stage kind,
-		CoreShaderCompiler.Format format = CoreShaderCompiler.Format.Spirv )
+		CoreShaderCompiler.Format? language = null )
 	{
 		if ( !CoreNative.Available || string.IsNullOrWhiteSpace( path ) || string.IsNullOrWhiteSpace( entry ) ) return null;
 
 		var (draws, runs) = Preludes( path, combo );
+		var format = language ?? CoreShaderCache.Target;
 
 		return kind == CoreShaderCompiler.Stage.Compute
 			? Build( path, entry, kind, runs + Defines( Stage.Compute ), format )

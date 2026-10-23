@@ -574,7 +574,7 @@ internal sealed class CoreSunPages : IDisposable
 	//Movers' shadow map: one square fitted to moving casters near the eye, texel-snapped to avoid crawl
 	private void Movers( float lodPixels, Vector3 eye )
 	{
-		if ( casters.Movers.Count == 0 ) return;
+		if ( casters.MovingCount == 0 ) return;
 
 		//In the frame the pixels read this frame - the kept bake's while the pages are
 		//being baked again, since one reader reads both maps with one matrix and one depth.
@@ -586,9 +586,9 @@ internal sealed class CoreSunPages : IDisposable
 
 		float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
 
-		foreach ( var slot in casters.Movers )
+		for ( var i = 0; i < casters.MovingCount; i++ )
 		{
-			var sphere = casters.SphereOf( slot );
+			var sphere = casters.MovingSphere( i );
 			if ( sphere.W < 0.0f ) continue;
 
 			var centre = ToSun( new Vector3( sphere.X, sphere.Y, sphere.Z ), in frame );
@@ -721,7 +721,7 @@ internal sealed class CoreSunPages : IDisposable
 		}
 
 		//How deep the scene reaches along the light - what moves included, since it is drawn over the same depth.
-		foreach ( var slot in casters.Movers ) Reach( casters.SphereOf( slot ) );
+		for ( var i = 0; i < casters.MovingCount; i++ ) Reach( casters.MovingSphere( i ) );
 	}
 
 	//A slot's footprint in the sun's frame, where it is part of the still world.

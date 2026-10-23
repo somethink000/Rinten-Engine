@@ -73,12 +73,42 @@ public static class LauncherEnvironment
 		//executed AFTER CurrentDomain_AssemblyResolve is set so that managed can find the correct dll
 		NetCore.NativeDllPath = nativeDllPath;
 
+		if ( OperatingSystem.IsLinux() )
+			RelinkLibraries( nativeDllPath );
+
 		//Put our native dll path first so that when looking up native dlls we'll always use the ones from our folder first
 		if ( OperatingSystem.IsWindows() )
 		{
 			var path = System.Environment.GetEnvironmentVariable( "PATH" );
 			path = $"{nativeDllPath};{path}";
 			System.Environment.SetEnvironmentVariable( "PATH", path );
+		}
+	}
+
+	//A release stores libSkiaSharp.so and the like as links; an unpacker that ignores links leaves a file
+	//holding the target's name, which no loader can open. Those files become the links they were meant to be
+	private static void RelinkLibraries( string nativeDllPath )
+	{
+		try
+		{
+			foreach ( var file in System.IO.Directory.GetFiles( nativeDllPath, "*.so*" ) )
+			{
+				var info = new System.IO.FileInfo( file );
+				if ( info.LinkTarget is not null || info.Length > 255 ) continue;
+
+				var target = System.IO.File.ReadAllText( file ).Trim();
+				if ( target.Length == 0 || target.Contains( '/' ) || target == info.Name ) continue;
+
+				var targetInfo = new System.IO.FileInfo( System.IO.Path.Combine( nativeDllPath, target ) );
+				if ( !targetInfo.Exists || targetInfo.Length <= 255 ) continue;
+
+				System.IO.File.Delete( file );
+				System.IO.File.CreateSymbolicLink( file, target );
+			}
+		}
+		catch ( Exception e ) when ( e is System.IO.IOException or UnauthorizedAccessException )
+		{
+			//A read-only install stays as it is; the library that cannot load says so itself
 		}
 	}
 

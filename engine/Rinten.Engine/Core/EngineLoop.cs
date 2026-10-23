@@ -125,13 +125,6 @@ internal static class EngineLoop
 	static FastTimer pacingClock = FastTimer.StartNew();
 	static double nextFrameDeadlineMs;
 
-	//Learned sleep overshoot, so pacing sleeps almost to the deadline and spins only a sliver
-	static double sleepSlackMs = 1.0;
-
-	//The sliver at the end that is spun rather than slept, in milliseconds. Small enough not to matter against a frame and
-	//large enough to absorb a sleep that comes back early. What is spun here is the only part of the clamp that costs anything.
-	const double SpinTailMs = 0.25;
-
 	//RINTEN_PACING_LOG: logs the held rate and sleep slack every five seconds
 	static readonly bool pacingLog = System.Environment.GetEnvironmentVariable( "RINTEN_PACING_LOG" ) is not null;
 	static double pacingSaidAt;
@@ -169,34 +162,8 @@ internal static class EngineLoop
 			{
 				using var inst = _sleepForFrameCap.Start();
 
-				//Slept in as few goes as the timer allows, with only a sliver spun at the end - see sleepSlackMs, which is where the whole of why is written down.
-				while ( true )
-				{
-					var remaining = deadlineMs - pacingClock.ElapsedMilliSeconds;
-					if ( remaining <= 0 ) break;
-
-					if ( remaining > sleepSlackMs + SpinTailMs )
-					{
-						var ask = (int)( remaining - sleepSlackMs - SpinTailMs );
-						if ( ask < 1 ) ask = 1;
-
-						var began = pacingClock.ElapsedMilliSeconds;
-						System.Threading.Thread.Sleep( ask );
-
-						//What this machine's timer actually does, averaged in slowly so one long sleep does not move it far.
-						var overshoot = ( pacingClock.ElapsedMilliSeconds - began ) - ask;
-						sleepSlackMs += ( overshoot - sleepSlackMs ) * 0.125;
-
-						if ( sleepSlackMs < 0.05 ) sleepSlackMs = 0.05;
-						else if ( sleepSlackMs > 4.0 ) sleepSlackMs = 4.0;
-
-						continue;
-					}
-
-					//The last quarter millisecond, where a sleep cannot land. SpinWait rather than an empty loop: it tells the processor
-					//what this is, and it is a point the runtime can suspend at without the poll standing in a tight managed loop.
-					System.Threading.Thread.SpinWait( 40 );
-				}
+				var left = deadlineMs - pacingClock.ElapsedMilliSeconds;
+				PreciseSleep.Until( System.Diagnostics.Stopwatch.GetTimestamp() + (long)( left * System.Diagnostics.Stopwatch.Frequency / 1000.0 ) );
 
 				//actual time parked this frame, including any oversleep
 				frameSleepMs = pacingClock.ElapsedMilliSeconds - nowMs;
@@ -215,7 +182,7 @@ internal static class EngineLoop
 			else if ( atMs - pacingSaidAt >= 5000 )
 			{
 				var frames = LoopFrames - pacingFramesAt;
-				new Rinten.Diagnostics.Logger( "Perf" ).Info( $"pacing: {frames * 1000.0 / ( atMs - pacingSaidAt ):F1} fps held, cap {maxFps:F0}, sleep slack {sleepSlackMs:F3} ms" );
+				new Rinten.Diagnostics.Logger( "Perf" ).Info( $"pacing: {frames * 1000.0 / ( atMs - pacingSaidAt ):F1} fps held, cap {maxFps:F0}, sleep slack {PreciseSleep.SlackMs:F3} ms" );
 				pacingSaidAt = atMs; pacingFramesAt = LoopFrames;
 			}
 		}
@@ -237,6 +204,7 @@ internal static class EngineLoop
 	{
 		try
 		{
+			CorePresent.Pace();
 			CoreLatency.BeforeInput();
 		}
 		catch ( System.Exception e )
@@ -605,6 +573,7 @@ internal static class EngineLoop
 	internal static void OnClientOutput()
 	{
 		RenderedFrames++;
+		CoreLatency.RenderStarts();
 
 		using var _outputScope = _clientOutput.Start();
 
@@ -633,7 +602,8 @@ internal static class EngineLoop
 
 		//Everything that was going to draw has drawn. Our renderer holds one frame open across all
 		//of them - the game and the menu are one picture - so this is where it goes on the screen.
-		CoreGameRenderer.Present();
+		using ( Diagnostics.Performance.Scope( "Present" ) )
+			CoreGameRenderer.Present();
 	}
 
 	static Channel<IDisposable> FrameEndDisposables = Channel.CreateUnbounded<IDisposable>();

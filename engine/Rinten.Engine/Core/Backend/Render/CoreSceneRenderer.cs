@@ -247,6 +247,9 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>How many shapes the model has, which is how many weights a draw writes.</summary>
 		public int MorphCount;
 
+		/// <summary>How many vertices the runs cover and how many deltas there are, for the portable frame's pose pass.</summary>
+		public int MorphVertexCount, MorphDeltaCount;
+
 		/// <summary>Deltas sorted by shape, for the pose pass (mesh_shapes.slang), which walks set shapes.</summary>
 		public ulong ShapeDeltas;
 		public int[] ShapeRuns;
@@ -395,11 +398,14 @@ internal static unsafe class CoreSceneRenderer
 	//a component - null where the light is a component's. See SceneWorld.InternalLights.
 	private static readonly List<SceneLight> looseScratch = new();
 
-	//Every light of the frame, as the buffer has them - see CoreLights.
+	//Every light of the frame, nearest reach first; CoreLights sorts them again as it sends them
 	internal static readonly float[] LightBlock = new float[CoreLights.MostLights * CoreLights.LightFloats];
 
 	//How many of them the last block was built with - which may be more than the block itself holds.
 	internal static int LightsInFrame;
+
+	//Whether the last frame had more lights than CoreLights.MostLights
+	private static bool lightsOver;
 
 	//Which light each of the last block's records is, in the same order - see CoreLampMaps.
 	//Null for a light put into the world without a component, which casts no shadow.
@@ -460,8 +466,10 @@ internal static unsafe class CoreSceneRenderer
 		block[TimeAt + 0] = RealTime.Now;
 		block[TimeAt + 1] = RealTime.Delta;
 
-		//Scene time while playing, so pause and time scale apply; wall clock in the editor
-		block[TimeAt + 2] = scene.IsValid() && !scene.IsEditor ? (float)scene.TimeNow : RealTime.Now;
+		//Scene time while playing, so pause and time scale apply; wall clock in the editor. And a frame before, for motion
+		var playing = scene.IsValid() && !scene.IsEditor;
+		block[TimeAt + 2] = playing ? (float)scene.TimeNow : RealTime.Now;
+		block[TimeAt + 3] = playing ? (float)( scene.TimeNow - scene.TimeDelta ) : RealTime.Now - RealTime.Delta;
 
 		block[ShadowFilterAt] = Math.Clamp( ShadowFilterQuality, 0, 2 );
 
@@ -501,11 +509,7 @@ internal static unsafe class CoreSceneRenderer
 
 		CoreRenderDevice.ZoneBegin( "block lights" );
 
-		//A light that cannot reach anything in view is not worth a slot: distance to the camera less its radius
-
-		//Measured from the eye, as a lamp three rooms behind the camera is not worth a slot
-		var from = camera;
-
+		//Nearest first by distance from the eye less the light's radius, as the slots run out from the far end
 		var wanted = lightScratch;
 		wanted.Clear();
 
@@ -513,7 +517,7 @@ internal static unsafe class CoreSceneRenderer
 		{
 			if ( !light.IsValid() || !light.Enabled ) continue;
 
-			var reach = Reach( light, from );
+			var reach = Reach( light, camera );
 			if ( reach < float.MaxValue ) wanted.Add( (light, null, reach) );
 		}
 
@@ -527,7 +531,7 @@ internal static unsafe class CoreSceneRenderer
 				{
 					if ( loose.Component is Light || !loose.RenderingEnabled ) continue;
 
-					var reach = Reach( loose, from );
+					var reach = Reach( loose, camera );
 					if ( reach < float.MaxValue ) wanted.Add( (null, loose, reach) );
 				}
 			}
@@ -546,12 +550,15 @@ internal static unsafe class CoreSceneRenderer
 			looseLights.Add( wanted[i].Loose );
 		}
 
-		//Said out loud rather than found out from a dark corner of the level.
-		if ( wanted.Count > CoreLights.MostLights )
+		//Said once as the frame starts dropping lights, rather than found out from a dark corner of the level
+		var over = wanted.Count > CoreLights.MostLights;
+		if ( over && !lightsOver )
 		{
 			Log.Warning( $"the frame has {wanted.Count} lights and the card holds {CoreLights.MostLights} - " +
 				$"the {wanted.Count - CoreLights.MostLights} furthest away are not in it" );
 		}
+
+		lightsOver = over;
 
 		//The block's count is the browser's and holds sixteen; everything else reads the buffer, which holds all
 		LightsInFrame = lights.Count;
@@ -929,7 +936,11 @@ internal static unsafe class CoreSceneRenderer
 	internal const int Lights2DAt = Light2DSnapAt + 4;
 	internal const int Light2DFloats = 12;
 
-	internal const int FrameFloats = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
+	//The lamps' movers frustums, a float4 each by slot - see lampMovers in frame_data.slang and CoreLampMaps.FitMovers.
+	internal const int LampMoversAt = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
+	internal const int MostMoverFrustums = 16;
+
+	internal const int FrameFloats = LampMoversAt + ( MostMoverFrustums * 4 );
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]
@@ -1150,9 +1161,6 @@ internal static unsafe class CoreSceneRenderer
 			sun is null ? default : -sun.WorldRotation.Forward.Normal,
 			//The light's own colour at world strength; the sky derives its brightness from the light the world gets
 			sun is null ? default : sun.EmittedColor );
-
-		if ( panorama?.Table is not null && !CoreRenderDevice.DrawsSkyTable && CoreRenderDevice.PortableFrame )
-			CoreSkyTable.Send( panorama.Table );
 	}
 
 	//Whether this frame's sky is a panorama, whose table is laid out by direction and made from the picture
@@ -1215,8 +1223,6 @@ internal static unsafe class CoreSceneRenderer
 			//are all paths no pixel takes - and a pipeline told so does not carry them. See SkySpecialize.
 			NightOn = false;
 			SunDiscOn = false;
-
-			FillSkyTable( frame );
 			return;
 		}
 
@@ -1251,25 +1257,7 @@ internal static unsafe class CoreSceneRenderer
 		//nought, sun below one, both through dusk
 		NightOn = frame[SunLightAt + 3] > 0.0f;
 		SunDiscOn = frame[SunLightAt + 3] < 1.0f;
-
-		FillSkyTable( frame );
 	}
-
-	//Bakes the CPU sky table for the browser from the block's colours; only resent when the sky changes
-	private static void FillSkyTable( float[] frame )
-	{
-		if ( CoreRenderDevice.DrawsSkyTable || !CoreRenderDevice.PortableFrame || HasPanorama( frame ) ) return;
-
-		var air = new CoreSkyTable.Air(
-			Read3( frame, SkyAt + 0 ), Read3( frame, SkyAt + 4 ), Read3( frame, SkyAt + 8 ),
-			Read3( frame, SunAt + 0 ), Read3( frame, SunLightAt + 0 ),
-			frame[SunLightAt + 3], frame[SunAt + 3] > 0.0f );
-
-		CoreSkyTable.Send( air );
-	}
-
-	private static System.Numerics.Vector3 Read3( float[] frame, int at )
-		=> new( frame[at + 0], frame[at + 1], frame[at + 2] );
 
 	private static void WriteColour( float[] frame, int at, Color colour )
 	{
@@ -1543,8 +1531,8 @@ internal static unsafe class CoreSceneRenderer
 	{
 		//What a light component is kept out of: one for the diffuse, two for the highlight - see Light.Contribution.
 		private static int WithheldBy( Light light )
-			=> ( light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ? 0 : 1 )
-				| ( light.Contribution.HasFlag( Light.LightContribution.Specular ) ? 0 : 2 );
+			=> ( ( light.Contribution & Light.LightContribution.Diffuse ) != 0 ? 0 : 1 )
+				| ( ( light.Contribution & Light.LightContribution.Specular ) != 0 ? 0 : 2 );
 
 		/// <summary>Kind is nought for the sun, one for a point, two for a spot - the shader's own numbering.</summary>
 		public static LightSource Of( Light light ) => light switch
@@ -1594,6 +1582,14 @@ internal static unsafe class CoreSceneRenderer
 	}
 
 	//Texture mip bias for this frame (see CoreUpscale.MipBias), in viewInfo's spare fourth lane
+	//One plus the frame's turn of hashed cut-outs, nought where no temporal history gathers them - see foliage.shader
+	internal static void SetHashedCut( float[] block, int turn )
+	{
+		if ( block is null || block.Length < ShadowFilterAt + 4 ) return;
+
+		block[ShadowFilterAt + 1] = turn;
+	}
+
 	internal static void SetMipBias( float[] block, float bias )
 	{
 		if ( block is null || block.Length < ShadowAt + 4 ) return;
@@ -1664,7 +1660,7 @@ internal static unsafe class CoreSceneRenderer
 	internal static int ShadeSpecialize()
 		=> ( CoreEnvmap.Written > 0 ? 1 : 0 )
 			| ( DebugViewOn ? 2 : 0 )
-			| ( CoreLights.Cells > 0 ? 4 : 0 )
+			| ( CoreLights.Tiles > 0 ? 4 : 0 )
 			| ( CoreLights.Lamps > 0 ? 8 : 0 )
 			| ( SkyTableOn ? 16 : 0 )
 			| ( FogOn ? 32 : 0 )
@@ -1776,6 +1772,9 @@ internal static unsafe class CoreSceneRenderer
 		//Nothing to write: the surface's DEPTH_ONLY stage, so the pre-pass does not shade; without one, the above
 		if ( kind.DepthOnly )
 			pixel = CoreShaderFile.Stage.DepthPixel;
+
+		if ( kind.Cluster && kind.Target == CoreRender.TargetKind.Velocity )
+			return (CoreShaderFile.Stage.ClusterVelocityVertex, CoreShaderFile.Stage.ClusterVelocityPixel);
 
 		if ( kind.Cluster )
 			return (CoreShaderFile.Stage.ClusterVertex,
@@ -1903,6 +1902,15 @@ internal static unsafe class CoreSceneRenderer
 		{
 			var clusterVertex = stages[(int)vertexStage];
 			var clusterPixel = chained ?? stages[(int)pixelStage];
+
+			//Only a surface that moves its corners has the pair; the rest have no motion of their own to draw
+			if ( kind.Target == CoreRender.TargetKind.Velocity )
+			{
+				return clusterVertex is null || clusterPixel is null ? 0 : CoreRenderDevice.CreatePipeline( clusterVertex, clusterPixel,
+					CoreRender.VertexLayoutKind.None, depthTest: true, CoreRender.Topology.Triangles, blend: false,
+					depthWrite: false, cullBack: !kind.TwoSided, target: kind.Target,
+					compare: CoreRenderDevice.DepthCompare.Equal );
+			}
 
 			if ( clusterVertex is null || clusterPixel is null )
 			{
@@ -2413,6 +2421,8 @@ internal static unsafe class CoreSceneRenderer
 				mesh.MorphDeltas = CoreRenderDevice.CreateBuffer( deltas );
 				mesh.MorphRuns = CoreRenderDevice.CreateBuffer( runs );
 				mesh.MorphCount = morphCount;
+				mesh.MorphVertexCount = vertexCount;
+				mesh.MorphDeltaCount = deltaCount;
 
 				if ( !CoreRenderDevice.PortableFrame ) ShapeMajor( mesh, deltas, deltaCount, runs, vertexCount, morphCount );
 
@@ -2425,6 +2435,7 @@ internal static unsafe class CoreSceneRenderer
 					mesh.MorphDeltas = 0;
 					mesh.MorphRuns = 0;
 					mesh.MorphCount = 0;
+					mesh.MorphVertexCount = mesh.MorphDeltaCount = 0;
 
 					CoreRenderDevice.DestroyBuffer( mesh.ShapeDeltas );
 					mesh.ShapeDeltas = 0;
@@ -2604,6 +2615,9 @@ internal static unsafe class CoreSceneRenderer
 		if ( materials.TryGetValue( held, out var cached ) ) return cached;
 
 		materials[held] = fallback;
+
+		//Whatever it ends as - built, or held as the checkerboard while its shader will not build - it is that shader's
+		CoreResources.BuiltOn( held, definition.Shader );
 
 		var colour = ResolveMaterialTexture( materialPath, textures, fallback );
 

@@ -16,10 +16,13 @@ public sealed class ParticleModuleRunner : ParticleController
 
 	TimeSince _sinceStarted;
 
-	//A context per thread, because the per-particle step is run across several of them - see
-	//ParticleController.OnParticleStep. One object per particle per frame would be the allocation that matters here.
+	//A context per thread, because the per-particle step is run across several of them - see ParticleController.OnParticleStep
 	[ThreadStatic]
 	static ParticleModuleContext _stepContext;
+
+	//Apart from the step's: a module may make particles, which must not repoint the context it runs with
+	[ThreadStatic]
+	static ParticleModuleContext _createContext;
 
 	//How long this emitter runs for: its own duration where it has one, and the effect's where it does not.
 	float Duration => Data is { Duration: > 0.0f } ? Data.Duration : Player?.Definition?.Duration ?? 0.0f;
@@ -29,7 +32,7 @@ public sealed class ParticleModuleRunner : ParticleController
 	public bool IsFinished
 		=> _sinceStarted > Duration
 			&& !( ( Player?.Definition?.Looping ?? false ) && !( Player?.PlayOnce ?? false ) )
-			&& ( ParticleEffect?.Particles.Count ?? 0 ) <= 0;
+			&& ( ParticleEffect?.ParticleCount ?? 0 ) <= 0;
 
 	//Called beside the native emitter's own reset. Without it, IsFinished would answer yes again on the very next frame however thoroughly the emitter had restarted, because the clock it reads had not moved.
 	/// <summary>Put the clock back to zero.</summary>
@@ -118,7 +121,7 @@ public sealed class ParticleModuleRunner : ParticleController
 		particle.Index = _born++;
 		particle.IndexDelta = places <= 1 ? 0.0f : ( particle.Index % places ) / (float)( places - 1 );
 
-		var context = Context( particle );
+		var context = Reused( ref _createContext, particle );
 
 		foreach ( var module in Data.InitializeModules )
 		{
@@ -132,13 +135,7 @@ public sealed class ParticleModuleRunner : ParticleController
 
 		if ( Data is null ) return;
 
-		var context = _stepContext ??= new ParticleModuleContext();
-
-		context.Particle = particle;
-		context.Effect = ParticleEffect;
-		context.Emitter = Emitter;
-		context.Player = Player;
-		context.Runner = this;
+		var context = Reused( ref _stepContext, particle );
 
 		//The engine's delta here is where the particle is in its life, nought to one - see ParticleEffect.OnStep.
 		//A force wants seconds, so that is what a module is handed; the life fraction is on the particle.
@@ -280,6 +277,21 @@ public sealed class ParticleModuleRunner : ParticleController
 	Dictionary<EventModule, ulong> _eventBits;
 
 	/// <summary>A context for this runner, with everything but the particle filled in.</summary>
+	//The thread's own context pointed at this particle: particles are many a frame, and a module reads it only while applied
+	ParticleModuleContext Reused( ref ParticleModuleContext slot, Particle particle )
+	{
+		var context = slot ??= new ParticleModuleContext();
+
+		context.Particle = particle;
+		context.Effect = ParticleEffect;
+		context.Emitter = Emitter;
+		context.Player = Player;
+		context.Runner = this;
+		context.Frame = null;
+
+		return context;
+	}
+
 	public ParticleModuleContext Context( Particle particle ) => new()
 	{
 		Particle = particle,

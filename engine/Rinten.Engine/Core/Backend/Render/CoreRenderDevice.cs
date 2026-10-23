@@ -185,31 +185,55 @@ internal static unsafe class CoreRenderDevice
 
 		savedPipelines = baked;
 
-		SavePipelineCache();
+		SavePipelineCache( inBackground: true );
 	}
 
 	//The count this saw last frame, to tell "still baking" from "settled".
 	private static int bakedPipelines;
 
-	//Writes out what the driver compiled this run, while the device is still open
-	private static void SavePipelineCache()
+	//The cache still on its way to disk; the next save goes after it, so the newer cache is the one left
+	private static Task writingCache = Task.CompletedTask;
+
+	//Reads what the driver compiled this run while the device is open; the file is written off the main thread
+	//during play, where closing a few MB over the old file stalls a frame for tens of milliseconds
+	private static void SavePipelineCache( bool inBackground = false )
+	{
+		//Asked how much room it wants before being given any.
+		var size = CoreRender.PipelineCacheSave( null, 0 );
+		if ( size <= 0 ) return;
+
+		var bytes = new byte[size];
+		int written;
+
+		fixed ( byte* data = bytes )
+		{
+			written = CoreRender.PipelineCacheSave( data, size );
+		}
+
+		if ( written <= 0 ) return;
+
+		if ( written < bytes.Length )
+			Array.Resize( ref bytes, written );
+
+		if ( !inBackground )
+		{
+			writingCache.Wait();
+			WritePipelineCache( bytes );
+			return;
+		}
+
+		var before = writingCache;
+		writingCache = Task.Run( () =>
+		{
+			before.Wait();
+			WritePipelineCache( bytes );
+		} );
+	}
+
+	private static void WritePipelineCache( byte[] bytes )
 	{
 		try
 		{
-			//Asked how much room it wants before being given any.
-			var size = CoreRender.PipelineCacheSave( null, 0 );
-			if ( size <= 0 ) return;
-
-			var bytes = new byte[size];
-			int written;
-
-			fixed ( byte* data = bytes )
-			{
-				written = CoreRender.PipelineCacheSave( data, size );
-			}
-
-			if ( written <= 0 ) return;
-
 			var path = PipelineCachePath;
 			Directory.CreateDirectory( Path.GetDirectoryName( path ) );
 
@@ -219,7 +243,7 @@ internal static unsafe class CoreRenderDevice
 
 			try
 			{
-				File.WriteAllBytes( temporary, bytes.AsSpan( 0, written ).ToArray() );
+				File.WriteAllBytes( temporary, bytes );
 				File.Move( temporary, path, overwrite: true );
 			}
 			catch ( Exception ) when ( File.Exists( temporary ) )
@@ -337,6 +361,12 @@ internal static unsafe class CoreRenderDevice
 		if ( CoreNative.Available ) CoreRender.WorldShades( surfaces ? 1 : 0 );
 	}
 
+	/// <summary>The next world's clip space into the frame before's, which its adaptive rates follow the view by.</summary>
+	public static void WorldBack( in System.Numerics.Matrix4x4 clipToPrevious )
+	{
+		if ( CoreNative.Available ) CoreRender.WorldBack( clipToPrevious );
+	}
+
 	/// <summary>Says the world's drawing on the screen is over - see <see cref="InterruptScreen"/>.</summary>
 	public static void ResumeScreen()
 	{
@@ -399,6 +429,7 @@ internal static unsafe class CoreRenderDevice
 	{
 		poses.Clear();
 		morphs.Clear();
+		posed.Clear();
 
 		KeepPipelineCache();
 
@@ -477,6 +508,10 @@ internal static unsafe class CoreRenderDevice
 	public static bool CaptureBackdrop()
 		=> CoreNative.Available && CoreRender.BackdropCapture() != 0;
 
+	/// <summary>Copies the window's picture as it stands, for a generated frame - see CoreFrameGeneration.</summary>
+	public static bool CaptureForGeneration( ulong picture )
+		=> CoreNative.Available && picture != 0 && CoreRender.GenerationCapture( picture ) != 0;
+
 	/// <summary>That copy as a texture, or zero until it has been taken this frame.</summary>
 	public static ulong BackdropTexture()
 		=> CoreNative.Available ? CoreRender.BackdropTexture() : 0;
@@ -521,6 +556,7 @@ internal static unsafe class CoreRenderDevice
 		//Last frame's poses live in last frame's scratch, which this one is about to write over.
 		poses.Clear();
 		morphs.Clear();
+		posed.Clear();
 
 		if ( !CoreNative.Available || CoreRender.ViewFrameBegin( view, clear.r, clear.g, clear.b, clear.a ) == 0 ) return false;
 
@@ -861,18 +897,19 @@ internal static unsafe class CoreRenderDevice
 			zones );
 	}
 
-	/// <summary>What a frame cost and what our resources hold, without the zones.</summary>
-	public readonly record struct FrameSummary( float GpuMs, float CpuMs, long TextureBytes, long BufferBytes );
+	/// <summary>What a frame cost, its triangles where counted (else below nought) and what our resources hold, without the zones.</summary>
+	public readonly record struct FrameSummary( float GpuMs, float CpuMs, long TextureBytes, long BufferBytes, long Triangles );
 
 	/// <summary>GPU/CPU time and memory of the viewport's last finished frame, without allocating</summary>
 	public static FrameSummary? ReadFrameSummary( ulong viewport )
 	{
 		if ( !CoreNative.Available || viewport == 0 ) return null;
 
-		var stats = stackalloc float[14];
-		if ( CoreRender.ProfileStats( viewport, stats, 14 ) < 14 ) return null;
+		var stats = stackalloc float[18];
+		var given = CoreRender.ProfileStats( viewport, stats, 18 );
+		if ( given < 14 ) return null;
 
-		return new FrameSummary( stats[0], stats[1], (long)stats[10], (long)stats[11] );
+		return new FrameSummary( stats[0], stats[1], (long)stats[10], (long)stats[11], given >= 18 ? (long)stats[17] : -1 );
 	}
 
 	//-- pipelines -------------------------------------------------------------
@@ -950,20 +987,10 @@ internal static unsafe class CoreRenderDevice
 	/// <summary>The sky table by elevation and sun angle, as an indexed texture - see TargetKind.SkyTable.</summary>
 	public static ulong SkyTableTexture => CoreNative.Available ? CoreRender.SkyTableTexture() : 0;
 
-	/// <summary>Whether the device draws that table with the sky shader; else CoreSkyTable fills it.</summary>
-	public static bool DrawsSkyTable => CoreNative.Available && CoreRender.DrawsSkyTable;
-
-	/// <summary>A CPU-made sky table to bind instead of the drawn one; nought for the drawn one.</summary>
+	/// <summary>A panorama's sky table to bind instead of the drawn one; nought for the drawn one.</summary>
 	public static void UseSkyTable( ulong texture )
 	{
 		if ( CoreNative.Available ) CoreRender.UseSkyTable( texture );
-	}
-
-	//Half floats, four channels, side squared; the full frame draws its table on the card
-	/// <summary>The portable frame's sky table onto the device - see <see cref="CoreSkyTable" />.</summary>
-	public static void SendSkyTable( byte* texels, int side )
-	{
-		if ( CoreNative.Available && PortableFrame ) CoreRender.SendSkyTable( texels, side );
 	}
 
 	/// <summary>Records one depth pyramid level; with an args buffer the group count comes from the GPU</summary>
@@ -977,6 +1004,12 @@ internal static unsafe class CoreRenderDevice
 			return CoreRender.PyramidBuild( pipeline, pyramid, lod, count, source,
 				pushBytes, push.Length, argsBuffer, argsOffset ) != 0;
 		}
+	}
+
+	/// <summary>Frame writes and dispatches until released read nothing another of them writes: one barrier after them all.</summary>
+	internal static void HoldBarriers( bool hold )
+	{
+		if ( CoreNative.Available ) CoreRender.HoldBarriers( hold );
 	}
 
 	/// <summary>Runs one over a grid of groups, inside a begun frame.</summary>
@@ -1546,6 +1579,60 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
+	/// <summary>A compute pipeline for the portable frame's pose pass; nought on a page.</summary>
+	public static ulong CreatePoseCompute( byte[] spirv )
+	{
+		if ( !CoreNative.Available || spirv is null || spirv.Length == 0 ) return 0;
+
+		fixed ( byte* code = spirv )
+		{
+			return CoreRender.PoseCreate( code, spirv.Length );
+		}
+	}
+
+	/// <summary>Poses a morphed mesh once a frame - shapes, then any bones - and says where its vertices went.</summary>
+	public static bool PoseAhead( ulong pipeline, CoreSceneRenderer.SceneMesh mesh, System.Numerics.Matrix4x4[] bones, float[] weights,
+		out ulong room, out int firstVertex )
+	{
+		room = 0;
+		firstVertex = 0;
+
+		if ( !CoreNative.Available || pipeline == 0 || weights is null || weights.Length == 0 ) return false;
+
+		if ( posed.TryGetValue( weights, out var found ) )
+		{
+			( room, firstVertex ) = found;
+			return room != 0;
+		}
+
+		fixed ( System.Numerics.Matrix4x4* pose = bones )
+		fixed ( float* shapes = weights )
+		{
+			room = CoreRender.PoseVertices( pipeline, mesh.Vertices, mesh.Skin, mesh.MorphRuns, mesh.MorphDeltas,
+				mesh.MorphVertexCount, mesh.MorphDeltaCount, (float*)pose, bones?.Length ?? 0, shapes, weights.Length, out firstVertex );
+		}
+
+		//A miss is kept too, so the passes after this one draw it the way it will be drawn this frame
+		posed[weights] = ( room, firstVertex );
+		return room != 0;
+	}
+
+	/// <summary>Where PoseAhead put a mesh posed with these weights this frame; false where it did not.</summary>
+	public static bool PosedFor( float[] weights, out ulong room, out int firstVertex )
+	{
+		room = 0;
+		firstVertex = 0;
+
+		if ( weights is null || !posed.TryGetValue( weights, out var found ) ) return false;
+
+		( room, firstVertex ) = found;
+		return room != 0;
+	}
+
+	//The morphed meshes posed ahead this frame, by their weights - see PoseAhead.
+	private static readonly Dictionary<float[], (ulong Room, int First)> posed =
+		new( ReferenceEqualityComparer.Instance as IEqualityComparer<float[]> );
+
 	//Where each pose handed over this frame was put.
 	private static readonly Dictionary<System.Numerics.Matrix4x4[], uint> poses =
 		new( ReferenceEqualityComparer.Instance as IEqualityComparer<System.Numerics.Matrix4x4[]> );
@@ -1737,8 +1824,10 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>How many floats a material's parameters are, four to a slot.</summary>
-	public const int MaterialParamSlots = 32;
+	/// <summary>How many float4 slots a material's parameters have; every backend packs, copies and binds this many.</summary>
+	public const int MaterialParamSlots = 64;
+
+	/// <summary>The same in floats, four to a slot.</summary>
 	public const int MaterialParamFloats = MaterialParamSlots * 4;
 
 	/// <summary>The same, with the numbers the shader asked for.</summary>

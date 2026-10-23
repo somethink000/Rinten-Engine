@@ -31,6 +31,27 @@ public abstract class ITagSet : IEnumerable<string>
 	/// <summary>Try to get all tags in the set.</summary>
 	public virtual IReadOnlySet<uint> GetTokens() => TryGetAll().Select( x => StringToken.FindOrCreate( x ) ).Distinct().ToFrozenSet();
 
+	//The tokens in a thread's own scratch, good until its next call: through CopyTo where the set has it, since a foreach
+	//over the interface boxes the set's enumerator - hot paths read tags every frame
+	internal static ReadOnlySpan<uint> Copy( IReadOnlySet<uint> tokens )
+	{
+		if ( tokens is null || tokens.Count == 0 ) return default;
+
+		var scratch = tokenScratch;
+		if ( scratch is null || scratch.Length < tokens.Count ) tokenScratch = scratch = new uint[Math.Max( 16, tokens.Count )];
+
+		if ( tokens is ICollection<uint> collection ) collection.CopyTo( scratch, 0 );
+		else
+		{
+			var i = 0;
+			foreach ( var token in tokens ) scratch[i++] = token;
+		}
+
+		return scratch.AsSpan( 0, tokens.Count );
+	}
+
+	[ThreadStatic] private static uint[] tokenScratch;
+
 	/// <summary>Get all default tags for this set.</summary>
 	public virtual IEnumerable<string> GetSuggested() => Enumerable.Empty<string>();
 

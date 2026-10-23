@@ -1,14 +1,17 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader is - includes
 //and all - and a project may put its own file of this name in its assets to replace it. See CoreShaderCache.Pass.
 
-//Upscale passes: TemporalCs (TAA/upscaler), EasuCs and SharpenCs (FSR1), MotionCs (full motion)
+//Upscale passes: TemporalCs (TAA/upscaler), EasuCs (FSR1; its RCAS is in compose.slang), MotionCs (full motion),
+//ReactiveCs (where glass and sprites changed the world, which a history should not be trusted with)
 
 #include "postprocess.slang"
 
 //What is stored into: the motion pass's picture is two half floats, every other pass's four - and a stored picture
 //has to be declared in its own format, so the motion pass is its own build. See CoreUpscaler.MotionDefines.
-#ifdef UPSCALE_MOTION
+#if defined( UPSCALE_MOTION )
 [[vk::binding(0,2)]] [format("rg16f")] RWTexture2D<float4> g_out;
+#elif defined( UPSCALE_SINGLE )
+[[vk::binding(0,2)]] [format("r16f")] RWTexture2D<float4> g_out;
 #else
 [[vk::binding(0,2)]] [format("rgba16f")] RWTexture2D<float4> g_out;
 #endif
@@ -40,8 +43,6 @@ float4 At( float slot, float2 uv )
 
 	return g_textures[uint( index )].SampleLevel( uv, 0.0 );
 }
-
-float Luma( float3 c ) { return dot( c, float3( 0.2126, 0.7152, 0.0722 ) ); }
 
 float Max3( float3 c ) { return max( c.x, max( c.y, c.z ) ); }
 
@@ -104,6 +105,21 @@ float2 BackwardsFrom( int2 texel, float2 size, float depth, float4 written )
 	return was - uv;
 }
 
+//BackwardsFrom for the temporal pass: this frame's clip space to the last's, three columns in the push block
+float2 Reprojected( int2 texel, float2 size, float depth, float4 written )
+{
+	float2 uv = ( float2( texel ) + 0.5 ) / size;
+
+	if ( written.a > 0.5 ) return -written.xy;
+
+	float4 clip = float4( ( uv * 2.0 ) - 1.0, min( depth, 1.0 ), 1.0 );
+	float3 before = float3( dot( clip, g_vPostSlots[1] ), dot( clip, g_vPostSlots[2] ), dot( clip, g_vPostSlots[3] ) );
+
+	if ( before.z <= 1e-6 ) return float2( 0.0, 0.0 );
+
+	return ( ( ( before.xy / before.z ) * 0.5 ) + 0.5 ) - uv;
+}
+
 [numthreads(8, 8, 1)]
 void MotionCs( uint3 id : SV_DispatchThreadID )
 {
@@ -123,6 +139,24 @@ void CopyCs( uint3 id : SV_DispatchThreadID )
 	if ( any( float2( id.xy ) >= size ) ) return;
 
 	g_out[id.xy] = float4( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb, 1.0 );
+}
+
+//---- reactivity --------------------------------------------------------------
+
+//How much of a texel what was laid over the opaque world changed, as AMD's generated reactive mask: the largest channel's
+//step as the eye sees it, nothing under a small one, at most 0.9 so a texel never forgets its history whole
+[numthreads(8, 8, 1)]
+void ReactiveCs( uint3 id : SV_DispatchThreadID )
+{
+	float2 size = g_vFrameSize.xy;
+	if ( any( float2( id.xy ) >= size ) ) return;
+
+	float3 final = Squeeze( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb );
+	float3 opaque = Squeeze( Texel( g_vFramePictures.y, int2( id.xy ), size ).rgb );
+
+	float step = Max3( abs( final - opaque ) );
+
+	g_out[id.xy] = float4( saturate( ( step - 0.02 ) * 4.0 ) * 0.9, 0.0, 0.0, 0.0 );
 }
 
 //---- the temporal pass -------------------------------------------------------
@@ -184,7 +218,6 @@ float3 ClipTowards( float3 history, float3 low, float3 high )
 //Group-shared 10x10 tile of world texels, loaded once per 8x8 group instead of per pixel
 static const int TileSide = 10;
 groupshared float4 g_tileColour[TileSide * TileSide];   //squeezed colour, and depth
-groupshared float4 g_tileMotion[TileSide * TileSide];   //what was written there - see BackwardsAt
 
 [numthreads(8, 8, 1)]
 void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex )
@@ -192,7 +225,6 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 	float2 outSize = g_vFrameSize.xy;
 	float2 inSize = InSize();
 	int2 last = int2( inSize ) - 1;
-	bool hasMotion = ( Flags() & FlagHasMotion ) != 0u;
 
 	//The tile's corner: one texel before the nearest the group's first pixel reaches. Loaded by every thread, the group's edge ones included,
 	//before any of them returns. Its colour squeezed and turned into YCoCg once here, not nine times over by every pixel that reads it.
@@ -204,7 +236,6 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 		int2 at = clamp( corner + int2( int( t ) % TileSide, int( t ) / TileSide ), int2( 0, 0 ), last );
 
 		g_tileColour[t] = float4( ToYCoCg( Squeeze( Texel( g_vFramePictures.x, at, inSize ).rgb ) ), Texel( g_vFramePictures.z, at, inSize ).r );
-		g_tileMotion[t] = hasMotion ? Texel( g_vFramePictures.w, at, inSize ) : float4( 0.0, 0.0, 0.0, 0.0 );
 	}
 
 	GroupMemoryBarrierWithGroupSync();
@@ -241,7 +272,6 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 
 	//And which of the nine drew the nearest surface, whose motion is the one followed: an edge moves with the thing in front, not with what it hides.
 	float nearestDepth = 2.0;
-	int nearestSlot = middle;
 	int2 nearestStep = int2( 0, 0 );
 
 	[unroll]
@@ -263,7 +293,6 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 			if ( held.a < nearestDepth )
 			{
 				nearestDepth = held.a;
-				nearestSlot = slot;
 				nearestStep = int2( x, y );
 			}
 		}
@@ -271,8 +300,10 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 
 	float3 current = sum / max( total, 1e-5 );
 
+	//Its written motion read for it alone, not for the whole tile: one texel a pixel instead of the tile's half again as many
 	int2 nearestAt = clamp( nearest + nearestStep, int2( 0, 0 ), last );
-	float2 backwards = BackwardsFrom( nearestAt, inSize, nearestDepth, g_tileMotion[nearestSlot] );
+	float4 written = ( Flags() & FlagHasMotion ) != 0u ? Texel( g_vFramePictures.w, nearestAt, inSize ) : float4( 0.0, 0.0, 0.0, 0.0 );
+	float2 backwards = Reprojected( nearestAt, inSize, nearestDepth, written );
 	float2 was = uv + backwards;
 
 	bool reset = ( Flags() & FlagReset ) != 0u;
@@ -283,7 +314,9 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 
 	if ( !reset && onScreen )
 	{
-		float4 history = HistoryAt( was, outSize );
+		//Catmull-Rom only between history texels; a still pixel reads its own, where one tap is exact
+		float2 between = abs( frac( was * outSize ) - 0.5 );
+		float4 history = all( between < 0.01 ) ? At( g_vFramePictures.y, was ) : HistoryAt( was, outSize );
 
 		gathered = min( history.a, most );
 
@@ -303,6 +336,9 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 		//And a history carried a long way has been resampled every frame of the way: it keeps less of itself the faster the pixel goes.
 		float speed = length( backwards * outSize );
 		gathered *= 1.0 / ( 1.0 + speed * 0.05 );
+
+		//Glass, particles and sprites move over what the motion follows: where they changed the picture, the history counts less
+		if ( g_vFrameParams.w > 0.5 ) gathered *= 1.0 - Texel( g_vFrameParams.w, clamp( nearest, int2( 0, 0 ), last ), inSize ).r;
 
 		//This frame's samples count by how close they fell to this pixel - a sample right
 		//on it is a whole frame's worth, one between output pixels a fraction of one.
@@ -464,50 +500,4 @@ void EasuCs( uint3 id : SV_DispatchThreadID )
 	float3 high = max( max( f, g ), max( j, k ) );
 
 	g_out[id.xy] = float4( clamp( result, low, high ) / max( Exposure(), 1e-8 ), 1.0 );
-}
-
-//---- RCAS --------------------------------------------------------------------
-
-//FSR1 RCAS: five-tap contrast-adaptive sharpening; g_vFrameParams.w is the sharpness
-[numthreads(8, 8, 1)]
-void SharpenCs( uint3 id : SV_DispatchThreadID )
-{
-	float2 size = g_vFrameSize.xy;
-	if ( any( float2( id.xy ) >= size ) ) return;
-
-	int2 at = int2( id.xy );
-	int2 last = int2( size ) - 1;
-
-	float slot = g_vFramePictures.x;
-
-	float4 middle = Texel( slot, at, size );
-
-	float3 b = Squeeze( Texel( slot, clamp( at + int2( 0, -1 ), int2( 0, 0 ), last ), size ).rgb );
-	float3 d = Squeeze( Texel( slot, clamp( at + int2( -1, 0 ), int2( 0, 0 ), last ), size ).rgb );
-	float3 e = Squeeze( middle.rgb );
-	float3 f = Squeeze( Texel( slot, clamp( at + int2( 1, 0 ), int2( 0, 0 ), last ), size ).rgb );
-	float3 h = Squeeze( Texel( slot, clamp( at + int2( 0, 1 ), int2( 0, 0 ), last ), size ).rgb );
-
-	float3 low = min( min( b, d ), min( f, h ) );
-	float3 high = max( max( b, d ), max( f, h ) );
-
-	//How far the lobe may go before the darkest or the brightest channel would leave what the neighbours span.
-	float3 hitLow = min( low, e ) / max( 4.0 * high, 1e-5 );
-	float3 hitHigh = ( 1.0 - max( high, e ) ) / min( ( 4.0 * low ) - 4.0, -1e-5 );
-
-	float3 lobeRgb = max( -hitLow, hitHigh );
-
-	//FSR_RCAS_LIMIT: a quarter less a sixteenth.
-	float lobe = max( -0.1875, min( Max3( lobeRgb ), 0.0 ) ) * g_vFrameParams.w;
-
-	//Noise is not detail: a pixel that stands out alone from a flat neighbourhood is sharpened less.
-	float lb = Luma( b ), ld = Luma( d ), le = Luma( e ), lf = Luma( f ), lh = Luma( h );
-	float noise = 0.25 * ( lb + ld + lf + lh ) - le;
-	float range = max( max( max( lb, ld ), max( lf, lh ) ), le ) - min( min( min( lb, ld ), min( lf, lh ) ), le );
-	noise = saturate( abs( noise ) / max( range, 1e-5 ) );
-	lobe *= -0.5 * noise + 1.0;
-
-	float3 sharpened = ( lobe * ( b + d + f + h ) + e ) / ( 4.0 * lobe + 1.0 );
-
-	g_out[id.xy] = float4( Unsqueeze( saturate( sharpened ) ), middle.a );
 }

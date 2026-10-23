@@ -4,6 +4,14 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
+//What places a run of copies on the card - see CoreSceneTables.AddRun.
+internal interface IInstanceRun
+{
+	//Writes a run's slots into the instance buffer: each copy the template where it stands, an empty one undrawn
+	//Between targets, after the tables went up; false where it could not yet, asked again next frame
+	bool Place( ulong instances, int head, int count, in CoreSceneTables.InstanceRecord template, System.Numerics.Vector4 bound );
+}
+
 //GPU tables for one scene: a record per instance plus materials; Sync uploads only what changed
 internal sealed class CoreSceneTables
 {
@@ -71,6 +79,16 @@ internal sealed class CoreSceneTables
 
 		/// <summary>The detail group it was added with, or null for its model's own - see LodGroupOf.</summary>
 		public string StaticLodGroup;
+
+		/// <summary>Slots from this one in a run the card places, nought for one instance - see AddRun.</summary>
+		public int Run;
+
+		/// <summary>The flags a run's copies are drawn with; its record lacks InstanceDrawn until the card placed them.</summary>
+		public uint RunFlags;
+
+		/// <summary>Where a run's copies stand, all of them inside it, and what places them.</summary>
+		public System.Numerics.Vector4 RunSphere;
+		public IInstanceRun Placer;
 
 		public CoreSceneRenderer.SceneMesh Mesh;
 		public Model Model;
@@ -151,6 +169,12 @@ internal sealed class CoreSceneTables
 		public long SkinnedAt = -1;
 		public int SkinnedGeneration = -1;
 
+		/// <summary>Its positions as posed before the last posing, a PosedCount range of Was; -1 for none.</summary>
+		public long WasAt = -1;
+
+		/// <summary>The loop turn whose posing moved it from what <see cref="WasAt"/> holds - see CoreMeshRender.Skin.</summary>
+		public long PoseMovedTurn = -1;
+
 		/// <summary>Back to what a new one would be, without being a new one - see Give.</summary>
 		public void Wipe()
 		{
@@ -167,6 +191,10 @@ internal sealed class CoreSceneTables
 			StaticShadows = false;
 			StaticLodScale = 1.0f;
 			StaticLodGroup = null;
+			Run = 0;
+			RunFlags = 0;
+			RunSphere = default;
+			Placer = null;
 			Mesh = null;
 			Model = null;
 			Groups = default;
@@ -197,6 +225,8 @@ internal sealed class CoreSceneTables
 			SkinnedHash = 0;
 			SkinnedAt = -1;
 			SkinnedGeneration = -1;
+			WasAt = -1;
+			PoseMovedTurn = -1;
 		}
 	}
 
@@ -219,6 +249,9 @@ internal sealed class CoreSceneTables
 	//What every shaped instance's blend shapes add to each of its vertices - a float3 of position and one of
 	//normal a vertex, a range each. Written by mesh_shapes.slang, read by the pose pass beside the palettes.
 	internal static readonly CoreGeometryPool.Pool ShapeSums = new( 24, 1 << 16 );
+
+	//Every posed instance's positions before its last posing, a float3 a vertex - what the velocity pass moves them from
+	internal static readonly CoreGeometryPool.Pool Was = new( 12, 1 << 16 );
 
 	internal static CoreSceneTables Of( Scene scene ) => tables.GetOrCreateValue( scene );
 
@@ -756,17 +789,8 @@ internal sealed class CoreSceneTables
 
 		var runs = ( objectSlots.Count + ObjectRun - 1 ) / ObjectRun;
 
-		if ( Rinten.Utility.Parallel.InOrder )
-		{
-			//A page's one thread: the same runs in order, with one set of marks.
-			var marks = takeMarks();
-			for ( var c = 0; c < runs; c++ ) marks = askOne( c, null, marks );
-			giveMarks( marks );
-		}
-		else
-		{
-			System.Threading.Tasks.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
-		}
+		//On a page's one thread the runs go in order with one set of marks
+		Rinten.Utility.Parallel.For( 0, runs, takeMarks, askOne, giveMarks );
 
 		for ( var i = 0; i < heldMarks.Count; i++ )
 		{
@@ -806,9 +830,176 @@ internal sealed class CoreSceneTables
 	internal void RemoveStatic( int slot )
 	{
 		if ( slot < 0 || slot >= used ) return;
-		if ( entries[slot] is not { Live: true, Static: true } ) return;
+		if ( entries[slot] is not { Live: true, Static: true, Run: 0 } ) return;
 
 		Give( slot );
+	}
+
+	//Each slot's run as its first slot plus one, nought for none; gaps runs left; runs the card must place again
+	private int[] runOf = Array.Empty<int>();
+	private readonly List<(int At, int Count)> runHoles = new();
+	private readonly HashSet<int> runs = new();
+	private readonly HashSet<int> unplaced = new();
+	private readonly List<int> placing = new();
+
+	//Adds copies of one model in adjacent slots inside a sphere, placed by the card from one record (PlaceRuns)
+	//The first slot, or -1 where the model is not drawn from clusters
+	internal int AddRun( Model model, int count, System.Numerics.Vector4 sphere, in Transform frame, IInstanceRun placer, Material over, bool castShadows, float lodScale, string lodGroup )
+	{
+		if ( model is null || placer is null || count < 1 || !Rinten.Rendering.DrawSettings.Clusters ) return -1;
+
+		var head = TakeRun( count );
+		var entry = entries[head] ??= new Entry();
+
+		entry.Live = true;
+		entry.Renderer = null;
+		entry.Object = null;
+		entry.Static = true;
+		entry.StaticTransform = frame;
+		entry.StaticShadows = castShadows;
+		entry.StaticLodScale = lodScale;
+		entry.StaticLodGroup = lodGroup;
+		entry.Model = model;
+		entry.Override = over;
+		entry.Tint = Color.White;
+		entry.Run = count;
+		entry.RunSphere = sphere;
+		entry.Placer = placer;
+
+		for ( var slot = head; slot < head + count; slot++ ) runOf[slot] = head + 1;
+
+		runs.Add( head );
+		SlotGeneration++;
+
+		Resolve( head );
+
+		return head;
+	}
+
+	//Whether a run is drawn from clusters: null while its model is not there yet.
+	internal bool? RunDrawn( int head )
+	{
+		if ( head < 0 || head >= used || entries[head] is not { Live: true, Run: > 0 } entry ) return false;
+		if ( entry.Mesh is null ) return null;
+
+		return ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) != 0;
+	}
+
+	//Takes a run out again, every slot of it.
+	internal void RemoveRun( int head )
+	{
+		if ( head < 0 || head >= used || entries[head] is not { Live: true, Run: > 0 } entry ) return;
+
+		var count = entry.Run;
+
+		runs.Remove( head );
+		unplaced.Remove( head );
+
+		Give( head, toFree: false );
+
+		//What the card placed in them is wiped too, and they leave their cell.
+		for ( var slot = head; slot < head + count; slot++ )
+		{
+			runOf[slot] = 0;
+			records[slot] = default;
+			dirty.Add( slot );
+		}
+
+		GiveRun( head, count );
+	}
+
+	//Slots side by side: out of a gap a run let go of, else past the last.
+	private int TakeRun( int count )
+	{
+		for ( var i = 0; i < runHoles.Count; i++ )
+		{
+			var (at, room) = runHoles[i];
+			if ( room < count ) continue;
+
+			if ( room == count ) runHoles.RemoveAt( i );
+			else runHoles[i] = ( at + count, room - count );
+
+			return at;
+		}
+
+		var head = used;
+		used += count;
+
+		if ( used > records.Length )
+		{
+			var size = Math.Max( records.Length * 2, used );
+
+			Array.Resize( ref records, size );
+			Array.Resize( ref entries, size );
+		}
+
+		if ( runOf.Length < records.Length ) Array.Resize( ref runOf, records.Length );
+
+		return head;
+	}
+
+	//A run's slots back as a gap, joined to the gaps either side of it.
+	private void GiveRun( int at, int count )
+	{
+		var i = 0;
+		while ( i < runHoles.Count && runHoles[i].At < at ) i++;
+
+		runHoles.Insert( i, ( at, count ) );
+
+		if ( i + 1 < runHoles.Count && runHoles[i].At + runHoles[i].Count == runHoles[i + 1].At )
+		{
+			runHoles[i] = ( runHoles[i].At, runHoles[i].Count + runHoles[i + 1].Count );
+			runHoles.RemoveAt( i + 1 );
+		}
+
+		if ( i > 0 && runHoles[i - 1].At + runHoles[i - 1].Count == runHoles[i].At )
+		{
+			runHoles[i - 1] = ( runHoles[i - 1].At, runHoles[i - 1].Count + runHoles[i].Count );
+			runHoles.RemoveAt( i );
+		}
+	}
+
+	//Has the card place every run written since it last did - after Upload, before the cull reads them
+	internal void PlaceRuns()
+	{
+		if ( unplaced.Count == 0 || instanceBuffer == 0 ) return;
+
+		placing.Clear();
+		placing.AddRange( unplaced );
+
+		foreach ( var head in placing )
+		{
+			var entry = head < used ? entries[head] : null;
+
+			if ( entry is not { Live: true, Run: > 0 } || entry.Mesh is null || ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) == 0 )
+			{
+				unplaced.Remove( head );
+				continue;
+			}
+
+			var template = records[head];
+			template.Flags = entry.RunFlags;
+
+			var bound = new System.Numerics.Vector4( entry.Mesh.BoundCentre.x, entry.Mesh.BoundCentre.y, entry.Mesh.BoundCentre.z, entry.Mesh.BoundRadius );
+
+			if ( entry.Placer.Place( instanceBuffer, head, entry.Run, in template, bound ) ) unplaced.Remove( head );
+		}
+	}
+
+	//Where a slot is filed for the cull: a run's first files all of its slots, the rest are left where it put them.
+	private void NoteCell( int slot )
+	{
+		var head = slot < runOf.Length ? runOf[slot] - 1 : -1;
+
+		if ( head < 0 )
+		{
+			Cells.Note( slot, records[slot], slot < used ? entries[slot] : null );
+			return;
+		}
+
+		if ( head != slot || entries[slot] is not { } entry ) return;
+
+		Cells.NoteRun( slot, entry.Run, entry.RunSphere, ( entry.RunFlags & CoreMeshShaders.InstanceDrawn ) != 0, entry.CountedChunks / Math.Max( 1, entry.Run ) );
 	}
 
 	private int Take()
@@ -874,7 +1065,7 @@ internal sealed class CoreSceneTables
 		}
 	}
 
-	private void Give( int slot )
+	private void Give( int slot, bool toFree = true )
 	{
 		var entry = entries[slot];
 		if ( entry is null ) return;
@@ -894,7 +1085,8 @@ internal sealed class CoreSceneTables
 		entry.Wipe();
 		records[slot] = default;
 		dirty.Add( slot );
-		free.Add( slot );
+
+		if ( toFree ) free.Add( slot );
 	}
 
 	//Holes are an unordered set, so a used one is swapped with the last instead of RemoveAt
@@ -1133,7 +1325,7 @@ internal sealed class CoreSceneTables
 
 		var world = CoreSceneRenderer.WorldOf( transform );
 		var scale = transform.Scale;
-		var maxScale = MathF.Max( scale.x, MathF.Max( scale.y, scale.z ) );
+		var maxScale = MathF.Max( MathF.Abs( scale.x ), MathF.Max( MathF.Abs( scale.y ), MathF.Abs( scale.z ) ) );
 		var centre = transform.PointToWorld( mesh.BoundCentre );
 		var radius = mesh.BoundRadius * maxScale;
 
@@ -1395,6 +1587,15 @@ internal sealed class CoreSceneTables
 			LodGroup = LodGroupOf( entry ),
 		};
 
+		//A run is drawn from clusters or not at all, once the card placed it: each copy's record starts from its own
+		if ( entry.Run > 0 )
+		{
+			Loose.Remove( slot );
+			entry.RunFlags = flags;
+			record.Flags = flags & ~CoreMeshShaders.InstanceDrawn;
+			record.Sphere = entry.RunSphere;
+		}
+
 
 		Count( entry );
 		dirty.Add( slot );
@@ -1467,7 +1668,7 @@ internal sealed class CoreSceneTables
 
 		ref var record = ref records[slot];
 		var scale = transform.Scale;
-		var maxScale = MathF.Max( scale.x, MathF.Max( scale.y, scale.z ) );
+		var maxScale = MathF.Max( MathF.Abs( scale.x ), MathF.Max( MathF.Abs( scale.y ), MathF.Abs( scale.z ) ) );
 		var centre = transform.PointToWorld( entry.Mesh.BoundCentre );
 
 		record.Prev = record.World;
@@ -1562,12 +1763,14 @@ internal sealed class CoreSceneTables
 
 		if ( entry.Mesh is null || entry.Loose || entry.Mesh.ClusterCount == 0 ) return;
 
-		entry.CountedChunks = ChunksOf( entry.Mesh );
-		entry.CountedFinest = entry.Mesh.ClusterCount;
-		entry.CountedOneSided = entry.OneSided;
-		entry.CountedTwoSided = entry.TwoSided;
-		entry.CountedCutOut = entry.CutOut;
-		entry.CountedMoving = entry.Moving;
+		var copies = Math.Max( 1, entry.Run );
+
+		entry.CountedChunks = ChunksOf( entry.Mesh ) * copies;
+		entry.CountedFinest = entry.Mesh.ClusterCount * copies;
+		entry.CountedOneSided = entry.OneSided * copies;
+		entry.CountedTwoSided = entry.TwoSided * copies;
+		entry.CountedCutOut = entry.CutOut * copies;
+		entry.CountedMoving = entry.Moving * copies;
 
 		ChunkCount += entry.CountedChunks;
 		FinestClusters += entry.CountedFinest;
@@ -1628,14 +1831,23 @@ internal sealed class CoreSceneTables
 		if ( entry.PosedAt >= 0 && entry.PosedAt + entry.PosedCount > CoreGeometryPool.Vertices.Used ) entry.PosedAt = -1;
 		if ( entry.PaletteAt >= 0 && entry.PaletteAt + entry.PaletteCount > Palettes.Used ) entry.PaletteAt = -1;
 		if ( entry.ShapesAt >= 0 && entry.ShapesAt + entry.ShapesCount > ShapeSums.Used ) entry.ShapesAt = -1;
+		if ( entry.WasAt >= 0 && entry.WasAt + entry.PosedCount > Was.Used ) entry.WasAt = -1;
 
-		if ( entry.PosedAt >= 0 && entry.PosedCount != count ) { CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount ); entry.PosedAt = -1; }
+		if ( entry.PosedAt >= 0 && entry.PosedCount != count )
+		{
+			CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount );
+			if ( entry.WasAt >= 0 ) Was.Give( entry.WasAt, entry.PosedCount );
+			entry.PosedAt = entry.WasAt = -1;
+		}
 		if ( entry.PaletteAt >= 0 && entry.PaletteCount != bones ) { Palettes.Give( entry.PaletteAt, entry.PaletteCount ); entry.PaletteAt = -1; entry.PaletteCount = 0; entry.PoseHash = 0; }
 		if ( entry.ShapesAt >= 0 && entry.ShapesCount != sums ) { ShapeSums.Give( entry.ShapesAt, entry.ShapesCount ); entry.ShapesAt = -1; entry.ShapesCount = 0; entry.PoseHash = 0; }
 
 		//The same for where the posed vertices go: a range that moved holds nothing posed yet, so the
 		//skin pass has to pose into it whether or not the skeleton did anything - see Entry.PoseHash.
-		if ( entry.PosedAt < 0 ) { entry.PosedAt = CoreGeometryPool.Vertices.Take( count ); entry.PosedCount = count; entry.PoseHash = 0; }
+		if ( entry.PosedAt < 0 ) { entry.PosedAt = CoreGeometryPool.Vertices.Take( count ); entry.PosedCount = count; entry.PoseHash = 0; entry.SkinnedAt = -1; }
+
+		//Without room it only loses its motion, never its pose
+		if ( entry.PosedAt >= 0 && entry.WasAt < 0 ) entry.WasAt = Was.Take( count );
 
 		//A new range holds whatever was in it, so the old one's pose says nothing - see Entry.PoseHash
 		if ( bones > 0 && entry.PaletteAt < 0 )
@@ -1666,7 +1878,9 @@ internal sealed class CoreSceneTables
 		if ( entry.PosedAt >= 0 && entry.PosedAt + entry.PosedCount <= CoreGeometryPool.Vertices.Used ) CoreGeometryPool.Vertices.Give( entry.PosedAt, entry.PosedCount );
 		if ( entry.PaletteAt >= 0 && entry.PaletteAt + entry.PaletteCount <= Palettes.Used ) Palettes.Give( entry.PaletteAt, entry.PaletteCount );
 		if ( entry.ShapesAt >= 0 && entry.ShapesAt + entry.ShapesCount <= ShapeSums.Used ) ShapeSums.Give( entry.ShapesAt, entry.ShapesCount );
+		if ( entry.WasAt >= 0 && entry.WasAt + entry.PosedCount <= Was.Used ) Was.Give( entry.WasAt, entry.PosedCount );
 		entry.PosedAt = -1;
+		entry.WasAt = -1;
 		entry.PoseHash = 0;
 		entry.PaletteAt = -1;
 		entry.PosedCount = 0;
@@ -1815,6 +2029,10 @@ internal sealed class CoreSceneTables
 		{
 			var bytes = MemoryMarshal.AsBytes( records.AsSpan( 0, used ) );
 
+			//What is written here over a run's slots wipes what the card placed in them.
+			if ( allDirty || dirty.Count * 2 >= used ) unplaced.UnionWith( runs );
+			else foreach ( var slot in dirty ) if ( runs.Contains( slot ) ) unplaced.Add( slot );
+
 			if ( allDirty )
 			{
 				CoreRenderDevice.FrameWrite( instanceBuffer, 0, bytes );
@@ -1871,11 +2089,11 @@ internal sealed class CoreSceneTables
 		if ( allDirty )
 		{
 			Cells.Reset();
-			for ( var slot = 0; slot < used; slot++ ) Cells.Note( slot, records[slot], entries[slot] );
+			for ( var slot = 0; slot < used; slot++ ) NoteCell( slot );
 		}
 		else
 		{
-			foreach ( var slot in dirty ) Cells.Note( slot, records[slot], slot < used ? entries[slot] : null );
+			foreach ( var slot in dirty ) NoteCell( slot );
 		}
 
 		Cells.Update( used );
@@ -1969,6 +2187,10 @@ internal static class CoreMaterialTable
 		/// <summary>The depth-only pass for a material moving its own vertices; nought for still surfaces.</summary>
 		public ulong DepthPipeline;
 		public bool AskedToDepth;
+
+		/// <summary>And its motion on the screen, for the velocity picture; nought where it has no velocity build.</summary>
+		public ulong VelocityPipeline;
+		public bool AskedToVelocity;
 
 		/// <summary>Whether it has already been said that this surface has no depth build - said once.</summary>
 		public bool SaidNoDepth;
@@ -2138,6 +2360,8 @@ internal static class CoreMaterialTable
 			one.AskedToShade = false;
 			one.DepthPipeline = 0;
 			one.AskedToDepth = false;
+			one.VelocityPipeline = 0;
+			one.AskedToVelocity = false;
 			one.ShadePrepass = false;
 			one.ShadeCarries = false;
 			one.ShadeFarCarries = false;

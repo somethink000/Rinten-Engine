@@ -133,7 +133,7 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 
 			if ( value is not null )
 			{
-				if ( !value.Desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) )
+				if ( !( ( value.Desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) )
 					throw new Exception( $"{nameof( RenderTarget )} texture needs to be a render target" );
 			}
 
@@ -437,7 +437,18 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 		}
 	}
 
-	internal bool IsSceneEditorCamera;
+	//Set after the component is added, so the scene looks for its cameras again then
+	internal bool IsSceneEditorCamera
+	{
+		get => field;
+		set
+		{
+			if ( field == value ) return;
+
+			field = value;
+			Scene?.UpdateMainCamera();
+		}
+	}
 
 	internal void InitializeRendering( bool renderUI = true )
 	{

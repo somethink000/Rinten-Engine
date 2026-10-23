@@ -335,10 +335,12 @@ internal static unsafe class VkBuffers
 
 			if ( data is null )
 			{
-				//Reserved: nothing to put in it. Host memory is cleared so a reserve reads as zeros wherever it was made.
+				//Reserved: cleared by the card so it reads as zeros wherever it was made. Clearing a mapped BAR
+				//from here writes every byte across the bus - a third of a second for a grown geometry pool.
+				var cleared = VkTextures.FillBuffer( buffer, 0, Vk.WholeSize, 0u );
 				void* mapped = null;
 
-				if ( !staged && VkDevice.vk.MapMemory( VkDevice.device, made.Memory, 0, Vk.WholeSize, 0, &mapped ) == Result.Success )
+				if ( !cleared && !staged && VkDevice.vk.MapMemory( VkDevice.device, made.Memory, 0, Vk.WholeSize, 0, &mapped ) == Result.Success )
 				{
 					System.Runtime.InteropServices.NativeMemory.Clear( mapped, (nuint)size );
 					VkDevice.vk.UnmapMemory( VkDevice.device, made.Memory );

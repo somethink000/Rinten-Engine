@@ -79,8 +79,8 @@ public static partial class Stats
 
 		try
 		{
-			var json = System.Text.Json.JsonSerializer.Serialize( data );
-			return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>( json );
+			var json = System.Text.Json.JsonSerializer.Serialize( data, EnumConvert.Plain );
+			return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>( json, EnumConvert.Plain );
 		}
 		catch ( System.Exception e )
 		{

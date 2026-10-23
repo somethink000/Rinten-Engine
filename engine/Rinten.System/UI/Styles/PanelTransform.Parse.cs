@@ -1,6 +1,5 @@
 ﻿
 using System.Collections.Generic;
-using System.Collections.Immutable;
 
 namespace Rinten.UI
 {
@@ -11,9 +10,6 @@ namespace Rinten.UI
 			var p = new Parse( value );
 
 			p.SkipWhitespaceAndNewlines();
-
-			if ( List == null )
-				List = ImmutableList.Create<Entry>();
 
 			while ( !p.IsEnd )
 			{
@@ -149,7 +145,7 @@ namespace Rinten.UI
 
 		private bool AddEntry( EntryType type, Vector3 data )
 		{
-			List = List.Add( new Entry { Type = type, Data = data } );
+			Add( new Entry { Type = type, Data = data } );
 			return true;
 		}
 

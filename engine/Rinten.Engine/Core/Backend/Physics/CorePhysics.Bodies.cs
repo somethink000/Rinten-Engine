@@ -522,7 +522,12 @@ internal static unsafe partial class CorePhysics
 
 	/// <summary>A triangle mesh from xyz triples and three indices per triangle. Density zero: a triangle soup has no interior, so it contributes no mass.</summary>
 	public static ulong BodyAddMesh( ulong body, ReadOnlySpan<float> vertices, ReadOnlySpan<int> indices, bool isTrigger )
+		=> BodyAddMesh( body, vertices, indices, isTrigger, out _ );
+
+	/// <summary>The same, handing back the cooked mesh so later shapes can borrow it through <see cref="BodyAddCookedMesh"/>.</summary>
+	public static ulong BodyAddMesh( ulong body, ReadOnlySpan<float> vertices, ReadOnlySpan<int> indices, bool isTrigger, out CookedMesh cooked )
 	{
+		cooked = null;
 		if ( !ResolveBody( body, out var id ) ) return 0;
 
 		int vertexCount = vertices.Length / 3;
@@ -561,8 +566,34 @@ internal static unsafe partial class CorePhysics
 			return 0;
 		}
 
-		//Unlike a hull, the shape only borrows this - we own it for as long as the shape lives.
-		RememberMesh( Pack( shape ), mesh );
+		//Unlike a hull, the shape only borrows this - we own it for as long as a shape on it lives.
+		cooked = new CookedMesh { Data = mesh, Users = 1 };
+		RememberMesh( Pack( shape ), cooked );
+		return Pack( shape );
+	}
+
+	/// <summary>A shape on a mesh another shape cooked, at no cost but the shape. Nought once that mesh has gone with its last shape.</summary>
+	public static ulong BodyAddCookedMesh( ulong body, CookedMesh cooked, bool isTrigger )
+	{
+		if ( cooked is null || !ResolveBody( body, out var id ) ) return 0;
+
+		//Taken before the shape is made, so the last other shape going meanwhile cannot free it under us
+		lock ( borrowedLock )
+		{
+			if ( cooked.Users <= 0 ) return 0;
+			cooked.Users++;
+		}
+
+		b3ShapeDef def = MakeShapeDef( 0.0f, isTrigger );
+
+		b3ShapeId shape = b3CreateMeshShape( id, &def, cooked.Data, Vec3( 1.0f, 1.0f, 1.0f ) );
+		if ( B3_IS_NULL( shape ) )
+		{
+			Release( cooked );
+			return 0;
+		}
+
+		RememberMesh( Pack( shape ), cooked );
 		return Pack( shape );
 	}
 

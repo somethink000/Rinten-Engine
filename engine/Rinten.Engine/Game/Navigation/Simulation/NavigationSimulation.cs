@@ -27,7 +27,7 @@ internal sealed class NavigationSimulation
 	private const int ParallelOverlapAgents = 256;
 
 	//A browser runs on one thread: a fork there is only the allocation.
-	private static readonly bool serialOnly = OperatingSystem.IsBrowser();
+	private static bool serialOnly => Rinten.Utility.Parallel.InOrder;
 	internal int Count { get { lock ( Gate ) return agents.Count; } }
 
 	internal NavigationSimulation( NavMeshGraph mesh, object gate, float radius, float height )
@@ -90,7 +90,7 @@ internal sealed class NavigationSimulation
 				}
 				else
 				{
-					Parallel.For( 0, agents.Count, stepWorker );
+					Rinten.Jobs.JobSystem.For( agents.Count, stepWorker );
 				}
 				if ( agents.Count > 1 ) ResolveOverlaps();
 			}
@@ -298,7 +298,7 @@ internal sealed class NavigationSimulation
 			}
 			else
 			{
-				Parallel.For( 0, agents.Count, separationWorker );
+				Rinten.Jobs.JobSystem.For( agents.Count, separationWorker );
 				foreach ( var agent in agents ) overlap |= agent.HadOverlap;
 			}
 			if ( !overlap ) break;
@@ -308,7 +308,7 @@ internal sealed class NavigationSimulation
 		{
 			foreach ( var agent in agents ) ConstrainPosition( agent );
 		}
-		else Parallel.For( 0, agents.Count, constrainWorker );
+		else Rinten.Jobs.JobSystem.For( agents.Count, constrainWorker );
 	}
 
 	private void ConstrainPosition( SimulationAgent agent )

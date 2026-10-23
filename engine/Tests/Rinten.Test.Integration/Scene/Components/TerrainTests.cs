@@ -7,26 +7,31 @@ public class TerrainComponentTest
 {
 	//Builds a small TerrainStorage for component tests: 64x64 heightmap, 6400 world units across (100 units per
 	//cell) and 1000 units of height range, so a raw height of ushort.MaxValue maps to exactly 1000 world units.
-	static TerrainStorage CreateSmallStorage()
+	static TerrainStorage CreateSmallStorage( bool plateau = false )
 	{
 		var storage = new TerrainStorage();
-		storage.SetResolution( 64 );
 		storage.TerrainSize = 6400.0f;
 		storage.TerrainHeight = 1000.0f;
+		storage.MakeFromHeights( Heights( plateau ), 64 );
 		return storage;
 	}
 
-	//Raises the square vertex region [16..47] on both axes of a 64x64 heightmap to the maximum raw
+	//A 64x64 height map, flat or with the square vertex region [16..47] on both axes raised to the maximum raw
 	//height. The region is symmetric so the result is identical regardless of row/column transposition.
-	static void RaiseCenterPlateau( TerrainStorage storage )
+	static ushort[] Heights( bool plateau )
 	{
+		var heights = new ushort[64 * 64];
+		if ( !plateau ) return heights;
+
 		for ( int row = 16; row < 48; row++ )
 		{
 			for ( int col = 16; col < 48; col++ )
 			{
-				storage.HeightMap[row * 64 + col] = ushort.MaxValue;
+				heights[row * 64 + col] = ushort.MaxValue;
 			}
 		}
+
+		return heights;
 	}
 
 	//CompactTerrainMaterial packs base/overlay ids, blend and hole bits exactly and clips per field
@@ -55,30 +60,19 @@ public class TerrainComponentTest
 		Assert.AreEqual( 0u, new CompactTerrainMaterial( 0 ).Packed, "Material 0 packs to zero" );
 	}
 
-	//A programmatically created TerrainStorage starts as a 512 resolution terrain that is 20000 units across and 10000 units tall, with full-size height
-	//and control maps - the control map filled with packed material 0 (zero) and no materials. SetResolution reallocates both maps to the new square size.
+	//A programmatically created TerrainStorage is half a kilometre across and a quarter of one tall, flat, with no materials
 	[TestMethod]
-	public void StorageDefaultsAndResolution()
+	public void StorageDefaults()
 	{
 		var storage = new TerrainStorage();
 
-		Assert.AreEqual( 512, storage.Resolution, "Default resolution is pinned" );
-		Assert.AreEqual( 20000.0f, storage.TerrainSize );
-		Assert.AreEqual( 10000.0f, storage.TerrainHeight );
-		Assert.AreEqual( 512 * 512, storage.HeightMap.Length );
-		Assert.AreEqual( 512 * 512, storage.ControlMap.Length );
-		Assert.AreEqual( (ushort)0, storage.HeightMap[0], "Heights start flat at zero" );
-		Assert.AreEqual( 0u, storage.ControlMap[0], "Control map starts as packed material 0" );
+		Assert.AreEqual( 500.0f, storage.TerrainSize );
+		Assert.AreEqual( 250.0f, storage.TerrainHeight );
+		Assert.AreEqual( 0.0f, storage.Mesh.Bounds.Maxs.y, 1e-3f, "The ground starts flat" );
 		Assert.AreEqual( 0, storage.Materials.Count, "No materials by default" );
 		Assert.IsNotNull( storage.MaterialSettings );
 		Assert.IsTrue( storage.MaterialSettings.HeightBlendEnabled, "Height blending defaults on" );
 		Assert.AreEqual( 0.87f, storage.MaterialSettings.HeightBlendSharpness, 0.001f );
-
-		storage.SetResolution( 64 );
-
-		Assert.AreEqual( 64, storage.Resolution );
-		Assert.AreEqual( 64 * 64, storage.HeightMap.Length, "SetResolution reallocates the height map" );
-		Assert.AreEqual( 64 * 64, storage.ControlMap.Length, "SetResolution reallocates the control map" );
 	}
 
 	//TerrainMaterialSettings raises OnChanged only when a property actually changes value -
@@ -118,56 +112,18 @@ public class TerrainComponentTest
 		Assert.AreSame( layer, storage.Materials[0] );
 	}
 
-	//TerrainStorage keeps maps in a $blob sidecar and settings in JSON; round trip is bit-exact
-	[TestMethod]
-	public void StorageBlobSerializationRoundTrip()
-	{
-		var storage = new TerrainStorage();
-		storage.SetResolution( 32 );
-		storage.TerrainSize = 4321.0f;
-		storage.TerrainHeight = 765.0f;
-		storage.MaterialSettings.HeightBlendEnabled = false;
-		storage.MaterialSettings.HeightBlendSharpness = 0.25f;
-
-		for ( int i = 0; i < storage.HeightMap.Length; i++ )
-		{
-			storage.HeightMap[i] = (ushort)((i * 7) % 65536);
-			storage.ControlMap[i] = (uint)(i * 13);
-		}
-
-		var json = storage.Serialize().ToJsonString();
-		var blob = storage.BinaryData;
-
-		Assert.IsNotNull( blob, "Serializing should capture the maps into binary blob data" );
-		Assert.IsTrue( blob.Length > 0 );
-		Assert.IsTrue( json.Contains( "$blob" ), "The JSON should reference the maps by blob guid" );
-
-		var loaded = new TerrainStorage();
-		loaded.BinaryData = blob;
-		loaded.LoadFromJson( json );
-
-		Assert.AreEqual( 32, loaded.Resolution );
-		Assert.AreEqual( 4321.0f, loaded.TerrainSize );
-		Assert.AreEqual( 765.0f, loaded.TerrainHeight );
-		Assert.IsFalse( loaded.MaterialSettings.HeightBlendEnabled );
-		Assert.AreEqual( 0.25f, loaded.MaterialSettings.HeightBlendSharpness, 0.001f );
-		Assert.AreEqual( 0, loaded.Materials.Count );
-		Assert.IsTrue( loaded.HeightMap.SequenceEqual( storage.HeightMap ), "Height map should round trip bit-exact through the blob" );
-		Assert.IsTrue( loaded.ControlMap.SequenceEqual( storage.ControlMap ), "Control map should round trip bit-exact through the blob" );
-	}
-
 	//A terrain whose mesh exists saves the mesh and nothing else: what was sculpted into it
 	//- here a dab that lifts the middle - comes back from the blob, triangle for triangle.
 	[TestMethod]
 	public void StorageMeshSerializationRoundTrip()
 	{
 		var storage = new TerrainStorage();
-		storage.SetResolution( 32 );
 		storage.TerrainSize = 320.0f;
 		storage.TerrainHeight = 100.0f;
+		storage.MakeFromHeights( new ushort[32 * 32], 32 );
 
 		var mesh = storage.Mesh;
-		Assert.IsNotNull( mesh, "A mesh is made from the maps the first time it is asked for" );
+		Assert.IsNotNull( mesh );
 
 		mesh.BeginEdit();
 		mesh.Displace( new Vector3( 160, 0, 160 ), 60.0f, Vector3.Up, 25.0f );
@@ -272,8 +228,7 @@ public class TerrainComponentTest
 		var scene = new Scene();
 		using var sceneScope = scene.Push();
 
-		var storage = CreateSmallStorage();
-		RaiseCenterPlateau( storage );
+		var storage = CreateSmallStorage( plateau: true );
 
 		var go = scene.CreateObject();
 		var terrain = go.Components.Create<Terrain>( false );
@@ -376,8 +331,7 @@ public class TerrainComponentTest
 		var scene = new Scene();
 		using var sceneScope = scene.Push();
 
-		var storage = CreateSmallStorage();
-		RaiseCenterPlateau( storage );
+		var storage = CreateSmallStorage( plateau: true );
 
 		var go = scene.CreateObject();
 		var terrain = go.Components.Create<Terrain>( false );
@@ -411,8 +365,7 @@ public class TerrainComponentTest
 		scene.ProcessDeletes();
 	}
 
-	//RayIntersects guard rails: no storage means a quiet miss, a ray cast away from the terrain misses, and a storage whose
-	//maps are broken is made into a flat terrain rather than thrown on - a mesh is what is traced, and one is always made.
+	//RayIntersects guard rails: no storage means a quiet miss, and a ray cast away from the terrain misses
 	[TestMethod]
 	public void RayIntersectsGuardsAgainstBadStorage()
 	{
@@ -429,13 +382,6 @@ public class TerrainComponentTest
 
 		Assert.IsFalse( terrain.RayIntersects( new Ray( new Vector3( 3200, 3200, 1500 ), Vector3.Up ), 4000.0f, out _ ), "A ray cast away from the terrain should miss" );
 
-		//Broken maps, and no mesh yet to have been made from them.
-		storage.SetResolution( 64 );
-		storage.HeightMap = new ushort[16];
-
-		Assert.IsTrue( terrain.RayIntersects( new Ray( new Vector3( 3200, 1500, 3200 ), Vector3.Down ), 4000.0f, out var flat ), "A broken storage is made flat rather than failing" );
-		Assert.AreEqual( 0.0f, flat.y, 1.0f );
-
 		go.Destroy();
 		scene.ProcessDeletes();
 	}
@@ -447,8 +393,7 @@ public class TerrainComponentTest
 		var scene = new Scene();
 		using var sceneScope = scene.Push();
 
-		var storage = CreateSmallStorage();
-		RaiseCenterPlateau( storage );
+		var storage = CreateSmallStorage( plateau: true );
 
 		var go = scene.CreateObject();
 		var terrain = go.Components.Create<Terrain>( false );

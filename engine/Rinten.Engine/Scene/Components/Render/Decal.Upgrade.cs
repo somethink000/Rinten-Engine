@@ -15,7 +15,7 @@ public partial class Decal
 		try
 		{
 			var color32 = json["ColorTint"].Deserialize<Color32>();
-			json["ColorTint"] = JsonSerializer.SerializeToNode( color32.ToColor() );
+			json["ColorTint"] = JsonSerializer.SerializeToNode( color32.ToColor(), EnumConvert.Plain );
 		}
 		catch { }
 	}
@@ -28,7 +28,7 @@ public partial class Decal
 		try
 		{
 			var color = json["ColorTint"].Deserialize<Color>();
-			json["ColorTint"] = JsonSerializer.SerializeToNode( (ParticleGradient)color );
+			json["ColorTint"] = JsonSerializer.SerializeToNode( (ParticleGradient)color, EnumConvert.Plain );
 		}
 		catch { }
 	}

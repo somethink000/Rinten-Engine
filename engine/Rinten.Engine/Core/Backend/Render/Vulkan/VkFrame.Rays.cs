@@ -16,6 +16,20 @@ internal static unsafe partial class VkFrame
 		}
 	}
 
+	/// <summary>Builds a structure over a soup of triangles into the frame being recorded; null where it is not built.</summary>
+	internal static VkRays.Soup RaysBuildSoup( ReadOnlySpan<float> corners, int solid )
+	{
+		lock ( VkDevice.renderLock )
+		{
+			if ( !VkRays.On || !Current.Recording ) return null;
+
+			var frame = CurrentFrame;
+			CloseOpenPasses( frame );
+
+			return VkRays.BuildSoup( frame.Commands, corners, solid );
+		}
+	}
+
 	/// <summary>A buffer's run of half texels into a half picture, in the frame's order after what wrote it.</summary>
 	internal static bool RaysCopy( ulong buffer, long offset, ulong texture, int width, int height )
 	{

@@ -76,6 +76,27 @@ internal sealed class CoreCasters
 	//The slots of everything that moves.
 	internal List<int> Movers => movers;
 
+	//What the frame draws by hand and moves - code's models, geometry made on the card - as world spheres. The tables do
+	//not hold them, so the drawer says them each frame; they cast into the maps of what moves beside the movers.
+	internal readonly List<System.Numerics.Vector4> Hand = new();
+
+	//How many moving casters there are this frame, the tables' and the hand-drawn, and where the one at an index is.
+	internal int MovingCount => movers.Count + Hand.Count;
+
+	//One thrown to NaN casts nothing: every test against it fails, and a frustum fitted round it is NaN too
+	internal System.Numerics.Vector4 MovingSphere( int at )
+	{
+		var found = at < movers.Count ? SphereOf( movers[at] ) : Hand[at - movers.Count];
+		return float.IsFinite( found.X + found.Y + found.Z + found.W ) ? found : Nothing;
+	}
+
+	//The world box of the moving caster at an index, inside its sphere; null for the hand-drawn, which have only spheres
+	internal BBox? MovingBox( int at )
+		=> at < movers.Count && seen?.EntryAt( movers[at] )?.Renderer is { } renderer && renderer.IsValid() ? renderer.Bounds : null;
+
+	//The tables last looked at, which the boxes are asked of
+	private CoreSceneTables seen;
+
 	//Where a slot's caster is - w below nought where it casts nothing.
 	internal System.Numerics.Vector4 SphereOf( int slot ) => slot < Count ? sphere[slot] : Nothing;
 
@@ -87,6 +108,8 @@ internal sealed class CoreCasters
 	//What the tables say changed since the last look, into Changes.
 	internal void Note( CoreSceneTables tables )
 	{
+		seen = tables;
+
 		Changes.Clear();
 		Whole = false;
 
@@ -160,7 +183,7 @@ internal sealed class CoreCasters
 		//What its clusters draw, or - drawn the classic way - what the drawer draws into
 		//the maps beside them: loose instances cast too, see CoreSceneDrawer.DrawLooseView.
 		var shown = entry is { Live: true, Mesh: not null } &&
-			( entry.Loose || ( record.Flags & CoreMeshShaders.InstanceDrawn ) != 0 );
+			( entry.Loose || ( ( record.Flags | entry.RunFlags ) & CoreMeshShaders.InstanceDrawn ) != 0 );
 
 		var casts = shown && ( record.Flags & CoreMeshShaders.InstanceNoShadow ) == 0;
 

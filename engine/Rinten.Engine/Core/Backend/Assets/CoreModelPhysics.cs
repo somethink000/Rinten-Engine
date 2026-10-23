@@ -84,6 +84,15 @@ internal static unsafe class CoreModelPhysics
 
 			case ModelFormat.ShapeKind.Mesh:
 			{
+				var core = body.Backend as CorePhysicsBodyBackend;
+				var cooked = core is null ? null : Cooked( model, part, index );
+
+				if ( cooked is not null && core.AddMeshShape( cooked ) is { } borrowed )
+				{
+					body.Dirty();
+					return borrowed;
+				}
+
 				var points = ReadPoints( model, part, index );
 				var indices = ReadIndices( model, part, index );
 
@@ -92,11 +101,35 @@ internal static unsafe class CoreModelPhysics
 				for ( var i = 0; i < points.Count; ++i )
 					points[i] = transform.PointToWorld( points[i] );
 
-				return body.AddMeshShape( points, indices );
+				if ( core is null )
+					return body.AddMeshShape( points, indices );
+
+				var shape = core.AddMeshShape( points, indices, out cooked );
+				if ( cooked is not null )
+					lock ( cookedMeshes ) cookedMeshes.GetOrCreateValue( model )[(part, index)] = cooked;
+
+				body.Dirty();
+				return shape;
 			}
 
 			default:
 				return null;
+		}
+	}
+
+	//Each model shape's cooked triangle mesh while a body still holds it: a forest of one tree cooks its BVH once
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CoreAssets.ModelFile, Dictionary<(int Part, int Index), CorePhysics.CookedMesh>> cookedMeshes = new();
+
+	private static CorePhysics.CookedMesh Cooked( CoreAssets.ModelFile model, int part, int index )
+	{
+		lock ( cookedMeshes )
+		{
+			if ( !cookedMeshes.TryGetValue( model, out var shapes ) ) return null;
+			if ( !shapes.TryGetValue( (part, index), out var cooked ) ) return null;
+			if ( cooked.IsLive ) return cooked;
+
+			shapes.Remove( (part, index) );
+			return null;
 		}
 	}
 
@@ -325,7 +358,7 @@ internal static unsafe class CoreModelPhysics
 
 		//The model's own graph, stepped over - see ModelDefinition.ModelGraph.Skim.
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(), new ModelDefinition.ModelGraph.Skim() },
+		Converters = { new EnumConvert(), new ModelDefinition.ModelGraph.Skim() },
 	};
 
 	static Dictionary<string, Transform> BoneRests( CoreAssets.ModelFile model )

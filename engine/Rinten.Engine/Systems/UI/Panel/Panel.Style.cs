@@ -18,17 +18,24 @@ public partial class Panel
 	/// <summary>Try to find <c>@keyframes</c> CSS rule with given name in <see cref="AllStyleSheets"/>.</summary>
 	public bool TryFindKeyframe( string name, out KeyFrames keyframes )
 	{
-		//TODO: optimization - cache found keyframes? Clear on load?
-
 		keyframes = null;
 
-		foreach ( var sheet in AllStyleSheets )
+		//AllStyleSheets' walk to the nearest boundary without its two iterators: asked every animation frame
+		for ( var panel = this; panel is not null; panel = panel.Parent )
 		{
-			if ( sheet.KeyFrames.TryGetValue( name, out var keyframe ) )
+			if ( panel.StyleSheet.List is { } sheets )
 			{
-				keyframes = keyframe;
-				return true;
+				foreach ( var sheet in sheets )
+				{
+					if ( sheet.KeyFrames.TryGetValue( name, out var keyframe ) )
+					{
+						keyframes = keyframe;
+						return true;
+					}
+				}
 			}
+
+			if ( panel.StyleBoundary ) break;
 		}
 
 		return false;

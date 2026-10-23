@@ -1,0 +1,34 @@
+{
+  "Title": "Game - 2D",
+  "Type": "game",
+  "Org": "local",
+  "Ident": "game.2d",
+  "Tags": null,
+  "Schema": 1,
+  "HasAssets": true,
+  "AssetsPath": "",
+  "Resources": null,
+  "MenuResources": "*",
+  "HasCode": true,
+  "CodePath": "/code/",
+  "PackageReferences": [],
+  "EditorReferences": null,
+  "Metadata": {
+    "MaxPlayers": 64,
+    "MinPlayers": 1,
+    "TickRate": 50,
+    "GameNetworkType": "Multiplayer",
+    "MapSelect": "Unrestricted",
+    "MapList": [],
+    "RankType": "None",
+    "PerMapRanking": false,
+    "LeaderboardType": "None",
+    "CsProjName": "",
+    "StartupScene": "scenes/2d.scene",
+    "ProjectTemplate": {
+      "Icon": "grid_on",
+      "Order": -9,
+      "Description": "An empty 2D game: an orthographic camera with a linear curve, so sprites show their sheet's own colours, and a sprite you walk"
+    }
+  }
+}

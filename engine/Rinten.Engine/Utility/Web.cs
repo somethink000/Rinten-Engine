@@ -245,7 +245,7 @@ internal static class Web
 
 		try
 		{
-			return JsonSerializer.Deserialize<T>( json, new JsonSerializerOptions( JsonSerializerOptions.Default ) { PropertyNameCaseInsensitive = true } );
+			return JsonSerializer.Deserialize<T>( json, new JsonSerializerOptions( EnumConvert.Plain ) { PropertyNameCaseInsensitive = true } );
 		}
 		catch ( OperationCanceledException )
 		{

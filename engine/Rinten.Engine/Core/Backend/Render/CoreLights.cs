@@ -3,34 +3,36 @@ using System.Runtime.InteropServices;
 
 namespace Rinten;
 
-//Frame lights plus a clustered tile/slice grid of light lists, then decals, in one buffer (set 1 b7)
+//Frame lights, then per screen tile a bitmask of the lamps reaching it and per depth bin its run of lamps, then decals,
+//in one buffer (set 1 b7) - the lamps go up sorted by view depth so that a bin's lamps are one run; see light_cull.slang
 internal static class CoreLights
 {
-	//How many lights one frame may carry.
-	internal const int MostLights = 128;
+	//How many lights one frame may carry; light_cull.slang's MostWords is this over 32
+	internal const int MostLights = 4096;
 
-	//Floats a light takes: five float4s, as frame.slang has it; the fifth holds only the falloff's shape, as the shader
-	//reads float4s - two kilobytes a frame across 128 lights
+	//Floats a light takes: five float4s, as frame.slang has it; the fifth holds only the falloff's shape
 	internal const int LightFloats = 20;
 
 	//What the buffer says about itself before the lights.
 	internal const int HeaderFloats = 16;
 
-	//Grid cell size in pixels; 64 would overflow PerCell, so 32
+	//Tile size in pixels
 	internal const int TileSize = 32;
 
-	//Depth slices of the light grid; fewer makes the cull cheaper with no visible change
-	internal const int Slices = 16;
+	//Depth bins, even in the logarithm of depth from the near plane to Deep; the last runs to infinity
+	internal const int Bins = 128;
 
-	//Max lights per cell, and the light count above which a grid is built at all
-	internal const int PerCell = 16;
+	//Lights above which the grid is built; with fewer every pixel walks them all for less than the cull costs
+	internal const int GridAbove = 16;
 
-	//Grid depth, the distance lamps are dropped past; the last slice runs to infinity
+	//Metres the bins span
 	internal const float Deep = 200.0f;
 
 	private static ulong buffer;
 	private static long bufferWords;
 	private static uint[] scratch = Array.Empty<uint>();
+	private static readonly float[] depths = new float[MostLights];
+	private static readonly int[] order = new int[MostLights];
 	private static ulong cullPipeline;
 	private static bool cullTried;
 	private static readonly ulong[] bound = new ulong[1];
@@ -39,8 +41,8 @@ internal static class CoreLights
 	//How many lights the last frame put on the card.
 	internal static int Count { get; private set; }
 
-	//And how many cells the grid had, or nought where it built none.
-	internal static int Cells { get; private set; }
+	//And how many tiles the grid had, or nought where it built none.
+	internal static int Tiles { get; private set; }
 
 	//Non-directional light count as uploaded; 0 selects pipelines without the lamp branch (kLampsOn)
 	internal static int Lamps { get; private set; }
@@ -66,16 +68,16 @@ internal static class CoreLights
 	}
 
 	//Sends the frame's lights and builds the grid over them, in the frame after the block is set up, before shading.
-	//grid: whether to build cells - a bake has no screen and a flat view no depth to slice; both read every light
+	//grid: whether to build one - a bake has no screen and a flat view no depth to bin; both read every light
 	internal static bool Frame( ReadOnlySpan<float> lights, int count, (int Width, int Height) pixels,
 		in System.Numerics.Matrix4x4 worldToView, float projX, float projY, float near, float far, bool grid )
 	{
 		Count = 0;
-		Cells = 0;
+		Tiles = 0;
 		Lamps = 0;
 		Decals = 0;
 
-		count = Math.Max( 0, Math.Min( count, lights.Length / LightFloats ) );
+		count = Math.Max( 0, Math.Min( count, Math.Min( MostLights, lights.Length / LightFloats ) ) );
 
 		//The portable frame reads its sixteen from the block, but its pipelines still take kLampsOn and kManyLights
 		if ( CoreRenderDevice.PortableFrame )
@@ -89,30 +91,50 @@ internal static class CoreLights
 
 		if ( !CoreNative.Available ) return false;
 
-		//No grid where a cell could not narrow anything: with no more lights than a cell holds, every cell would name
-		//all of them and the cull would be paid for nothing. Which is every scene that has a sun and a lamp or two.
-		grid = grid && count > PerCell && pixels.Width > 0 && pixels.Height > 0 &&
+		grid = grid && count > GridAbove && pixels.Width > 0 && pixels.Height > 0 &&
 			MathF.Abs( projX ) > 0.0001f && MathF.Abs( projY ) > 0.0001f &&
 			far > near && near > 0.0f && EnsurePipeline();
 
-		var cellsX = grid ? ( pixels.Width + TileSize - 1 ) / TileSize : 0;
-		var cellsY = grid ? ( pixels.Height + TileSize - 1 ) / TileSize : 0;
-		var cellsZ = grid ? Slices : 0;
-		var cells = cellsX * cellsY * cellsZ;
+		//The suns first in their own order, then the lamps nearest the eye first: the kind is the w of the second float4
+		var suns = 0;
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( lights[( i * LightFloats ) + 7] < 0.5f ) order[suns++] = i;
+		}
 
-		var lightWords = HeaderFloats + ( MostLights * LightFloats );
+		Lamps = count - suns;
 
-		//The decals go after the cells, and the cells after the lights: the cull writes its lists
-		//at lightWords and the decals must not be under them. See CoreDecals for what one is.
+		var lamp = suns;
+		for ( var i = 0; i < count; i++ )
+		{
+			var at = i * LightFloats;
+			if ( lights[at + 7] < 0.5f ) continue;
+
+			depths[lamp] = -( ( lights[at] * worldToView.M13 ) + ( lights[at + 1] * worldToView.M23 ) +
+				( lights[at + 2] * worldToView.M33 ) + worldToView.M43 );
+			order[lamp++] = i;
+		}
+
+		if ( grid ) Array.Sort( depths, order, suns, Lamps );
+
+		var tilesX = grid ? ( pixels.Width + TileSize - 1 ) / TileSize : 0;
+		var tilesY = grid ? ( pixels.Height + TileSize - 1 ) / TileSize : 0;
+		var maskWords = grid ? ( count + 31 ) / 32 : 0;
+		var bins = grid ? Bins : 0;
+
+		//The masks and bins after the lights, the decals after them; the cull writes what is between
+		var lightWords = HeaderFloats + ( count * LightFloats );
+		var masksAt = lightWords;
+		var binsAt = masksAt + ( tilesX * tilesY * maskWords );
 		var decalCount = Math.Min( CoreDecals.Count, CoreDecals.MostDecals );
-		var decalWords = lightWords + ( cells * ( PerCell + 1 ) );
+		var decalWords = binsAt + bins;
 		var words = decalWords + ( decalCount * CoreDecals.DecalFloats );
 
 		if ( buffer == 0 || bufferWords < words )
 		{
 			if ( buffer != 0 ) CoreRenderDevice.DestroyBuffer( buffer );
 
-			bufferWords = Math.Max( words, Math.Max( bufferWords * 2, lightWords ) );
+			bufferWords = Math.Max( words, bufferWords * 2 );
 			buffer = CoreRenderDevice.ReserveBuffer( bufferWords * 4 );
 
 			if ( buffer == 0 ) { bufferWords = 0; return false; }
@@ -123,34 +145,30 @@ internal static class CoreLights
 
 		if ( scratch.Length < lightWords ) scratch = new uint[lightWords];
 
-		//Upload only this frame's lights, not the whole buffer; nothing reads past the count
-		var written = HeaderFloats + ( count * LightFloats );
+		Array.Clear( scratch, 0, HeaderFloats );
 
-		Array.Clear( scratch, 0, written );
-
-		//Near enough to matter, and no further: see Deep.
 		var gridNear = MathF.Max( near, 0.05f );
 		var gridFar = MathF.Min( MathF.Max( far, gridNear * 2.0f ), Deep );
-		var scale = grid ? Slices / MathF.Log( gridFar / gridNear ) : 0.0f;
+		var scale = grid ? Bins / MathF.Log( gridFar / gridNear ) : 0.0f;
 
 		scratch[0] = (uint)count;
-		scratch[1] = (uint)cellsX;
-		scratch[2] = (uint)cellsY;
-		scratch[3] = (uint)cellsZ;
-		scratch[4] = PerCell;
-		scratch[5] = (uint)lightWords;
+		scratch[1] = (uint)tilesX;
+		scratch[2] = (uint)tilesY;
+		scratch[3] = (uint)bins;
+		scratch[4] = (uint)suns;
+		scratch[5] = (uint)masksAt;
 		scratch[6] = BitConverter.SingleToUInt32Bits( gridNear );
 		scratch[7] = BitConverter.SingleToUInt32Bits( scale );
 		scratch[8] = (uint)decalCount;
 		scratch[9] = (uint)decalWords;
+		scratch[11] = (uint)binsAt;
+		scratch[12] = (uint)maskWords;
 
-		//Tile size goes in the header so the shader never hardcodes its own copy
-		scratch[10] = (uint)TileSize;
+		var source = MemoryMarshal.Cast<float, uint>( lights );
+		for ( var i = 0; i < count; i++ )
+			source.Slice( order[i] * LightFloats, LightFloats ).CopyTo( scratch.AsSpan( HeaderFloats + ( i * LightFloats ) ) );
 
-		MemoryMarshal.Cast<float, uint>( lights[..( count * LightFloats )] )
-			.CopyTo( scratch.AsSpan( HeaderFloats ) );
-
-		if ( !CoreRenderDevice.FrameWrite( buffer, 0, MemoryMarshal.AsBytes( scratch.AsSpan( 0, written ) ) ) )
+		if ( !CoreRenderDevice.FrameWrite( buffer, 0, MemoryMarshal.AsBytes( scratch.AsSpan( 0, lightWords ) ) ) )
 			return false;
 
 		if ( decalCount > 0 && !CoreRenderDevice.FrameWrite( buffer, decalWords * 4L,
@@ -161,10 +179,6 @@ internal static class CoreLights
 
 		Count = count;
 		Decals = decalCount;
-
-		//The kind is the w of the second float4: nought the sun, anything else a lamp - frame.slang's test
-		for ( var i = 0; i < count; i++ )
-			if ( lights[( i * LightFloats ) + 7] >= 0.5f ) Lamps++;
 
 		if ( !grid ) return true;
 
@@ -177,30 +191,31 @@ internal static class CoreLights
 		floats[8] = m.M31; floats[9] = m.M32; floats[10] = m.M33; floats[11] = m.M34;
 		floats[12] = m.M41; floats[13] = m.M42; floats[14] = m.M43; floats[15] = m.M44;
 
-		//Signed: the projection turns the picture over on its y, and the cell's own box has to be turned over with it.
+		//Signed: the projection turns the picture over on its y, and the tile's planes have to be turned over with it.
 		floats[16] = 1.0f / projX;
 		floats[17] = 1.0f / projY;
 		floats[18] = gridNear;
 		floats[19] = scale;
 
-		floats[20] = cellsX;
-		floats[21] = cellsY;
-		floats[22] = cellsZ;
+		floats[20] = tilesX;
+		floats[21] = tilesY;
+		floats[22] = bins;
 		floats[23] = count;
 
-		floats[24] = PerCell;
-		floats[25] = lightWords;
+		floats[24] = suns;
+		floats[25] = masksAt;
+		floats[26] = binsAt;
+		floats[27] = maskWords;
 
 		bound[0] = buffer;
 
+		//A group a tile, then the bins 64 to a group
 		CoreRenderDevice.ZoneBegin( "light cull" );
-		var ok = CoreRenderDevice.Dispatch( cullPipeline, bound, cellsX * cellsY, 1, 1, push );
+		var ok = CoreRenderDevice.Dispatch( cullPipeline, bound, ( tilesX * tilesY ) + ( ( bins + 63 ) / 64 ), 1, 1, push );
 		CoreRenderDevice.ZoneEnd();
 
-		if ( ok ) Cells = cells;
-
-
-		if ( !ok ) Log.Warning( "the light cull would not dispatch" );
+		if ( ok ) Tiles = tilesX * tilesY;
+		else Log.Warning( "the light cull would not dispatch" );
 
 		return ok;
 	}
@@ -216,7 +231,7 @@ internal static class CoreLights
 		cullPipeline = 0;
 		cullTried = false;
 		Count = 0;
-		Cells = 0;
+		Tiles = 0;
 		Decals = 0;
 		CoreRenderDevice.SetLightBuffer( 0 );
 	}

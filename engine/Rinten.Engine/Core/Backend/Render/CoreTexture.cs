@@ -52,7 +52,7 @@ internal sealed class CoreTexture
 	//Changes whenever the shown content changes; render targets count as changing every frame
 	internal int Content =>
 		borrowed ? borrowedVersion
-		: Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) ? unchecked( (int)EngineLoop.LoopFrames )
+		: ( ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) ? unchecked( (int)EngineLoop.LoopFrames )
 		: Version;
 
 	internal int Width => Desc.m_nWidth;
@@ -389,6 +389,23 @@ internal sealed class CoreTexture
 		return output;
 	}
 
+	[ThreadStatic] static byte[] converting;
+
+	//The first level as RGBA8, in the thread's kept buffer - valid until the next call on this thread
+	private ReadOnlySpan<byte> Converted( int width, int height )
+	{
+		var count = width * height * 4;
+		if ( converting is null || converting.Length < count ) converting = new byte[System.Math.Max( count, ( converting?.Length ?? 0 ) * 2 )];
+
+		var output = converting.AsSpan( 0, count );
+		output.Clear();
+
+		if ( CoreImage.Handles( Format ) )
+			Read( (0, 0, width, height), 0, 0, output, ImageFormat.RGBA8888, (0, 0, width, height), width * 4 );
+
+		return output;
+	}
+
 	//Uploads since last read and their pixel count; a count climbing with frame rate means slow UI
 	internal static int Uploads;
 	internal static long UploadedPixels;
@@ -486,9 +503,10 @@ internal sealed class CoreTexture
 
 		//RGBA8 goes as the bytes it already is. Converting a format to itself through Pixels() walks every pixel through a read
 		//and a write, and on an interface repainting a window's worth of widgets that walk cost more than the upload it fed.
+		//Any other format is turned into RGBA8 in one buffer a thread keeps, not a new array of colours for every upload
 		ReadOnlySpan<byte> bytes = Format == ImageFormat.RGBA8888
 			? MipData( 0 )
-			: System.Runtime.InteropServices.MemoryMarshal.AsBytes( Pixels( 0 ).AsSpan() );
+			: Converted( width, height );
 
 		if ( bytes.Length < width * height * 4 )
 		{
@@ -533,7 +551,7 @@ internal sealed class CoreTexture
 	//Upload with mips instead of level 0 only, so downscaled pictures aren't jagged; RGBA8 2D only
 	private bool Chained => Mips > 1 && Format == ImageFormat.RGBA8888 && Depth == 1
 		&& !Desc.IsCube && !Desc.IsArray
-		&& !Desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
+		&& !( ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET );
 
 	//The picture onto the device with every level, built here from the first one where nobody wrote them. Zero where the device would not take it.
 	private ulong UploadChain( int width, int height )

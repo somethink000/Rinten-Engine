@@ -338,21 +338,15 @@ float3 Light2DAt( float3 world )
 }
 
 //Wrapped lighting for sprites (back lights still count), no shadows
-float3 LightOn( float3 world, float3 normal, float2 screen )
+float3 LightOn( float3 world, float3 normal )
 {
 	float3 lit = SceneAmbient( SkyAmbient( normal ) );
 
-	float viewDepth = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
+	LightWalk walk = LightsHere( world );
+	uint which;
 
-	LightWalk walk = LightsHere( screen, viewDepth );
-	int count = int( walk.count );
-
-	if ( kManyLights == 0 ) count = min( count, 1 );
-
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
-
 		Light light = LightAt( which );
 
 		float3 l;

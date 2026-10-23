@@ -21,14 +21,11 @@ internal sealed class VerletRopeGameSystem : GameObjectSystem
 		Scene.GetAll<VerletRope>( _ropes );
 		if ( _ropes.Count == 0 ) return;
 
-		var timeDelta = Time.Delta;
-
-		if ( Rinten.Utility.Parallel.InOrder )
-		{
-			for ( var i = 0; i < _ropes.Count; i++ ) _ropes[i].Simulate( timeDelta );
-			return;
-		}
-
-		System.Threading.Tasks.Parallel.ForEach( Partitioner.Create( _ropes, loadBalance: true ), rope => rope.Simulate( timeDelta ) );
+		//The step as a field and the body made once: a lambda over a local was a closure made every frame, whichever way it ran
+		stepDelta = Time.Delta;
+		Rinten.Utility.Parallel.ForEach( _ropes, null, simulate ??= rope => rope.Simulate( stepDelta ) );
 	}
+
+	float stepDelta;
+	Action<VerletRope> simulate;
 }

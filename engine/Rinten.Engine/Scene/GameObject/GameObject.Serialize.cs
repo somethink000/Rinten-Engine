@@ -969,7 +969,7 @@ public partial class GameObject
 
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( componentType.TargetType ) )
 		{
-			if ( !propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost ) )
+			if ( !( ( propertyAndAttribute.Attribute.Flags & SyncFlags.FromHost ) == SyncFlags.FromHost ) )
 				continue;
 
 			componentJson.Remove( propertyAndAttribute.Property.Name );
@@ -1092,7 +1092,7 @@ public partial class GameObject
 	{
 		if ( reader.TokenType == JsonTokenType.StartObject )
 		{
-			var goRef = JsonSerializer.Deserialize<GameObjectReference>( ref reader );
+			var goRef = JsonSerializer.Deserialize<GameObjectReference>( ref reader, EnumConvert.Plain );
 
 			return goRef.Resolve( Game.ActiveScene, warn: true );
 		}

@@ -173,7 +173,7 @@ internal static unsafe partial class VkPipelines
 		byte* pixelSpirv, int pixelSize, string pixelEntry,
 		int vertexLayout, int depthTest, int topology, int blend,
 		int depthWrite, int cullBack, int depthOnly, int target, int rasterFlags,
-		int specialize = -1, int pictureFormat = -1, uint viewMask = 0 )
+		int specialize = -1, int pictureFormat = -1, uint viewMask = 0, uint samples = 1 )
 	{
 		lock ( VkDevice.renderLock )
 		{
@@ -461,7 +461,7 @@ internal static unsafe partial class VkPipelines
 					var multisample = new PipelineMultisampleStateCreateInfo
 					{
 						SType = StructureType.PipelineMultisampleStateCreateInfo,
-						RasterizationSamples = SampleCountFlags.Count1Bit,
+						RasterizationSamples = samples > 1 ? (SampleCountFlags)samples : SampleCountFlags.Count1Bit,
 					};
 
 					var blendAttachment = new PipelineColorBlendAttachmentState
@@ -589,7 +589,7 @@ internal static unsafe partial class VkPipelines
 						PColorAttachmentFormats = colourless ? null : colourFormats,
 						DepthAttachmentFormat = formats.Depth,
 
-						//The layers a pass drawing both of a headset's eyes goes to - only a pipeline made again for one; see Multiview.
+						//The layers a pass drawing both of a headset's eyes goes to - only a pipeline made again for one; see Variant.
 						ViewMask = viewMask,
 					};
 
@@ -647,7 +647,7 @@ internal static unsafe partial class VkPipelines
 
 			var handle = pipelines.Add( made );
 
-			if ( viewMask == 0 )
+			if ( viewMask == 0 && samples <= 1 )
 			{
 				Remember( made.Pipeline, new Recipe(
 					new ReadOnlySpan<byte>( vertexSpirv, vertexSize ).ToArray(), vertexEntry,

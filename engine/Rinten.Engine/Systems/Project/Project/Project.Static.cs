@@ -186,7 +186,7 @@ public partial class Project
 		{
 			ConfigFilePath = cleanPath,
 			Active = active,
-			IsBuiltIn = flags.HasFlag( ProjectLoadFlags.BuiltIn )
+			IsBuiltIn = ( ( flags & ProjectLoadFlags.BuiltIn ) == ProjectLoadFlags.BuiltIn )
 		};
 		project.Load();
 

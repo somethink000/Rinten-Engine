@@ -468,6 +468,37 @@ internal sealed unsafe class CorePhysicsBodyBackend : IPhysicsBodyBackend
 		return Adopt( CorePhysics.BodyAddMesh( body, flat, indices, isTrigger ) );
 	}
 
+	//A mesh in body space, cooked here and handed back so the next body made from the same model shape borrows it
+	internal PhysicsShape AddMeshShape( List<Vector3> points, List<int> indices, out CorePhysics.CookedMesh cooked )
+	{
+		cooked = null;
+		if ( points is null || points.Count < 3 ) return null;
+		if ( indices is null || indices.Count < 3 ) return null;
+
+		//Box3D reads the vertices an index names without asking
+		foreach ( var i in indices )
+		{
+			if ( i < 0 || i >= points.Count ) return null;
+		}
+
+		var flat = new float[points.Count * 3];
+
+		for ( var i = 0; i < points.Count; i++ )
+		{
+			flat[i * 3 + 0] = points[i].x;
+			flat[i * 3 + 1] = points[i].y;
+			flat[i * 3 + 2] = points[i].z;
+		}
+
+		var triangles = System.Runtime.InteropServices.CollectionsMarshal.AsSpan( indices );
+
+		return Adopt( CorePhysics.BodyAddMesh( body, flat, triangles, isTrigger, out cooked ) );
+	}
+
+	//A mesh another body cooked; null once that mesh has gone with the last shape on it
+	internal PhysicsShape AddMeshShape( CorePhysics.CookedMesh cooked )
+		=> Adopt( CorePhysics.BodyAddCookedMesh( body, cooked, isTrigger ) );
+
 	//Points into the flat float triples the ABI takes, placed on the body.
 	private static float[] Flatten( Vector3[] points, Transform transform )
 	{

@@ -16,7 +16,7 @@ internal static class Translation
 		options.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString | System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals;
 		options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault;
 
-		options.Converters.Add( new JsonStringEnumConverter( null, true ) );
+		options.Converters.Add( new EnumConvert() );
 	}
 
 	internal static bool TryConvert( ref object value, Type targetType )

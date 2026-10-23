@@ -2,7 +2,7 @@ namespace Rinten;
 
 /// <summary>A steady pull in one direction.</summary>
 [Title( "Gravity" ), Category( "Update" ), Icon( "arrow_downward" )]
-public sealed class GravityModule : ParticleModule, IParticleModuleStep
+public sealed class GravityModule : ParticleModule, IParticleModuleStep, IParticleModuleFrame
 {
 	public override ParticleModuleStage Stage => ParticleModuleStage.Update;
 
@@ -14,7 +14,23 @@ public sealed class GravityModule : ParticleModule, IParticleModuleStep
 	public override void Apply( ParticleModuleContext context ) { }
 
 	public void Step( ParticleModuleContext context, float delta )
-		=> context.Particle.Velocity += Force.Evaluate( context.Particle, context.Player ) * delta;
+		=> context.Particle.Velocity += ( context.Frame is Held held ? held.Force : Force.Evaluate( context.Particle, context.Player ) ) * delta;
+
+	//The force worked out once an effect where no particle changes it, not two lookups by name a particle
+	private sealed class Held
+	{
+		internal Vector3 Force;
+	}
+
+	public object Begin( ParticleModuleContext context, float delta, object was )
+	{
+		if ( !Force.Uniform ) return null;
+
+		var held = was as Held ?? new Held();
+		held.Force = Force.Evaluate( null, context.Player );
+
+		return held;
+	}
 }
 
 //Handed to the effect rather than stepped here: damping is one of the things the engine's own simulation already does, and doing it there means it happens with everything else that moves a particle rather than after all of it.
@@ -83,7 +99,7 @@ public enum ParticleSpace
 
 /// <summary>A point that pulls particles towards it - full strength inside its own size, falling away outside it.</summary>
 [Title( "Attractor" ), Category( "Update" ), Icon( "my_location" )]
-public sealed class AttractorModule : ParticleModule, IParticleModuleStep
+public sealed class AttractorModule : ParticleModule, IParticleModuleStep, IParticleModuleFrame
 {
 	public override ParticleModuleStage Stage => ParticleModuleStage.Update;
 
@@ -113,11 +129,14 @@ public sealed class AttractorModule : ParticleModule, IParticleModuleStep
 
 	public void Step( ParticleModuleContext context, float delta )
 	{
-		var origin = Position.Evaluate( context.Particle, context.Player );
+		var held = context.Frame as EmitterFrame;
+		var origin = held?.Point ?? Position.Evaluate( context.Particle, context.Player );
 
 		//Local means the emitter's own frame: turned with it as well as carried by it, so a point beside a pitched emitter stays beside it.
-		if ( Space == ParticleSpace.Local && context.Emitter.IsValid() )
+		if ( held is null && Space == ParticleSpace.Local && context.Emitter.IsValid() )
 			origin = context.Emitter.WorldPosition + ( context.Emitter.WorldRotation * origin );
+		else if ( held is { Point: null, Local: true } )
+			origin = held.Emitter.Position + ( held.Emitter.Rotation * origin );
 
 		var toward = origin - context.Particle.Position;
 		var distance = toward.Length;
@@ -137,13 +156,23 @@ public sealed class AttractorModule : ParticleModule, IParticleModuleStep
 		//A push is the pull the other way, with the same falloff - not the falloff turned inside out, which pushed nothing near and everything far.
 		if ( Invert ) toward = -toward;
 
-		context.Particle.Velocity += toward.Normal * Strength.Evaluate( context.Player ) * strength * delta;
+		context.Particle.Velocity += toward.Normal * ( held?.Amount ?? Strength.Evaluate( context.Player ) ) * strength * delta;
+	}
+
+	public object Begin( ParticleModuleContext context, float delta, object was )
+	{
+		var held = EmitterFrame.Of( context, Space, was );
+
+		held.Point = Position.Uniform ? held.ToWorld( Position.Evaluate( null, context.Player ) ) : null;
+		held.Amount = Strength.Uniform ? Strength.Evaluate( context.Player ) : null;
+
+		return held;
 	}
 }
 
 /// <summary>A swirl about an axis - particles orbit rather than fall in.</summary>
 [Title( "Vortex" ), Category( "Update" ), Icon( "cyclone" )]
-public sealed class VortexModule : ParticleModule, IParticleModuleStep
+public sealed class VortexModule : ParticleModule, IParticleModuleStep, IParticleModuleFrame
 {
 	public override ParticleModuleStage Stage => ParticleModuleStage.Update;
 
@@ -163,14 +192,19 @@ public sealed class VortexModule : ParticleModule, IParticleModuleStep
 
 	public void Step( ParticleModuleContext context, float delta )
 	{
-		var center = Center;
-		var axis = Axis.Evaluate( context.Particle, context.Player ).Normal;
+		var held = context.Frame as EmitterFrame;
+		var center = held?.Point ?? Center;
+		var axis = held?.Axis ?? Axis.Evaluate( context.Particle, context.Player ).Normal;
 
 		//Local means the emitter's own frame: the axis turns with the emitter, so a portal stood on its side still spins in its own plane.
-		if ( Space == ParticleSpace.Local && context.Emitter.IsValid() )
+		if ( held is null && Space == ParticleSpace.Local && context.Emitter.IsValid() )
 		{
 			center = context.Emitter.WorldPosition + ( context.Emitter.WorldRotation * center );
 			axis = context.Emitter.WorldRotation * axis;
+		}
+		else if ( held is { Axis: null, Local: true } )
+		{
+			axis = held.Emitter.Rotation * axis;
 		}
 
 		var outward = context.Particle.Position - center;
@@ -179,14 +213,25 @@ public sealed class VortexModule : ParticleModule, IParticleModuleStep
 		if ( distance < 0.01f ) return;
 		var tangent = Vector3.Cross( axis, outward.Normal );
 
-		context.Particle.Velocity += tangent * ( Strength.Evaluate( context.Player ) / distance ) * delta;
+		context.Particle.Velocity += tangent * ( ( held?.Amount ?? Strength.Evaluate( context.Player ) ) / distance ) * delta;
+	}
+
+	public object Begin( ParticleModuleContext context, float delta, object was )
+	{
+		var held = EmitterFrame.Of( context, Space, was );
+
+		held.Point = held.ToWorld( Center );
+		held.Axis = Axis.Uniform ? held.TurnToWorld( Axis.Evaluate( null, context.Player ).Normal ) : null;
+		held.Amount = Strength.Uniform ? Strength.Evaluate( context.Player ) : null;
+
+		return held;
 	}
 }
 
 //The curl of a noise field, which is divergence-free by construction: whatever flows into a region flows out of it again. The field itself is a handful of sines rather than proper Perlin noise - cheap, and at these scales the difference does not show.
 /// <summary>A flow field that swirls without ever pushing particles together - what makes smoke look like smoke rather than like a spray.</summary>
 [Title( "Curl Noise" ), Category( "Update" ), Icon( "waves" )]
-public sealed class CurlNoiseModule : ParticleModule, IParticleModuleStep
+public sealed class CurlNoiseModule : ParticleModule, IParticleModuleStep, IParticleModuleFrame
 {
 	public override ParticleModuleStage Stage => ParticleModuleStage.Update;
 
@@ -211,57 +256,67 @@ public sealed class CurlNoiseModule : ParticleModule, IParticleModuleStep
 	public void Step( ParticleModuleContext context, float delta )
 	{
 		var particle = context.Particle;
-		var position = ( particle.Position + Offset ) * Scale.Evaluate( context.Player );
-		var time = particle.Age * TimeScale.Evaluate( context.Player );
+		var held = context.Frame as Held;
 
-		particle.Velocity += Curl( position, time ) * Strength.Evaluate( context.Player ) * delta;
+		var scale = held?.Scale ?? Scale.Evaluate( context.Player );
+		var timeScale = held?.TimeScale ?? TimeScale.Evaluate( context.Player );
+		var strength = held?.Strength ?? Strength.Evaluate( context.Player );
+
+		var position = ( particle.Position + Offset ) * scale;
+		var time = particle.Age * timeScale;
+
+		particle.Velocity += Curl( position, time ) * strength * delta;
 	}
 
-	//Curl of the potential field by central differences; each of the six samples taken once
+	//The three numbers worked out once for the effect where they are plain numbers, read as they are per particle otherwise
+	private sealed class Held
+	{
+		internal float? Scale, TimeScale, Strength;
+	}
+
+	public object Begin( ParticleModuleContext context, float delta, object was )
+	{
+		var held = was as Held ?? new Held();
+
+		held.Scale = Scale.Uniform ? Scale.Evaluate( context.Player ) : null;
+		held.TimeScale = TimeScale.Uniform ? TimeScale.Evaluate( context.Player ) : null;
+		held.Strength = Strength.Uniform ? Strength.Evaluate( context.Player ) : null;
+
+		return held;
+	}
+
+	//The potential field's exact curl: the field is a sum of sines of lines, whose gradients are cosines
 	static Vector3 Curl( Vector3 position, float time )
 	{
-		const float epsilon = 0.001f;
+		var x = Gradient( position, time );
+		var y = Gradient( position + new Vector3( 31.416f, -47.853f, 12.793f ), time );
+		var z = Gradient( position + new Vector3( -17.737f, 86.214f, -59.482f ), time );
 
-		var x = new Vector3( epsilon, 0.0f, 0.0f );
-		var y = new Vector3( 0.0f, epsilon, 0.0f );
-		var z = new Vector3( 0.0f, 0.0f, epsilon );
-
-		var aheadX = Potential( position + x, time );
-		var behindX = Potential( position - x, time );
-		var aheadY = Potential( position + y, time );
-		var behindY = Potential( position - y, time );
-		var aheadZ = Potential( position + z, time );
-		var behindZ = Potential( position - z, time );
-
-		var curl = new Vector3(
-			( aheadY.z - behindY.z ) - ( aheadZ.y - behindZ.y ),
-			( aheadZ.x - behindZ.x ) - ( aheadX.z - behindX.z ),
-			( aheadX.y - behindX.y ) - ( aheadY.x - behindY.x ) );
-
-		return curl / ( 2.0f * epsilon );
+		return new Vector3( z.y - y.z, x.z - z.x, y.x - x.y );
 	}
 
-	//Three offset samples of the same field, which makes a vector field out of a scalar one.
-	static Vector3 Potential( Vector3 position, float time ) => new(
-		Noise( position, time ),
-		Noise( position + new Vector3( 31.416f, -47.853f, 12.793f ), time ),
-		Noise( position + new Vector3( -17.737f, 86.214f, -59.482f ), time ) );
-
-	static float Noise( Vector3 position, float time )
+	//Noise's gradient at the point moved by time along (1, 0.7, 0.5); Noise is 0.5 sin(x + 1.3y) + 0.3 sin(1.7y + 0.9z)
+	//+ 0.2 sin(2.1z + 1.1x) + 0.15 sin(3.7x + 2.3y + 1.9z)
+	static Vector3 Gradient( Vector3 position, float time )
 	{
 		var p = position + new Vector3( time, time * 0.7f, time * 0.5f );
 
-		return MathF.Sin( p.x * 1.0f + p.y * 1.3f ) * 0.5f
-			+ MathF.Sin( p.y * 1.7f + p.z * 0.9f ) * 0.3f
-			+ MathF.Sin( p.z * 2.1f + p.x * 1.1f ) * 0.2f
-			+ MathF.Sin( p.x * 3.7f + p.y * 2.3f + p.z * 1.9f ) * 0.15f;
+		var a = MathF.Cos( p.x + p.y * 1.3f ) * 0.5f;
+		var b = MathF.Cos( p.y * 1.7f + p.z * 0.9f ) * 0.3f;
+		var c = MathF.Cos( p.z * 2.1f + p.x * 1.1f ) * 0.2f;
+		var d = MathF.Cos( p.x * 3.7f + p.y * 2.3f + p.z * 1.9f ) * 0.15f;
+
+		return new Vector3(
+			a + ( c * 1.1f ) + ( d * 3.7f ),
+			( a * 1.3f ) + ( b * 1.7f ) + ( d * 2.3f ),
+			( b * 0.9f ) + ( c * 2.1f ) + ( d * 1.9f ) );
 	}
 }
 
 //Rotates position about the axis at a fixed rate instead of applying a force
 /// <summary>Carries the particles round an axis at a steady rate, whatever else they are doing - a ring that stays a ring.</summary>
 [Title( "Orbit" ), Category( "Update" ), Icon( "autorenew" )]
-public sealed class OrbitModule : ParticleModule, IParticleModuleStep
+public sealed class OrbitModule : ParticleModule, IParticleModuleStep, IParticleModuleFrame
 {
 	public override ParticleModuleStage Stage => ParticleModuleStage.Update;
 
@@ -284,18 +339,23 @@ public sealed class OrbitModule : ParticleModule, IParticleModuleStep
 
 	public void Step( ParticleModuleContext context, float delta )
 	{
-		var center = Center;
-		var axis = Axis.Evaluate( context.Particle, context.Player );
+		var held = context.Frame as EmitterFrame;
+		var center = held?.Point ?? Center;
+		var axis = held?.Axis ?? Axis.Evaluate( context.Particle, context.Player );
 
-		if ( Space == ParticleSpace.Local && context.Emitter.IsValid() )
+		if ( held is null && Space == ParticleSpace.Local && context.Emitter.IsValid() )
 		{
 			center = context.Emitter.WorldPosition + ( context.Emitter.WorldRotation * center );
 			axis = context.Emitter.WorldRotation * axis;
 		}
+		else if ( held is { Axis: null, Local: true } )
+		{
+			axis = held.Emitter.Rotation * axis;
+		}
 
 		if ( axis.IsNearlyZero() ) return;
 
-		var degrees = Speed.Evaluate( context.Particle, context.Player ) * delta;
+		var degrees = ( held?.Amount ?? Speed.Evaluate( context.Particle, context.Player ) ) * delta;
 		if ( degrees == 0.0f ) return;
 
 		var turn = Rotation.FromAxis( axis.Normal, degrees );
@@ -304,4 +364,40 @@ public sealed class OrbitModule : ParticleModule, IParticleModuleStep
 		particle.Position = center + ( turn * ( particle.Position - center ) );
 		particle.Velocity = turn * particle.Velocity;
 	}
+
+	public object Begin( ParticleModuleContext context, float delta, object was )
+	{
+		var held = EmitterFrame.Of( context, Space, was );
+
+		held.Point = held.ToWorld( Center );
+		held.Axis = Axis.Uniform ? held.TurnToWorld( Axis.Evaluate( null, context.Player ) ) : null;
+		held.Amount = Speed.Uniform ? Speed.Evaluate( context.Player ) : null;
+
+		return held;
+	}
+}
+
+//What a module about a point of the emitter's holds for the effect's step: the emitter where it stands this frame - read
+//once, not walked up its parents for every particle - and whichever of its point, axis and amount no particle changes
+internal sealed class EmitterFrame
+{
+	internal bool Local;
+	internal Transform Emitter;
+	internal Vector3? Point;
+	internal Vector3? Axis;
+	internal float? Amount;
+
+	internal static EmitterFrame Of( ParticleModuleContext context, ParticleSpace space, object was )
+	{
+		var held = was as EmitterFrame ?? new EmitterFrame();
+
+		held.Local = space == ParticleSpace.Local && context.Emitter.IsValid();
+		held.Emitter = held.Local ? context.Emitter.WorldTransform : Transform.Zero;
+
+		return held;
+	}
+
+	internal Vector3 ToWorld( Vector3 point ) => Local ? Emitter.Position + ( Emitter.Rotation * point ) : point;
+
+	internal Vector3 TurnToWorld( Vector3 direction ) => Local ? Emitter.Rotation * direction : direction;
 }

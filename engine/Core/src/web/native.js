@@ -52,10 +52,16 @@ function RintenNativeBind(host) {
 		return size;
 	}
 
+	//A build file's path as an address: each part escaped, as a name may hold "#", "?" or "%" - a "#" ended the address there
+	function addressOf(path) {
+		if (path.indexOf("://") >= 0) return path;
+		return path.split("/").map(encodeURIComponent).join("/");
+	}
+
 	//Fetches one build file; a "+" prefix means it is shipped as .gz and inflated here. Null if missing
 	function fetchFile(path) {
 		var packed = path.charAt(0) === "+";
-		var url = packed ? path.slice(1) + ".gz" : path;
+		var url = addressOf(packed ? path.slice(1) + ".gz" : path);
 
 		return fetch(url).then(function (r) {
 			if (!r.ok) return null;
@@ -188,15 +194,55 @@ function RintenNativeBind(host) {
 		window.addEventListener("keydown", function (e) {
 			if (!keys[e.code]) keyVersion++;
 			keys[e.code] = 1;
+			unread[e.code] = 1;
+			releaseLater[e.code] = 0;
 			if (swallowed[e.code] && !e.ctrlKey && !e.metaKey) e.preventDefault();
 			settleFullscreen();
 		});
-		window.addEventListener("blur", function () { keys = Object.create(null); buttons = 0; pressed = 0; keyVersion++; });
+		window.addEventListener("blur", function () {
+			keys = Object.create(null); unread = Object.create(null); releaseLater = Object.create(null);
+			buttons = 0; pressed = 0; keyVersion++;
+		});
 		window.addEventListener("keyup", function (e) {
-			keys[e.code] = 0;
+			//Let go before the engine saw it down - both between two of its frames - and it stays down until it has been read once
+			if (unread[e.code]) releaseLater[e.code] = 1;
+			else keys[e.code] = 0;
 			keyVersion++;
 		});
 	}
+
+	//Keys pressed that the engine has not read yet, and of those, the ones already let go - see keyDown
+	var unread = Object.create(null);
+	var releaseLater = Object.create(null);
+
+	//What the engine reads a key as, once a frame: a key let go before it was read is down this once, and up from the next
+	function readKey(code) {
+		var down = keys[code] ? 1 : 0;
+		if (!unread[code]) return down;
+
+		unread[code] = 0;
+		if (releaseLater[code]) {
+			releaseLater[code] = 0;
+			keys[code] = 0;
+			keyVersion++;
+		}
+
+		return down;
+	}
+
+	//miniaudio wakes the audio on a click or a tap, once, and drops its listeners even where no sound had started yet - so a
+	//game begun from the keyboard, or clicked while it loaded, stayed silent. Any key, pointer or touch wakes what is asleep.
+	function wakeAudio() {
+		var devices = globalThis.miniaudio && globalThis.miniaudio.devices;
+		if (!devices) return;
+
+		for (var i = 0; i < devices.length; i++) {
+			var audio = devices[i] && devices[i].webaudio;
+			if (audio && audio.state === "suspended") audio.resume().catch(function () { });
+		}
+	}
+
+	for (var wake of ["keydown", "pointerdown", "click", "touchend"]) window.addEventListener(wake, wakeAudio, true);
 
 	bindInput(canvas);
 	fitCanvas();
@@ -261,7 +307,7 @@ function RintenNativeBind(host) {
 		},
 		//Held, or pressed since the last ask - which is the engine's frame - so a press is seen for a frame even when it was already let go.
 		buttons: function () { var v = buttons | pressed; pressed = 0; return v; },
-		keyDown: function (code) { return keys[code] ? 1 : 0; },
+		keyDown: readKey,
 		keyVersion: function () { return keyVersion; },
 		nextFrame: function () {
 			return new Promise(function (resolve) { requestAnimationFrame(function () { resolve(); }); });
@@ -277,7 +323,7 @@ function RintenNativeBind(host) {
 			if (text) document.title = text;
 		},
 		fetchText: function (url) {
-			return fetch(url).then(function (r) {
+			return fetch(addressOf(url)).then(function (r) {
 				if (!r.ok) return "";
 				return r.text();
 			}).catch(function () { return ""; });

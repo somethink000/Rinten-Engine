@@ -1236,7 +1236,7 @@ internal static unsafe partial class VkFrame
 			var profile = VkSwapchain.ProfileFor( viewport );
 			if ( profile is null || !profile.Valid ) return 0;
 
-			var values = stackalloc float[17];
+			var values = stackalloc float[18];
 			values[0] = profile.GpuMs;
 			values[1] = profile.CpuMs;
 			values[2] = profile.Draws;
@@ -1254,8 +1254,9 @@ internal static unsafe partial class VkFrame
 			values[14] = profile.Instances;
 			values[15] = profile.Dispatches;
 			values[16] = profile.Indirect;
+			values[17] = profile.Counted;
 
-			var give = count < 17 ? count : 17;
+			var give = count < 18 ? count : 18;
 
 			for ( var i = 0; i < give; ++i ) into[i] = values[i];
 

@@ -204,7 +204,7 @@ public abstract partial class Component : BytePack.ISerializer
 	{
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( GetType() ) )
 		{
-			if ( !propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost ) )
+			if ( !( ( propertyAndAttribute.Attribute.Flags & SyncFlags.FromHost ) == SyncFlags.FromHost ) )
 				continue;
 
 			try
@@ -336,7 +336,7 @@ public abstract partial class Component : BytePack.ISerializer
 	{
 		if ( reader.TokenType == JsonTokenType.StartObject )
 		{
-			var compRef = JsonSerializer.Deserialize<ComponentReference>( ref reader );
+			var compRef = JsonSerializer.Deserialize<ComponentReference>( ref reader, EnumConvert.Plain );
 
 			return compRef.Resolve( Game.ActiveScene, targetType, warn: true );
 		}

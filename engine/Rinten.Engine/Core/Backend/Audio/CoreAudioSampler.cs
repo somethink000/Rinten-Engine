@@ -181,10 +181,21 @@ internal sealed unsafe class CoreAudioSampler : AudioSampler
 
 		//Playing faster and playing at a lower output rate are the same arithmetic, so pitch is the
 		//ratio rather than a step of its own - two lots of resampling would be two lots of error.
-		var output = (int)Math.Max( 1.0f, outputRate / pitch );
+		if ( pitch == 1.0f )
+		{
+			MiniAudio.rn_resampler_set_rate( resampler, sound.SampleRate, outputRate );
+			return;
+		}
 
-		MiniAudio.rn_resampler_set_rate( resampler, sound.SampleRate, output );
+		//Off one, the ratio over a fixed denominator rather than an output rate of 48000 / pitch: exact to a few parts in a hundred
+		//thousand however near one it is, and small enough that miniaudio's 32-bit timer arithmetic on a rate change cannot overflow
+		var input = Math.Clamp( Math.Round( (double)sound.SampleRate * pitch / outputRate * PitchSteps ), 1.0, int.MaxValue );
+
+		MiniAudio.rn_resampler_set_rate( resampler, (int)input, PitchSteps );
 	}
+
+	//The denominator a pitch's ratio is given over - see Retune.
+	private const int PitchSteps = 1 << 15;
 
 	//Decode more input, going back to the start of the loop at its end if it is looping. The loop is cut here, in the file's frames, before the resampler:
 	//the resampler sees one unbroken run of input going round, so the join is as smooth as the file's own loop points make it, whatever the pitch.
@@ -303,7 +314,9 @@ internal sealed unsafe class CoreAudioSampler : AudioSampler
 			{
 				for ( var frame = 0; frame < produced; frame++ )
 				{
-					destination[frame] = stagingPointer[( (long)frame * sourceChannels ) + channel];
+					//Silence for a sample that is not a number: let into a mixer, one stays in every filter and reverb after it for good
+					var sample = stagingPointer[( (long)frame * sourceChannels ) + channel];
+					destination[frame] = float.IsFinite( sample ) ? sample : 0.0f;
 				}
 			}
 			else

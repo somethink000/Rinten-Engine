@@ -111,7 +111,8 @@ internal static class CoreCameraTargets
 			if ( views.Remove( camera, out var preview ) ) preview.Dispose();
 		}
 
-		foreach ( var scene in drawnAt.Keys.ToArray() )
+		//Removing while walking a dictionary is allowed, so no copy of the keys every frame
+		foreach ( var scene in drawnAt.Keys )
 		{
 			if ( scene.IsValid() ) continue;
 

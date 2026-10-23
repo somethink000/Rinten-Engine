@@ -68,6 +68,9 @@
 	var errorCount = 0;
 	var lastError = "";
 
+	//Why this device cannot draw the game, where it cannot: lost, or a pipeline it would not build - see index.html, which opens WebGL2 instead
+	var broken = "";
+
 	async function init(validation) {
 		if (!navigator.gpu) {
 			infoText = "WebGPU: this browser has none";
@@ -95,6 +98,7 @@
 			device.lost.then(function (info) {
 				lost = 1;
 				infoText = "WebGPU: device lost - " + info.message;
+				if (info.reason !== "destroyed") broken = broken || "the device was lost: " + info.message;
 			});
 			device.onuncapturederror = function (e) {
 				errorCount++;
@@ -287,6 +291,7 @@
 			return alloc(await device.createRenderPipelineAsync(desc));
 		} catch (e) {
 			lastError = e && e.message ? e.message : String(e);
+			broken = broken || "a pipeline would not build: " + lastError;
 			return 0;
 		}
 	}
@@ -554,6 +559,7 @@
 		init: init,
 		ready: function () { return ready; },
 		lost: function () { return lost; },
+		broken: function () { return broken; },
 		info: function () { return infoText; },
 		deviceName: function () { return deviceNameText; },
 		language: function () { return "wgsl"; },

@@ -253,9 +253,9 @@ internal static partial class CoreBakedLighting
 			on.Green = CoreRenderDevice.CreateTextureHalf( data.VolumeGreen, across, data.VolumeZ );
 			on.Blue = CoreRenderDevice.CreateTextureHalf( data.VolumeBlue, across, data.VolumeZ );
 
-			//Bytes of nibbles, read whole: linear, and only ever at a texel's middle
+			//Bytes of nibbles, a texel a point, loaded whole
 			if ( data.HasWalls )
-				on.Walls = CoreRenderDevice.CreateTextureRgba( data.VolumeWalls, across, data.VolumeZ * 3, false );
+				on.Walls = CoreRenderDevice.CreateTextureRgba( BakeVolume.ReachByPoint( data.VolumeWalls, data.VolumeX, data.VolumeY, data.VolumeZ ), across, data.VolumeZ, false );
 
 			//Three half sheets wide, a colour each, linear - see BakeSheet.Band
 			if ( data.HasBand )
@@ -359,7 +359,7 @@ internal static partial class CoreBakedLighting
 		foreach ( var light in scene.GetAllComponents<DirectionalLight>() )
 		{
 			if ( !light.IsValid() || !light.Enabled || !light.Active || !light.NotBaked ) continue;
-			if ( !light.Contribution.HasFlag( Light.LightContribution.Diffuse ) ) continue;
+			if ( !( ( light.Contribution & Light.LightContribution.Diffuse ) == Light.LightContribution.Diffuse ) ) continue;
 
 			liveSun = light.Id;
 			break;

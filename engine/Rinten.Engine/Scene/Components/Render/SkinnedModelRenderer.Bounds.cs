@@ -37,7 +37,7 @@ partial class SkinnedModelRenderer
 		return base.GetWorldBoundsInternal();
 	}
 
-	//Cull sphere holds unless the animator provides pose bounds (none do yet)
+	//Cull sphere holds unless the animator provides pose bounds - see CoreAnimatableObject.LocalBounds
 	internal override bool CullSphereHolds
 		=> !SceneModel.IsValid() || SceneModel.Animation is not { } animation
 			|| ( animation.LocalBounds is null && animation.WorldBounds is null );

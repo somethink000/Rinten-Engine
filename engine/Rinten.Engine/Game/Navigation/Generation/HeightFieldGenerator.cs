@@ -86,6 +86,20 @@ class HeightFieldGenerator : IDisposable
 
 			AddGeometryFromPhysicsShape( shape );
 		}
+
+		//And the ground a terrain keeps out of the physics world here, far from anything that moves - see Terrain.UnheldCollision.
+		if ( world.Scene is not { } scene ) return;
+
+		foreach ( var terrain in scene.GetAll<Terrain>() )
+		{
+			if ( !terrain.IsValid() || !navMesh.IsTerrainRelevantForNavmesh( terrain ) ) continue;
+
+			triangulationVertCache.Clear();
+			triangulationIndexCache.Clear();
+
+			terrain.UnheldCollision( tileBoundsWorld, triangulationVertCache, triangulationIndexCache );
+			AddTriangulation( Transform.Zero );
+		}
 	}
 
 	internal void AddGeometryFromPhysicsShape( PhysicsShape shape )
@@ -94,6 +108,14 @@ class HeightFieldGenerator : IDisposable
 		triangulationIndexCache.Clear();
 
 		shape.Backend.AppendTriangulation( cfg.Bounds, triangulationVertCache, triangulationIndexCache );
+
+		AddTriangulation( shape.Body.Transform );
+	}
+
+	//What the caches hold, placed by a transform into the input geometry.
+	private void AddTriangulation( Transform bodyTransform )
+	{
+		if ( triangulationIndexCache.Count == 0 ) return;
 
 		if ( inputGeoVerticesCount + triangulationVertCache.Count > inputGeoVertices.Length )
 		{
@@ -117,7 +139,6 @@ class HeightFieldGenerator : IDisposable
 			inputGeoIndices[inputGeoIndicesCount++] = triangulationIndexCache[i] + startV;
 
 		//Transform positions added to the vertex data
-		var bodyTransform = shape.Body.Transform;
 		foreach ( var localPos in triangulationVertCache )
 		{
 			var vertexWorldPos = bodyTransform.PointToWorld( localPos );

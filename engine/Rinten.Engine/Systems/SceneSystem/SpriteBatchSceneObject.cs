@@ -443,7 +443,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 		var total = NoBounds;
 		var boundsLock = _boundsLock;
 
-		Parallel.For<(Vector3 mins, Vector3 maxs)>( 0, componentCount,
+		Rinten.Utility.Parallel.For<(Vector3 mins, Vector3 maxs)>( 0, componentCount,
 			() => NoBounds, ( i, _, local ) => One( i, local ), local =>
 			{
 				lock ( boundsLock )
@@ -579,7 +579,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		if ( at - componentCount >= ParallelGather && _gather.Count > 1 && !Rinten.Utility.Parallel.InOrder )
 		{
-			Parallel.For( 0, _gather.Count, gatherOne ??= GatherOne );
+			Rinten.Jobs.JobSystem.For( _gather.Count, gatherOne ??= GatherOne );
 		}
 		else
 		{

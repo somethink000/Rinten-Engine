@@ -109,8 +109,15 @@ public sealed partial class ClutterGridSystem : GameObjectSystem
 		_subscribedTerrains.RemoveWhere( t => !t.IsValid() );
 	}
 
+	//Frames between looks at whether a layer's settings changed, in play: a look hashes every [Property] of its scatterer
+	//through reflection, boxing each, and settings a game changes may land a few frames late. The editor looks every frame.
+	private const int SettingsLookEvery = 30;
+	private int settingsLook;
+
 	private void UpdateActiveComponents( List<ClutterComponent> components, Vector3 cameraPosition )
 	{
+		var look = Scene.IsEditor || settingsLook++ % SettingsLookEvery == 0;
+
 		foreach ( var component in components )
 		{
 			var settings = component.GetCurrentSettings();
@@ -118,7 +125,7 @@ public sealed partial class ClutterGridSystem : GameObjectSystem
 				continue;
 
 			var layer = GetOrCreateLayer( component, settings );
-			layer.UpdateSettings( settings );
+			if ( look ) layer.UpdateSettings( settings );
 
 			foreach ( var job in layer.UpdateTiles( cameraPosition ) )
 				QueueJob( job );

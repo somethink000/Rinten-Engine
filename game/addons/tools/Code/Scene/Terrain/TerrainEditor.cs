@@ -16,6 +16,7 @@ public partial class TerrainEditorTool : EditorTool
 		yield return new RaiseLowerTool( this );
 		yield return new SmoothTool( this );
 		yield return new NoiseTool( this );
+		yield return new StampTool( this );
 		yield return new FlattenTool( this );
 		yield return new DigTool( this );
 		yield return new PaintTextureTool( this );
@@ -88,6 +89,16 @@ public partial class TerrainEditorTool : EditorTool
 			};
 		}
 
+		if ( CurrentTool is StampTool )
+		{
+			var group = sidebar.AddGroup( "Stamp" );
+			var so = StampTool.Settings.GetSerialized();
+
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.HeightMap ) ) ) );
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.Height ) ) ) );
+			group.Add( ControlSheetRow.Create( so.GetProperty( nameof( StampTool.StampSettings.Mode ) ) ) );
+		}
+
 		//Paint-only sections — hidden unless PaintTextureTool is active
 		var sidebarStretch = new Widget( sidebar ) { VerticalSizeMode = SizeMode.Flexible };
 		var paintOnlySection = new PaintOnlySectionWidget( this, opacityRow, sidebarStretch );
@@ -119,7 +130,7 @@ public partial class TerrainEditorTool : EditorTool
 					picker.OnAssetPicked = x =>
 					{
 						var material = x.First().LoadResource<Material>();
-						if ( material is null ) return;
+						if ( material is null || terrain.Storage.Materials.Count >= Terrain.MostLayers ) return;
 
 						terrain.Storage.Materials.Add( material );
 						terrain.UpdateMaterials();
@@ -150,7 +161,7 @@ public partial class TerrainEditorTool : EditorTool
 
 	static void NewTerrainLayer( Terrain terrain, TerrainMaterialList materialList )
 	{
-		if ( TerrainMaterialList.CreateLayer() is not { } material )
+		if ( terrain.Storage.Materials.Count >= Terrain.MostLayers || TerrainMaterialList.CreateLayer() is not { } material )
 			return;
 
 		terrain.Storage.Materials.Add( material );

@@ -105,7 +105,7 @@ public sealed partial class Project
 			}
 
 			var text = File.ReadAllText( ConfigFilePath );
-			Config = JsonSerializer.Deserialize<DataModel.ProjectConfig>( text );
+			Config = JsonSerializer.Deserialize<DataModel.ProjectConfig>( text, EnumConvert.Plain );
 			Config.Init( ConfigFilePath );
 
 			UpdateMockPackage();

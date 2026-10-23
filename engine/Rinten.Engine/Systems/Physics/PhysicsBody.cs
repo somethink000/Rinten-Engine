@@ -1067,7 +1067,7 @@ public sealed partial class PhysicsBody : IHandle
 		AngularVelocity = angVelocity;
 	}
 
-	void Dirty()
+	internal void Dirty()
 	{
 		OnDirty?.Invoke();
 	}

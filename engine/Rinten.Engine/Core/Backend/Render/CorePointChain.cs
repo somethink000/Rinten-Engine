@@ -847,26 +847,12 @@ internal static partial class CorePointChain
 
 			var made = 0;
 
-			//Whole first, then one effect missing, then two - a run that is too long to enumerate is covered where it matters and not past that.
-			for ( var gone = 0; gone < run.Length && made < most; gone++ )
+			foreach ( var subset in WithoutSome( run ) )
 			{
-				for ( long mask = 0; mask < 1L << run.Length && made < most; mask++ )
-				{
-					if ( System.Numerics.BitOperations.PopCount( (ulong)mask ) != gone ) continue;
+				if ( made >= most ) break;
 
-					var subset = new List<Point>( run.Length );
-
-					for ( var i = 0; i < run.Length; i++ )
-					{
-						if ( ( mask & ( 1L << i ) ) == 0 ) subset.Add( run[i] );
-					}
-
-					if ( subset.Count == 0 ) continue;
-
-					Variant( subset );
-
-					made++;
-				}
+				Variant( subset );
+				made++;
 			}
 
 			variants += made;
@@ -917,12 +903,70 @@ internal static partial class CorePointChain
 			runs++;
 		}
 
+		//And the finishes of a frame drawn aside, which carry the run beside bloom or passes (CorePortableGlow) - also for
+		//every shorter run an effect fading to nothing makes, so a page never falls back to the curve alone
+		foreach ( var run in asked.Values.ToArray() )
+		{
+			if ( run.Length == 0 || run.Length > 30 ) continue;
+
+			var made = 0;
+
+			foreach ( var subset in WithoutSome( run ) )
+			{
+				if ( made >= 64 ) break;
+
+				WithCurve( subset );
+
+				if ( !Foldable( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( subset ) ) ) continue;
+
+				made++;
+
+				foreach ( var finish in CorePortableGlow.ChainRequests( ScreenKeyFor( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( subset ) ) ) )
+				{
+					if ( CoreShaderCache.Words( finish.Source, finish.Directory, finish.Entry, finish.Stage, CoreShaderCache.Target, "point effects in the finish" ) is null )
+					{
+						failed++;
+						log.Warning( $"the glow's {finish.Entry} with the point effects did not compile for {CoreShaderCache.Target}: {CoreRenderDevice.ShaderError}" );
+					}
+					else stages++;
+				}
+			}
+		}
+
 		log.Info( $"{runs} of {asked.Count} runs of point effects compiled into {stages} surface stages for {CoreShaderCache.Target} ({failed} did not)" );
 
 		return runs;
 	}
 
 	//One run compiled every way a frame can draw it: as a pass of its own, and into the compose.
+	//The run with effects switched off, nearest to whole first: none missing, then each one, then each two. The masks of
+	//a count are stepped through directly (Gosper's), so a long run costs what it yields rather than two to its length
+	private static IEnumerable<List<Point>> WithoutSome( Point[] run )
+	{
+		var end = 1L << run.Length;
+
+		for ( var gone = 0; gone < run.Length; gone++ )
+		{
+			for ( var mask = ( 1L << gone ) - 1; mask < end; )
+			{
+				var subset = new List<Point>( run.Length + 1 );
+
+				for ( var i = 0; i < run.Length; i++ )
+				{
+					if ( ( mask & ( 1L << i ) ) == 0 ) subset.Add( run[i] );
+				}
+
+				yield return subset;
+
+				if ( mask == 0 ) break;
+
+				var low = mask & -mask;
+				var ripple = mask + low;
+				mask = ( ( ( ripple ^ mask ) >> 2 ) / low ) | ripple;
+			}
+		}
+	}
+
 	private static void Variant( List<Point> chain )
 	{
 		Compiles( Source( System.Runtime.InteropServices.CollectionsMarshal.AsSpan( chain ), chain.Count, "", PassTail ) );

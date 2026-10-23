@@ -92,7 +92,7 @@ public sealed class CookieContainer
 
 		try
 		{
-			val = JsonSerializer.Deserialize<T>( json );
+			val = JsonSerializer.Deserialize<T>( json, EnumConvert.Plain );
 			return true;
 		}
 		catch ( Exception )
@@ -118,7 +118,7 @@ public sealed class CookieContainer
 
 		try
 		{
-			var value = JsonSerializer.Deserialize<T>( json );
+			var value = JsonSerializer.Deserialize<T>( json, EnumConvert.Plain );
 
 			if ( copies ) parsed[key] = (json, value);
 
@@ -137,7 +137,7 @@ public sealed class CookieContainer
 	public void Set<T>( string key, T value )
 	{
 		if ( CookieCache == null ) return;
-		SetString( key, JsonSerializer.Serialize( value ) );
+		SetString( key, JsonSerializer.Serialize( value, EnumConvert.Plain ) );
 	}
 
 	/// <summary>Removes a cookie from the cache entirely</summary>
@@ -291,7 +291,7 @@ public sealed class CookieContainer
 			}
 			else
 			{
-				FileSystem.WriteAllText( fnorig, JsonSerializer.Serialize( CookieCache, new JsonSerializerOptions( JsonSerializerOptions.Default ) { WriteIndented = true } ) );
+				FileSystem.WriteAllText( fnorig, JsonSerializer.Serialize( CookieCache, new JsonSerializerOptions( EnumConvert.Plain ) { WriteIndented = true } ) );
 			}
 
 			//that succeeded, so we can delete any backups

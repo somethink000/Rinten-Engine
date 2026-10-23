@@ -849,6 +849,32 @@ public sealed unsafe partial class CommandList
 		AddEntry( &Execute, new Entry { Object1 = indexBuffer, Object2 = material, Object3 = indirectBuffer, Data1 = new Vector4( bufferOffset, (int)primitiveType, drawCount, stride ), Object4 = attributes } );
 	}
 
+	//PackedVertex vertices and indices drawn with a material's stages and the draw's numbers into the world
+	//For card-made geometry such as the relief ring; nothing where ready says no
+	internal void DrawMesh( GpuBuffer vertices, GpuBuffer indices, int count, Material material, Func<bool> ready, RenderAttributes attributes = null )
+	{
+		static void Execute( ref Entry entry, CommandList commandList )
+		{
+			if ( entry.Object1 is not GpuBuffer vertices || entry.Object2 is not GpuBuffer indices || entry.Object3 is not Material material ) return;
+			if ( entry.Object4 is Func<bool> ready && !ready() ) return;
+
+			var shape = new CoreBufferDraw
+			{
+				Vertices = vertices.Handle,
+				Indices = indices.Handle,
+				WideIndices = indices.ElementSize == sizeof( uint ),
+				Count = (int)entry.Data1.x,
+				Instances = 1,
+			};
+
+			Graphics.DrawOutOf( shape, null, material, entry.Object5 as RenderAttributes, Graphics.PrimitiveType.Triangles, commandList );
+		}
+		AddEntry( &Execute, new Entry
+		{
+			Object1 = vertices, Object2 = indices, Object3 = material, Object4 = ready, Object5 = attributes, Data1 = new Vector4( count, 0, 0, 0 ),
+		} );
+	}
+
 	//No vertex buffer: the index buffer names the corners and the shader reads everything else out of the attributes' buffers at set 2 - see Graphics.DrawOutOf.
 	/// <summary>Draws indexed geometry with instancing. Each instance shares the same index buffer.</summary>
 	public void DrawIndexedInstanced( GpuBuffer indexBuffer, Material material, int instanceCount, RenderAttributes attributes = null, Graphics.PrimitiveType primitiveType = Graphics.PrimitiveType.Triangles )

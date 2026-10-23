@@ -205,6 +205,21 @@ namespace Topten.RichTextKit
 		/// </summary>
 		const int overScale = 512;
 
+		[ThreadStatic] static HarfBuzzSharp.Buffer shapingBuffer;
+
+		//The width of a space at each size asked, measured once: asked for every run, and measuring made a font each time
+		readonly System.Collections.Concurrent.ConcurrentDictionary<float, float> _spaceWidths = new();
+
+		static readonly ushort[] spaceCharacter = { ' ' };
+
+		/// <summary>The advance of a space at a font size.</summary>
+		public float SpaceWidth( float fontSize )
+			=> _spaceWidths.GetOrAdd( fontSize, static ( size, typeface ) =>
+			{
+				using var font = typeface.ToFont( size );
+				return font.MeasureText( spaceCharacter );
+			}, _typeface );
+
 		static readonly Feature[] _tabularNumbersFeature = new[]
 		{
 			new Feature( new Tag( 't', 'n', 'u', 'm' ), 1 )
@@ -306,7 +321,9 @@ namespace Topten.RichTextKit
 			}
 
 
-			using ( var buffer = new HarfBuzzSharp.Buffer() )
+			//One buffer a thread, emptied for each run: made new for every one, it was a native buffer and its wrapper per run
+			var buffer = shapingBuffer ??= new HarfBuzzSharp.Buffer();
+			buffer.Reset();
 			{
 				// Setup buffer
 				buffer.AddUtf32( codePoints.AsSpan(), 0, -1 );
@@ -365,8 +382,9 @@ namespace Topten.RichTextKit
 				r.CodePointXCoords.Fill( 0 );
 
 				// Convert points
-				var gp = buffer.GlyphPositions;
-				var gi = buffer.GlyphInfos;
+				//Read in place: the properties copy both out into new arrays
+				var gp = buffer.GetGlyphPositionSpan();
+				var gi = buffer.GetGlyphInfoSpan();
 				float cursorX = 0;
 				float cursorY = 0;
 				float cursorXCluster = 0;

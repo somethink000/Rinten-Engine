@@ -62,6 +62,9 @@ internal static unsafe class CoreRender
 
 		/// <summary>One unsigned integer: a counter or an atomic-min depth, read as stored, not as float.</summary>
 		Whole = 8,
+
+		/// <summary>Two signed integers: a movement in whole pixels, read as stored, not as float.</summary>
+		WholePair = 9,
 	}
 
 	internal enum TargetKind
@@ -359,12 +362,9 @@ internal static unsafe class CoreRender
 
 	//Opens a frame picture for the next draws; the portable frame only has the sky table
 	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear )
-		=> web || ( Portable && target != VkDevice.TargetSkyTable )
-			? 0
+		=> Portable && target != VkDevice.TargetSkyTable ? 0
+			: web ? BrowserSwapchain.TargetBegin( target, r, g, b, a, clear )
 			: VkFrame.TargetBegin( target, r, g, b, a, clear );
-
-	//Whether this device draws the sky table from the sky shader; WebGPU can't bind and attach at once
-	internal static bool DrawsSkyTable => !web;
 
 	//-- the frame's pictures - see VkPictures; the browser's are one level, drawn into without depth --------
 
@@ -476,6 +476,9 @@ internal static unsafe class CoreRender
 	internal static int BackdropCapture()
 		=> Portable ? 0 : VkFrame.BackdropCapture();
 
+	internal static int GenerationCapture( ulong picture )
+		=> Portable ? 0 : VkFrame.GenerationCapture( picture );
+
 	internal static int ScreenInterrupt()
 		=> Portable ? 0 : VkFrame.ScreenInterrupt();
 
@@ -485,6 +488,11 @@ internal static unsafe class CoreRender
 	internal static void WorldShades( int surfaces )
 	{
 		if ( !Portable ) VkFrame.WorldShades( surfaces != 0 );
+	}
+
+	internal static void WorldBack( in System.Numerics.Matrix4x4 clipToPrevious )
+	{
+		if ( !Portable ) VkFrame.AdaptiveBack = clipToPrevious;
 	}
 
 	//The near end of the depth range the next draws are squeezed into - see VkFrame.SetDepthCeiling.
@@ -538,18 +546,11 @@ internal static unsafe class CoreRender
 	internal static ulong SkyTableTexture()
 		=> Portable ? 0 : VkDevice.SkyTableTexture();
 
-	//A table made on the CPU bound in place of the drawn one; the page is sent its bytes instead - see SendSkyTable
+	//A panorama's table in place of the drawn one; the page copies it over the table its frame groups hold
 	internal static void UseSkyTable( ulong texture )
 	{
-		if ( !web ) VkTextures.portableSkyTable = texture;
-	}
-
-	//The portable frame's sky table onto the device - see CoreSkyTable.
-	internal static void SendSkyTable( byte* texels, int side )
-	{
-		if ( !Portable || texels is null || side <= 0 ) return;
-
-		if ( web ) BrowserSwapchain.SendSkyTable( texels, side );
+		if ( web ) BrowserSwapchain.UseSkyTable( texture );
+		else VkTextures.portableSkyTable = texture;
 	}
 
 	internal static int PyramidBuild( ulong pipeline, ulong pyramid, int lod, int count,
@@ -560,6 +561,11 @@ internal static unsafe class CoreRender
 		ulong texture, byte* pushData, int pushSize, int groupsX, int groupsY, int groupsZ )
 		=> Portable ? 0 : VkFrame.ComputeDispatch( pipeline, buffers, bufferCount, texture,
 			pushData, pushSize, groupsX, groupsY, groupsZ );
+
+	internal static void HoldBarriers( bool hold )
+	{
+		if ( !Portable ) VkFrame.HoldBarriers( hold );
+	}
 
 	internal static int DrawObjects( ulong pipeline, int vertexCount, byte* push, int pushSize,
 		ulong texture, ulong* buffers, int bufferCount )
@@ -1000,6 +1006,18 @@ internal static unsafe class CoreRender
 
 	//Whether this device draws blend shapes; WebGL2 lacks storage buffers, so a page draws the rest shape
 	internal static bool DrawsMorphs => !web;
+
+	//The portable frame's pose pass, which on Vulkan computes where the rest of that frame does not - see VkFrame.Posed
+	internal static ulong PoseCreate( byte* code, int byteCount )
+		=> web ? 0 : VkPipelines.ComputeCreate( code, byteCount );
+
+	internal static ulong PoseVertices( ulong pipeline, ulong vertices, ulong skin, ulong runs, ulong deltas, int vertexCount,
+		int deltaCount, float* bones, int boneCount, float* weights, int weightCount, out int firstVertex )
+	{
+		firstVertex = 0;
+		return web ? 0 : VkFrame.PoseVertices( pipeline, vertices, skin, runs, deltas, vertexCount, deltaCount,
+			bones, boneCount, weights, weightCount, out firstVertex );
+	}
 
 	internal static unsafe uint MorphWeights( float* weights, int count )
 		=> web ? 0 : VkFrame.MorphWeights( weights, count );

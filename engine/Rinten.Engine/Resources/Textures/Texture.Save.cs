@@ -10,13 +10,13 @@ public partial class Texture
 	{
 		var desc = Desc;
 
-		if ( desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY ) )
+		if ( ( ( desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY ) )
 		{
 			throw new System.NotSupportedException( "SaveToVtex does not yet support texture arrays" );
 		}
 
-		bool isCubemap = desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_CUBE_TEXTURE );
-		bool isVolume = desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE );
+		bool isCubemap = ( ( desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_CUBE_TEXTURE ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_CUBE_TEXTURE );
+		bool isVolume = ( ( desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE );
 
 		int numFaces = isCubemap ? 6 : 1;
 
@@ -74,7 +74,7 @@ public partial class Texture
 		if ( isVolume )
 			flags |= VTexWriter.VTEX_Flags_t.VTEX_FLAG_VOLUME_TEXTURE;
 
-		if ( desc.m_nFlags.HasFlag( NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_NO_LOD ) || isPngFormat )
+		if ( ( ( desc.m_nFlags & NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_NO_LOD ) == NativeEngine.RuntimeTextureSpecificationFlags.TSPEC_NO_LOD ) || isPngFormat )
 			flags |= VTexWriter.VTEX_Flags_t.VTEX_FLAG_NO_LOD;
 
 		writer.Header.Flags = flags;

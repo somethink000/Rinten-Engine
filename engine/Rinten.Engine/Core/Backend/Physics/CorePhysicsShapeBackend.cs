@@ -47,7 +47,7 @@ internal sealed unsafe class CorePhysicsShapeBackend : IPhysicsShapeBackend
 	}
 
 	//Tags this shape carries, for trace filtering.
-	internal IReadOnlyCollection<uint> Tags => tags;
+	internal HashSet<uint> Tags => tags;
 
 	public PhysicsBody GetBody() => owner;
 

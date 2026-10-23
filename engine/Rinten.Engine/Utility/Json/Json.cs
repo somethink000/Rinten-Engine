@@ -41,7 +41,7 @@ public static partial class Json
 		options.MaxDepth = 512;
 		options.Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
 
-		options.Converters.Add( new JsonStringEnumConverter( null, true ) );
+		options.Converters.Add( new EnumConvert() );
 		options.Converters.Add( new BinaryConvert() );
 
 		options.Converters.Add( new JsonConvertFactory() );

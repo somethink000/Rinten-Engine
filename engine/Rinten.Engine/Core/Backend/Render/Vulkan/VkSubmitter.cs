@@ -17,7 +17,17 @@ internal static unsafe class VkSubmitter
 		/// <summary>The swapchain it belongs to - read and written by <see cref="Settle"/> alone.</summary>
 		public VkSwapchain.Swapchain Owner;
 
+		/// <summary>Its present id, nought for none - see CorePresent.</summary>
+		public ulong Id;
+
 		public Result Presented;
+
+		/// <summary>A generated frame shown first, and how long after it this one is - see VkFrame.Generation.</summary>
+		public bool Generated;
+		public VkSemaphore GeneratedSignal;
+		public uint GeneratedImage;
+		public long Spacing;
+		public Result GeneratedPresented;
 	}
 
 	private static readonly object gate = new();
@@ -37,11 +47,19 @@ internal static unsafe class VkSubmitter
 	//Whether anything is in the worker's hands - cheap to ask, and the whole of what most callers need.
 	internal static bool Busy => Volatile.Read( ref handed );
 
-	//Hands a closed frame over. Waits for the one before it, if that is somehow still going.
+	//Parked between a generated frame's present and its own, the worker waits for its time and the render lock (Yield)
+	//Hand-overs are numbered, so a job presented first by another thread is known to be over - see TakeOver
+	private static bool parked;
+	private static long handing;
+
+	//Hands a closed frame over. Waits for the one before it, if that is somehow still going - or, where it is only waiting to be
+	//shown, shows it now: the frame after it is already here.
 	internal static void Hand( in Job frame )
 	{
 		lock ( gate )
 		{
+			if ( parked ) TakeOver();
+
 			while ( handed ) Monitor.Wait( gate );
 
 			if ( thread is null )
@@ -59,6 +77,7 @@ internal static unsafe class VkSubmitter
 			}
 
 			job = frame;
+			handing++;
 			Volatile.Write( ref handed, true );
 			Monitor.PulseAll( gate );
 		}
@@ -71,8 +90,36 @@ internal static unsafe class VkSubmitter
 
 		lock ( gate )
 		{
+			if ( parked ) TakeOver();
+
 			while ( handed ) Monitor.Wait( gate );
 		}
+	}
+
+	/// <summary>Waits until the worker is out of the queue; a parked job stays parked. Under the render lock only.</summary>
+	internal static void Yield()
+	{
+		if ( !Volatile.Read( ref handed ) ) return;
+
+		lock ( gate )
+		{
+			while ( handed && !parked ) Monitor.Wait( gate );
+		}
+	}
+
+	//The parked job's own present made here and now, and the job over. Under the gate.
+	private static void TakeOver()
+	{
+		parked = false;
+
+		CoreLatency.Presenting( job.Id );
+		job.Presented = Present( job.Signal, job.Handle, job.Image, job.Id );
+		CoreLatency.Presented( job.Id );
+
+		answered.Add( job );
+		handing++;
+		Volatile.Write( ref handed, false );
+		Monitor.PulseAll( gate );
 	}
 
 	//What the worker's calls answered, acted on the way the frame end used to act on them. The recording thread, under the render lock, after a Drain.
@@ -91,6 +138,14 @@ internal static unsafe class VkSubmitter
 	{
 		var owner = one.Owner;
 		if ( owner is null ) return;
+
+		if ( one.Generated && one.GeneratedPresented != Result.Success )
+		{
+			var generated = one;
+			generated.Generated = false;
+			generated.Presented = one.GeneratedPresented;
+			Act( generated );
+		}
 
 		switch ( one.Presented )
 		{
@@ -131,17 +186,19 @@ internal static unsafe class VkSubmitter
 		while ( true )
 		{
 			Job taken;
+			long number;
 
 			lock ( gate )
 			{
 				while ( !handed ) Monitor.Wait( gate );
 				taken = job;
+				number = handing;
 			}
 
 			//Whatever happens in the driver, the hand-over is over: a worker that died holding it would leave every Drain waiting for ever under the render lock.
 			try
 			{
-				Perform( ref taken );
+				if ( !Perform( ref taken, number ) ) continue;
 			}
 			catch ( System.Exception e )
 			{
@@ -151,6 +208,7 @@ internal static unsafe class VkSubmitter
 
 			lock ( gate )
 			{
+				parked = false;
 				answered.Add( taken );
 				Volatile.Write( ref handed, false );
 				Monitor.PulseAll( gate );
@@ -158,13 +216,63 @@ internal static unsafe class VkSubmitter
 		}
 	}
 
-	//The call the frame end used to make itself.
-	private static void Perform( ref Job one )
+	//The frame's presents; false where another thread made its own present first - see TakeOver
+	private static bool Perform( ref Job one, long number )
 	{
-		var finished = one.Signal;
-		var swapchain = one.Handle;
-		var index = one.Image;
+		if ( one.Generated )
+		{
+			var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
+			one.GeneratedPresented = Present( one.GeneratedSignal, one.Handle, one.GeneratedImage, 0 );
+
+			if ( one.Spacing > 0 )
+			{
+				lock ( gate )
+				{
+					job.GeneratedPresented = one.GeneratedPresented;
+					parked = true;
+					Monitor.PulseAll( gate );
+
+					//Asleep on the gate rather than the clock, so a take-over ends it at once
+					while ( handing == number )
+					{
+						var left = began + one.Spacing - System.Diagnostics.Stopwatch.GetTimestamp();
+						if ( left <= 0 ) break;
+
+						Monitor.Wait( gate, TimeSpan.FromTicks( Math.Max( left * TimeSpan.TicksPerSecond / System.Diagnostics.Stopwatch.Frequency, 1 ) ) );
+					}
+
+					if ( handing != number ) return false;
+				}
+
+				//The queue only with the render lock: the recording thread may be using it, having yielded
+				lock ( VkDevice.renderLock )
+				{
+					lock ( gate )
+					{
+						if ( handing != number ) return false;
+						parked = false;
+					}
+
+					CoreLatency.Presenting( one.Id );
+					one.Presented = Present( one.Signal, one.Handle, one.Image, one.Id );
+					CoreLatency.Presented( one.Id );
+				}
+
+				return true;
+			}
+		}
+
+		CoreLatency.Presenting( one.Id );
+		one.Presented = Present( one.Signal, one.Handle, one.Image, one.Id );
+		CoreLatency.Presented( one.Id );
+
+		return true;
+	}
+
+	/// <summary>One image of a swapchain to the display once its signal is, with its present id where it has one.</summary>
+	internal static Result Present( VkSemaphore finished, SwapchainKHR swapchain, uint index, ulong id )
+	{
 		var present = new PresentInfoKHR
 		{
 			SType = StructureType.PresentInfoKhr,
@@ -175,6 +283,9 @@ internal static unsafe class VkSubmitter
 			PImageIndices = &index,
 		};
 
-		one.Presented = VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
+		PresentIdKHR told;
+		CorePresent.Stamp( &present, &told, &id );
+
+		return VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
 	}
 }

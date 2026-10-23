@@ -14,6 +14,15 @@ public partial class RenderAttributes
 	//Says the bag has been written to. Public setters all go through it.
 	private void Wrote() => Version++;
 
+	//The same number again is no change, so what reads the bag by version is not remade
+	private void Put( in StringToken k, in Held held )
+	{
+		if ( values.TryGetValue( k, out var had ) && had.Same( held ) ) return;
+
+		values[k] = held;
+		Wrote();
+	}
+
 	//Holds a texture, buffer or matrix, which forces the classic path; sticky until Clear
 	internal bool HoldsReference { get; private set; }
 
@@ -283,19 +292,19 @@ public partial class RenderAttributes
 	internal void SetPointer( in StringToken k, in IntPtr value ) { values[k] = Held.OfReference( value ); WroteReference(); }
 
 	//Numbers are held as themselves, not boxed - see Held.
-	public void Set( in StringToken k, in int value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in uint value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Vector2Int value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Vector3Int value ) { values[k] = Held.Of( value ); Wrote(); }
+	public void Set( in StringToken k, in int value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in uint value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Vector2Int value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Vector3Int value ) => Put( k, Held.Of( value ) );
 	public void Set( in StringToken k, in SamplerState value ) { values[k] = Held.OfReference( value ); WroteReference(); }
-	public void Set( in StringToken k, in float value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in double value ) { values[k] = Held.Of( (float)value ); Wrote(); }
+	public void Set( in StringToken k, in float value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in double value ) => Put( k, Held.Of( (float)value ) );
 	public void Set( in StringToken k, in string value ) { values[k] = Held.OfReference( value ); WroteReference(); }
-	public void Set( in StringToken k, in bool value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Vector4 value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Angles value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Vector3 value ) { values[k] = Held.Of( value ); Wrote(); }
-	public void Set( in StringToken k, in Vector2 value ) { values[k] = Held.Of( value ); Wrote(); }
+	public void Set( in StringToken k, in bool value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Vector4 value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Angles value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Vector3 value ) => Put( k, Held.Of( value ) );
+	public void Set( in StringToken k, in Vector2 value ) => Put( k, Held.Of( value ) );
 	public void Set( in StringToken k, in Matrix value ) { values[k] = Held.OfReference( value ); WroteReference(); }
 	public void Set( in StringToken k, in GpuBuffer value ) { values[k] = Held.OfReference( value ); WroteReference(); }
 
@@ -409,6 +418,10 @@ public partial class RenderAttributes
 		public static Held Of( uint value ) => new( HeldKind.UInt, integers: new Vector3Int( unchecked( (int)value ), 0, 0 ) );
 		public static Held Of( Vector2Int value ) => new( HeldKind.Vector2Int, integers: new Vector3Int( value.x, value.y, 0 ) );
 		public static Held Of( Vector3Int value ) => new( HeldKind.Vector3Int, integers: value );
+
+		/// <summary>Whether two hold the same number set the same way; never for a reference.</summary>
+		public bool Same( in Held other )
+			=> Kind == other.Kind && Kind != HeldKind.Reference && Numbers == other.Numbers && Integers == other.Integers;
 
 		/// <summary>Anything that is not one of the numbers - named apart so no overload can pick it by accident.</summary>
 		public static Held OfReference( object value ) => new( HeldKind.Reference, reference: value );

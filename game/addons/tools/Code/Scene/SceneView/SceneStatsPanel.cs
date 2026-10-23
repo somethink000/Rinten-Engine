@@ -4,7 +4,7 @@ using System;
 
 namespace Editor;
 
-//Editor cost overlay: FPS, main thread, GPU time and memory; process-wide, same on all views
+//Editor cost overlay: FPS, main thread, GPU time, memory and triangles; process-wide, same on all views
 [StyleSheet( "SceneStatsPanel.cs.scss" )]
 internal sealed class SceneStatsPanel : EditorPanel
 {
@@ -32,6 +32,7 @@ internal sealed class SceneStatsPanel : EditorPanel
 	private readonly StatRow gpu;
 	private readonly StatRow vram;
 	private readonly StatRow ram;
+	private readonly StatRow tris;
 
 	public SceneStatsPanel()
 	{
@@ -43,6 +44,7 @@ internal sealed class SceneStatsPanel : EditorPanel
 		gpu = AddRow( "GPU" );
 		vram = AddRow( "VRAM" );
 		ram = AddRow( "RAM" );
+		tris = AddRow( "Tris" );
 
 		Read();
 	}
@@ -59,6 +61,9 @@ internal sealed class SceneStatsPanel : EditorPanel
 		base.Tick();
 
 		SetClass( "hidden", !Showing );
+
+		//The count is a query over every frame, run only while somebody reads it
+		PerformanceStats.MeasureTriangles = Showing;
 
 		if ( !Showing ) return;
 		if ( timeSinceRead < RefreshInterval ) return;
@@ -83,7 +88,7 @@ internal sealed class SceneStatsPanel : EditorPanel
 		var atCap = limit > 0.0f && perSecond >= limit * 0.95f;
 
 		cap.Set( limit > 0.0f ? $"{limit:0} · {CapSourceName( PerformanceStats.FrameRateCapSource )}" : "off",
-			atCap ? Theme.Yellow : Theme.Text );
+			atCap ? Warn : Plain );
 
 		//Main thread time as a share of the frame; 100 means the frame waits on this thread
 		var cpuPct = PerformanceStats.MainThreadUsage;
@@ -95,9 +100,19 @@ internal sealed class SceneStatsPanel : EditorPanel
 
 		//Nothing measures the GPU until our renderer has drawn a frame and its fence has proved it finished - a dash beats a confident zero
 		gpu.Set( gpuMs > 0.0f ? $"{gpuMs:0.00} ms · {gpuPct:0} %" : "-", GpuColour( gpuPct ) );
-		vram.Set( FormatBytes( PerformanceStats.GpuMemoryUsage ), Theme.Text );
-		ram.Set( FormatBytes( PerformanceStats.ApproximateProcessMemoryUsage ), Theme.Text );
+		vram.Set( FormatBytes( PerformanceStats.GpuMemoryUsage ), Plain );
+		ram.Set( FormatBytes( PerformanceStats.ApproximateProcessMemoryUsage ), Plain );
+
+		//Every pass's - shadows and the depth pre-pass draw the world again - as the GPU was handed them; a dash where nothing counts
+		var triangles = PerformanceStats.FrameTriangles;
+		tris.Set( triangles >= 0 ? FormatCount( triangles ) : "-", Plain );
 	}
+
+	//Brighter than the theme's: the numbers sit straight on the scene, with no plate behind them
+	private static readonly Color Plain = Color.White;
+	private static readonly Color Good = new( 0.45f, 1.0f, 0.45f );
+	private static readonly Color Warn = new( 1.0f, 0.9f, 0.3f );
+	private static readonly Color Bad = new( 1.0f, 0.4f, 0.35f );
 
 	//The caps by the names a person picked them under.
 	private static string CapSourceName( string source ) => source switch
@@ -111,10 +126,10 @@ internal sealed class SceneStatsPanel : EditorPanel
 
 	private static Color GpuColour( float pct ) => pct switch
 	{
-		<= 0.0f => Theme.Text,
-		> 90.0f => Theme.Red,
-		> 70.0f => Theme.Yellow,
-		_ => Theme.Text
+		<= 0.0f => Plain,
+		> 90.0f => Bad,
+		> 70.0f => Warn,
+		_ => Plain
 	};
 
 	//The same thresholds the GPU row uses, so the two are read together: past ninety the frame is waiting on this thread and nothing else will help.
@@ -122,10 +137,10 @@ internal sealed class SceneStatsPanel : EditorPanel
 
 	private static Color FrameRateColour( float frameMs ) => frameMs switch
 	{
-		<= 0.0f => Theme.Text,
-		> 33.3f => Theme.Red,
-		> 16.7f => Theme.Yellow,
-		_ => Theme.Green
+		<= 0.0f => Plain,
+		> 33.3f => Bad,
+		> 16.7f => Warn,
+		_ => Good
 	};
 
 	private static string FormatBytes( ulong bytes ) => bytes switch
@@ -134,6 +149,13 @@ internal sealed class SceneStatsPanel : EditorPanel
 		>= 1024UL * 1024UL => $"{bytes / (1024.0 * 1024.0):0} MB",
 		>= 1024UL => $"{bytes / 1024.0:0} KB",
 		_ => $"{bytes} B"
+	};
+
+	private static string FormatCount( long count ) => count switch
+	{
+		>= 1_000_000L => $"{count / 1_000_000.0:0.00} M",
+		>= 1_000L => $"{count / 1_000.0:0.0} K",
+		_ => $"{count}"
 	};
 
 	//One line: what it is on the left, what it says on the right.

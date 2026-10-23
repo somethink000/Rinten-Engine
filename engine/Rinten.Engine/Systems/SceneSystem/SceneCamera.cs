@@ -461,7 +461,9 @@ public sealed partial class SceneCamera : IDisposable, IManagedCamera
 			var bl = GetRay( new Vector2( MathF.Min( c1.x, c2.x ), MathF.Max( c1.y, c2.y ) ), screenSize );
 			var br = GetRay( new Vector2( MathF.Max( c1.x, c2.x ), MathF.Max( c1.y, c2.y ) ), screenSize );
 
-			return Rinten.Frustum.FromCorners( tl, tr, br, bl, ZNear, ZFar );
+			//As far as the drawn view reaches: its far plane is pushed out to meet ZFar at the corners
+			var aspect = Size.y > 0 ? Size.x / Size.y : 1.0f;
+			return Rinten.Frustum.FromCorners( tl, tr, br, bl, ZNear, ZFar * CoreSceneDrawer.CornerStretch( FieldOfView, aspect ) );
 		}
 	}
 

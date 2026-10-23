@@ -26,8 +26,8 @@ public partial class Scene : GameObject
 			.ThenBy( x => x.Priority )
 			.FirstOrDefault();
 
-		//And the editor's own, in the same walk rather than another one.
+		//And the editor's own - not a hidden stand-in a scene camera is drawn through, which is never enabled.
 		_editorCamera = GetAllComponents<CameraComponent>()
-			.FirstOrDefault( x => x.IsValid() && x.IsSceneEditorCamera );
+			.FirstOrDefault( x => x.IsValid() && x.IsSceneEditorCamera && x.Active );
 	}
 }

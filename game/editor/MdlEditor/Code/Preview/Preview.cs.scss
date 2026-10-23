@@ -102,6 +102,15 @@
 		background-color: $accent;
 		color: $text;
 	}
+
+	//Shown but with nothing to do on this model; its tooltip says what would give it something
+	&.unavailable
+	{
+		opacity: 0.35;
+		cursor: default;
+
+		&:hover { color: $text-light; }
+	}
 }
 
 //The shape of a slider in a toolbar is design.scss's .toolbar-slider, which both of these wear. What is left here is what each one is a slider OF.

@@ -50,8 +50,8 @@ internal partial class GlobalContext
 	/// <summary>Allows a common place for an org's data</summary>
 	public BaseFileSystem FileOrg { get; set; }
 
-	/// <summary>Special options for serializing json</summary>
-	public JsonSerializerOptions JsonSerializerOptions { get; set; }
+	/// <summary>Special options for serializing json; the plain ones until the context sets up its own.</summary>
+	public JsonSerializerOptions JsonSerializerOptions { get; set; } = EnumConvert.Plain;
 
 	/// <summary>For running tasks in a kind of sandboxed way</summary>
 	public TaskSource TaskSource { get; set; }

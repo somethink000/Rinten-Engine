@@ -24,7 +24,8 @@ public partial class Terrain
 
 	private readonly List<int> queried = new();
 
-	/// <summary>What the ground is painted with nearest a point of the world: the two heaviest layers of the nearest vertex. Null where there is no ground near.</summary>
+	//Out of the paint mask where it covers the point, the nearest vertex's paint for the rest.
+	/// <summary>The two heaviest layers painted nearest a world point; null where there is no ground near.</summary>
 	public TerrainMaterialInfo? GetMaterialAtWorldPosition( Vector3 worldPosition )
 	{
 		if ( Storage?.Mesh is not { } mesh ) return null;
@@ -51,11 +52,12 @@ public partial class Terrain
 
 		var vertex = mesh.GetVertex( nearest );
 
-		System.Span<float> weights =
-		[
-			vertex.Layers.r / 255.0f, vertex.Layers.g / 255.0f, vertex.Layers.b / 255.0f, vertex.Layers.a / 255.0f,
-			vertex.Layers2.x, vertex.Layers2.y, vertex.Layers2.z, vertex.Layers2.w,
-		];
+		//The mask where it covers the point, the nearest vertex's paint for the rest.
+		System.Span<float> weights = stackalloc float[MostLayers];
+		weights.Clear();
+
+		var cover = mesh.MaskAt( local, vertex.Normal.y, weights );
+		vertex.Paint.AddTo( weights, 1.0f - cover );
 
 		var first = 0;
 		var second = -1;

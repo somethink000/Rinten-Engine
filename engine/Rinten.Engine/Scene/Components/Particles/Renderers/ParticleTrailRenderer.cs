@@ -53,6 +53,11 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 
 	List<SceneTrailObject> adopted = new();
 
+	//Trails whose particle is gone and whose tail has faded, and listeners of gone particles, kept for the next particles:
+	//one of each per particle was objects and arrays every frame
+	readonly System.Collections.Concurrent.ConcurrentBag<SceneTrailObject> spare = new();
+	readonly System.Collections.Concurrent.ConcurrentBag<ParticleTrail> spareListeners = new();
+
 	internal Material _defaultMaterial;
 
 	protected override void OnParticleCreated( Particle p )
@@ -60,7 +65,7 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 		if ( Application.IsHeadless )
 			return;
 
-		p.AddListener( new ParticleTrail( this ), this );
+		p.AddListener( spareListeners.TryTake( out var kept ) ? kept : new ParticleTrail( this ), this );
 	}
 
 	//If we have to do this where we want to wait for a SceneSystem effect to finish before destroying it more than
@@ -73,6 +78,30 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 		{
 			adopted.Add( obj );
 		}
+	}
+
+	//A trail for a new particle, from the spares where there is one
+	internal SceneTrailObject Take()
+	{
+		while ( spare.TryTake( out var kept ) )
+		{
+			if ( !kept.IsValid() ) continue;
+
+			kept.RenderingEnabled = true;
+			return kept;
+		}
+
+		return new SceneTrailObject( Scene.SceneWorld );
+	}
+
+	internal void Spare( ParticleTrail listener ) => spareListeners.Add( listener );
+
+	//Back to the spares, empty and not drawn
+	internal void Return( SceneTrailObject obj )
+	{
+		obj.Reset();
+		obj.RenderingEnabled = false;
+		spare.Add( obj );
 	}
 
 	protected override void OnUpdate()
@@ -93,21 +122,23 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 			}
 		}
 
-		Rinten.Utility.Parallel.ForEach( adopted, p =>
+		Rinten.Jobs.JobSystem.For( adopted.Count, (adopted, Time.Delta), static ( s, i ) =>
 		{
-			p.AdvanceTime( Time.Delta );
-			p.Build();
-
+			s.adopted[i].AdvanceTime( s.Delta );
+			s.adopted[i].Build();
 		} );
 
-		adopted.RemoveAll( TryDelete );
+		adopted.RemoveAll( retire ??= Retire );
 	}
 
-	static bool TryDelete( SceneTrailObject obj )
+	Predicate<SceneTrailObject> retire;
+
+	//An adopted trail that has faded goes back to the spares
+	bool Retire( SceneTrailObject obj )
 	{
 		if ( !obj.IsEmpty ) return false;
 
-		obj.Delete();
+		Return( obj );
 		return true;
 	}
 
@@ -129,6 +160,9 @@ public sealed class ParticleTrailRenderer : ParticleController, Component.Execut
 		}
 
 		adopted.Clear();
+
+		while ( spare.TryTake( out var kept ) ) kept.Delete();
+		spareListeners.Clear();
 	}
 }
 
@@ -146,7 +180,7 @@ class ParticleTrail : Particle.BaseListener
 
 	public override void OnEnabled( Particle p )
 	{
-		so = new SceneTrailObject( Renderer.Scene.SceneWorld );
+		so = Renderer.Take();
 		so.Tags.SetFrom( Renderer.GameObject.Tags );
 		so.MaxPoints = Renderer.MaxPoints;
 		so.PointDistance = Renderer.PointDistance;
@@ -169,14 +203,13 @@ class ParticleTrail : Particle.BaseListener
 	{
 		if ( so is null ) return;
 
-		if ( so.IsEmpty || !Renderer.Active )
-		{
-			so.Delete();
-		}
-		else
-		{
-			Renderer.Adopt( so );
-		}
+		if ( !Renderer.Active ) so.Delete();
+		else if ( so.IsEmpty ) Renderer.Return( so );
+		else Renderer.Adopt( so );
+
+		so = null;
+
+		if ( Renderer.Active ) Renderer.Spare( this );
 	}
 
 	public override void OnUpdate( Particle p, float dt )

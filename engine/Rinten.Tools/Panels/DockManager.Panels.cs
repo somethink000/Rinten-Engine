@@ -924,8 +924,8 @@ public partial class DockManager
 		}
 	}
 
-	//Draws one group's tab strip in strip-local coordinates.
-	internal void PaintTabs( Side side )
+	//Draws one group's tab strip in strip-local coordinates; pointer is where the mouse is over it, if it is.
+	internal void PaintTabs( Side side, Vector2? pointer = null )
 	{
 		if ( !OnPanels ) return;
 
@@ -994,8 +994,19 @@ public partial class DockManager
 				Paint.DrawIcon( glyph, dock.Icon, TabIconSize, TextFlag.Center );
 			}
 
-			Paint.SetPen( showing ? Theme.InkDim : Theme.InkOff );
-			Paint.DrawIcon( CloseOf( tab ), "close", 12.0f );
+			var close = CloseOf( tab );
+			var overClose = pointer is { } p && close.IsInside( p );
+
+			//The same light plate the title bar's buttons wear under the pointer
+			if ( overClose )
+			{
+				Paint.ClearPen();
+				Paint.SetBrush( Theme.VeilHover );
+				Paint.DrawRect( close.Grow( 2.0f, 2.0f ), Theme.ControlRadius );
+			}
+
+			Paint.SetPen( overClose ? Theme.Ink : showing ? Theme.InkDim : Theme.InkOff );
+			Paint.DrawIcon( close, "close", 12.0f );
 
 			at += tabWidth;
 		}
@@ -1033,7 +1044,24 @@ public partial class DockManager
 
 		public override bool UsesCanvasDraw => true;
 
-		protected override void OnPaint() => docks.PaintTabs( Side );
+		//Where the mouse is over the strip, for the close box it is on to light up
+		private Vector2? pointer;
+
+		protected override void OnPaint() => docks.PaintTabs( Side, pointer );
+
+		protected override void OnMouseMove( MouseEvent e )
+		{
+			base.OnMouseMove( e );
+
+			pointer = e.LocalPosition;
+			Update();
+		}
+
+		protected override void OnMouseLeave()
+		{
+			pointer = null;
+			base.OnMouseLeave();
+		}
 
 		protected override void OnMousePress( MouseEvent e )
 		{
@@ -1532,6 +1560,17 @@ public partial class DockManager
 		return true;
 	}
 
+	//Brings a floating dock back into this layout, in front of its tab group. False where it is not floating
+	internal bool DockFloating( DockWidget dock )
+	{
+		if ( !floating.TryGetValue( dock, out var window ) || !window.IsValid() ) return false;
+
+		window.DockBack();
+		SetDockState( dock.Title, true );
+
+		return true;
+	}
+
 	//A window holding one dock of this layout: no tab, only the panel. Pulled by its caption it is carried, and put down on the layout
 	//it docks there - see Landed. Its close puts the panel away, as a tab's cross does
 	private sealed class FloatingDock : Window
@@ -1563,6 +1602,10 @@ public partial class DockManager
 			this.dock = dock;
 
 			living.Add( this );
+
+			//One press puts it back in the layout, where dragging it there by its caption would
+			if ( MenuWidget is TitleBar bar )
+				bar.TitleBarButtons.AddButton( "push_pin", Pin ).ToolTip = "Dock into the layout";
 		}
 
 		internal DockWidget Dock => dock;
@@ -1576,6 +1619,11 @@ public partial class DockManager
 
 			if ( living.FirstOrDefault( x => x.IsValid() && x.Shell == shell ) is { } window )
 				window.docks?.Landed( window, CoreUiWindow.Of( on ), at );
+		}
+
+		private void Pin()
+		{
+			if ( dock.IsValid() ) docks?.DockFloating( dock );
 		}
 
 		//Back into the layout, open; the caller places it

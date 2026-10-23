@@ -32,6 +32,24 @@ internal static class CoreSkeletons
 		}
 	}
 
+	private static readonly Dictionary<string, CorePoseReach> reaches = new( StringComparer.OrdinalIgnoreCase );
+
+	/// <summary>How far a model's vertices reach from its bones, read once - see CorePoseReach. Null where a pose's bounds can't come from them.</summary>
+	public static CorePoseReach Reach( Model model )
+	{
+		if ( model?.core is not { IsValid: true } core ) return null;
+
+		lock ( padlock )
+		{
+			if ( reaches.TryGetValue( core.Name, out var cached ) ) return cached;
+
+			var reach = CorePoseReach.Of( core.Loaded );
+			reaches[core.Name] = reach;
+
+			return reach;
+		}
+	}
+
 	/// <summary>Drop what was remembered about a model, so the next thing to ask reads it again.</summary>
 	public static void Forget( string modelPath )
 	{
@@ -44,6 +62,7 @@ internal static class CoreSkeletons
 		{
 			Drop( skeletons, name );
 			Drop( definitions, name );
+			Drop( reaches, name );
 		}
 	}
 
@@ -300,7 +319,7 @@ internal static class CoreSkeletons
 		AllowTrailingCommas = true,
 		IncludeFields = true,
 		MaxDepth = 512,
-		Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(), new ModelDefinition.ModelGraph.Skim() },
+		Converters = { new EnumConvert(), new ModelDefinition.ModelGraph.Skim() },
 	};
 
 	//What a model's definition said, read the first time anything asks for any part of it and kept until the model is forgotten.

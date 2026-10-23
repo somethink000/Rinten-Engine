@@ -89,7 +89,10 @@ internal static unsafe partial class VkDevice
 	//Zone to collect pipeline statistics for (RINTEN_ZONE_STATS), or null for none
 	internal static readonly string StatsZone = Environment.GetEnvironmentVariable( "RINTEN_ZONE_STATS" );
 
-	//Whether the device has the statistics feature and it was asked for.
+	//Whether a frame's statistics query counts the whole frame: while its triangles are shown, unless a run named a zone
+	internal static bool CountsFrame => StatsZone is null && Rinten.Diagnostics.PerformanceStats.MeasureTriangles;
+
+	//Whether the device has the statistics feature.
 	internal static bool statsQueries;
 
 	//How many frames have read their statistics back, for saying one in a hundred and twenty.
@@ -98,8 +101,8 @@ internal static unsafe partial class VkDevice
 	/// <summary>Set 0 is a material: 4 images plus params; fixed count so any material fits any pipeline</summary>
 	public const uint MaterialTextures = 4;
 
-	/// <summary>Material param slots, one float4 each (unpacked); params past the last slot are silently dropped</summary>
-	public const uint MaterialParamSlots = 64;
+	/// <summary>Material param slots, one float4 each - CoreRenderDevice's, which the packing on the CPU uses too</summary>
+	public const uint MaterialParamSlots = CoreRenderDevice.MaterialParamSlots;
 	public const uint MaterialParamFloats = MaterialParamSlots * 4;
 	public const uint MaterialParamSize = MaterialParamFloats * 4;
 
@@ -398,6 +401,12 @@ internal static unsafe partial class VkDevice
 	//Whether multiview (both headset eyes in one pass) is available; on whenever supported
 	internal static bool multiview;
 
+	//Samples the portable frame's pass may take at most, colour and depth resolved in it; one where it cannot
+	internal static uint mostSamples = 1;
+
+	//What makes a pass that resolves its depth (VK_KHR_create_renderpass2), where mostSamples is above one
+	internal static KhrCreateRenderpass2 renderPass2;
+
 	//How many one call may name: one where the above is missing
 	internal static uint maxDrawIndirect = 1;
 
@@ -680,6 +689,7 @@ internal static unsafe partial class VkDevice
 		public DescriptorSet Set;
 		public VkSemaphore Semaphore;
 		public SwapchainKHR Swapchain;
+		public AccelerationStructureKHR Structure;
 		public uint Bindless;
 
 		/// <summary>Where this image's memory came from, when it was a slice of a texture slab: the slice is given back rather than freed.</summary>
@@ -722,6 +732,7 @@ internal static unsafe partial class VkDevice
 		if ( grave.Image.Handle != 0 ) vk.DestroyImage( device, grave.Image, null );
 
 		//Before the buffer it was built into, which is its storage.
+		if ( grave.Structure.Handle != 0 ) VkRays.DestroyStructure( grave.Structure );
 
 		if ( grave.Buffer.Handle != 0 ) vk.DestroyBuffer( device, grave.Buffer, null );
 
@@ -861,6 +872,12 @@ internal static unsafe partial class VkDevice
 		Retire( new Grave { Ticket = StampForNow(), Buffer = buffer, Memory = memory, Block = -1 } );
 	}
 
+	//A ray structure with the buffer that holds it
+	internal static void RetireStructure( AccelerationStructureKHR structure, VkBuffer buffer, DeviceMemory memory )
+	{
+		Retire( new Grave { Ticket = StampForNow(), Structure = structure, Buffer = buffer, Memory = memory, Block = -1 } );
+	}
+
 	internal static void RetireImage( VkImage image, DeviceMemory memory, ImageView view )
 	{
 		Retire( new Grave { Ticket = StampForNow(), Image = image, Memory = memory, View = view, Block = -1 } );
@@ -892,6 +909,8 @@ internal static unsafe partial class VkDevice
 
 	internal static void RetireSwapchain( SwapchainKHR swapchain, uint after = 0 )
 	{
+		CorePresent.Forget( swapchain );
+
 		if ( swapchain.Handle == 0 ) return;
 
 		Retire( new Grave { Ticket = StampAfter( after ), Swapchain = swapchain, Block = -1 } );

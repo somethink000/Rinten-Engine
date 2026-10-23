@@ -69,6 +69,11 @@
 									<label class="material-icon">@OrientationIcon</label>
 									<label>Screen: @OrientationTitle</label>
 								</div>
+
+								<div class="option @(microphone ? "on" : null)" onclick="@ToggleMicrophone">
+									<label class="material-icon">@(microphone ? "check_box" : "check_box_outline_blank")</label>
+									<label>Microphone, for voice</label>
+								</div>
 							}
 
 							@if ( on && ToolsMissing( platform ) is { } tools )
@@ -140,6 +145,9 @@
 	string orientation = "landscape";
 
 	static readonly string[] Orientations = [ "landscape", "portrait", "auto" ];
+
+	//Whether an Android game may ask the player for the microphone, for voice. Off, its package has no RECORD_AUDIO.
+	bool microphone;
 
 	string OrientationTitle => orientation switch
 	{
@@ -228,6 +236,7 @@
 		exportDebug = config.GetMetaOrDefault( "Build.Debug", false );
 		orientation = config.GetMetaOrDefault( "Build.Orientation", "landscape" );
 		if ( !Orientations.Contains( orientation ) ) orientation = "landscape";
+		microphone = config.GetMetaOrDefault( "Build.Microphone", false );
 	}
 
 	void SaveBuild()
@@ -239,6 +248,7 @@
 		config.SetMeta( "Build.Zip", createZip );
 		config.SetMeta( "Build.Debug", exportDebug );
 		config.SetMeta( "Build.Orientation", orientation );
+		config.SetMeta( "Build.Microphone", microphone );
 	}
 
 	public override void OnSave()
@@ -306,6 +316,12 @@
 	void NextOrientation()
 	{
 		orientation = Orientations[( Array.IndexOf( Orientations, orientation ) + 1 ) % Orientations.Length];
+		Changed();
+	}
+
+	void ToggleMicrophone()
+	{
+		microphone = !microphone;
 		Changed();
 	}
 

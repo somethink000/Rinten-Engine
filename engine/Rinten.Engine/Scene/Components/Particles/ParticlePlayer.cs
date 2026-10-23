@@ -165,6 +165,9 @@ public sealed class ParticlePlayer : Component, Component.ExecuteInEditor, Compo
 
 	readonly List<GameObject> _emitters = new();
 
+	//Each built emitter's runner, kept with it rather than looked up: the runners are walked several times a frame
+	readonly List<ParticleModuleRunner> _runners = new();
+
 	Vector3 _lastPosition;
 	int _builtRevision = -1;
 
@@ -361,6 +364,7 @@ public sealed class ParticlePlayer : Component, Component.ExecuteInEditor, Compo
 		}
 
 		var runner = target.GetOrAddComponent<ParticleModuleRunner>();
+		_runners.Add( runner );
 
 		runner.Data = data;
 		runner.Player = this;
@@ -426,17 +430,14 @@ public sealed class ParticlePlayer : Component, Component.ExecuteInEditor, Compo
 			emitter?.DestroyImmediate();
 
 		_emitters.Clear();
+		_runners.Clear();
 	}
 
-	IEnumerable<ParticleModuleRunner> Runners()
+	//The live runners; one destroyed with its object since is dropped here
+	List<ParticleModuleRunner> Runners()
 	{
-		foreach ( var target in _emitters )
-		{
-			if ( !target.IsValid() ) continue;
-
-			if ( target.GetComponent<ParticleModuleRunner>() is { } runner )
-				yield return runner;
-		}
+		_runners.RemoveAll( static x => !x.IsValid() );
+		return _runners;
 	}
 
 	//Component

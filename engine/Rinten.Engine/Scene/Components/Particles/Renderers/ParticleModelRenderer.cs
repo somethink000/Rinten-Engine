@@ -137,7 +137,62 @@ public sealed class ParticleModelRenderer : ParticleController, Component.Execut
 	//Called when a particle is created.
 	protected override void OnParticleCreated( Particle p )
 	{
-		p.AddListener( new ParticleModel( this ), this );
+		p.AddListener( spareListeners.TryTake( out var kept ) ? kept : new ParticleModel( this ), this );
+	}
+
+	//Dead particles' drawn objects and listeners, by what they draw, kept for the next particles rather than remade
+	//Taken and given back from the threads the effect steps on
+	readonly System.Collections.Concurrent.ConcurrentDictionary<(Model Model, bool Morphed), System.Collections.Concurrent.ConcurrentBag<SceneObject>> spare = new();
+	readonly System.Collections.Concurrent.ConcurrentBag<Particle.BaseListener> spareListeners = new();
+
+	//An object drawing this model, from the spares where there is one
+	internal SceneObject Take( Model model, bool morphed )
+	{
+		if ( spare.TryGetValue( (model, morphed), out var kept ) )
+		{
+			while ( kept.TryTake( out var so ) )
+			{
+				if ( !so.IsValid() ) continue;
+
+				so.RenderingEnabled = true;
+				return so;
+			}
+		}
+
+		return morphed
+			? new SceneModel( Scene.SceneWorld, model, global::Transform.Zero )
+			: new SceneObject( Scene.SceneWorld, model ?? Model.Cube );
+	}
+
+	//Back to the spares, not drawn
+	internal void Return( SceneObject so, Model model, bool morphed )
+	{
+		if ( !Active )
+		{
+			so.Delete();
+			return;
+		}
+
+		so.RenderingEnabled = false;
+		spare.GetOrAdd( (model, morphed), static _ => new() ).Add( so );
+	}
+
+	internal void Spare( Particle.BaseListener listener )
+	{
+		if ( Active ) spareListeners.Add( listener );
+	}
+
+	protected override void OnDisabled()
+	{
+		base.OnDisabled();
+
+		foreach ( var kept in spare.Values )
+		{
+			while ( kept.TryTake( out var so ) ) so.Delete();
+		}
+
+		spare.Clear();
+		spareListeners.Clear();
 	}
 
 	/// <summary>Version of the component.</summary>
@@ -173,6 +228,10 @@ file class ParticleModel : Particle.BaseListener
 
 	SceneObject so;
 
+	//What so draws, which is what it goes back to the spares under
+	Model drawn;
+	bool morphed;
+
 	/// <summary>Initializes a new instance of the <see cref="ParticleModel"/> class.</summary>
 	public ParticleModel( ParticleModelRenderer renderer )
 	{
@@ -186,9 +245,9 @@ file class ParticleModel : Particle.BaseListener
 		var model = entry?.Model;
 
 		//A model with blend shapes is a SceneModel, which is what carries the weights the renderer reads; anything else is the plainer object.
-		so = model is { Morphs.Count: > 0 } && Renderer.Morphs.Count > 0
-			? new SceneModel( Renderer.Scene.SceneWorld, model, Transform.Zero )
-			: new SceneObject( Renderer.Scene.SceneWorld, model ?? Model.Cube );
+		drawn = model;
+		morphed = model is { Morphs.Count: > 0 } && Renderer.Morphs.Count > 0;
+		so = Renderer.Take( model, morphed );
 
 		so.Tags.SetFrom( Renderer.GameObject.Tags );
 
@@ -206,9 +265,10 @@ file class ParticleModel : Particle.BaseListener
 	/// <summary>Called when the particle is disabled.</summary>
 	public override void OnDisabled( Particle p )
 	{
-		if ( !so.IsValid() ) return;
+		if ( so.IsValid() ) Renderer.Return( so, drawn, morphed );
 
-		so.Delete();
+		so = null;
+		Renderer.Spare( this );
 	}
 
 	/// <summary>Updates the particle.</summary>

@@ -37,17 +37,27 @@ public abstract class Scatterer
 
 		hash.Add( GetType().Name );
 
-		foreach ( var property in typeDesc.Properties )
+		foreach ( var property in Hashed( typeDesc ) )
 		{
-			if ( !property.HasAttribute<PropertyAttribute>() )
-				continue;
-
-			var value = property.GetValue( this );
-			HashValue( ref hash, value );
+			HashValue( ref hash, property.GetValue( this ) );
 		}
 
 		return hash.ToHashCode();
 	}
+
+	//Each scatterer kind's [Property] members, found once for the hash a clutter layer checks every frame
+	private static PropertyDescription[] Hashed( TypeDescription type )
+	{
+		lock ( hashed )
+		{
+			if ( !hashed.TryGetValue( type, out var found ) )
+				hashed[type] = found = type.Properties.Where( x => x.HasAttribute<PropertyAttribute>() ).ToArray();
+
+			return found;
+		}
+	}
+
+	private static readonly Dictionary<TypeDescription, PropertyDescription[]> hashed = new();
 
 	private static void HashValue( ref HashCode hash, object value )
 	{
@@ -140,7 +150,7 @@ public abstract class Scatterer
 		var physicsWorld = scene.PhysicsWorld;
 
 		//even though this is on the main thread, it's safe to do since nothing will change the physics world between now and when this completes
-		Parallel.For( 0, positions.Count, i =>
+		Rinten.Utility.Parallel.For( 0, positions.Count, i =>
 		{
 			var position = positions[i];
 			var traceStart = position.WithY( sceneBounds.Maxs.y );

@@ -154,7 +154,7 @@ public sealed class SceneSpriteSystem : GameObjectSystem<SceneSpriteSystem>
 
 		if ( shared >= ParallelParticles && _systemOffsets.Count > 1 && !Rinten.Utility.Parallel.InOrder )
 		{
-			Parallel.For( 0, _systemOffsets.Count, processSystem ??= ProcessSystem );
+			Rinten.Jobs.JobSystem.For( _systemOffsets.Count, processSystem ??= ProcessSystem );
 		}
 		else
 		{
@@ -333,8 +333,7 @@ public sealed class SceneSpriteSystem : GameObjectSystem<SceneSpriteSystem>
 		MemoryMarshal.Write( buf[5..], in material );
 		MemoryMarshal.Write( buf[9..], in order );
 		var tokenSlice = MemoryMarshal.Cast<byte, uint>( buf[13..] );
-		int i = 0;
-		foreach ( var token in tokens ) tokenSlice[i++] = token;
+		ITagSet.Copy( tokens ).CopyTo( tokenSlice );
 		MemoryExtensions.Sort( tokenSlice );
 
 		return XxHash3.HashToUInt64( buf );

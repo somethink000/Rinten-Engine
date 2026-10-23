@@ -10,9 +10,8 @@ public sealed class TerrainSoup
 	{
 		public Vector3 Position, Normal;
 
-		/// <summary>Which painted layers the vertex wears, and beside it how much of each.</summary>
-		public Color32 Layers;
-		public Vector4 Layers2;
+		/// <summary>Which painted layers the vertex wears, and how much of each.</summary>
+		public TerrainPaint Paint;
 
 		public Vector2 Uv;
 		public Vector4 Tangent;
@@ -1700,16 +1699,10 @@ public static class TerrainMeshUnion
 
 			var handed = wa >= wb && wa >= wc ? a.Tangent.w : wb >= wc ? b.Tangent.w : c.Tangent.w;
 
-			static byte Mix( byte x, byte y, byte z, double wx, double wy, double wz )
-				=> (byte)Math.Clamp( Math.Round( ( x * wx ) + ( y * wy ) + ( z * wz ) ), 0.0, 255.0 );
-
 			return new TerrainSoup.Vertex
 			{
 				Normal = normal,
-				Layers = new Color32(
-					Mix( a.Layers.r, b.Layers.r, c.Layers.r, wa, wb, wc ), Mix( a.Layers.g, b.Layers.g, c.Layers.g, wa, wb, wc ),
-					Mix( a.Layers.b, b.Layers.b, c.Layers.b, wa, wb, wc ), Mix( a.Layers.a, b.Layers.a, c.Layers.a, wa, wb, wc ) ),
-				Layers2 = ( a.Layers2 * fa ) + ( b.Layers2 * fb ) + ( c.Layers2 * fc ),
+				Paint = TerrainPaint.Mix( a.Paint, b.Paint, c.Paint, fa, fb, fc ),
 				Uv = ( a.Uv * fa ) + ( b.Uv * fb ) + ( c.Uv * fc ),
 				Tangent = new Vector4( tangent.x, tangent.y, tangent.z, handed ),
 			};

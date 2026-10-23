@@ -60,7 +60,7 @@ internal sealed class UdpConnection : Connection
 	{
 		if ( data is null || data.Length == 0 ) return;
 
-		peer.Send( data, !flags.HasFlag( NetFlags.Unreliable ) );
+		peer.Send( data, !( ( flags & NetFlags.Unreliable ) == NetFlags.Unreliable ) );
 
 		transport.Flush( peer );
 	}

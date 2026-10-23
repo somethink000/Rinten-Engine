@@ -9,8 +9,12 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 {
 	public override bool IsConcave => true;
 
+	//Between OnEnabled and OnDisabled: storage set while the scene is read comes first and would be laid out twice
+	private bool running;
+
 	protected override void OnEnabled()
 	{
+		running = true;
 		Create();
 		Transform.OnTransformChanged += OnTerrainChanged;
 		Storage?.MaterialSettings?.OnChanged += OnTerrainChanged;
@@ -18,6 +22,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 
 	protected override void OnDisabled()
 	{
+		running = false;
 		DestroyInternal();
 	}
 
@@ -43,6 +48,8 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 	void DisposeRenderResources()
 	{
 		ReleaseChunks();
+		DropRelief();
+		DropMask();
 
 		if ( watched is not null ) watched.Changed -= MeshChanged;
 		watched = null;
@@ -69,8 +76,10 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 			return;
 		}
 
-		//Whatever is waiting to be baked, and whatever the workers finished.
+		//What waits to be baked and what the workers finished; then the relief ring and the paint mask
 		PumpChunks();
+		PumpRelief();
+		PumpMask();
 	}
 
 	protected override void OnPreRender()
@@ -108,7 +117,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 	/// <summary>Call on enable or storage change</summary>
 	public void Create()
 	{
-		if ( !Active )
+		if ( !Active || !running )
 			return;
 
 		DisposeRenderResources();

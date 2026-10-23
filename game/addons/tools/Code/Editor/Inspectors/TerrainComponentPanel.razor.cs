@@ -12,16 +12,6 @@ namespace Editor.Inspectors;
 [StyleSheet( "TerrainComponentPanel.razor.scss" )]
 public partial class TerrainComponentPanel : ComponentPanel
 {
-	public enum HeightMapSizes
-	{
-		[Title( "256x256" )] S256 = 256,
-		[Title( "512x512" )] S512 = 512,
-		[Title( "1024x1024" )] S1024 = 1024,
-		[Title( "2048x2048" )] S2048 = 2048,
-		[Title( "4096x4096" )] S4096 = 4096,
-		[Title( "8192x8192" )] S8192 = 8192,
-	}
-
 	enum Page { Layers, Ground, Mesh }
 
 	readonly Terrain terrain;
@@ -63,13 +53,6 @@ public partial class TerrainComponentPanel : ComponentPanel
 
 		terrain = obj.Targets.FirstOrDefault() as Terrain;
 		if ( !terrain.IsValid() ) return;
-
-		var resolution = new ResolutionProxy( terrain );
-
-		groundProperties.Add( new ReflectionSerializedProperty<HeightMapSizes>(
-			typeof( ResolutionProxy ).GetProperty( nameof( ResolutionProxy.Resolution ) ),
-			() => resolution.Resolution,
-			v => resolution.Resolution = v ) );
 
 		foreach ( var property in obj.ToList().Where( Shown ) )
 		{
@@ -297,12 +280,12 @@ public partial class TerrainComponentPanel : ComponentPanel
 		var files = fd.SelectedFiles;
 		if ( files.Count == 0 ) return;
 
-		var resolution = terrain.Storage.Resolution;
-		var numPixels = resolution * resolution;
+		//The maps are as many texels a side as the first of them, laid over the whole terrain; the rest have to match it
+		int resolution;
+		using ( var first = EditorUtility.LoadBitmap( files[0] ) ) resolution = first.Width;
 
-		//A terrain read back off disk has its mesh and no maps; the splat map is read into a fresh one.
-		if ( terrain.Storage.ControlMap is null || terrain.Storage.ControlMap.Length < numPixels )
-			terrain.Storage.ControlMap = new uint[numPixels];
+		var numPixels = resolution * resolution;
+		var control = new uint[numPixels];
 
 		var allWeights = new List<(int materialIndex, float weight)>[numPixels];
 		for ( int i = 0; i < numPixels; i++ )
@@ -315,7 +298,7 @@ public partial class TerrainComponentPanel : ComponentPanel
 			using var bitmap = EditorUtility.LoadBitmap( file );
 			if ( bitmap.Width != resolution || bitmap.Height != resolution )
 			{
-				Log.Warning( $"Skipping {Path.GetFileName( file )}: does not match terrain resolution" );
+				Log.Warning( $"Skipping {Path.GetFileName( file )}: not square, or not the size of the first splat map" );
 				continue;
 			}
 
@@ -358,56 +341,15 @@ public partial class TerrainComponentPanel : ComponentPanel
 			byte overlayMat = (byte)Math.Clamp( secondIdx, 0, Math.Min( 31, terrain.Storage.Materials.Count - 1 ) );
 
 			var compactMaterial = new CompactTerrainMaterial( baseMat, overlayMat, blendFactor, false );
-			terrain.Storage.ControlMap[i] = compactMaterial.Packed;
+			control[i] = compactMaterial.Packed;
 		}
 
 		//The mesh is what is painted, vertex by vertex; the map just filled in is read across it by where each vertex stands.
-		if ( terrain.RepaintFromControlMap() is { } edit )
+		if ( terrain.RepaintFromControlMap( control, resolution ) is { } edit )
 		{
 			SceneEditorSession.Active?.UndoSystem.Insert( "Import Splatmap",
 				() => { if ( terrain.IsValid() ) terrain.Mesh?.Undo( edit ); },
 				() => { if ( terrain.IsValid() ) terrain.Mesh?.Redo( edit ); } );
-		}
-	}
-
-	sealed class ResolutionProxy
-	{
-		readonly Terrain terrain;
-
-		public ResolutionProxy( Terrain terrain ) => this.terrain = terrain;
-
-		public HeightMapSizes Resolution
-		{
-			get
-			{
-				var res = terrain.Storage?.Resolution ?? 512;
-				var defined = Enum.GetValues<HeightMapSizes>().Cast<int>();
-				var nearest = defined.MinBy( v => Math.Abs( v - res ) );
-				return (HeightMapSizes)nearest;
-			}
-			set
-			{
-				if ( terrain?.Storage is null ) return;
-				int newRes = (int)value;
-				if ( newRes == terrain.Storage.Resolution ) return;
-
-				Dialog.AskConfirm( () =>
-				{
-					//The mesh is made again from the height map at the new size; what was sculpted into it
-					//since - overhangs, caves, anything set in - is not something a height map can hold.
-					var storage = terrain.Storage;
-
-					if ( storage.HeightMap is { Length: > 0 } && storage.HeightMap.Length >= storage.Resolution * storage.Resolution )
-						TerrainImportHelper.ResampleStorage( storage, newRes );
-					else
-						storage.SetResolution( newRes );
-
-					storage.BuildMeshFromMaps();
-					terrain.Create();
-				},
-				$"Make the terrain's mesh again at {newRes}×{newRes}? Everything sculpted into it since it was made from its height map is lost, and this cannot be undone.",
-				"Remake Terrain" );
-			}
 		}
 	}
 }

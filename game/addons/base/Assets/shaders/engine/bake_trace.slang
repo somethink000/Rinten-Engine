@@ -26,8 +26,29 @@ cbuffer Push
 	uint g_mode;        //What a texel's samples do - the Mode flags; nought traces whole paths
 	uint g_cacheLights; //Lit triangles of the cache a gather samples as lights; nought for none
 	uint g_triangles;   //The world's triangles, where g_lights' list starts
-
+	uint g_raysLow;     //The world's ray structure's address, where BAKE_RAYS traces it - see BakeGpu
+	uint g_raysHigh;
+	uint g_solid;       //The structure's solid triangles, its first geometry; the rest are its second
 };
+
+#if BAKE_RAYS
+//The structure's triangles in its order: solid ones, then those a ray may pass - each its world triangle
+[[vk::binding(5,0)]] StructuredBuffer<uint> g_order;
+
+RaytracingAccelerationStructure World() { return RaytracingAccelerationStructure( ( uint64_t( g_raysHigh ) << 32 ) | uint64_t( g_raysLow ) ); }
+
+uint Source( uint geometry, uint primitive ) { return g_order[primitive + ( geometry == 0u ? 0u : g_solid )]; }
+
+RayDesc Ray( float3 origin, float3 direction, float furthest )
+{
+	RayDesc ray;
+	ray.Origin = origin;
+	ray.Direction = direction;
+	ray.TMin = 0.0;
+	ray.TMax = furthest;
+	return ray;
+}
+#endif
 
 static const float Pi = 3.14159265;
 static const float InvPi = 1.0 / Pi;
@@ -376,6 +397,87 @@ uint PackLets( float3 c )
 
 float3 UnpackLets( uint w ) { return float3( float( w & 1023u ), float( ( w >> 10 ) & 1023u ), float( ( w >> 20 ) & 1023u ) ) / 1023.0; }
 
+#if BAKE_RAYS
+//Nearest as a ray query: solid triangles are the structure's opaque geometry, the rest come back to be asked
+bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit, out float3 veil )
+{
+	hit.distance = 0.0;
+	hit.triangle = 0xFFFFFFFFu;
+	hit.u = 0.0;
+	hit.v = 0.0;
+	veil = float3( 1.0, 1.0, 1.0 );
+
+	float paneAt[4];
+	uint paneLets[4];
+	uint panes = 0u;
+
+	RayQuery<RAY_FLAG_NONE> query;
+	query.TraceRayInline( World(), RAY_FLAG_NONE, 0xFF, Ray( origin, direction, furthest ) );
+
+	while ( query.Proceed() )
+	{
+		if ( query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE ) continue;
+
+		uint t = Source( query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex() );
+		float2 at = query.CandidateTriangleBarycentrics();
+		float3 lets = Veil( t, at.x, at.y, true, direction );
+
+		if ( all( lets >= 1.0 ) ) continue;
+
+		if ( any( lets > 0.0 ) )
+		{
+			if ( panes < 4u )
+			{
+				paneAt[panes] = query.CandidateTriangleRayT();
+				paneLets[panes] = PackLets( lets );
+				panes++;
+			}
+			else veil *= lets;
+
+			continue;
+		}
+
+		query.CommitNonOpaqueTriangleHit();
+	}
+
+	bool found = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+
+	if ( found )
+	{
+		float2 at = query.CommittedTriangleBarycentrics();
+		hit.distance = query.CommittedRayT();
+		hit.triangle = Source( query.CommittedGeometryIndex(), query.CommittedPrimitiveIndex() );
+		hit.u = at.x;
+		hit.v = at.y;
+	}
+
+	for ( uint p = 0u; p < panes; ++p )
+		if ( !found || paneAt[p] < hit.distance ) veil *= UnpackLets( paneLets[p] );
+
+	return found;
+}
+
+//Transmittance as a ray query: the first solid triangle, or a pane that lets nothing by, ends it
+float3 Transmittance( float3 origin, float3 direction, float furthest )
+{
+	float3 through = float3( 1.0, 1.0, 1.0 );
+
+	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+	query.TraceRayInline( World(), RAY_FLAG_NONE, 0xFF, Ray( origin, direction, furthest ) );
+
+	while ( query.Proceed() )
+	{
+		if ( query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE ) continue;
+
+		float2 at = query.CandidateTriangleBarycentrics();
+		through *= Veil( Source( query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex() ), at.x, at.y, true, direction );
+
+		if ( all( through <= 1e-4 ) ) query.CommitNonOpaqueTriangleHit();
+	}
+
+	return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? float3( 0.0, 0.0, 0.0 ) : through;
+}
+#else
 //The nearest solid thing along a ray, and in `veil` what the glass in front of it let by - the panes it crossed on the
 //way, kept as it walks so the bounce needs no second walk (the first four by distance, any more just multiplied)
 bool Nearest( float3 origin, float3 direction, float furthest, out Hit hit, out float3 veil )
@@ -537,6 +639,8 @@ float3 Transmittance( float3 origin, float3 direction, float furthest )
 
 	return through;
 }
+
+#endif
 
 //---- the world as the rays see it - BakeScene ----------------------------------
 
@@ -809,6 +913,23 @@ float3 Unshadowed( uint index, float3 position, float3 normal, float3 geometric,
 }
 
 //Whether a ray crosses, however clear, a triangle of one mirror - BakeBvh.Touches
+#if BAKE_RAYS
+bool Touches( float3 origin, float3 direction, float furthest, uint mirror )
+{
+	RayQuery<RAY_FLAG_FORCE_NON_OPAQUE> query;
+	query.TraceRayInline( World(), RAY_FLAG_NONE, 0xFF, Ray( origin, direction, furthest ) );
+
+	while ( query.Proceed() )
+	{
+		if ( Word( MirrorOfAt() + Source( query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex() ) ) != mirror ) continue;
+
+		query.Abort();
+		return true;
+	}
+
+	return false;
+}
+#else
 bool Touches( float3 origin, float3 direction, float furthest, uint mirror )
 {
 	float3 inverse = Inverse( direction );
@@ -862,6 +983,8 @@ bool Touches( float3 origin, float3 direction, float furthest, uint mirror )
 
 	return false;
 }
+
+#endif
 
 float3 Reflect( float3 v, float3 n ) { return v - ( n * ( 2.0 * dot( v, n ) ) ); }
 

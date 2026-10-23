@@ -52,7 +52,9 @@ internal static class CoreGameRenderer
 
 		//The cameras drawing into textures first, each a view of its own sent before the window's frame opens - so the frame samples what they
 		//saw this frame rather than last. These are drawn either way: a render texture may be what a panel in front of the player is showing.
+		CoreRenderDevice.ZoneBegin( "camera targets" );
 		CoreCameraTargets.Draw( scene );
+		CoreRenderDevice.ZoneEnd();
 
 		//No window frame while a headset has the picture, unless VRSystem.MirrorToScreen asks for one
 		if ( CoreHeadset.HasSession && !Rinten.VR.VRSystem.MirrorToScreen )
@@ -64,7 +66,11 @@ internal static class CoreGameRenderer
 		//The first scene of the tick opens the frame and says what colour the window starts as; anything after it draws on top of what is there.
 		if ( !framing )
 		{
-			if ( !CoreRenderDevice.BeginFrame( swapchain, camera.BackgroundColor ) ) return false;
+			CoreRenderDevice.ZoneBegin( "begin frame" );
+			var begun = CoreRenderDevice.BeginFrame( swapchain, camera.BackgroundColor );
+			CoreRenderDevice.ZoneEnd();
+
+			if ( !begun ) return false;
 
 			framing = true;
 		}

@@ -58,7 +58,7 @@ public partial class GpuBuffer : IValid, IDisposable
 		var made = CoreRenderDevice.ReserveBuffer( Bytes );
 		if ( made == 0 ) return;
 
-		if ( Usage.HasFlag( UsageFlags.Append ) )
+		if ( ( ( Usage & UsageFlags.Append ) == UsageFlags.Append ) )
 		{
 			//Starts at nought, which is what a count of nothing written is.
 			Span<byte> zero = stackalloc byte[4];
@@ -92,7 +92,7 @@ public partial class GpuBuffer : IValid, IDisposable
 		if ( elementSize <= 0 ) throw new ArgumentException( "Element size must be greater than zero." );
 
 		//Structured buffers element size must be 4 byte aligned
-		if ( usageFlags.HasFlag( UsageFlags.Structured ) )
+		if ( ( ( usageFlags & UsageFlags.Structured ) == UsageFlags.Structured ) )
 		{
 			if ( elementSize % 4 != 0 )
 			{
@@ -101,7 +101,7 @@ public partial class GpuBuffer : IValid, IDisposable
 		}
 
 		//short or int
-		if ( usageFlags.HasFlag( UsageFlags.Index ) )
+		if ( ( ( usageFlags & UsageFlags.Index ) == UsageFlags.Index ) )
 		{
 			if ( elementSize != 2 && elementSize != 4 )
 			{
@@ -328,7 +328,7 @@ public partial class GpuBuffer : IValid, IDisposable
 	{
 		if ( Counter != 0 ) return true;
 
-		if ( Handle != 0 && !Usage.HasFlag( UsageFlags.Append ) && !saidNoCounter )
+		if ( Handle != 0 && !( ( Usage & UsageFlags.Append ) == UsageFlags.Append ) && !saidNoCounter )
 		{
 			saidNoCounter = true;
 			Log.Warning( $"GpuBuffer.{what}: only a buffer made with UsageFlags.Append carries a counter here - an AppendStructuredBuffer's" );

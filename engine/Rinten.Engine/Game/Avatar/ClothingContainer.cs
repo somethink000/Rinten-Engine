@@ -158,7 +158,7 @@ public partial class ClothingContainer
 			PrefersHuman,
 		};
 
-		var options = new JsonSerializerOptions( JsonSerializerOptions.Default ) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+		var options = new JsonSerializerOptions( EnumConvert.Plain ) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 		return System.Text.Json.JsonSerializer.Serialize( o, options );
 	}
 
@@ -200,7 +200,7 @@ public partial class ClothingContainer
 		if ( array is null )
 			return;
 
-		var entries = System.Text.Json.JsonSerializer.Deserialize<Entry[]>( array );
+		var entries = System.Text.Json.JsonSerializer.Deserialize<Entry[]>( array, EnumConvert.Plain );
 
 		foreach ( var entry in entries )
 		{

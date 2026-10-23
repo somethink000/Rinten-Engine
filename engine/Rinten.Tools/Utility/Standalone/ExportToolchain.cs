@@ -31,6 +31,10 @@ public static class ExportToolchain
 
 	//What was found, until an install changes it
 	static string dotnet;
+
+	//The folder the SDK found is installed in - see Look.
+	static string sdkRoot;
+
 	static HashSet<string> workloads;
 	static bool looked;
 
@@ -55,8 +59,15 @@ public static class ExportToolchain
 		{
 			if ( looked ) return;
 
+			string listed = null;
+
 			var found = new[] { Path.Combine( LocalRoot, ExeName ), "dotnet" }
-				.FirstOrDefault( x => Run( x, "--list-sdks" ) is { } sdks && sdks.Split( '\n' ).Any( l => l.StartsWith( "10." ) ) );
+				.FirstOrDefault( x => ( listed = Run( x, "--list-sdks" ) ) is { } sdks && sdks.Split( '\n' ).Any( l => l.StartsWith( "10." ) ) );
+
+			//Where the SDK is, which a shimmed dotnet (mise, asdf) does not say by its path: "10.0.100 [/root/sdk]"
+			var sdkLine = found is null ? null : listed?.Split( '\n' ).FirstOrDefault( l => l.StartsWith( "10." ) );
+			var open = sdkLine?.IndexOf( '[' ) ?? -1;
+			sdkRoot = open < 0 ? null : Path.GetDirectoryName( sdkLine[( open + 1 )..].TrimEnd( ']', '\r', ' ' ) );
 
 			var ids = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
 
@@ -413,6 +424,10 @@ public static class ExportToolchain
 	/// <summary>The folders workload packs are in, for the SDK found here.</summary>
 	public static IEnumerable<string> PackRoots()
 	{
+		Look();
+
+		if ( sdkRoot is not null ) yield return Path.Combine( sdkRoot, "packs" );
+		if ( Environment.GetEnvironmentVariable( "DOTNET_ROOT" ) is { Length: > 0 } root ) yield return Path.Combine( root, "packs" );
 		if ( Dotnet is { } exe && Path.IsPathRooted( exe ) ) yield return Path.Combine( Path.GetDirectoryName( exe ), "packs" );
 
 		yield return Path.Combine( LocalRoot, "packs" );

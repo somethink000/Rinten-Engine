@@ -60,7 +60,7 @@ internal sealed class CoreSkyLight
 	internal void Lay( float[] frame )
 	{
 		var at = CoreSceneRenderer.SkyLightAt;
-		var on = ready && generation == CoreResources.Generation && Available && CoreSceneRenderer.HasSky( frame );
+		var on = ready && generation == CoreResources.Cleared && Available && CoreSceneRenderer.HasSky( frame );
 
 		frame[at + 0] = on ? reflectionsIndex : 0.0f;
 		frame[at + 1] = on ? ReflectionLevels : 0.0f;
@@ -246,12 +246,12 @@ internal sealed class CoreSkyLight
 	private bool EnsurePictures()
 	{
 		//The old device's pictures went with it; nothing to give back
-		if ( generation != CoreResources.Generation )
+		if ( generation != CoreResources.Cleared )
 		{
 			capture = reflections = irradiance = 0;
 			ready = false;
 			step = Step.Capture;
-			generation = CoreResources.Generation;
+			generation = CoreResources.Cleared;
 		}
 
 		if ( capture != 0 && reflections != 0 && irradiance != 0 ) return true;

@@ -9,13 +9,18 @@ public partial class Terrain
 	//Layout is shared with shaders/engine/terrain.shader; change both together
 	internal Texture ParamsMap { get; private set; }
 
-	/// <summary>How many layers the ground can paint at once - a weight each on the vertex, spread over its colour and both texture coordinates, see TerrainChunkBaker. The shader's <c>MaxLayers</c> is the same number and the two change together.</summary>
+	//A weight each on the drawn vertex over its colour and both UVs, for the chunk's palette - see TerrainChunkBaker
+	//The shader's MaxLayers is the same number
+	/// <summary>How many layers one chunk of ground draws.</summary>
 	public const int MaxLayers = 8;
 
-	//How many layers a terrain may list, and how wide the picture is.
+	/// <summary>How many layers a terrain may list; a point wears four at most - see TerrainPaint.</summary>
+	public const int MostLayers = 32;
+
+	//How wide the picture is: a column a layer, with room to spare.
 	private const int ParamsWide = 64;
 
-	//And how many rows it has - seven used, the rest headroom.
+	//And how many rows it has.
 	private const int ParamsHigh = 8;
 
 	private const int RowTerrain = 0;
@@ -23,7 +28,7 @@ public partial class Terrain
 	//Colour index low, normal index high.
 	private const int RowLayerMaps = 1;
 
-	//Height index high; the low half is spare.
+	//Displacement in metres low, as a half; height index high.
 	private const int RowLayerPacks = 2;
 
 	//One over the layer's uv scale, as a whole float.
@@ -37,6 +42,9 @@ public partial class Terrain
 
 	//Roughness map index low, occlusion map index high.
 	private const int RowLayerMaps2 = 6;
+
+	//The ring of relief round the eye - see FillRelief.
+	private const int RowRing = 7;
 
 	//Current and last-sent bytes, so frames where nothing changed skip the upload
 	private byte[] paramsBytes;
@@ -88,7 +96,7 @@ public partial class Terrain
 				LayerPicture( layer, "Normal", srgb: false ) );
 
 			WriteShorts( i, RowLayerPacks,
-				0,
+				BitConverter.HalfToUInt16Bits( (Half)CoreResources.Number( layer?.core, "g_flDisplacement", 0.0f ) ),
 				LayerPicture( layer, "g_tHeight", srgb: false ) );
 
 			WriteShorts( i, RowLayerMaps2,
@@ -109,6 +117,9 @@ public partial class Terrain
 				CoreResources.Number( layer?.core, "g_flNormalStrength", 1.0f ),
 				CoreResources.Number( layer?.core, "g_flHeightBlend", 1.0f ) );
 		}
+
+		FillRelief();
+		FillMask();
 	}
 
 	//Bindless index of a layer's compiled texture, looked up per frame since slots get reused

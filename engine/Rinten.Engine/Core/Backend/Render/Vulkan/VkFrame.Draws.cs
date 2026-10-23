@@ -15,7 +15,8 @@ internal static unsafe partial class VkFrame
 		{
 			//The frame before this one out of the submit thread's hands, and what the queue and the display said about it acted on - see VkSubmitter. Before
 			//anything here, because the acquire below and that frame's present may not run at once, and what they said may be that this swapchain has gone.
-			VkSubmitter.Drain();
+			//Yielded rather than drained: a frame left waiting to be shown after a generated one takes this lock before it is presented.
+			VkSubmitter.Yield();
 			VkSubmitter.Settle();
 
 			//A device that has been lost stays lost until it is shut down and brought up again. Every call past this
@@ -352,6 +353,9 @@ internal static unsafe partial class VkFrame
 				VkDevice.dialect.EndRendering( frame.Commands );
 				Current.MainPass = false;
 
+				//The frame between the last and this one, in a second image, where the world was kept for one
+				var generated = GenerateBeforeEnd( frame, out var generatedImage );
+
 				//The buffers somebody asked to have back, read after everything the frame did to them - see VkReadbacks.
 				VkReadbacks.RecordInto( frame );
 
@@ -459,7 +463,10 @@ internal static unsafe partial class VkFrame
 				vk.EndCommandBuffer( frame.Commands );
 				frame.CpuEnd = VkSwapchain.NowNs();
 
-				var wait = new SemaphoreSubmitInfo
+				var wait = stackalloc SemaphoreSubmitInfo[2];
+				var signal = stackalloc SemaphoreSubmitInfo[2];
+
+				wait[0] = new SemaphoreSubmitInfo
 				{
 					SType = StructureType.SemaphoreSubmitInfo,
 					Semaphore = frame.ImageAvailable,
@@ -468,10 +475,25 @@ internal static unsafe partial class VkFrame
 					StageMask = PipelineStageFlags2.ColorAttachmentOutputBit,
 				};
 
-				var signal = new SemaphoreSubmitInfo
+				signal[0] = new SemaphoreSubmitInfo
 				{
 					SType = StructureType.SemaphoreSubmitInfo,
 					Semaphore = Current.RenderFinished[Current.ImageIndex],
+					StageMask = PipelineStageFlags2.AllCommandsBit,
+				};
+
+				//The generated frame's image is written by a copy at the end
+				wait[1] = new SemaphoreSubmitInfo
+				{
+					SType = StructureType.SemaphoreSubmitInfo,
+					Semaphore = frame.GeneratedAvailable,
+					StageMask = PipelineStageFlags2.AllTransferBit,
+				};
+
+				signal[1] = new SemaphoreSubmitInfo
+				{
+					SType = StructureType.SemaphoreSubmitInfo,
+					Semaphore = generated ? Current.RenderFinished[generatedImage] : default,
 					StageMask = PipelineStageFlags2.AllCommandsBit,
 				};
 
@@ -484,12 +506,12 @@ internal static unsafe partial class VkFrame
 				var submit = new SubmitInfo2
 				{
 					SType = StructureType.SubmitInfo2,
-					WaitSemaphoreInfoCount = 1,
-					PWaitSemaphoreInfos = &wait,
+					WaitSemaphoreInfoCount = generated ? 2u : 1u,
+					PWaitSemaphoreInfos = wait,
 					CommandBufferInfoCount = 1,
 					PCommandBufferInfos = &commands,
-					SignalSemaphoreInfoCount = 1,
-					PSignalSemaphoreInfos = &signal,
+					SignalSemaphoreInfoCount = generated ? 2u : 1u,
+					PSignalSemaphoreInfos = signal,
 				};
 
 				//Every picture uploaded while this frame was being recorded goes to the card first, in one submission.
@@ -509,6 +531,8 @@ internal static unsafe partial class VkFrame
 					return 0;
 				}
 
+				CoreLatency.Submitted();
+
 				//The graveyard learns which ticket this recording went to the queue as - everything retired while it was open waits for exactly this fence.
 				frame.Ticket = VkDevice.RecordingSubmitted();
 				frame.Submitted = true;
@@ -517,6 +541,10 @@ internal static unsafe partial class VkFrame
 				var finished = Current.RenderFinished[Current.ImageIndex];
 				var swapchain = Current.Handle;
 				var index = Current.ImageIndex;
+
+				//The generated frame goes without an id: ids are the loop's frames, which both latency drivers tie its stages to
+				var spacing = generated ? GeneratedSpacing() : 0L;
+				var id = CorePresent.Next( Current );
 
 				//Handed over: the present goes on the submit thread while this one gets on with the next frame - see VkSubmitter. The submission
 				//above stays here, so the card starts on the frame the moment it is closed; what is handed over is the display's half.
@@ -528,23 +556,29 @@ internal static unsafe partial class VkFrame
 						Handle = swapchain,
 						Image = index,
 						Owner = Current,
+						Id = id,
+						Generated = generated,
+						GeneratedSignal = signal[1].Semaphore,
+						GeneratedImage = generatedImage,
+						Spacing = spacing,
 					} );
 
 					Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
 					return 1;
 				}
 
-				var present = new PresentInfoKHR
+				if ( generated )
 				{
-					SType = StructureType.PresentInfoKhr,
-					WaitSemaphoreCount = 1,
-					PWaitSemaphores = &finished,
-					SwapchainCount = 1,
-					PSwapchains = &swapchain,
-					PImageIndices = &index,
-				};
+					var began = System.Diagnostics.Stopwatch.GetTimestamp();
 
-				var presented = VkDevice.khrSwapchain.QueuePresent( VkDevice.graphicsQueue, &present );
+					//What it answers is what the frame's own present answers a moment later
+					VkSubmitter.Present( signal[1].Semaphore, swapchain, generatedImage, 0 );
+					PreciseSleep.Until( began + spacing );
+				}
+
+				CoreLatency.Presenting( id );
+				var presented = VkSubmitter.Present( finished, swapchain, index, id );
+				CoreLatency.Presented( id );
 
 				Current.Frame = ( Current.Frame + 1 ) % VkSwapchain.FramesInFlight;
 
@@ -582,6 +616,8 @@ internal static unsafe partial class VkFrame
 			finally
 			{
 				//Whatever happened above, the frame is over and the swapchain goes back to nobody's - so the next one can begin, on this or on any other.
+				if ( ReferenceEquals( generating, Current ) ) generating = null;
+
 				Current.Recording = false;
 				VkSwapchain.active = VkSwapchain.placeholder;
 			}
@@ -1717,26 +1753,9 @@ internal static unsafe partial class VkFrame
 
 			VkDevice.vk.CmdCopyBuffer( frame.Commands, frame.Scratch, into, 1, &copy );
 
-			//One barrier per write on purpose; batching them was measured slower (barriers inside a pass)
-			var barrier = new MemoryBarrier2
-			{
-				SType = StructureType.MemoryBarrier2,
-				SrcStageMask = PipelineStageFlags2.CopyBit,
-				SrcAccessMask = AccessFlags2.TransferWriteBit,
-				DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
-					PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.CopyBit,
-				DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
-					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit,
-			};
-
-			var dependency = new DependencyInfo
-			{
-				SType = StructureType.DependencyInfo,
-				MemoryBarrierCount = 1,
-				PMemoryBarriers = &barrier,
-			};
-
-			VkDevice.dialect.Barrier( frame.Commands, &dependency );
+			//One barrier per write on purpose, unless held; batching them inside a pass was measured slower
+			if ( barriersHeld ) copyOwed = true;
+			else Barriers( frame, copies: true, dispatches: false );
 
 			return 1;
 		}
@@ -1983,8 +2002,60 @@ internal static unsafe partial class VkFrame
 				vk.CmdDispatch( frame.Commands, (uint)groupsX, (uint)groupsY, (uint)groupsZ );
 			}
 
-			//Broad barrier after the dispatch on purpose; narrowing it was measured slower
-			var barrier = new MemoryBarrier2
+			if ( barriersHeld ) dispatchOwed = true;
+			else Barriers( frame, copies: false, dispatches: true );
+
+			frame.StatDispatches++;
+
+			DrawTrace.End( DrawTrace.Kind.Dispatch, traced, inside );
+
+			return 1;
+		}
+	}
+
+	//Set while what is recorded - frame writes and dispatches - reads nothing another of them writes: one barrier
+	//after the lot, for what is owed - see HoldBarriers
+	private static bool barriersHeld, copyOwed, dispatchOwed;
+
+	/// <summary>Holds the barrier after each frame write and dispatch until released, then records one for them all.</summary>
+	internal static void HoldBarriers( bool hold )
+	{
+		lock ( VkDevice.renderLock )
+		{
+			barriersHeld = hold;
+
+			if ( hold ) return;
+
+			if ( ( copyOwed || dispatchOwed ) && Current.Recording ) Barriers( CurrentFrame, copyOwed, dispatchOwed );
+
+			copyOwed = dispatchOwed = false;
+		}
+	}
+
+	//What copies and dispatches wrote made visible to every later stage that may read it; broad on purpose, as
+	//narrowing it was measured slower
+	private static void Barriers( Frame frame, bool copies, bool dispatches )
+	{
+		var barriers = stackalloc MemoryBarrier2[2];
+		var count = 0u;
+
+		if ( copies )
+		{
+			barriers[count++] = new MemoryBarrier2
+			{
+				SType = StructureType.MemoryBarrier2,
+				SrcStageMask = PipelineStageFlags2.CopyBit,
+				SrcAccessMask = AccessFlags2.TransferWriteBit,
+				DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
+					PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.CopyBit,
+				DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
+					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit,
+			};
+		}
+
+		if ( dispatches )
+		{
+			barriers[count++] = new MemoryBarrier2
 			{
 				SType = StructureType.MemoryBarrier2,
 				SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
@@ -1997,22 +2068,16 @@ internal static unsafe partial class VkFrame
 					AccessFlags2.VertexAttributeReadBit | AccessFlags2.IndexReadBit |
 					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit,
 			};
-
-			var dependency = new DependencyInfo
-			{
-				SType = StructureType.DependencyInfo,
-				MemoryBarrierCount = 1,
-				PMemoryBarriers = &barrier,
-			};
-
-			VkDevice.dialect.Barrier( frame.Commands, &dependency );
-
-			frame.StatDispatches++;
-
-			DrawTrace.End( DrawTrace.Kind.Dispatch, traced, inside );
-
-			return 1;
 		}
+
+		var dependency = new DependencyInfo
+		{
+			SType = StructureType.DependencyInfo,
+			MemoryBarrierCount = count,
+			PMemoryBarriers = barriers,
+		};
+
+		VkDevice.dialect.Barrier( frame.Commands, &dependency );
 	}
 
 	internal static int ComputeDispatch( ulong pipeline, ulong* buffers, int bufferCount,

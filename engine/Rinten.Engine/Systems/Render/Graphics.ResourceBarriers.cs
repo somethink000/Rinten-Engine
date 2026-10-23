@@ -66,10 +66,10 @@ public static partial class Graphics
 			case ResourceState.VertexOrIndexBuffer:
 				dstStageFlags = RenderBarrierPipelineStageFlags_t.VertexInputBit;
 
-				if ( bufferUsageFlags.HasFlag( GpuBuffer.UsageFlags.Index ) )
+				if ( ( ( bufferUsageFlags & GpuBuffer.UsageFlags.Index ) == GpuBuffer.UsageFlags.Index ) )
 					accessFlags = RenderBarrierAccessFlags_t.IndexReadBit;
 
-				if ( bufferUsageFlags.HasFlag( GpuBuffer.UsageFlags.Vertex ) )
+				if ( ( ( bufferUsageFlags & GpuBuffer.UsageFlags.Vertex ) == GpuBuffer.UsageFlags.Vertex ) )
 					accessFlags = RenderBarrierAccessFlags_t.VertexAttributeReadBit;
 
 				break;

@@ -9,7 +9,7 @@ struct Light
 	float4 colour;    //Colour rgb times brightness, kind w (0 sun, 1 point, 2 spot)
 	float4 direction; //Direction xyz, inner cone cosine w - a point's shape (AreaShape)
 	float4 cone;      //Outer cosine x (a point's half width), source width y, spare zw
-	float4 shape;     //Falloff power x, faces reading movers y (a bit each), half height z, turn w
+	float4 shape;     //Falloff power x, faces reading movers y (a bit each; below nought a frustum slot), half height z, turn w
 };
 
 //Envmap probe: an octahedral 2D picture of all directions with blurred mips stacked below
@@ -65,7 +65,7 @@ struct FrameData
 	Probe probes[4];
 
 	//Two clocks: wall time always runs; scene time pauses and scales with the scene
-	float4 time; //Seconds since start, frame delta, scene seconds, spare
+	float4 time; //Seconds since start, frame delta, scene seconds, scene seconds a frame ago
 
 	//The sun's light after the air it crosses, and how far into night; both depend only on the sun's height,
 	//so CoreSceneRenderer.SetSky works them out once a frame
@@ -121,7 +121,8 @@ struct FrameData
 	//Area lamps' LTC tables by table index: inverse matrix x, magnitude and Fresnel y - see CoreAreaLights
 	float4 area;
 
-	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; spare yzw
+	//How shadow edges are filtered: nought one compare, one a fixed soft edge, two as the source makes them; one plus
+	//the frame's turn of hashed cut-outs y, nought where no temporal history gathers them (foliage.shader); spare zw
 	float4 shadow;
 
 	//The portable frame's bake (CoreBakedLighting.Portable): the sheet's light half wide x and high y, nought for none,
@@ -162,6 +163,10 @@ struct FrameData
 	//The 2D lights, three each: where it stands xyz and its range w; its colour times its intensity rgb and how big it is
 	//w; which way a spot points on the plane xy, half its cone z (pi shines every way), how much of its edge fades w
 	float4 lights2d[96];
+
+	//The lamps' movers frustums by slot, which a light's shape.y names below nought: down xyz, how wide a metre out w -
+	//see CoreLampMaps.FitMovers
+	float4 lampMovers[16];
 };
 
 #ifdef WEBGL
@@ -183,6 +188,12 @@ struct FrameData
 #else
 #define EYE_FRAME( field ) g_frame[Eye()].field
 #endif
+
+//Set while a velocity stage runs a surface's Vertex again for the frame before - see cluster_surface.slang
+static bool g_frameBefore;
+
+//Scene seconds, which pause and scale with the scene; what a surface that moves by the clock reads
+float SceneSeconds() { return g_frameBefore ? g_frame[0].time.w : g_frame[0].time.z; }
 
 //Headset eye being drawn, 0 otherwise; per-eye data reads g_frame[Eye()], the rest g_frame[0]
 #ifdef STEREO

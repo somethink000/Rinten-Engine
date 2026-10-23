@@ -168,7 +168,7 @@ internal class TcpChannel : Connection
 		if ( client?.Connected != true )
 			return;
 
-		if ( Networking.FakePacketLoss > 0 && !flags.HasFlag( NetFlags.Reliable ) )
+		if ( Networking.FakePacketLoss > 0 && !( ( flags & NetFlags.Reliable ) == NetFlags.Reliable ) )
 		{
 			var chance = Random.Shared.Next( 0, 100 );
 			if ( chance <= Networking.FakePacketLoss )

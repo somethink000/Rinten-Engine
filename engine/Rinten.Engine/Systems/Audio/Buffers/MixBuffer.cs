@@ -132,6 +132,9 @@ public sealed unsafe class MixBuffer : IDisposable
 		{
 			if ( span[i] > 1.0f ) span[i] = 1.0f;
 			else if ( span[i] < -1.0f ) span[i] = -1.0f;
+
+			//Neither comparison holds for NaN, which the device would play as noise
+			else if ( float.IsNaN( span[i] ) ) span[i] = 0.0f;
 		}
 	}
 

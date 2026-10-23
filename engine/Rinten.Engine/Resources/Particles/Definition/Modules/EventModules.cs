@@ -320,9 +320,10 @@ public sealed class EventModule : ParticleModule, IParticleModuleStep, IParticle
 public sealed class ParticleEventRelay : ParticleController
 {
 	readonly ConcurrentQueue<Pending> _pending = new();
-	readonly Dictionary<EventModule, List<(GameObject Object, Particle Particle)>> _spawned = new();
+	readonly Dictionary<EventModule, ParticleChildEffects> _spawned = new();
 	readonly List<EventModule> _events = new();
 
+	//The context rows' values come from a shared pool and go back once spawned: events are frequent
 	readonly record struct Pending( EventModule Event, Vector3 Position, Vector3 Velocity, Vector4[] Context, Particle Particle, float Scale );
 
 	//An event module of this emitter, told so death can reach it.
@@ -335,11 +336,13 @@ public sealed class ParticleEventRelay : ParticleController
 	{
 		//The facts read now, on this thread, while the particle is what the event saw: by the time the spawn happens it may have moved or gone.
 		var rows = module.Context;
-		var values = new Vector4[rows.Count];
+		var values = rows.Count == 0 ? System.Array.Empty<Vector4>() : System.Buffers.ArrayPool<Vector4>.Shared.Rent( rows.Count );
 
 		for ( var i = 0; i < rows.Count; i++ )
 		{
 			var row = rows[i];
+			values[i] = Vector4.Zero;
+
 			if ( !row.Enabled ) continue;
 
 			if ( row.FromSlot )
@@ -363,21 +366,14 @@ public sealed class ParticleEventRelay : ParticleController
 		base.OnUpdate();
 
 		while ( _pending.TryDequeue( out var pending ) )
+		{
 			Spawn( pending );
 
-		//Carried along: a spawned effect that follows its particle goes where it goes, and is let go where it dies.
-		foreach ( var (module, list) in _spawned )
-		{
-			list.RemoveAll( x => !x.Object.IsValid() );
-
-			if ( !module.Follow ) continue;
-
-			foreach ( var (go, particle) in list )
-			{
-				if ( particle is null ) continue;
-				go.WorldPosition = particle.Position;
-			}
+			if ( pending.Context.Length > 0 ) System.Buffers.ArrayPool<Vector4>.Shared.Return( pending.Context );
 		}
+
+		//Carried along: a spawned effect that follows its particle goes where it goes, and is let go where it dies.
+		foreach ( var children in _spawned.Values ) children.Update();
 	}
 
 	void Spawn( in Pending pending )
@@ -386,32 +382,21 @@ public sealed class ParticleEventRelay : ParticleController
 
 		if ( module.Effect is null || !Scene.IsValid() ) return;
 
-		if ( !_spawned.TryGetValue( module, out var list ) )
-			_spawned[module] = list = new List<(GameObject, Particle)>();
+		if ( !_spawned.TryGetValue( module, out var children ) )
+			_spawned[module] = children = new ParticleChildEffects();
 
-		list.RemoveAll( x => !x.Object.IsValid() );
-
-		if ( list.Count >= module.MaxAlive ) return;
+		if ( children.Playing >= module.MaxAlive ) return;
 
 		var rotation = module.AlignToVelocity && !pending.Velocity.IsNearlyZero()
 			? Rotation.LookAt( pending.Velocity.Normal )
 			: Rotation.Identity;
 
-		var go = new GameObject( false, $"{module.Effect.ResourceName} (event)" );
+		var player = children.Take( module.Effect, $"{module.Effect.ResourceName} (event)" );
+		var go = player.GameObject;
 
 		go.WorldPosition = pending.Position;
 		go.WorldRotation = rotation;
 		go.WorldScale = pending.Scale;
-		go.Flags = go.Flags
-			.WithFlag( GameObjectFlags.Hidden, true )
-			.WithFlag( GameObjectFlags.NotSaved, true )
-			.WithFlag( GameObjectFlags.NotNetworked, true );
-
-		var player = go.AddComponent<ParticlePlayer>();
-
-		player.Definition = module.Effect;
-		player.DestroyOnEnd = true;
-		player.PlayOnce = true;
 
 		//The parent's facts as the child's parameters, by the row's kind: a float parameter takes one channel, a vector three, a colour four.
 		var rows = module.Context;
@@ -424,29 +409,31 @@ public sealed class ParticleEventRelay : ParticleController
 
 			var v = pending.Context[i] * row.Scale;
 
-			if ( definition.ColorParameters.Any( p => string.Equals( p.Name, row.Parameter, StringComparison.OrdinalIgnoreCase ) ) )
+			if ( Declares( definition.ColorParameters, row.Parameter ) )
 				player.Set( row.Parameter, new Color( v.x, v.y, v.z, row.Scale == 1.0f ? v.w : pending.Context[i].w ) );
-			else if ( definition.VectorParameters.Any( p => string.Equals( p.Name, row.Parameter, StringComparison.OrdinalIgnoreCase ) ) )
+			else if ( Declares( definition.VectorParameters, row.Parameter ) )
 				player.Set( row.Parameter, new Vector3( v.x, v.y, v.z ) );
 			else
 				player.Set( row.Parameter, ParticleFloatBinding.Channel( v, row.Channel ) );
 		}
 
-		go.Enabled = true;
+		children.Start( player, module.Follow ? pending.Particle : null );
+	}
 
-		list.Add( (go, module.Follow ? pending.Particle : null) );
+	static bool Declares<T>( List<T> parameters, string name ) where T : ParticleDefinition.Parameter
+	{
+		for ( var i = 0; i < parameters.Count; i++ )
+		{
+			if ( string.Equals( parameters[i].Name, name, StringComparison.OrdinalIgnoreCase ) ) return true;
+		}
+
+		return false;
 	}
 
 	protected override void OnParticleDestroyed( Particle p )
 	{
 		//A followed effect is let go where its particle died - the particle object goes back to the pool and would be somebody else's next.
-		foreach ( var list in _spawned.Values )
-		{
-			for ( var i = 0; i < list.Count; i++ )
-			{
-				if ( ReferenceEquals( list[i].Particle, p ) ) list[i] = (list[i].Object, null);
-			}
-		}
+		foreach ( var children in _spawned.Values ) children.LetGo( p );
 
 		if ( _events.Count == 0 || !ParticleEffect.IsValid() ) return;
 
@@ -464,13 +451,7 @@ public sealed class ParticleEventRelay : ParticleController
 	{
 		base.OnDisabled();
 
-		foreach ( var list in _spawned.Values )
-		{
-			foreach ( var (go, _) in list )
-			{
-				if ( go.IsValid() ) go.Destroy();
-			}
-		}
+		foreach ( var children in _spawned.Values ) children.Clear();
 
 		_spawned.Clear();
 	}

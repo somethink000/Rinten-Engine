@@ -19,6 +19,9 @@
 //position and one of normal a vertex, a range of CoreSceneTables.ShapeSums that mesh_shapes.slang has just written.
 [[vk::binding(5,0)]] ByteAddressBuffer g_shapeSums;
 
+//Where each vertex stood before this posing, a float3 a vertex from g_wasAt - what the velocity pass moves it from
+[[vk::binding(6,0)]] RWStructuredBuffer<float> g_was;
+
 [[vk::push_constant]]
 cbuffer SkinPush
 {
@@ -26,16 +29,17 @@ cbuffer SkinPush
 	uint g_first;
 	uint g_count;
 
-	uint g_unused;
+	//Where this instance's range of g_was starts, in vertices
+	uint g_wasAt;
 
 	//Where this instance's sums start, in vertices, and whether it has any - nought where nothing
 	//drives its shapes, and then the buffer above is whatever was to hand and is not read.
 	uint g_sumsAt;
 	uint g_shaped;
 
-	//Whether it has a skeleton - see above.
+	//Whether it has a skeleton - see above. And whether its range holds a pose to keep in g_was first
 	uint g_skinned;
-	uint g_pad;
+	uint g_keepWas;
 };
 
 static const uint ShapeSumBytes = 24;
@@ -126,6 +130,15 @@ void main( uint3 id : SV_DispatchThreadID )
 	g_frames[posed] = frame;
 
 	uint at = posed * 3;
+
+	if ( g_keepWas != 0 )
+	{
+		uint was = ( g_wasAt + id.x ) * 3;
+		g_was[was] = g_positions[at];
+		g_was[was + 1] = g_positions[at + 1];
+		g_was[was + 2] = g_positions[at + 2];
+	}
+
 	g_positions[at] = position.x;
 	g_positions[at + 1] = position.y;
 	g_positions[at + 2] = position.z;

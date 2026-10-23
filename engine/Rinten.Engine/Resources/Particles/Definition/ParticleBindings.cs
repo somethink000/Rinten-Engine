@@ -144,6 +144,9 @@ public sealed class ParticleFloatBinding
 	/// <summary>Whether this actually names a parameter that could be read.</summary>
 	public bool IsBound => UseParameter && !string.IsNullOrEmpty( ParameterName );
 
+	//The same for every particle of a player this frame: no slot, a plain number - see Evaluate( ParticlePlayer )
+	internal bool Uniform => !HasSlot && Value.IsPlainConstant;
+
 	/// <summary>This as something the engine can hold: a parameter collapses to the constant it is worth for this player.</summary>
 	public ParticleFloat Resolve( ParticlePlayer player )
 	{
@@ -153,7 +156,7 @@ public sealed class ParticleFloatBinding
 		var parameter = player.GetFloat( ParameterName ) * Multiplier;
 
 		if ( Mode == ParticleBindingMode.Multiply )
-			return Scale( Value, parameter );
+			return Kept( Value, parameter );
 
 		return new ParticleFloat
 		{
@@ -221,13 +224,20 @@ public sealed class ParticleFloatBinding
 	/// <summary>This, with everything in it multiplied - constants, ranges and curves alike.</summary>
 	public ParticleFloat Scaled( ParticlePlayer player, float scale )
 	{
-		var value = Resolve( player );
+		//A multiplying parameter and the scale make one factor, so the curve is scaled - and kept - once
+		if ( IsBound && player is not null && Mode == ParticleBindingMode.Multiply )
+			return Kept( Value, player.GetFloat( ParameterName ) * Multiplier * scale );
 
+		return Kept( Resolve( player ), scale );
+	}
+
+	//Scale, with the last scaled curves kept by their frames and scale - a module asks for one every particle it starts
+	//One reference written whole, so a step on another thread reads a matching pair
+	ParticleFloat Kept( ParticleFloat value, float scale )
+	{
 		if ( value.Type is not ( ParticleFloat.ValueType.Curve or ParticleFloat.ValueType.CurveRange ) )
 			return Scale( value, scale );
 
-		//A scaled curve is a new curve, asked for with every particle a module starts: the last one is kept, by the frames it was
-		//scaled from and the scale (plan В5). One reference, written whole, so a step on another thread reads a matching pair.
 		if ( scaledCurves is { } kept && kept.Scale == scale && kept.FromA == value.CurveA.Frames && kept.FromB == value.CurveB.Frames )
 		{
 			value.CurveA = kept.A;
@@ -335,6 +345,9 @@ public sealed class ParticleVectorBinding
 
 	/// <summary>Whether this actually names a parameter that could be read.</summary>
 	public bool IsBound => UseParameter && !string.IsNullOrEmpty( ParameterName );
+
+	//The same for every particle of a player this frame: no slot, and a parameter or three plain numbers - see Evaluate
+	internal bool Uniform => !HasSlot && ( IsBound || ( Value.X.IsPlainConstant && Value.Y.IsPlainConstant && Value.Z.IsPlainConstant ) );
 
 	/// <summary>The vector for one particle - or, with no particle, for the effect as a whole, where the random components read as zero.</summary>
 	public Vector3 Evaluate( Particle particle, ParticlePlayer player = null )

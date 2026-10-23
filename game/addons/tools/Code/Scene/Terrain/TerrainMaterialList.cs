@@ -138,6 +138,7 @@ public class TerrainMaterialList : ListView
 			if ( asset.TryLoadResource<Material>( out var material ) )
 			{
 				if ( Terrain.Storage.Materials.Contains( material ) ) continue;
+				if ( Terrain.Storage.Materials.Count >= Terrain.MostLayers ) break;
 				Terrain.Storage.Materials.Add( material );
 				Terrain.UpdateMaterials();
 			}

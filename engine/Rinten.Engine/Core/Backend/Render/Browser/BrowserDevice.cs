@@ -89,6 +89,9 @@ internal static class BrowserDevice
 		internal const int Scene = 1;
 		internal const int Depth = 4;
 
+		/// <summary>The sky table's picture: half floats, no depth - see TargetKind.SkyTable.</summary>
+		internal const int SkyTable = 17;
+
 		/// <summary>A frame picture: one colour attachment of its own format, no depth.</summary>
 		internal const int Picture = 20;
 	}
@@ -108,11 +111,16 @@ internal static class BrowserDevice
 
 	internal static int shadowImage;
 	internal static int shadowView;
-	//The sky's table and the picture it lives in - see CoreSkyTable.
+	//The sky's table every frame group samples, and the panorama table last copied into it, nought for the drawn one
 	internal static int skyTableImage;
 	internal static int skyTableView;
+	internal static ulong skyTableFrom;
 
-	//How many texels across it is - see CoreSkyTable.Side, which fills it.
+	//The picture the sky shader draws its table into, copied over the sampled one - see BrowserSwapchain.TargetEnd
+	internal static int skyTableDrawn;
+	internal static int skyTableDrawnView;
+
+	//Texels across; must match CoreSkyTable.Side
 	internal const int SkyTableSide = 64;
 
 	//Binding for the second eye's frame block in stereo passes; must match webgl2.js SecondFrameBinding
@@ -225,16 +233,18 @@ internal static class BrowserDevice
 		private readonly string kind;
 		private readonly int handle;
 		private readonly long size;
+		private readonly long offset;
 
-		private Bind( int binding, string kind, int handle, long size )
+		private Bind( int binding, string kind, int handle, long size, long offset = 0 )
 		{
 			this.binding = binding;
 			this.kind = kind;
 			this.handle = handle;
 			this.size = size;
+			this.offset = offset;
 		}
 
-		internal static Bind Buffer( int binding, int buffer, long size ) => new( binding, "buffer", buffer, size );
+		internal static Bind Buffer( int binding, int buffer, long size, long offset = 0 ) => new( binding, "buffer", buffer, size, offset );
 		internal static Bind View( int binding, int view ) => new( binding, "textureView", view, 0 );
 		internal static Bind Sampler( int binding, int sampler ) => new( binding, "sampler", sampler, 0 );
 
@@ -243,13 +253,14 @@ internal static class BrowserDevice
 			json.Append( "{\"binding\":" ).Append( binding ).Append( ",\"" ).Append( kind ).Append( "\":" )
 				.Append( handle );
 			if ( size > 0 ) json.Append( ",\"size\":" ).Append( size );
+			if ( offset > 0 ) json.Append( ",\"offset\":" ).Append( offset );
 			json.Append( '}' );
 		}
 	}
 
 	//A bind group naming resources by handle. Made when a texture, a material or a frame's
 	//scratch is made and kept for as long as they are - nothing on the per-draw path builds one.
-	internal static int MakeBindGroup( int layout, params Bind[] entries )
+	internal static int MakeBindGroup( int layout, params ReadOnlySpan<Bind> entries )
 	{
 		if ( layout == 0 ) return 0;
 
@@ -351,14 +362,18 @@ internal static class BrowserDevice
 		//What the sun's map slots hold until there are maps - one texel, never read, as the frame block says nothing is whole
 		shadowImage = MakeTexture( 1, 1, FormatDepth32, usage );
 
-		//Cleared: alpha stays nought, meaning no table, until CoreSkyTable sends one - see SkyTableAt in frame.slang
+		//Cleared: alpha stays nought, meaning no table, until one is drawn or copied in - see SkyTableAt in frame.slang
 		skyTableImage = MakeTexture( SkyTableSide, SkyTableSide, FormatRgba16Float,
 			TextureUse.TextureBinding | TextureUse.CopyDst );
 
-		if ( shadowImage == 0 || skyTableImage == 0 ) return false;
+		skyTableDrawn = MakeTexture( SkyTableSide, SkyTableSide, FormatRgba16Float,
+			TextureUse.RenderAttachment | TextureUse.CopySrc );
+
+		if ( shadowImage == 0 || skyTableImage == 0 || skyTableDrawn == 0 ) return false;
 
 		shadowView = BrowserNative.CreateView( shadowImage, FormatDepth32, AspectDepth, 0, 0, 0, "2d-array" );
 		skyTableView = MakeView( skyTableImage, FormatRgba16Float );
+		skyTableDrawnView = MakeView( skyTableDrawn, FormatRgba16Float );
 
 		var empty = new byte[SkyTableSide * SkyTableSide * 8];
 		BrowserNative.WriteTexture( skyTableImage, 0, 0, 0, SkyTableSide, SkyTableSide, SkyTableSide * 8, empty );
@@ -366,7 +381,7 @@ internal static class BrowserDevice
 		noBakeImage = MakeTexture( 1, 1, FormatRgba16Float, TextureUse.TextureBinding | TextureUse.CopyDst );
 		noBakeView = noBakeImage != 0 ? MakeView( noBakeImage, FormatRgba16Float ) : 0;
 
-		return shadowView != 0 && skyTableView != 0 && noBakeView != 0;
+		return shadowView != 0 && skyTableView != 0 && skyTableDrawnView != 0 && noBakeView != 0;
 	}
 
 	private static bool CreateDefaults()
@@ -445,10 +460,9 @@ internal static class BrowserDevice
 
 		ReleaseTexture( ref shadowImage, ref shadowView );
 		ReleaseTexture( ref skyTableImage, ref skyTableView );
+		ReleaseTexture( ref skyTableDrawn, ref skyTableDrawnView );
 		ReleaseTexture( ref noBakeImage, ref noBakeView );
-
-		//CoreSkyTable sends the table again rather than leave the next device a cleared one
-		CoreSkyTable.Forget();
+		skyTableFrom = 0;
 
 		if ( textureSetLayout != 0 ) BrowserNative.Release( textureSetLayout );
 		if ( boneSetLayout != 0 ) BrowserNative.Release( boneSetLayout );

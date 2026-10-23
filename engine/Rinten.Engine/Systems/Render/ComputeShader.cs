@@ -131,6 +131,31 @@ public class ComputeShader
 		}
 	}
 
+	//Runs over buffers alone outside any stage, bound after the pictures' places - see VkFrame.PassDispatch
+	//False where it did not run
+	internal bool RunApartOver( ReadOnlySpan<ulong> buffers, int threadsX, int threadsY, int threadsZ )
+	{
+		var built = Pipeline;
+
+		if ( built == 0 || buffers.IsEmpty || !pass ) return false;
+		if ( threadsX < 1 || threadsY < 1 || threadsZ < 1 ) return false;
+
+		CoreRenderDevice.ZoneBegin( zone );
+
+		try
+		{
+			var push = CorePostBlit.ApartPush( resource, Attributes, 1, 1 );
+			var size = group;
+
+			return CoreRenderDevice.DispatchPass( built, CoreSceneDrawer.WhiteTexture, ReadOnlySpan<ulong>.Empty, ReadOnlySpan<int>.Empty,
+				buffers, push, Groups( threadsX, size.X ), Groups( threadsY, size.Y ), Groups( threadsZ, size.Z ) );
+		}
+		finally
+		{
+			CoreRenderDevice.ZoneEnd();
+		}
+	}
+
 	//Runs inside a frame from a command list, storing into outputs set on the list's attributes
 	internal void RunInList( Rinten.Rendering.CommandList list, int threadsX, int threadsY, int threadsZ )
 	{

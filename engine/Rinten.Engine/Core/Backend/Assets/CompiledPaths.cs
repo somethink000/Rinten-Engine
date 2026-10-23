@@ -32,6 +32,9 @@ internal static class CompiledPaths
 	/// <summary>Blocks that travel as a KTX2 of Basis Universal's UASTC - what a web build carries of a picture, for the page to turn into what its device reads. See StandaloneExporter.Pictures and BrowserTextures.</summary>
 	public static string Universal( string blocks ) => blocks + ".ktx2";
 
+	/// <summary>A terrain's baked chunks, shipped so a game starts without baking: <c>x.terrain_c.chunks</c>.</summary>
+	public static string TerrainChunks( string terrain ) => terrain + "_c.chunks";
+
 	/// <summary>A resource's binary half: <c>thing.scene</c> to <c>thing.scene_d</c>.</summary>
 	public static string BlobSidecar( string resource ) => resource + "_d";
 

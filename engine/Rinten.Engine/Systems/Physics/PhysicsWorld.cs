@@ -31,6 +31,9 @@ public sealed partial class PhysicsWorld : IHandle
 	/// <summary>All bodies in the world</summary>
 	public IEnumerable<PhysicsBody> Bodies => bodies.Where( x => x.IsValid() );
 
+	//Every body, unfiltered and without an iterator to make - check each IsValid
+	internal HashSet<PhysicsBody> BodySet => bodies;
+
 	internal int BodyCount => bodies.Count;
 
 	//public Action<int, PhysicsBody, PhysicsBody, Vector3> Internal_OnCollision;

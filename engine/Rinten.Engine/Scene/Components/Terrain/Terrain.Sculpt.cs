@@ -47,17 +47,20 @@ public partial class Terrain
 		return edit;
 	}
 
-	/// <summary>Paints the mesh from the storage's control map, read across it by where each vertex stands on the ground plane - what an imported splat map comes to. A cave's floor and the hill over it get the same paint; they are one texel of a map.</summary>
-	public TerrainMeshEdit RepaintFromControlMap()
+	/// <summary>Paints the mesh from a side by side control map (CompactTerrainMaterial) by where vertices stand.</summary>
+	public TerrainMeshEdit RepaintFromControlMap( uint[] control, int side )
 	{
-		if ( Storage?.Mesh is not { } mesh || Storage.ControlMap is not { } control ) return null;
-
-		var side = Storage.Resolution;
+		if ( Storage?.Mesh is not { } mesh || control is null ) return null;
 		if ( side <= 0 || control.Length < side * side || Storage.TerrainSize <= 0.0f ) return null;
 
 		var texel = Storage.TerrainSize / side;
 
 		mesh.BeginEdit();
+
+		//The map is the paint now, and the mask over the top of the ground would hide it.
+		mesh.ClearMask();
+
+		System.Span<float> weights = stackalloc float[MostLayers];
 
 		for ( var v = 0; v < mesh.VertexSlots; v++ )
 		{
@@ -71,15 +74,12 @@ public partial class Terrain
 			var painted = new CompactTerrainMaterial( control[( z * side ) + x] );
 			var blend = painted.BlendFactor / 255.0f;
 
-			System.Span<float> weights = stackalloc float[MaxLayers];
 			weights.Clear();
 
-			weights[Math.Min( (int)painted.BaseTextureId, MaxLayers - 1 )] += 1.0f - blend;
-			weights[Math.Min( (int)painted.OverlayTextureId, MaxLayers - 1 )] += blend;
+			weights[Math.Min( (int)painted.BaseTextureId, MostLayers - 1 )] += 1.0f - blend;
+			weights[Math.Min( (int)painted.OverlayTextureId, MostLayers - 1 )] += blend;
 
-			vertex.Layers = new Color32( (byte)( weights[0] * 255.0f + 0.5f ), (byte)( weights[1] * 255.0f + 0.5f ),
-				(byte)( weights[2] * 255.0f + 0.5f ), (byte)( weights[3] * 255.0f + 0.5f ) );
-			vertex.Layers2 = new Vector4( weights[4], weights[5], weights[6], weights[7] );
+			vertex.Paint = TerrainPaint.Strongest( weights );
 
 			mesh.SetVertex( v, vertex );
 		}

@@ -42,12 +42,30 @@ public partial class Texture
 		if ( Find( filepath ) is Texture existing )
 			return existing;
 
-		var tex = TryToLoad( filesystem, filepath, warnOnMissing );
-		if ( tex == null )
+		filesystem ??= GlobalContext.Current.FileMount;
+
+		var key = (filesystem, filepath);
+		if ( missedAt.TryGetValue( key, out var when ) && RealTime.Now - when < MissLasts )
 			return null;
 
+		var tex = TryToLoad( filesystem, filepath, warnOnMissing );
+		if ( tex == null )
+		{
+			if ( TextureLoader.Image.IsAppropriate( filepath ) )
+				missedAt[key] = RealTime.Now;
+
+			return null;
+		}
+
+		missedAt.TryRemove( key, out _ );
 		return tex;
 	}
+
+	//When each picture file that was not there was last looked for: a gizmo handle per object asks for the same one
+	private static readonly System.Collections.Concurrent.ConcurrentDictionary<(BaseFileSystem, string), float> missedAt = new();
+
+	//Seconds a missing picture stays missing; new imports show up after it
+	private const float MissLasts = 1.0f;
 
 
 	/// <summary>Try to load a texture.</summary>

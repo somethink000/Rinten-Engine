@@ -56,15 +56,15 @@ internal static partial class DrawSettings
 		Help = "Radiance below which a lamp is dropped (0 trusts the authored radius)." )]
 	internal static float LightCutoff { get; set; } = 0.001f;
 
-	//FXAA runs in compose, so enabling it forces the offscreen world target (~0.2 ms); off by default
+	//FXAA runs in compose (the portable frame's finish off a page), so it forces the world drawn aside (~0.2 ms)
 	/// <summary>Whether the edges of the finished picture are softened.</summary>
 	[ConVar( "r_fxaa", ConVarFlags.Saved, Help = "Soften the edges of the finished picture (0 off)." )]
-	internal static bool Fxaa { get; set; }
+	internal static bool Fxaa { get; set; } = true;
 
-	/// <summary>MSAA sample count (0 is none); only the web frame reads it, the desktop ignores it</summary>
+	/// <summary>MSAA sample count (0 is none); the web's and the portable frame read it, the full frame smooths temporally</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
-		Help = "Samples per pixel (0 off). The web's frame reads it; the desktop does not yet." )]
-	internal static int Msaa { get; set; }
+		Help = "Samples per pixel (0 off). The web's frame and the portable frame read it; the full frame does not." )]
+	internal static int Msaa { get; set; } = 4;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>
 	[ConVar( "r_upscaling", ConVarFlags.Saved, Min = 0, Max = 5,
@@ -86,6 +86,11 @@ internal static partial class DrawSettings
 	[ConVar( "r_fsr3_sharpness", ConVarFlags.Saved, Min = 0.0f, Max = 1.0f,
 		Help = "FSR3 sharpening, 0 off to 1 the most." )]
 	internal static float Fsr3Sharpness { get; set; } = 0.5f;
+
+	/// <summary>Whether FSR 3 makes a frame between every two drawn; needs a temporal upscaler.</summary>
+	[ConVar( "r_frame_generation", ConVarFlags.Saved,
+		Help = "Generate a frame between every two drawn (FSR3 frame generation, needs FSR3, DLSS or TAA)." )]
+	internal static bool FrameGeneration { get; set; } = false;
 
 	/// <summary>DLSS's preset: 0 ultra performance, 1 performance, 2 balanced, 3 quality, 4 DLAA (native, anti-aliasing only).</summary>
 	[ConVar( "r_dlss_quality", ConVarFlags.Saved, Min = 0, Max = 4,

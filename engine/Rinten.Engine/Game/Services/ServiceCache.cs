@@ -64,7 +64,7 @@ internal static class ServiceCache
 			var json = fs.ReadAllText( path );
 			if ( string.IsNullOrEmpty( json ) ) return false;
 
-			value = System.Text.Json.JsonSerializer.Deserialize<T>( json );
+			value = System.Text.Json.JsonSerializer.Deserialize<T>( json, EnumConvert.Plain );
 			return value is not null;
 		}
 		catch ( Exception e )
@@ -82,7 +82,7 @@ internal static class ServiceCache
 			if ( fs is null ) return;
 
 			fs.CreateDirectory( CacheFolder );
-			var json = System.Text.Json.JsonSerializer.Serialize( value );
+			var json = System.Text.Json.JsonSerializer.Serialize( value, EnumConvert.Plain );
 			fs.WriteAllText( GetPath( cacheKey ), json );
 		}
 		catch ( Exception e )

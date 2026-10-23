@@ -101,7 +101,7 @@ internal sealed class CoreMeshRender
 	private static bool pipelinesTried;
 	//The pass that poses a whole model - see shaders/engine/mesh_skin.slang.
 	private static ulong skinPipeline;
-	private readonly ulong[] skinBound = new ulong[6];
+	private readonly ulong[] skinBound = new ulong[7];
 	private readonly byte[] skinPush = new byte[32];
 
 	//The pass that adds one blend shape into an instance's sums - see shaders/engine/mesh_shapes.slang.
@@ -762,17 +762,18 @@ internal sealed class CoreMeshRender
 	}
 
 	//SkinPush in mesh_skin.slang, eight words.
-	private ReadOnlySpan<byte> SkinPush( uint index, uint first, uint count, uint sumsAt, uint shaped, uint skinned )
+	private ReadOnlySpan<byte> SkinPush( uint index, uint first, uint count, uint sumsAt, uint shaped, uint skinned,
+		uint wasAt, uint keepWas )
 	{
 		var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>( skinPush.AsSpan() );
 		words[0] = index;
 		words[1] = first;
 		words[2] = count;
-		words[3] = 0;
+		words[3] = wasAt;
 		words[4] = sumsAt;
 		words[5] = shaped;
 		words[6] = skinned;
-		words[7] = 0;
+		words[7] = keepWas;
 		return skinPush;
 	}
 
@@ -800,6 +801,7 @@ internal sealed class CoreMeshRender
 		skinBound[3] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
 		skinBound[4] = CoreSceneTables.Palettes.Buffer != 0 ? CoreSceneTables.Palettes.Buffer : stand;
 		skinBound[5] = CoreSceneTables.ShapeSums.Buffer != 0 ? CoreSceneTables.ShapeSums.Buffer : stand;
+		skinBound[6] = CoreSceneTables.Was.Buffer != 0 ? CoreSceneTables.Was.Buffer : stand;
 
 		foreach ( var one in skinBound ) if ( one == 0 ) return;
 
@@ -832,10 +834,16 @@ internal sealed class CoreMeshRender
 			CoreRenderDevice.ZoneEnd();
 			var skinned = entry.PaletteAt >= 0 && mesh.Skin != 0;
 
+			//The range holds a pose of this one's only where it was posed into before
+			var keepWas = entry.WasAt >= 0 && CoreSceneTables.Was.Buffer != 0 && entry.SkinnedAt == entry.PosedAt;
+
 			CoreRenderDevice.Dispatch( skinPipeline, skinBound,
 				( mesh.PoolVertexCount + 127 ) / 128, 1, 1,
 				SkinPush( (uint)slot, (uint)mesh.PoolVertexAt, (uint)mesh.PoolVertexCount,
-					shaped ? (uint)entry.ShapesAt : 0u, shaped ? 1u : 0u, skinned ? 1u : 0u ) );
+					shaped ? (uint)entry.ShapesAt : 0u, shaped ? 1u : 0u, skinned ? 1u : 0u,
+					keepWas ? (uint)entry.WasAt : 0u, keepWas ? 1u : 0u ) );
+
+			entry.PoseMovedTurn = keepWas && entry.SkinnedHash != entry.PoseHash ? EngineLoop.LoopFrames : -1;
 
 			entry.SkinnedHash = entry.PoseHash;
 			entry.SkinnedAt = entry.PosedAt;
@@ -1249,14 +1257,11 @@ internal sealed class CoreMeshRender
 			Log.Warning( $"{lost} clusters of the depth have a material with nothing to shade them -{said}" );
 	}
 
-	//Depth pre-pass for self-moving surfaces using their own vertex shader and alpha cut only
-	//so the shading pass writes no depth and gets early depth rejection
-	internal void DrawMoverDepth()
+	//The buffers a material's draw reads, in cluster_main.slang's order; empty where the pool has no vertices yet
+	private Span<ulong> MaterialBound()
 	{
-		if ( !Ready || materials <= 0 ) return;
-
 		var vertices = CoreGeometryPool.Vertices.Buffer;
-		if ( vertices == 0 ) return;
+		if ( vertices == 0 ) return default;
 
 		bound[0] = paramsBuffer;
 		bound[1] = tables.InstanceBuffer;
@@ -1267,10 +1272,43 @@ internal sealed class CoreMeshRender
 		bound[6] = visibleBuffer;
 		bound[7] = paramsBuffer;
 
-		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang.
+		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang
 		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
 		bound[9] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.FrameSide );
-		var drawBound = bound.AsSpan( 0, 10 );
+
+		return bound.AsSpan( 0, 10 );
+	}
+
+	//A material's push block: its bin and number, the screen, and its tint in g_visSpare0, which ClusterInstance multiplies in
+	private byte[] MaterialPush( int m, Color tint )
+	{
+		Array.Clear( visPush );
+
+		var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>( visPush.AsSpan() );
+		words[0] = (uint)binnedAt;
+		words[1] = (uint)m;
+		words[2] = (uint)pixels.Width;
+		words[3] = (uint)pixels.Height;
+		words[4] = (uint)entriesAt;
+		words[5] = (uint)binOffsetsAt;
+
+		var floats = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( visPush.AsSpan() );
+		floats[16] = tint.r;
+		floats[17] = tint.g;
+		floats[18] = tint.b;
+		floats[19] = tint.a;
+
+		return visPush;
+	}
+
+	//Depth pre-pass for self-moving surfaces using their own vertex shader and alpha cut only
+	//so the shading pass writes no depth and gets early depth rejection
+	internal void DrawMoverDepth()
+	{
+		if ( !Ready || materials <= 0 ) return;
+
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return;
 
 		CoreRenderDevice.ZoneBegin( "mover depth" );
 
@@ -1313,25 +1351,12 @@ internal sealed class CoreMeshRender
 				continue;
 			}
 
-			Array.Clear( visPush );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 0 ), (uint)binnedAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 4 ), (uint)m );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 8 ), (uint)pixels.Width );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 12 ), (uint)pixels.Height );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 16 ), (uint)entriesAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 20 ), (uint)binOffsetsAt );
-
-			BitConverter.TryWriteBytes( visPush.AsSpan( 64 ), material.Tint.r );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 68 ), material.Tint.g );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 72 ), material.Tint.b );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 76 ), material.Tint.a );
-
 			//Whole run in one call, far spans included; letting them write depth while shading was slower
 			for ( var span = 0; span < binDraws; span++ )
 			{
 				if ( CoreRenderDevice.DrawPulledIndexedIndirect( material.DepthPipeline, visibleBuffer,
 					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
-					visPush, material.Texture, drawBound ) )
+					MaterialPush( m, material.Tint ), material.Texture, drawBound ) )
 					MoverDepthDraws++;
 			}
 		}
@@ -1341,6 +1366,66 @@ internal sealed class CoreMeshRender
 
 	//How many depth calls the movers took this run - see DrawMoverDepth.
 	internal static long MoverDepthDraws;
+
+	//Whether any cluster material moves its own corners - see DrawMoverVelocity
+	internal bool AnyMovers()
+	{
+		var most = Math.Min( materials, ushort.MaxValue - 1 );
+
+		for ( var m = 0; m < most; m++ )
+		{
+			if ( CoreMaterialTable.At( m ) is { Loose: false, Translucent: false, Moves: true } ) return true;
+		}
+
+		return false;
+	}
+
+	//The movers' own motion into the velocity picture, over the depth they wrote - see MainClusterVelocityVs; whether any drew
+	internal bool DrawMoverVelocity()
+	{
+		if ( !Ready || materials <= 0 ) return false;
+
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return false;
+
+		var drew = false;
+		var most = Math.Min( materials, ushort.MaxValue - 1 );
+
+		CoreRenderDevice.ZoneBegin( "mover velocity" );
+
+		for ( var m = 0; m < most; m++ )
+		{
+			var material = CoreMaterialTable.At( m );
+			if ( material is null || material.Loose || material.Translucent || !material.Moves ) continue;
+
+			if ( !material.AskedToVelocity )
+			{
+				material.AskedToVelocity = true;
+				material.VelocityPipeline = CoreResources.Pipeline( new CoreSceneRenderer.PipelineKind( false, false, material.TwoSided )
+				{
+					Shader = material.Shader,
+					Combo = material.Combo,
+					Target = CoreRender.TargetKind.Velocity,
+					Cluster = true,
+					Specialize = 0,
+					Moves = true,
+				} );
+			}
+
+			if ( material.VelocityPipeline == 0 ) continue;
+
+			for ( var span = 0; span < binDraws; span++ )
+			{
+				drew |= CoreRenderDevice.DrawPulledIndexedIndirect( material.VelocityPipeline, visibleBuffer,
+					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
+					MaterialPush( m, material.Tint ), material.Texture, drawBound );
+			}
+		}
+
+		CoreRenderDevice.ZoneEnd();
+
+		return drew;
+	}
 
 	//A material at a time, its clusters out of the bin the cull sorted for it: a draw a material, a cluster an instance of
 	//it, tested equal against the depth the pre-pass wrote and shaded by the material's own stages - see cluster_main.slang.
@@ -1352,22 +1437,8 @@ internal sealed class CoreMeshRender
 		//all whole branches of that stage which the ordinary frame never takes and pays for anyway - see CoreSceneRenderer.ShadeSpecialize.
 		var specialize = CoreSceneRenderer.ShadeSpecialize();
 
-		var vertices = CoreGeometryPool.Vertices.Buffer;
-		if ( vertices == 0 ) return;
-
-		bound[0] = paramsBuffer;
-		bound[1] = tables.InstanceBuffer;
-		bound[2] = CoreClusters.Clusters.Buffer;
-		bound[3] = CoreClusters.ClusterVertices.Buffer;
-		bound[4] = CoreClusters.ClusterTriangles.Buffer;
-		bound[5] = vertices;
-		bound[6] = visibleBuffer;
-		bound[7] = paramsBuffer;
-
-		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang.
-		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
-		bound[9] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.FrameSide );
-		var drawBound = bound.AsSpan( 0, 10 );
+		var drawBound = MaterialBound();
+		if ( drawBound.IsEmpty ) return;
 
 		CoreRenderDevice.ZoneBegin( "materials" );
 
@@ -1451,20 +1522,6 @@ internal sealed class CoreMeshRender
 				continue;
 			}
 
-			Array.Clear( visPush );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 0 ), (uint)binnedAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 4 ), (uint)m );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 8 ), (uint)pixels.Width );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 12 ), (uint)pixels.Height );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 16 ), (uint)entriesAt );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 20 ), (uint)binOffsetsAt );
-
-			//Material tint in g_visSpare0, multiplied with the instance tint in ClusterInstance
-			BitConverter.TryWriteBytes( visPush.AsSpan( 64 ), material.Tint.r );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 68 ), material.Tint.g );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 72 ), material.Tint.b );
-			BitConverter.TryWriteBytes( visPush.AsSpan( 76 ), material.Tint.a );
-
 			//One call per span, nearest first; far spans use the far pass, or the full one if it will not build
 			for ( var span = 0; span < binDraws; span++ )
 			{
@@ -1474,7 +1531,7 @@ internal sealed class CoreMeshRender
 
 				if ( CoreRenderDevice.DrawPulledIndexedIndirect( pipeline, visibleBuffer,
 					( binArgsAt + ( ( ( m * binDraws ) + span ) * 5 ) ) * 4, indexBuffer,
-					visPush, material.Texture, drawBound ) )
+					MaterialPush( m, material.Tint ), material.Texture, drawBound ) )
 					MaterialDraws++;
 			}
 		}

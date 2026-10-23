@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading;
 
 namespace Rinten;
@@ -38,6 +39,10 @@ public sealed class ParticleLightRenderer : ParticleController
 
 	internal int currentLightCount;
 
+	//Listeners and lights of particles that have gone, for the next ones: one of each per particle was garbage every frame
+	readonly ConcurrentBag<ParticleLight> spareListeners = new();
+	readonly ConcurrentBag<ScenePointLight> spareLights = new();
+
 	protected override void OnParticleCreated( Particle p )
 	{
 		if ( Random.Shared.Float( 0, 1 ) > Ratio )
@@ -48,7 +53,45 @@ public sealed class ParticleLightRenderer : ParticleController
 
 		currentLightCount++;
 
-		p.AddListener( new ParticleLight( this ), this );
+		p.AddListener( spareListeners.TryTake( out var kept ) ? kept : new ParticleLight( this ), this );
+	}
+
+	internal ScenePointLight TakeLight( Vector3 position )
+	{
+		while ( spareLights.TryTake( out var kept ) )
+		{
+			if ( !kept.IsValid() ) continue;
+
+			kept.Position = position;
+			kept.RenderingEnabled = true;
+			return kept;
+		}
+
+		return new ScenePointLight( Scene.SceneWorld, position, 5.0f, Color.Red );
+	}
+
+	//A particle's listener and light, back once it has gone; deleted outright where this is no longer running
+	internal void Return( ParticleLight listener, ScenePointLight light )
+	{
+		if ( light.IsValid() )
+		{
+			if ( !Active ) light.Delete();
+			else
+			{
+				light.RenderingEnabled = false;
+				spareLights.Add( light );
+			}
+		}
+
+		if ( Active ) spareListeners.Add( listener );
+	}
+
+	protected override void OnDisabled()
+	{
+		base.OnDisabled();
+
+		while ( spareLights.TryTake( out var kept ) ) kept.Delete();
+		spareListeners.Clear();
 	}
 }
 
@@ -65,17 +108,18 @@ class ParticleLight : Particle.BaseListener
 
 	public override void OnEnabled( Particle p )
 	{
-		//Overwritten by the first OnUpdate from the particle's own scale - this is only what it is for the frame in between, and it was a hundred metres of it.
-		so = new ScenePointLight( Renderer.Scene.SceneWorld, p.Position, 5.0f, Color.Red );
+		//Its radius is overwritten by the first OnUpdate from the particle's own scale
+		so = Renderer.TakeLight( p.Position );
 	}
 
 	public override void OnDisabled( Particle p )
 	{
 		Interlocked.Decrement( ref Renderer.currentLightCount );
 
-		if ( !so.IsValid() ) return;
+		var light = so;
+		so = null;
 
-		so.Delete();
+		Renderer.Return( this, light );
 	}
 
 	public override void OnUpdate( Particle p, float dt )

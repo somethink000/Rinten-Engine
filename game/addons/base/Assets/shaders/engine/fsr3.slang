@@ -18,8 +18,7 @@
 #define FFX_GPU 1
 #define FFX_HLSL 1
 
-//No half floats: they are a speed-up on the cards that have them and a build that does
-//not compile on the ones that do not, and the engine bakes one build for every card.
+//No half floats: AMD's half build ran its accumulate slower on RADV (780M 1.24 -> 1.80 ms), 2026-10-17
 #define FFX_HALF 0
 
 //The world's picture is light past white, not a tonemapped picture.
@@ -182,12 +181,8 @@ void main( int2 iDispatchThreadId : SV_DispatchThreadID )
 
 #elif defined( FSR3_ACCUMULATE )
 
-//With FSR3_SHARPEN defined as well, the build RCAS follows: it leaves the output to RCAS and writes only its history.
-#if defined( FSR3_SHARPEN )
-#define FFX_FSR3UPSCALER_OPTION_APPLY_SHARPENING 1
-#else
+//Its RCAS is the compose's - see CoreUpscaler.ComposeSharpening
 #define FFX_FSR3UPSCALER_OPTION_APPLY_SHARPENING 0
-#endif
 
 #define FSR3UPSCALER_BIND_SRV_INPUT_EXPOSURE                        0
 #define FSR3UPSCALER_BIND_SRV_DILATED_REACTIVE_MASKS                1
@@ -213,24 +208,6 @@ void main( int2 iDispatchThreadId : SV_DispatchThreadID )
 void main( int2 iDispatchThreadId : SV_DispatchThreadID )
 {
 	Accumulate( iDispatchThreadId );
-}
-
-#elif defined( FSR3_RCAS )
-
-#define FSR3UPSCALER_BIND_SRV_INPUT_EXPOSURE            0
-#define FSR3UPSCALER_BIND_SRV_RCAS_INPUT                1
-#define FSR3UPSCALER_BIND_UAV_UPSCALED_OUTPUT           0
-#define FSR3UPSCALER_BIND_CB_FSR3UPSCALER               0
-#define FSR3UPSCALER_BIND_CB_RCAS                       1
-
-#include "ffx/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_rinten.h"
-#include "ffx/gpu/fsr3upscaler/ffx_fsr3upscaler_common.h"
-#include "ffx/gpu/fsr3upscaler/ffx_fsr3upscaler_rcas.h"
-
-[numthreads(64, 1, 1)]
-void main( uint3 LocalThreadId : SV_GroupThreadID, uint3 WorkGroupId : SV_GroupID, uint3 Dtid : SV_DispatchThreadID )
-{
-	RCAS( LocalThreadId, WorkGroupId, Dtid );
 }
 
 #elif defined( FSR3_CLEAR )

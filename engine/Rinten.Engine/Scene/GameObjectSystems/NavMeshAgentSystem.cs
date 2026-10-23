@@ -35,7 +35,7 @@ internal sealed class NavMeshGameSystem : GameObjectSystem
 			return;
 		}
 
-		System.Threading.Tasks.Parallel.ForEach( Partitioner.Create( _agents, loadBalance: true ), findGround );
+		Rinten.Utility.Parallel.ForEach( _agents, null, findGround );
 	}
 
 	//Trace down from above the capsule centre; with several hits prefer the one closest to the centre

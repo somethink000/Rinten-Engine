@@ -36,7 +36,7 @@ internal sealed class UdpChannel : Connection
 
 		//Anything not asked for unreliably is sent reliably: a message that went missing
 		//is worse than one that arrived late, unless whoever sent it said otherwise.
-		peer.Send( data, !flags.HasFlag( NetFlags.Unreliable ) );
+		peer.Send( data, !( ( flags & NetFlags.Unreliable ) == NetFlags.Unreliable ) );
 
 		transport.Flush( peer );
 	}

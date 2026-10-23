@@ -4,7 +4,7 @@ using Rinten.Utility;
 namespace Rinten;
 
 //Mic voice chat: capture, gate silence by an adaptive noise floor, encode 20 ms frames into packets
-//and decodes others'. Unavailable (IsValid false) on server, tests, web and Android
+//and decodes others'. Unavailable (IsValid false) on server, tests, web, and Android without HostMicrophone
 internal static class VoiceManager
 {
 	static readonly Logger log = new( "Voice" );
@@ -26,8 +26,11 @@ internal static class VoiceManager
 	static bool Supported => !Application.IsHeadless
 		&& !Application.IsUnitTest
 		&& !Application.OnWeb
-		&& !OperatingSystem.IsAndroid()
+		&& ( !OperatingSystem.IsAndroid() || HostMicrophone is not null )
 		&& CoreNative.Available;
+
+	//Asked before the microphone opens where the system guards it: true when it may, false while the player is asked or said no
+	internal static Func<bool> HostMicrophone { get; set; }
 
 	//How long after a microphone would not open before it is tried again.
 	const float RetrySeconds = 10.0f;
@@ -72,6 +75,8 @@ internal static class VoiceManager
 	public static bool StartRecording()
 	{
 		if ( !IsValid ) return false;
+
+		if ( capture is null && HostMicrophone is { } allowed && !allowed() ) return false;
 
 		if ( capture is null && !Open() ) return false;
 

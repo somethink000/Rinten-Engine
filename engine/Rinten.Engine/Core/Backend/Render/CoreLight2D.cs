@@ -117,6 +117,16 @@ internal static class CoreLight2D
 		return true;
 	}
 
+	//How much this view's screen is shrunk to take in its 2D light's margin; one where it has no 2D lighting. The pictures
+	//round up to whole texels past it, by a texel or two - see Draw
+	internal static float Shrink( Scene scene, CameraComponent camera )
+	{
+		if ( CoreRenderDevice.PortableFrame || camera is not { Orthographic: true } ) return 1.0f;
+		if ( scene?.GetSystem<SceneLight2DSystem>() is not { Active: true } system ) return 1.0f;
+
+		return 1.0f / ( 1.0f + ( 2.0f * Math.Clamp( system.Settings.Margin, 0.0f, 0.5f ) ) );
+	}
+
 	//The block's lanes for the pictures - see light2dScene and light2dSnap in frame_data.slang
 	internal static void Lay( float[] frame, System.Numerics.Vector2 shrink, int scene, int light, System.Numerics.Vector2 snap )
 	{

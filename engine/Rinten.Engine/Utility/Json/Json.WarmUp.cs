@@ -62,6 +62,10 @@ partial class Json
 			if ( typeDesc.TargetType.IsGenericType )
 				continue;
 
+			//State machines and closures are never serialized
+			if ( CompilerMade( typeDesc.TargetType ) )
+				continue;
+
 			//Nor the one to load an assembly. A type whose description names one that nothing has loaded yet is described on the day
 			//something serializes it: Project, whose compilers are its own properties, had a warm-up load the compiler into every game.
 			if ( DescribingReaches( typeDesc.TargetType, reaches ) )

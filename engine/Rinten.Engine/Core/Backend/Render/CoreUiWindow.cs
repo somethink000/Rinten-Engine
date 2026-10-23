@@ -2136,11 +2136,11 @@ internal sealed class UiWindowInput : PanelInput
 
 		state.MousePos = new Vector2( x, y );
 		//Panel button order: 1 is middle, 2 is right, matching PanelInput, not the button names
-		state.Mouse0 = buttons.HasFlag( MouseButtons.Left );
-		state.Mouse1 = buttons.HasFlag( MouseButtons.Middle );
-		state.Mouse2 = buttons.HasFlag( MouseButtons.Right );
-		state.Mouse3 = buttons.HasFlag( MouseButtons.Back );
-		state.Mouse4 = buttons.HasFlag( MouseButtons.Forward );
+		state.Mouse0 = ( ( buttons & MouseButtons.Left ) == MouseButtons.Left );
+		state.Mouse1 = ( ( buttons & MouseButtons.Middle ) == MouseButtons.Middle );
+		state.Mouse2 = ( ( buttons & MouseButtons.Right ) == MouseButtons.Right );
+		state.Mouse3 = ( ( buttons & MouseButtons.Back ) == MouseButtons.Back );
+		state.Mouse4 = ( ( buttons & MouseButtons.Forward ) == MouseButtons.Forward );
 		state.MouseWheel = -window.TakeWheel();
 
 		keys = window.TakeKeys();

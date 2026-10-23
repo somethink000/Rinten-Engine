@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -42,6 +42,7 @@ partial class StandaloneExporter
 
 		//What the serializer makes generic over the game's values, which the compiler has to be told - see WebDirectives. Asked of the game's own library.
 		var directives = Path.Combine( work, "rd.xml" );
+		var descriptor = Path.Combine( work, "kept.xml" );
 		HashSet<string> inModule = null;
 
 		await OnMainThread( () =>
@@ -60,12 +61,13 @@ partial class StandaloneExporter
 			var kept = types.Concat( described )
 				.Where( x => !x.IsGenericType && !x.IsArray && inModule.Contains( x.Assembly.GetName().Name ) && Ours( x.Assembly.GetName().Name ) )
 				.Distinct().ToList();
-			File.WriteAllText( directives, WebDirectives.For( made, inModule, kept ) );
+			File.WriteAllText( directives, WebDirectives.For( made, inModule ) );
+			File.WriteAllText( descriptor, WebDirectives.Descriptor( kept, inModule ) );
 			Logger.Info( $"web module: {made.Count} serializer generics from {types.Count} types" );
 		} );
 
 		//The same inputs make the same module, and making it is most of an export: a game exported again with only its content changed takes the last one.
-		var key = ModuleKey( project, gameBin, directives, inModule );
+		var key = ModuleKey( project, gameBin, [directives, descriptor], inModule );
 		var last = Path.Combine( work, "kept", key );
 
 		if ( ModuleFiles.All( x => File.Exists( Path.Combine( last, x ) ) ) )
@@ -83,7 +85,7 @@ partial class StandaloneExporter
 
 		var arguments = $"publish \"{project}\" -r browser-wasm -c Release -m:{compiles} -p:IlcSingleThreaded=true " +
 			"-p:BuildProjectReferences=false " +
-			$"-p:RintenGameBin=\"{gameBin}\" -p:RintenRdXml=\"{directives}\" " +
+			$"-p:RintenGameBin=\"{gameBin}\" -p:RintenRdXml=\"{directives}\" -p:RintenDescriptor=\"{descriptor}\" " +
 			$"-p:RintenWasmBin=\"{WasmBin}{Path.DirectorySeparatorChar}\" " +
 			$"-p:NativeIntermediateOutputPath=\"{native}{Path.DirectorySeparatorChar}\" -p:NativeOutputPath=\"{output}{Path.DirectorySeparatorChar}\"";
 
@@ -93,6 +95,14 @@ partial class StandaloneExporter
 		var built = await Task.Run( () => RunDotnet( arguments, emscripten, ceiling, out var log ) || Failed( log ) );
 
 		if ( !built ) return false;
+
+		//A compiler stopped at the memory ceiling leaves the SDK saying it succeeded, with nothing written
+		if ( !ModuleFiles.All( x => File.Exists( Path.Combine( output, x ) ) ) )
+		{
+			Problem( $"no web module: the build ended without writing it - most often the compiler was stopped past the {ceiling} GB " +
+				"of memory it was given; close what else is running and export again" );
+			return false;
+		}
 
 		Logger.Info( $"web module: compiled in {clock.Elapsed.TotalMinutes:F1} min" );
 
@@ -180,7 +190,7 @@ partial class StandaloneExporter
 	private static string WasmBin => Path.Combine( Environment.CurrentDirectory, ExportPlatform.Web.BinFolder );
 
 	//One hash over everything the module is compiled from, to skip rebuilding an unchanged module
-	private static string ModuleKey( string project, string gameBin, string directives, HashSet<string> inModule )
+	private static string ModuleKey( string project, string gameBin, string[] directives, HashSet<string> inModule )
 	{
 		var player = Path.GetDirectoryName( project );
 		var managed = Path.GetDirectoryName( typeof( Rinten.Scene ).Assembly.Location );
@@ -195,7 +205,7 @@ partial class StandaloneExporter
 		var shared = Path.Combine( player, "prebuilt", "Shared.props" );
 		if ( File.Exists( shared ) )
 			files.AddRange( System.Text.RegularExpressions.Regex.Matches( File.ReadAllText( shared ), @"bin/managed/([^""]+\.dll)" ).Select( m => Path.Combine( managed, m.Groups[1].Value ) ) );
-		files.Add( directives );
+		files.AddRange( directives );
 		files.AddRange( Directory.GetFiles( gameBin, "*.dll" ) );
 		files.AddRange( inModule.Select( x => Path.Combine( managed, x + ".dll" ) ).Where( File.Exists ) );
 		files.Add( Path.Combine( WasmBin, "rintencore.a" ) );
@@ -348,14 +358,14 @@ partial class StandaloneExporter
 	[return: MarshalAs( UnmanagedType.Bool )]
 	private static extern bool GlobalMemoryStatusEx( ref MemoryStatus status );
 
-	//Runs the SDK with these arguments and this environment; true where it finished well. On Linux inside a scope
-	//of its own with a hard memory ceiling, so a build that wants more than it was given is the one that stops.
+	//Runs the SDK; true where it finished well. On Linux in its own scope with a memory ceiling, so the desktop
+	//keeps what it needs and the build swaps rather than being killed
 	private static bool RunDotnet( string arguments, Dictionary<string, string> environment, int ceilingGB, out string log )
 	{
 		var capped = OperatingSystem.IsLinux() && File.Exists( "/usr/bin/systemd-run" );
 		var dotnet = ExportToolchain.Dotnet ?? "dotnet";
 		var start = new ProcessStartInfo( capped ? "/usr/bin/systemd-run" : dotnet,
-			capped ? $"--user --scope --quiet -p MemoryMax={ceilingGB}G -p MemorySwapMax=0 \"{dotnet}\" {arguments}" : arguments )
+			capped ? $"--user --scope --quiet -p MemoryMax={ceilingGB}G \"{dotnet}\" {arguments}" : arguments )
 		{
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,

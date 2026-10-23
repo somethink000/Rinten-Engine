@@ -70,11 +70,35 @@
 		<AndroidNativeLibrary Include="$(RintenBin)libopenxr_loader.so" Abi="arm64-v8a" />
 	</ItemGroup>
 
+	<!-- FFmpeg, for a game with video: built by engine/Core/build-android-ffmpeg.sh, in the package by the names Android loads them by. See FFmpeg.cs. -->
+	<ItemGroup Condition="'$(RintenVideo)' == 'true'">
+		<AndroidNativeLibrary Include="$(RintenBin)ffmpeg/lib*.so" Abi="arm64-v8a" />
+	</ItemGroup>
+
 	<!-- A game played in a headset gets the manifest a headset launches immersive apps by -
 	     see Properties/AndroidManifest.Vr.xml. The export says so for a project that is VR. -->
 	<PropertyGroup Condition="'$(RintenVr)' == 'true'">
 		<AndroidManifest>Properties/AndroidManifest.Vr.xml</AndroidManifest>
 	</PropertyGroup>
+
+	<!-- The microphone, for a game whose build page asks for it: the manifest it is built with is the one above with
+	     RECORD_AUDIO before its application, so a game with no voice never has the player asked. See VoiceManager. -->
+	<PropertyGroup Condition="'$(RintenMicrophone)' == 'true'">
+		<RintenManifestSource>$(MSBuildThisFileDirectory)Properties/AndroidManifest.xml</RintenManifestSource>
+		<RintenManifestSource Condition="'$(RintenVr)' == 'true'">$(MSBuildThisFileDirectory)Properties/AndroidManifest.Vr.xml</RintenManifestSource>
+		<AndroidManifest>obj/AndroidManifest.Microphone.xml</AndroidManifest>
+	</PropertyGroup>
+
+	<Target Name="RintenMicrophoneManifest" BeforeTargets="_GetAndroidPackageName;BeforeBuild"
+		Condition="'$(RintenMicrophone)' == 'true'">
+		<PropertyGroup>
+			<_RintenManifest>$([System.IO.File]::ReadAllText('$(RintenManifestSource)'))</_RintenManifest>
+			<_RintenManifest>$(_RintenManifest.Replace('&lt;application ', '&lt;uses-permission android:name="android.permission.RECORD_AUDIO" /&gt;&lt;application '))</_RintenManifest>
+		</PropertyGroup>
+
+		<!-- Escaped, or the semicolons in its comments would cut it into lines -->
+		<WriteLinesToFile File="$(AndroidManifest)" Lines="$([MSBuild]::Escape($(_RintenManifest)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+	</Target>
 
 	<!-- The whole game as one asset. Thousands of loose ones is a packaging step that takes minutes and a
 	     first frame that opens every one of them; a zip is opened once, into the folder the app can read. -->

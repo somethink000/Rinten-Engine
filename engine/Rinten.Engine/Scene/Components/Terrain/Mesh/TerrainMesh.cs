@@ -5,18 +5,15 @@ using System.IO;
 namespace Rinten;
 
 /// <summary>The ground as it is: one triangle mesh for a whole terrain, which is what is stored, what the brushes move and what the render chunks are baked from.</summary>
-public sealed class TerrainMesh
+public sealed partial class TerrainMesh
 {
 	/// <summary>Everything a vertex of the ground carries.</summary>
 	public struct Vertex
 	{
 		public Vector3 Position, Normal;
 
-		/// <summary>How much of the terrain's painted layers 0 to 3 is here, a byte each.</summary>
-		public Color32 Layers;
-
-		/// <summary>And of layers 4 to 7, nought to one.</summary>
-		public Vector4 Layers2;
+		/// <summary>Which of the terrain's layers are painted here, and how much of each.</summary>
+		public TerrainPaint Paint;
 	}
 
 	/// <summary>Per-corner UV and tangent, so texture seams don't split vertices and crack under brushes</summary>
@@ -30,8 +27,7 @@ public sealed class TerrainMesh
 
 	private Vector3[] vPosition = [];
 	private Vector3[] vNormal = [];
-	private Color32[] vLayers = [];
-	private Vector4[] vLayers2 = [];
+	private TerrainPaint[] vPaint = [];
 	private bool[] vAlive = [];
 
 	//The first corner at each vertex, or less than nought.
@@ -45,9 +41,8 @@ public sealed class TerrainMesh
 	private int[] tVertex = [];
 	private ushort[] tMaterial = [];
 
-	//A triangle's corners' own numbers - see Corner. Three to a triangle, beside tVertex .
-	private Vector2[] cUv = [];
-	private Vector4[] cTangent = [];
+	//The corners' own numbers (Corner) of triangles that have any - what was set in; the ground's own have none
+	private readonly Dictionary<int, (Corner A, Corner B, Corner C)> worn = new();
 	private bool[] tAlive = [];
 
 	//The next corner at the same vertex, per corner.
@@ -118,12 +113,14 @@ public sealed class TerrainMesh
 	{
 		Position = vPosition[v],
 		Normal = vNormal[v],
-		Layers = vLayers[v],
-		Layers2 = vLayers2[v],
+		Paint = vPaint[v],
 	};
 
 	/// <summary>One corner of a triangle, k from nought to two in the order <see cref="GetTriangle"/> gives them.</summary>
-	public Corner CornerOf( int t, int k ) => new() { Uv = cUv[( t * 3 ) + k], Tangent = cTangent[( t * 3 ) + k] };
+	public Corner CornerOf( int t, int k )
+		=> !worn.TryGetValue( t, out var three ) ? default : k == 0 ? three.A : k == 1 ? three.B : three.C;
+
+	private static bool Says( in Corner corner ) => corner.Uv != Vector2.Zero || corner.Tangent != Vector4.Zero;
 
 	/// <summary>Everything there is, as a box. Only ever grows between loads.</summary>
 	public BBox Bounds => anyBounds ? bounds : new BBox( Vector3.Zero, Vector3.Zero );
@@ -144,8 +141,7 @@ public sealed class TerrainMesh
 
 			Array.Resize( ref vPosition, room );
 			Array.Resize( ref vNormal, room );
-			Array.Resize( ref vLayers, room );
-			Array.Resize( ref vLayers2, room );
+			Array.Resize( ref vPaint, room );
 			Array.Resize( ref vAlive, room );
 			Array.Resize( ref vCorner, room );
 			Array.Resize( ref vCell, room );
@@ -159,8 +155,6 @@ public sealed class TerrainMesh
 
 			Array.Resize( ref tVertex, room * 3 );
 			Array.Resize( ref cNext, room * 3 );
-			Array.Resize( ref cUv, room * 3 );
-			Array.Resize( ref cTangent, room * 3 );
 			Array.Resize( ref tMaterial, room );
 			Array.Resize( ref tAlive, room );
 		}
@@ -226,8 +220,7 @@ public sealed class TerrainMesh
 
 		vPosition[v] = value.Position;
 		vNormal[v] = value.Normal;
-		vLayers[v] = value.Layers;
-		vLayers2[v] = value.Layers2;
+		vPaint[v] = value.Paint;
 		vAlive[v] = true;
 		vCorner[v] = -1;
 		vertexCount++;
@@ -252,8 +245,7 @@ public sealed class TerrainMesh
 		var was = vPosition[v];
 
 		vNormal[v] = value.Normal;
-		vLayers[v] = value.Layers;
-		vLayers2[v] = value.Layers2;
+		vPaint[v] = value.Paint;
 
 		if ( was == value.Position )
 		{
@@ -306,9 +298,8 @@ public sealed class TerrainMesh
 		tVertex[( t * 3 ) + 2] = c;
 		tMaterial[t] = material;
 
-		cUv[t * 3] = ca.Uv; cTangent[t * 3] = ca.Tangent;
-		cUv[( t * 3 ) + 1] = cb.Uv; cTangent[( t * 3 ) + 1] = cb.Tangent;
-		cUv[( t * 3 ) + 2] = cc.Uv; cTangent[( t * 3 ) + 2] = cc.Tangent;
+		if ( Says( ca ) || Says( cb ) || Says( cc ) ) worn[t] = (ca, cb, cc);
+		else worn.Remove( t );
 		tAlive[t] = true;
 		triangleCount++;
 
@@ -365,6 +356,7 @@ public sealed class TerrainMesh
 		tAlive[t] = false;
 		triangleCount--;
 		freeTriangles.Push( t );
+		worn.Remove( t );
 	}
 
 	//the public changes: the primitives, recorded
@@ -465,6 +457,13 @@ public sealed class TerrainMesh
 		anyTouched = false;
 
 		open?.Grow( box );
+		Announce( box );
+	}
+
+	//Tells whoever listens, the mask's tops over the box first.
+	private void Announce( BBox box )
+	{
+		StaleMask( box );
 		Changed?.Invoke( box );
 	}
 
@@ -498,7 +497,7 @@ public sealed class TerrainMesh
 		if ( edit.IsEmpty ) return null;
 
 		edit.Close();
-		Changed?.Invoke( edit.Bounds );
+		Announce( edit.Bounds );
 
 		return edit;
 	}
@@ -526,14 +525,20 @@ public sealed class TerrainMesh
 					var gone = edit.Triangles[op.Data];
 					RawAddTriangleAt( op.Id, gone.A, gone.B, gone.C, gone.Material, gone.CA, gone.CB, gone.CC );
 					break;
+
+				case TerrainMeshEdit.Kind.SetTexel: RawSetTexel( edit.Texels[op.Data].Key, op.Id, edit.Texels[op.Data].Before ); break;
+				case TerrainMeshEdit.Kind.AddTile: RawRemoveTile( edit.Tiles[op.Data].Key ); break;
+				case TerrainMeshEdit.Kind.RemoveTile: RawAddTile( edit.Tiles[op.Data].Key, edit.Tiles[op.Data].Paint ); break;
 			}
 		}
+
+		PublishMask();
 
 		open = was;
 		anyTouched = false;
 
 		Remeasure();
-		Changed?.Invoke( edit.Bounds );
+		Announce( edit.Bounds );
 	}
 
 	/// <summary>Makes an undone edit again.</summary>
@@ -557,8 +562,14 @@ public sealed class TerrainMesh
 					var made = edit.Triangles[op.Data];
 					RawAddTriangleAt( op.Id, made.A, made.B, made.C, made.Material, made.CA, made.CB, made.CC );
 					break;
+
+				case TerrainMeshEdit.Kind.SetTexel: RawSetTexel( edit.Texels[op.Data].Key, op.Id, edit.Texels[op.Data].After ); break;
+				case TerrainMeshEdit.Kind.AddTile: RawAddTile( edit.Tiles[op.Data].Key, edit.Tiles[op.Data].Paint ); break;
+				case TerrainMeshEdit.Kind.RemoveTile: RawRemoveTile( edit.Tiles[op.Data].Key ); break;
 			}
 		}
+
+		PublishMask();
 
 		open = was;
 		anyTouched = false;
@@ -893,20 +904,15 @@ public sealed class TerrainMesh
 			Grow( vPosition[v] );
 		}
 
-		for ( var t = 0; t < triangleSlots; t++ )
+		foreach ( var t in worn.Keys.ToArray() )
 		{
-			if ( !tAlive[t] ) continue;
-
-			for ( var k = 0; k < 3; k++ )
-			{
-				var at = ( t * 3 ) + k;
-				var along = new Vector3( cTangent[at].x, cTangent[at].y, cTangent[at].z ) * factor;
-				along = along.IsNearZeroLength ? along : along.Normal;
-				cTangent[at] = new Vector4( along.x, along.y, along.z, cTangent[at].w );
-			}
+			var (a, b, c) = worn[t];
+			worn[t] = (Stretched( a, factor ), Stretched( b, factor ), Stretched( c, factor ));
 		}
 
 		longestEdge *= MathF.Max( across, up );
+
+		StretchMask( across );
 
 		Touch( was.Mins );
 		Touch( was.Maxs );
@@ -915,6 +921,14 @@ public sealed class TerrainMesh
 		Report();
 
 		return true;
+	}
+
+	private static Corner Stretched( Corner corner, Vector3 factor )
+	{
+		var along = new Vector3( corner.Tangent.x, corner.Tangent.y, corner.Tangent.z ) * factor;
+		along = along.IsNearZeroLength ? along : along.Normal;
+
+		return corner with { Tangent = new Vector4( along.x, along.y, along.z, corner.Tangent.w ) };
 	}
 
 	/// <summary>Moves the ground along a direction - up to raise it, along the view to carve into a cliff.</summary>
@@ -951,6 +965,79 @@ public sealed class TerrainMesh
 		Renormal( brushed );
 		Report();
 	}
+
+	/// <summary>How a stamp meets the ground under it.</summary>
+	public enum StampMode
+	{
+		/// <summary>The shape is added on top of the ground.</summary>
+		Raise,
+
+		/// <summary>The shape is pressed down into the ground.</summary>
+		Lower,
+
+		/// <summary>The ground becomes the shape, standing on the stamp's centre.</summary>
+		Set,
+	}
+
+	//How much of the stamp's half-width its edge blends into the ground over.
+	private const float StampEdge = 0.1f;
+
+	/// <summary>Lays shapeAt (0 to 1 over the square) times height over the ground; only upward ground moves.</summary>
+	public void Stamp( Vector3 centre, float half, float turn, Func<float, float, float> shapeAt, float height, StampMode mode )
+	{
+		if ( !( half > 0.0f ) || shapeAt is null ) return;
+
+		var reach = half * MathF.Sqrt( 2.0f );
+		var cos = MathF.Cos( MathX.DegreeToRadian( turn ) );
+		var sin = MathF.Sin( MathX.DegreeToRadian( turn ) );
+
+		brushed.Clear();
+
+		CellRange( centre.x - reach, centre.z - reach, centre.x + reach, centre.z + reach, out var x0, out var x1, out var z0, out var z1 );
+
+		for ( var z = z0; z <= z1; z++ )
+			for ( var x = x0; x <= x1; x++ )
+				for ( var v = gridFirst[( z * gridWide ) + x]; v >= 0; v = vCellNext[v] )
+					if ( vNormal[v].y > 0.0f ) brushed.Add( v );
+
+		stamped.Clear();
+
+		foreach ( var v in brushed )
+		{
+			var at = vPosition[v];
+			var dx = at.x - centre.x;
+			var dz = at.z - centre.z;
+
+			//Across the stamp, turned with it: minus one to one on each side.
+			var u = ( ( dx * cos ) + ( dz * sin ) ) / half;
+			var w = ( ( dz * cos ) - ( dx * sin ) ) / half;
+
+			if ( MathF.Abs( u ) > 1.0f || MathF.Abs( w ) > 1.0f ) continue;
+
+			var inside = Math.Clamp( MathF.Min( 1.0f - MathF.Abs( u ), 1.0f - MathF.Abs( w ) ) / StampEdge, 0.0f, 1.0f );
+			var blend = inside * inside * ( 3.0f - ( 2.0f * inside ) );
+			if ( blend <= 0.0f ) continue;
+
+			var shape = shapeAt( ( u * 0.5f ) + 0.5f, ( w * 0.5f ) + 0.5f ) * height;
+
+			var y = mode switch
+			{
+				StampMode.Raise => at.y + ( shape * blend ),
+				StampMode.Lower => at.y - ( shape * blend ),
+				_ => at.y + ( ( centre.y + shape - at.y ) * blend ),
+			};
+
+			if ( y == at.y ) continue;
+
+			Move( v, new Vector3( at.x, y, at.z ) );
+			stamped.Add( v );
+		}
+
+		Renormal( stamped );
+		Report();
+	}
+
+	private readonly List<int> stamped = new();
 
 	/// <summary>Moves each vertex along its own normal: swells what is there, or with less than nought hollows it.</summary>
 	public void Inflate( Vector3 centre, float radius, float amount )
@@ -1073,15 +1160,17 @@ public sealed class TerrainMesh
 		Report();
 	}
 
-	/// <summary>Paints a layer: more of it under the brush, and the rest scaled back so the six still come to one.</summary>
+	//On the vertices, and on the mask over the top of the ground wherever the brush reaches that.
+	/// <summary>Paints a layer: more of it under the brush, and the rest scaled back so the whole still comes to one.</summary>
 	public void Paint( Vector3 centre, float radius, int layer, float strength )
 	{
-		if ( layer < 0 || layer >= Terrain.MaxLayers ) return;
+		if ( layer < 0 || layer >= Terrain.MostLayers ) return;
+
+		//The mask first: a tile it makes is filled from the vertices as they were before this dab.
+		PaintMask( centre, radius, layer, strength );
 
 		brushed.Clear();
 		VerticesInSphere( centre, radius, brushed );
-
-		Span<float> weights = stackalloc float[Terrain.MaxLayers];
 
 		foreach ( var v in brushed )
 		{
@@ -1089,37 +1178,13 @@ public sealed class TerrainMesh
 			if ( add == 0.0f ) continue;
 
 			var value = GetVertex( v );
-
-			weights[0] = value.Layers.r / 255.0f;
-			weights[1] = value.Layers.g / 255.0f;
-			weights[2] = value.Layers.b / 255.0f;
-			weights[3] = value.Layers.a / 255.0f;
-			weights[4] = value.Layers2.x;
-			weights[5] = value.Layers2.y;
-			weights[6] = value.Layers2.z;
-			weights[7] = value.Layers2.w;
-
-			weights[layer] = Math.Clamp( weights[layer] + add, 0.0f, 1.0f );
-
-			var others = 0.0f;
-			for ( var i = 0; i < Terrain.MaxLayers; i++ ) if ( i != layer ) others += weights[i];
-
-			var scale = others > 1e-6f ? ( 1.0f - weights[layer] ) / others : 0.0f;
-			for ( var i = 0; i < Terrain.MaxLayers; i++ ) if ( i != layer ) weights[i] *= scale;
-
-			//Nothing else painted and this one short of whole: it is whole.
-			if ( others <= 1e-6f ) weights[layer] = 1.0f;
-
-			value.Layers = new Color32( Byte( weights[0] ), Byte( weights[1] ), Byte( weights[2] ), Byte( weights[3] ) );
-			value.Layers2 = new Vector4( weights[4], weights[5], weights[6], weights[7] );
+			value.Paint = value.Paint.With( layer, add );
 
 			SetVertex( v, value );
 		}
 
 		Report();
 	}
-
-	private static byte Byte( float unit ) => (byte)Math.Clamp( MathF.Round( unit * 255.0f ), 0.0f, 255.0f );
 
 	/// <summary>A hole: every triangle whose middle is under the brush goes.</summary>
 	public void DeleteTriangles( Vector3 centre, float radius )
@@ -1764,10 +1829,7 @@ public sealed class TerrainMesh
 		{
 			Position = ( a.Position + b.Position ) * 0.5f,
 			Normal = ( a.Normal + b.Normal ).Normal,
-			Layers = new Color32(
-				(byte)( ( a.Layers.r + b.Layers.r + 1 ) / 2 ), (byte)( ( a.Layers.g + b.Layers.g + 1 ) / 2 ),
-				(byte)( ( a.Layers.b + b.Layers.b + 1 ) / 2 ), (byte)( ( a.Layers.a + b.Layers.a + 1 ) / 2 ) ),
-			Layers2 = ( a.Layers2 + b.Layers2 ) * 0.5f,
+			Paint = TerrainPaint.Between( a.Paint, b.Paint ),
 		};
 	}
 
@@ -1988,7 +2050,7 @@ public sealed class TerrainMesh
 	//storage
 
 	private const uint Magic = 0x534D5452; //"RTMS"
-	private const int Version = 3;   //3: four more-layer weights a vertex rather than two
+	private const int Version = 4;   //4: four layers by number a vertex, and the mask after the triangles
 
 	/// <summary>The mesh as bytes, with the dead slots dropped - so what is read back has other ids, and an edit made before does not belong to it.</summary>
 	public void Write( BinaryWriter into )
@@ -2014,8 +2076,7 @@ public sealed class TerrainMesh
 
 			into.Write( vPosition[v].x ); into.Write( vPosition[v].y ); into.Write( vPosition[v].z );
 			into.Write( vNormal[v].x ); into.Write( vNormal[v].y ); into.Write( vNormal[v].z );
-			into.Write( vLayers[v].r ); into.Write( vLayers[v].g ); into.Write( vLayers[v].b ); into.Write( vLayers[v].a );
-			into.Write( vLayers2[v].x ); into.Write( vLayers2[v].y ); into.Write( vLayers2[v].z ); into.Write( vLayers2[v].w );
+			into.Write( vPaint[v].Layers ); into.Write( vPaint[v].Weights );
 		}
 
 		for ( var t = 0; t < triangleSlots; t++ )
@@ -2032,11 +2093,13 @@ public sealed class TerrainMesh
 
 			for ( var k = 0; k < 3; k++ )
 			{
-				var c = ( t * 3 ) + k;
-				into.Write( cUv[c].x ); into.Write( cUv[c].y );
-				into.Write( cTangent[c].x ); into.Write( cTangent[c].y ); into.Write( cTangent[c].z ); into.Write( cTangent[c].w );
+				var corner = CornerOf( t, k );
+				into.Write( corner.Uv.x ); into.Write( corner.Uv.y );
+				into.Write( corner.Tangent.x ); into.Write( corner.Tangent.y ); into.Write( corner.Tangent.z ); into.Write( corner.Tangent.w );
 			}
 		}
+
+		WriteMask( into );
 	}
 
 	/// <summary>A mesh from what <see cref="Write"/> wrote, or null for anything else.</summary>
@@ -2046,7 +2109,7 @@ public sealed class TerrainMesh
 
 		//One: the coordinates on the vertex, before they were on the corners.
 		var version = from.ReadInt32();
-		if ( version is not ( 1 or 2 or Version ) ) return null;
+		if ( version is not ( 1 or 2 or 3 or Version ) ) return null;
 
 		var min = new Vector2( from.ReadSingle(), from.ReadSingle() );
 		var max = new Vector2( from.ReadSingle(), from.ReadSingle() );
@@ -2068,11 +2131,22 @@ public sealed class TerrainMesh
 			{
 				Position = new Vector3( from.ReadSingle(), from.ReadSingle(), from.ReadSingle() ),
 				Normal = new Vector3( from.ReadSingle(), from.ReadSingle(), from.ReadSingle() ),
-				Layers = new Color32( from.ReadByte(), from.ReadByte(), from.ReadByte(), from.ReadByte() ),
-				Layers2 = version >= 3
-					? new Vector4( from.ReadSingle(), from.ReadSingle(), from.ReadSingle(), from.ReadSingle() )
-					: new Vector4( from.ReadSingle(), from.ReadSingle(), 0.0f, 0.0f ),
 			};
+
+			//Before four: eight weights, one for each of the first eight layers.
+			if ( version >= 4 )
+			{
+				value.Paint = new TerrainPaint { Layers = from.ReadUInt32(), Weights = from.ReadUInt32() };
+			}
+			else
+			{
+				var first = new Color32( from.ReadByte(), from.ReadByte(), from.ReadByte(), from.ReadByte() );
+				var last = version >= 3
+					? new Vector4( from.ReadSingle(), from.ReadSingle(), from.ReadSingle(), from.ReadSingle() )
+					: new Vector4( from.ReadSingle(), from.ReadSingle(), 0.0f, 0.0f );
+
+				value.Paint = TerrainPaint.FromEight( first, last );
+			}
 
 			if ( oldCorners is not null )
 			{
@@ -2109,6 +2183,8 @@ public sealed class TerrainMesh
 			mesh.RawAddTriangleAt( t, a, b, c, material, ca, cb, cc );
 		}
 
+		if ( version >= 4 && !mesh.ReadMask( from ) ) return null;
+
 		mesh.anyTouched = false;
 		mesh.longestEdgeGrew = false;
 
@@ -2138,7 +2214,7 @@ public sealed class TerrainMesh
 		var ids = new int[side * side];
 		var holes = new bool[side * side];
 
-		Span<float> weights = stackalloc float[Terrain.MaxLayers];
+		Span<float> weights = stackalloc float[Terrain.MostLayers];
 
 		for ( var z = 0; z < side; z++ )
 		{
@@ -2149,8 +2225,8 @@ public sealed class TerrainMesh
 
 				holes[at] = ( ( packed >> 18 ) & 1u ) != 0u;
 
-				var under = (int)Math.Min( packed & 0x1Fu, (uint)Terrain.MaxLayers - 1 );
-				var over = (int)Math.Min( ( packed >> 5 ) & 0x1Fu, (uint)Terrain.MaxLayers - 1 );
+				var under = (int)Math.Min( packed & 0x1Fu, (uint)Terrain.MostLayers - 1 );
+				var over = (int)Math.Min( ( packed >> 5 ) & 0x1Fu, (uint)Terrain.MostLayers - 1 );
 				var blend = ( ( packed >> 10 ) & 0xFFu ) / 255.0f;
 
 				weights.Clear();
@@ -2164,8 +2240,7 @@ public sealed class TerrainMesh
 				{
 					Position = new Vector3( ( x + 0.5f ) * unit, At( x, z ), ( z + 0.5f ) * unit ),
 					Normal = new Vector3( -dx, 1.0f, -dz ).Normal,
-					Layers = new Color32( Byte( weights[0] ), Byte( weights[1] ), Byte( weights[2] ), Byte( weights[3] ) ),
-					Layers2 = new Vector4( weights[4], weights[5], weights[6], weights[7] ),
+					Paint = TerrainPaint.Strongest( weights ),
 				} );
 			}
 		}
@@ -2298,7 +2373,7 @@ public sealed class TerrainMesh
 /// <summary>Undo journal of primitive mesh changes for one edit, replayed backwards to restore ids too</summary>
 public sealed class TerrainMeshEdit
 {
-	internal enum Kind : byte { SetVertex, AddVertex, RemoveVertex, AddTriangle, RemoveTriangle }
+	internal enum Kind : byte { SetVertex, AddVertex, RemoveVertex, AddTriangle, RemoveTriangle, SetTexel, AddTile, RemoveTile }
 
 	internal struct Op
 	{
@@ -2320,6 +2395,26 @@ public sealed class TerrainMeshEdit
 	internal readonly List<TerrainMesh.Vertex> Vertices = new();
 	internal readonly List<Triangle> Triangles = new();
 
+	//A point of the mask: its tile, and what it was and came to; the op's id is where in the tile it is.
+	internal struct Texel
+	{
+		public long Key;
+		public TerrainPaint Before, After;
+	}
+
+	//A tile made or taken away, with its paint as it was made or as it was when it went.
+	internal struct Tile
+	{
+		public long Key;
+		public TerrainPaint[] Paint;
+	}
+
+	internal readonly List<Texel> Texels = new();
+	internal readonly List<Tile> Tiles = new();
+
+	//Which op last set each point of the mask, as for the vertices.
+	private Dictionary<(long, int), int> lastTexel = new();
+
 	//Which op last set each vertex, while the edit is open - so the next set of it lands there too.
 	private Dictionary<int, int> lastSet = new();
 
@@ -2329,7 +2424,8 @@ public sealed class TerrainMeshEdit
 	public BBox Bounds { get; private set; }
 
 	/// <summary>About how much memory it holds on to.</summary>
-	public long Bytes => ( Ops.Count * 12L ) + ( Vertices.Count * 40L ) + ( Triangles.Count * 88L );
+	public long Bytes => ( Ops.Count * 12L ) + ( Vertices.Count * 40L ) + ( Triangles.Count * 88L ) + ( Texels.Count * 24L )
+		+ ( Tiles.Count * TerrainMaskTile.Side * TerrainMaskTile.Side * 8L );
 
 	internal bool IsEmpty => Ops.Count == 0;
 
@@ -2339,7 +2435,11 @@ public sealed class TerrainMeshEdit
 		any = true;
 	}
 
-	internal void Close() => lastSet = null;
+	internal void Close()
+	{
+		lastSet = null;
+		lastTexel = null;
+	}
 
 	internal void SetVertex( int v, in TerrainMesh.Vertex before, in TerrainMesh.Vertex after )
 	{
@@ -2382,5 +2482,35 @@ public sealed class TerrainMeshEdit
 	{
 		Ops.Add( new Op { Kind = Kind.RemoveTriangle, Id = t, Data = Triangles.Count } );
 		Triangles.Add( new Triangle { A = a, B = b, C = c, Material = material, CA = ca, CB = cb, CC = cc } );
+	}
+
+	internal void SetTexel( long key, int at, TerrainPaint before, TerrainPaint after )
+	{
+		if ( lastTexel.TryGetValue( (key, at), out var op ) )
+		{
+			var texel = Texels[Ops[op].Data];
+			texel.After = after;
+			Texels[Ops[op].Data] = texel;
+			return;
+		}
+
+		lastTexel[(key, at)] = Ops.Count;
+		Ops.Add( new Op { Kind = Kind.SetTexel, Id = at, Data = Texels.Count } );
+		Texels.Add( new Texel { Key = key, Before = before, After = after } );
+	}
+
+	//A tile coming or going starts its points' history again.
+	internal void AddedTile( long key, TerrainPaint[] paint )
+	{
+		lastTexel.Clear();
+		Ops.Add( new Op { Kind = Kind.AddTile, Data = Tiles.Count } );
+		Tiles.Add( new Tile { Key = key, Paint = paint } );
+	}
+
+	internal void RemovedTile( long key, TerrainPaint[] paint )
+	{
+		lastTexel.Clear();
+		Ops.Add( new Op { Kind = Kind.RemoveTile, Data = Tiles.Count } );
+		Tiles.Add( new Tile { Key = key, Paint = paint } );
 	}
 }

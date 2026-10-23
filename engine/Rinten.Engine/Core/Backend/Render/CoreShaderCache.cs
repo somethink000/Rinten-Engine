@@ -80,8 +80,12 @@ internal static class CoreShaderCache
 		return Convert.ToHexString( SHA256.HashData( bytes ) );
 	}
 
-	//Whether to say what each key was made of - RINTEN_SHADER_KEYS=1.
-	private static readonly bool Saying = Environment.GetEnvironmentVariable( "RINTEN_SHADER_KEYS" ) == "1";
+	//Whether to say what each key was made of - RINTEN_SHADER_KEYS=1, or -shaderkeys where there is no environment (a page);
+	//asked late, as a page's switches are read after the first shaders
+	private static bool Saying => saying ??= Environment.GetEnvironmentVariable( "RINTEN_SHADER_KEYS" ) == "1" ||
+		Rinten.Utility.CommandLine.HasSwitch( "-shaderkeys" );
+
+	private static bool? saying;
 
 	//What a key was made of, the two halves hashed apart, so a miss names which half moved
 	private static void Say( string name, string entry, CoreShaderCompiler.Stage stage, string source, string includes, string key )
@@ -105,6 +109,19 @@ internal static class CoreShaderCache
 		//no words to mean it is not drawn, which in that frame is right
 		if ( CoreShaderCompiler.IsPortable( format ) && !EngineShaders.InPortableFrame( file ) ) return null;
 
+		if ( PassText( file, defines ) is not { } made ) return null;
+
+		//Asked of the cache and of nobody else. A build with no compiler - a page, a phone - would
+		//otherwise say out loud that a shader is missing, about a run it is perfectly all right not to have.
+		if ( optional )
+			return Cached( made.Text, made.Directory, entry, stage, format, out _, out var baked ) ? baked : null;
+
+		return Words( made.Text, made.Directory, entry, stage, format, file );
+	}
+
+	//An engine pass's text with defines before it and text after it, and its folder; null where it is not there
+	internal static (string Text, string Directory)? PassText( string file, string defines = null, string after = null )
+	{
 		var path = CoreShaderFile.Source( file );
 
 		if ( path is null )
@@ -115,28 +132,16 @@ internal static class CoreShaderCache
 			return null;
 		}
 
-		string text;
-
 		try
 		{
 			//Through the seal: a shipped build's shaders are sealed, and the sealed bytes are not the text a key is made of
-			text = CompiledFile.TextOf( path );
+			return ( ( defines ?? "" ) + CompiledFile.TextOf( path ) + ( after ?? "" ), Path.GetDirectoryName( path ) );
 		}
 		catch ( IOException e )
 		{
 			log.Warning( $"{file} would not read: {e.Message}" );
 			return null;
 		}
-
-		var source = ( defines ?? "" ) + text;
-		var directory = Path.GetDirectoryName( path );
-
-		//Asked of the cache and of nobody else. A build with no compiler - a page, a phone - would
-		//otherwise say out loud that a shader is missing, about a run it is perfectly all right not to have.
-		if ( optional )
-			return Cached( source, directory, entry, stage, format, out _, out var baked ) ? baked : null;
-
-		return Words( source, directory, entry, stage, format, file );
 	}
 
 	/// <summary>The compiled words for one entry point, from the cache or else the compiler.</summary>
@@ -743,6 +748,8 @@ internal static class CoreShaderCache
 
 			foreach ( var (entry, stage) in stages )
 			{
+				if ( stage == CoreShaderCompiler.Stage.Compute && portable && Target != CoreShaderCompiler.Format.SpirvPortable ) continue;
+
 				if ( Pass( file, entry, stage, defines ) is not null ) continue;
 
 				log.Error( $"{file} {entry}{( string.IsNullOrEmpty( defines ) ? "" : " with " + defines.Trim().Replace( '\n', ' ' ) )} " +
@@ -776,6 +783,7 @@ internal static class CoreShaderCache
 			{
 				Baking = format;
 				whole &= BakePasses( portable: true );
+				BakeShippedPasses();
 				project?.Invoke();
 			}
 
@@ -837,8 +845,8 @@ internal static class CoreShaderCache
 				continue;
 			}
 
-			//A pass over the frame's pictures, in a frame without them - see RenderTier
-			if ( portable && !CoreResources.IsSurface( shader ) ) continue;
+			//Neither a surface nor a pass over the frame that is more than a point effect, which the portable frame carries
+			if ( portable && !CoreResources.IsSurface( shader ) && !PortablePass( shader ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( shader ) is { } doubt ) log.Warning( doubt );
@@ -865,8 +873,10 @@ internal static class CoreShaderCache
 				}
 
 				//And each entry of its own beyond every file's - bloom's three in one file; see EntryWords
-				foreach ( var (entry, kind) in portable ? [] : CoreShaderFile.EntriesOf( shader ) )
+				foreach ( var (entry, kind) in CoreShaderFile.EntriesOf( shader ) )
 				{
+					if ( portable && kind == CoreShaderCompiler.Stage.Compute ) continue;
+
 					if ( CoreShaderFile.EntryWords( shader, null, entry, kind ) is not null ) continue;
 
 					log.Error( $"{shader} {entry} did not compile: {CoreRenderDevice.ShaderError}" );
@@ -905,6 +915,30 @@ internal static class CoreShaderCache
 		return true;
 	}
 
+	//Whether a shipped shader is a pass over the frame the portable frame draws as one, rather than a point effect it carries
+	private static bool PortablePass( string shader )
+		=> CoreShaderFile.IsPass( shader ) && !CorePointChain.IsPoint( shader ) && !CoreResources.IsFullFrameOnly( shader );
+
+	//The shipped passes a page draws as passes of their own, in Baking's language; one that will not is said and left out
+	private static void BakeShippedPasses()
+	{
+		foreach ( var shader in Shipped() )
+		{
+			if ( CoreShaderFile.IsForeign( shader ) || !PortablePass( shader ) ) continue;
+
+			if ( CoreShaderFile.Compile( shader ) is null )
+				log.Warning( $"{shader} is not in the portable frame: {CoreRenderDevice.ShaderError}" );
+
+			foreach ( var (entry, kind) in CoreShaderFile.EntriesOf( shader ) )
+			{
+				if ( kind == CoreShaderCompiler.Stage.Compute ) continue;
+
+				if ( CoreShaderFile.EntryWords( shader, null, entry, kind ) is null )
+					log.Warning( $"{shader} {entry} is not in the portable frame: {CoreRenderDevice.ShaderError}" );
+			}
+		}
+	}
+
 	//The .shader files under the engine's own shader folder.
 	private static IEnumerable<string> Shipped()
 	{
@@ -936,6 +970,8 @@ internal static class EngineShaders
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";
 	internal const string MeshSkin = "shaders/engine/mesh_skin.slang";
+	internal const string ClassicPose = "shaders/engine/classic_pose.slang";
+	internal const string Particles = "shaders/engine/particles.slang";
 	internal const string MeshShapes = "shaders/engine/mesh_shapes.slang";
 	internal const string ShadingRate = "shaders/engine/shading_rate.slang";
 	internal const string DepthPyramid = "shaders/engine/depth_pyramid.slang";
@@ -943,6 +979,7 @@ internal static class EngineShaders
 	internal const string Fold = "shaders/engine/picture_fold.slang";
 	internal const string Upscale = "shaders/engine/upscale.slang";
 	internal const string Fsr3 = "shaders/engine/fsr3.slang";
+	internal const string FrameGeneration = "shaders/engine/framegen.slang";
 	internal const string BakeTrace = "shaders/engine/bake_trace.slang";
 	internal const string BakeDenoise = "shaders/engine/bake_denoise.slang";
 	internal const string RayBounce = "shaders/engine/ray_bounce.slang";
@@ -987,6 +1024,10 @@ internal static class EngineShaders
 	private static readonly (string, CoreShaderCompiler.Stage)[] Draws =
 		[("MainVs", CoreShaderCompiler.Stage.Vertex), ("MainPs", CoreShaderCompiler.Stage.Pixel)];
 
+	//And a posed thing's, out of its posed positions - see velocity.slang
+	private static readonly (string, CoreShaderCompiler.Stage)[] VelocityDraws =
+		[("MainVs", CoreShaderCompiler.Stage.Vertex), ("PosedVs", CoreShaderCompiler.Stage.Vertex), ("MainPs", CoreShaderCompiler.Stage.Pixel)];
+
 	//Whether the portable frame has a pass - see All, which says it of each of the engine's
 	//own. A file that is not one of those is somebody else's to answer for, and is let through.
 	internal static bool InPortableFrame( string file )
@@ -1022,7 +1063,7 @@ internal static class EngineShaders
 		( Background, "", Draws, true ),
 		//The portable frame's bloom, in pixel passes - see CorePortableGlow
 		( Glow, "", GlowDraws, true ),
-		( Velocity, "", Draws, false ),
+		( Velocity, "", VelocityDraws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),
 		( MeshRaster, "", Draws, false ),
@@ -1030,6 +1071,9 @@ internal static class EngineShaders
 		( MeshRaster, View, Draws, false ),
 		( MeshCull, "", Runs, false ),
 		( MeshSkin, "", Runs, false ),
+		//The portable frame's on Vulkan; a page computes nothing - see BakePasses
+		( ClassicPose, "", Runs, true ),
+		( Particles, "", ParticleRuns, false ),
 		( MeshShapes, "", Runs, false ),
 		( ShadingRate, "", Runs, false ),
 		( DepthPyramid, "", Runs, false ),
@@ -1043,10 +1087,13 @@ internal static class EngineShaders
 		//The upscalers' passes - see CoreUpscaler; full frame only, as they need the world's picture and compute
 		( Upscale, "", UpscaleRuns, false ),
 		( Upscale, CoreUpscaler.MotionDefines, MotionRuns, false ),
+		( Upscale, CoreUpscaler.SingleDefines, ReactiveRuns, false ),
 		//And FSR 3's, one build a pass - see CoreFsr3.
 		.. Fsr3Builds,
+		.. FrameGenerationBuilds,
 		//The baked lighting's rays - see BakeGpu. The editor's, and a full frame's.
 		( BakeTrace, "", BakeRuns, false ),
+		( BakeTrace, Rinten.Bake.BakeGpu.RaysDefines, BakeRuns, false ),
 		( BakeDenoise, "", Runs, false ),
 		//The probes' bounce through hardware rays - see CoreLiveBounce. Built everywhere, run where the card has rays.
 		( RayBounce, "", Runs, false ),
@@ -1093,11 +1140,13 @@ internal static class EngineShaders
 	private static IEnumerable<(string, string, (string, CoreShaderCompiler.Stage)[], bool)> Fsr3Builds
 		=> CoreFsr3.Defines.Select( defines => ( Fsr3, defines, Runs, false ) );
 
+	private static IEnumerable<(string, string, (string, CoreShaderCompiler.Stage)[], bool)> FrameGenerationBuilds
+		=> CoreFrameGeneration.Defines.Select( defines => ( FrameGeneration, defines, Runs, false ) );
+
 	private static readonly (string, CoreShaderCompiler.Stage)[] UpscaleRuns =
 	[
 		("TemporalCs", CoreShaderCompiler.Stage.Compute),
 		("EasuCs", CoreShaderCompiler.Stage.Compute),
-		("SharpenCs", CoreShaderCompiler.Stage.Compute),
 		("CopyCs", CoreShaderCompiler.Stage.Compute),
 	];
 
@@ -1108,8 +1157,15 @@ internal static class EngineShaders
 		("DownPs", CoreShaderCompiler.Stage.Pixel),
 		("UpPs", CoreShaderCompiler.Stage.Pixel),
 		("ComposePs", CoreShaderCompiler.Stage.Pixel),
+		("FinishPs", CoreShaderCompiler.Stage.Pixel),
 	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] ParticleRuns =
+		[("main", CoreShaderCompiler.Stage.Compute), ("SpawnCs", CoreShaderCompiler.Stage.Compute), ("SortCs", CoreShaderCompiler.Stage.Compute)];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] MotionRuns =
 		[("MotionCs", CoreShaderCompiler.Stage.Compute)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] ReactiveRuns =
+		[("ReactiveCs", CoreShaderCompiler.Stage.Compute)];
 }

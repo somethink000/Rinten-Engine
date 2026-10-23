@@ -1,21 +1,11 @@
 ﻿using System.Diagnostics;
-using System.Threading;
 
 namespace Editor;
 
 internal static partial class ShaderHooks
 {
 	[Event( "content.changed" )]
-	public static void OnShaderWasEdited( string filename )
-	{
-		//only respond to shaders that changed todo if a hlsl changed we could look at what files include it and recompile those that would be genuinely useful
-
-		//Idea: only recompile changed shaders, or only the combos in use by loaded materials
-		//ConsoleSystem.Run( $"mat_reloadshaders {shaderName}" );
-
-		//Compile the shaders - in fast mode
-		CompileShader( filename.Trim( '/' ) );
-	}
+	public static void OnShaderWasEdited( string filename ) => CompileShader( filename.Trim( '/' ) );
 
 	private static ICodeEditor _editor;
 	private static ICodeEditor Editor
@@ -42,41 +32,18 @@ internal static partial class ShaderHooks
 		Editor?.OpenFile( filename );
 	}
 
-	static CancellationTokenSource cts;
-
 	[Event( "compile.shader" )]
 	public static void CompileShader( string shader )
 	{
-		if ( !FileSystem.Mounted.FileExists( shader ) ) return;
-		if ( !shader.EndsWith( ".shader" ) ) return;
+		if ( !shader.EndsWith( ".shader" ) || !FileSystem.Mounted.FileExists( shader ) ) return;
 
-		cts?.Cancel();
-		cts?.Dispose();
-		cts = new CancellationTokenSource();
+		//Shaders rebuild from source when next drawn: only an asset with a builder of its own is compiled here
+		var asset = AssetSystem.FindByPath( shader );
+		if ( asset is null || !asset.CanRecompile ) return;
 
-		_ = CompileShader( shader, cts.Token );
-	}
-
-	static async Task CompileShader( string file, CancellationToken token )
-	{
-		Log.Info( $"Compiling: {file}" );
+		Log.Info( $"Compiling: {shader}" );
 
 		var sw = Stopwatch.StartNew();
-
-		var asset = AssetSystem.FindByPath( file );
-
-		if ( asset is null )
-		{
-			Log.Warning( $"{file} is not an asset" );
-			return;
-		}
-
-		//Shaders rebuild from source when next drawn, so no builder is normal; warn only on refusal
-		if ( !asset.CanRecompile )
-		{
-			Log.Info( $"{file} will be compiled again from source when next drawn" );
-			return;
-		}
 
 		if ( !asset.Compile( full: true ) )
 		{
@@ -85,7 +52,5 @@ internal static partial class ShaderHooks
 		}
 
 		Log.Info( $"Done in {sw.Elapsed.TotalMilliseconds:0.00}ms" );
-
-		await Task.CompletedTask;
 	}
 }

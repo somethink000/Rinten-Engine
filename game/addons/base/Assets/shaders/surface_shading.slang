@@ -287,12 +287,20 @@ struct Surface
 #endif
 };
 
-//The colour, and how much of a mirror the surface is for the passes that come after and never saw it drawn.
+//The colour, and how much of a mirror the surface is and how rough, for the passes that come after and never saw it drawn.
 struct Shaded
 {
 	float3 colour;
 	float mirror;
+	float roughness;
 };
+
+//The world's second picture in 8 bits: the normal in rgb shortened by roughness (a mirror keeps full precision)
+//and the mirror weight in a - see SceneRoughness
+float4 SurfaceWord( float3 normal, float roughness, float mirror )
+{
+	return float4( ( normal * ( 1.0 - ( 0.8 * min( roughness, 0.625 ) ) ) ) * 0.5 + 0.5, mirror );
+}
 
 //Lays the frame's decals over the surface before lighting, in order, each by its own alpha
 void ApplyDecals( inout Surface s )
@@ -435,23 +443,15 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 litDiffuse = float3( 0.0, 0.0, 0.0 );
 	float3 litSpecular = float3( 0.0, 0.0, 0.0 );
 
-	//View depth, which cuts the light grid and picks the sun's cascade, worked out once
-	float viewDepth = mul( float4( s.world, 1.0 ), EYE_FRAME( worldToClip ) ).w;
-
-	//The lights reaching it: a grid cell where the frame built one, else every light - see CoreLights
-	LightWalk walk = LightsHere( s.screen, viewDepth );
-	int count = int( walk.count );
-
-	//With one light at most per pixel this is no loop: a trip count of one drops the back edge - see kManyLights
-	if ( kManyLights == 0 ) count = min( count, 1 );
+	//The lights reaching it - see LightsHere
+	LightWalk walk = LightsHere( s.world );
+	uint which;
 
 	//A surface with its own lightmap has the baked lights in it already - see LightBaked
 	bool sheetLit = HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0;
 
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
-
 		Light light = LightAt( which );
 
 		float3 l;
@@ -792,9 +792,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	}
 	else if ( HasBakedVolume() )
 	{
-		//A step off the surface, so a floor reads the room above it rather than the lattice's layer below.
-		float3 lifted = s.world + ( geometric * ( 0.35 / g_frame[0].volumeOrigin.w ) );
-		float3 spot = BakedVolumeSpot( lifted, geometric );
+		float3 spot = BakedVolumeSpot( s.world, geometric );
 
 		ambientSky = BakedVolume( spot, normal ) + BakedGlowVolumes( spot );
 		if ( HasBakedBounce() ) ambientSky += BakedBounce( spot, normal );
@@ -894,10 +892,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	Shaded o;
 	o.colour = shaded;
 
-	//Mirror weight for the SSR pass: the exact environment weight used here, gone by half rough
+	//Mirror weight for SSR: this environment weight, gone by 0.625 rough where its rays are GGX's - see reflection.shader
 	float mirror = LightStrength( reflectance ) * reach;
 
-	o.mirror = mirror * saturate( 1.0 - ( roughness * 2.0 ) );
+	o.mirror = mirror * saturate( 1.0 - ( roughness * 1.6 ) );
+	o.roughness = roughness;
 
 	return o;
 }

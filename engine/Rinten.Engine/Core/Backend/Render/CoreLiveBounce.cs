@@ -191,7 +191,7 @@ internal sealed partial class CoreLiveBounce
 		{
 			if ( found.Count >= MostLamps ) break;
 			if ( light is DirectionalLight || !light.IsValid() || !light.Enabled || !light.Active ) continue;
-			if ( !light.Contribution.HasFlag( Rinten.Light.LightContribution.Diffuse ) || bounced.Contains( light.Id ) ) continue;
+			if ( !( ( light.Contribution & Rinten.Light.LightContribution.Diffuse ) == Rinten.Light.LightContribution.Diffuse ) || bounced.Contains( light.Id ) ) continue;
 
 			var emitted = light.EmittedColor;
 			if ( emitted.r <= 0.0f && emitted.g <= 0.0f && emitted.b <= 0.0f ) continue;
@@ -255,7 +255,7 @@ internal sealed partial class CoreLiveBounce
 		if ( data.LiveSun == Guid.Empty ) return;
 		if ( scene.Directory.FindComponentByGuid( data.LiveSun ) is not DirectionalLight sun ) return;
 		if ( !sun.IsValid() || !sun.Enabled || !sun.Active ) return;
-		if ( !sun.Contribution.HasFlag( Rinten.Light.LightContribution.Diffuse ) ) return;
+		if ( !( ( sun.Contribution & Rinten.Light.LightContribution.Diffuse ) == Rinten.Light.LightContribution.Diffuse ) ) return;
 
 		var forward = sun.WorldRotation.Forward.Normal;
 		var emitted = sun.EmittedColor;

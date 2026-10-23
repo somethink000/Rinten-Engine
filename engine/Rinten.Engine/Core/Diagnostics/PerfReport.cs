@@ -16,6 +16,13 @@ internal static class PerfReport
 	//-perfwarmup: seconds to wait after the first frame before measuring (default 30, past JIT/compiler)
 	private static readonly int warmup = Rinten.Utility.CommandLine.GetSwitchInt( "-perfwarmup", 30 );
 
+	//With -perfscene or -perfplay the warm-up starts once the tools have opened the scene - see ScenarioReady
+	private static bool scenarioPending = Rinten.Utility.CommandLine.HasSwitch( "-perfscene" ) ||
+		Rinten.Utility.CommandLine.HasSwitch( "-perfplay" );
+
+	/// <summary>The run's scene is open, and playing where asked: the warm-up may start.</summary>
+	internal static void ScenarioReady() => scenarioPending = false;
+
 	//-perfwindowshot: path to save the actual presented window image (PPM plus alpha PGM)
 	private static string WindowShot =>
 		Rinten.Utility.CommandLine.GetSwitch( "-perfwindowshot", "" ).TrimQuoted();
@@ -129,6 +136,7 @@ internal static class PerfReport
 	//And what the mesh passes had counted, and the editor's labels.
 	private static long meshCullsAtArm, meshListDrawsAtArm, meshMaterialDrawsAtArm;
 	private static long particleTicksAtArm, particleRunsAtArm;
+	private static long presentWaitsAtArm, presentTicksAtArm, generatedAtArm;
 	private static long particleAskedAtArm, particleHeldAtArm;
 	private static long textLabelsAtArm, textMadeAtArm, textGoneAtArm;
 
@@ -146,8 +154,11 @@ internal static class PerfReport
 
 	//How many charts of the sun had been traced as the window opened, and how often the world was built for the rays.
 	private static long bakesAtArm;
+
+	//The text counters as the window opened - see the text lines of the report
+	private static Rinten.UI.TextStats.Snapshot textAtArm;
 	private static long pagesAtArm;
-	private static long lampFacesAtArm;
+	private static long lampFacesAtArm, moverFacesAtArm, moverFrustumsAtArm;
 
 	//The collector's counts as the window opened.
 	private static long allocatedAtArm;
@@ -332,8 +343,8 @@ internal static class PerfReport
 		//window: the editor's, or the game's own, which is the only one a browser or a standalone build has.
 		if ( CoreUiWindow.FramesPresented == 0 && CoreGameRenderer.FramesPresented == 0 ) return;
 
-		//Nor a scene still coming down a page: its frames until then draw a scene that is not there.
-		if ( WebContent.ScenesWaiting > 0 ) return;
+		//Nor a scene still coming down a page or still to be opened: its frames until then draw a scene that is not there.
+		if ( WebContent.ScenesWaiting > 0 || scenarioPending ) return;
 
 		if ( firstFrameAt == 0 )
 		{
@@ -374,6 +385,10 @@ internal static class PerfReport
 			meshListDrawsAtArm = CoreMeshRender.ListDraws;
 			meshMaterialDrawsAtArm = CoreMeshRender.MaterialDraws;
 			particleTicksAtArm = ParticleGameSystem.StepTicks;
+			presentWaitsAtArm = CorePresent.Waits;
+			presentTicksAtArm = CorePresent.WaitTicks;
+			generatedAtArm = VkFrame.GeneratedShown;
+			ParticleGameSystem.CountedFrom++;
 			particleRunsAtArm = ParticleGameSystem.StepRuns;
 			particleAskedAtArm = ParticleGameSystem.Asked;
 			particleHeldAtArm = ParticleGameSystem.Held;
@@ -402,11 +417,15 @@ internal static class PerfReport
 			bakesAtArm = CoreSunPages.Bakes;
 			pagesAtArm = CoreSunPages.PagesBaked;
 			lampFacesAtArm = CoreLampMaps.FacesDrawn;
+			moverFacesAtArm = CoreLampMaps.MoverFacesDrawn;
+			moverFrustumsAtArm = CoreLampMaps.MoverFrustumsDrawn;
 
 			lock ( Scene.EditorTicks ) Scene.EditorTicks.Clear();
 
 			allocations = new Allocations.Scope();
 			allocations.Start();
+
+			textAtArm = Rinten.UI.TextStats.Take();
 
 			//Profiler tree records only with RINTEN_PERF_TREE=1; it slows the frame, so it's a map, not a timing
 			FrameProfiler.Reporting = WantsTree;
@@ -570,6 +589,20 @@ internal static class PerfReport
 		if ( VkFrame.CardIdleRecordings > 1 && frameMs.Count > 0 )
 			report.AppendLine( $"  card idle between recordings {VkFrame.CardIdleMs / frameMs.Count:F3} ms a frame " +
 				$"({VkFrame.CardIdleRecordings / (double)frameMs.Count:F1} recordings a frame)" );
+
+		//How long a frame's top waited for the screen to show the frame before last (CorePresent); held to the refresh only
+		var generatedShown = VkFrame.GeneratedShown - generatedAtArm;
+
+		if ( generatedShown > 0 )
+			report.AppendLine( $"  frame generation: {generatedShown / (double)frameMs.Count:F2} generated frames shown a drawn one" );
+
+		report.AppendLine( $"  edges smoothed by {PerformanceStats.AntiAliasing}" );
+
+		var presentWaits = CorePresent.Waits - presentWaitsAtArm;
+
+		if ( presentWaits > 0 && frameMs.Count > 0 )
+			report.AppendLine( $"  paced to the screen: {presentWaits / (double)frameMs.Count:F2} waits a frame, " +
+				$"{( CorePresent.WaitTicks - presentTicksAtArm ) * 1000.0 / System.Diagnostics.Stopwatch.Frequency / frameMs.Count:F3} ms a frame waiting" );
 
 		//The one cost a baked shader cache does not remove: SPIR-V is not what the card runs, so the driver compiles every pipeline the first
 		//time it is made. A player's first run pays for all of them; every run after finds them in the driver's own cache. See VkPipelines.Baked.
@@ -747,6 +780,13 @@ internal static class PerfReport
 		{
 			var ts = Rinten.UI.TextStats.Take();
 			report.AppendLine( $"  text over the run ({ts.Frames} frames): " + Rinten.UI.TextStats.Describe( ts ) );
+
+			//What text cost in the window alone, past the run's first shaping and loading of each face
+			var rasters = ts.ScopeRasters - textAtArm.ScopeRasters;
+			var changes = ts.Restyles - textAtArm.Restyles;
+			report.AppendLine( $"  text in the window: {rasters} rasters, {( ts.ScopeGarbage - textAtArm.ScopeGarbage ) / 1024.0:F1} KB garbage " +
+				$"({( rasters > 0 ? ( ts.ScopeGarbage - textAtArm.ScopeGarbage ) / rasters : 0 )} bytes each); {changes} label changes, " +
+				$"{( ts.LabelGarbage - textAtArm.LabelGarbage ) / 1024.0:F1} KB garbage ({( changes > 0 ? ( ts.LabelGarbage - textAtArm.LabelGarbage ) / changes : 0 )} bytes each)" );
 		}
 
 		if ( walk.Biggest is { } biggest )
@@ -1119,6 +1159,18 @@ internal static class PerfReport
 		if ( asked > 0 && held > 0 )
 			report.AppendLine( $"  {held * 100 / asked} % of the effects asked were held back this frame - too far to step every one" );
 
+		//Which effects that processor went to, the dearest first
+		if ( ticks > 0 && Game.ActiveScene is { } stepping )
+		{
+			foreach ( var (name, effectTicks, effectParticles) in ParticleGameSystem.Costliest( stepping, 10 ) )
+			{
+				var share = effectTicks * 100.0 / ticks;
+				var each = effectTicks * 1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency / Math.Max( effectParticles, 1 );
+
+				report.AppendLine( $"    {share,5:0.0} %  {effectParticles / steps,6} a frame  {each,7:0} ns each  {name}" );
+			}
+		}
+
 		Anchors( report, steps );
 	}
 
@@ -1180,6 +1232,7 @@ internal static class PerfReport
 		report.AppendLine( $"  {CoreSunPages.Bakes - bakesAtArm} bakes of the sun's pages in the window, " +
 			$"{CoreSunPages.PagesBaked - pagesAtArm} pages" );
 		report.AppendLine( $"  {CoreLampMaps.FacesDrawn - lampFacesAtArm} lamp faces drawn in the window" );
+		report.AppendLine( $"  what moves: {CoreLampMaps.MoverFacesDrawn - moverFacesAtArm} faces, {CoreLampMaps.MoverFrustumsDrawn - moverFrustumsAtArm} frustums" );
 		report.AppendLine();
 	}
 

@@ -327,7 +327,7 @@ public sealed partial class SkinnedModelRenderer : ModelRenderer, Component.Exec
 		{
 			if ( Scene.IsEditor && !CanUpdateInEditor() )
 			{
-				SceneModel.UpdateToBindPose( ReadBonesFromGameObjects );
+				SceneModel.UpdateToBindPose( readBones ??= ReadBonesFromGameObjects );
 			}
 			else
 			{
@@ -424,7 +424,7 @@ public sealed partial class SkinnedModelRenderer : ModelRenderer, Component.Exec
 
 			if ( Scene.IsEditor && !CanUpdateInEditor() )
 			{
-				SceneModel.UpdateToBindPose( ReadBonesFromGameObjects );
+				SceneModel.UpdateToBindPose( readBones ??= ReadBonesFromGameObjects );
 			}
 			else
 			{
@@ -432,7 +432,7 @@ public sealed partial class SkinnedModelRenderer : ModelRenderer, Component.Exec
 				//frame for ever, which looks like a character that will not breathe. The editor's own clock is the one that is running.
 				var step = Scene.IsEditor ? RealTime.Delta : Time.Delta;
 
-				SceneModel.Update( step, ReadBonesFromGameObjects );
+				SceneModel.Update( step, readBones ??= ReadBonesFromGameObjects );
 			}
 		}
 
@@ -444,6 +444,9 @@ public sealed partial class SkinnedModelRenderer : ModelRenderer, Component.Exec
 	}
 
 	bool _transformDirty;
+
+	//ReadBonesFromGameObjects as the delegate the model asks for, made once rather than every update
+	Action readBones;
 
 	//Whether a merge onto this one that matched no bones has been said.
 	bool _mergeReported;

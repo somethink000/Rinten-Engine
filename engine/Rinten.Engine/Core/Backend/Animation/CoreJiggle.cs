@@ -272,6 +272,7 @@ internal static class CoreJiggle
 	private static void Recompose( CoreAnimRuntime.Instance instance )
 	{
 		var skeleton = instance.Skeleton;
+		++instance.Stamp;
 
 		foreach ( var bone in skeleton.Order )
 		{

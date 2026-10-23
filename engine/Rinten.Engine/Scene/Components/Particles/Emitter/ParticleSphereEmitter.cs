@@ -44,9 +44,10 @@ public sealed class ParticleSphereEmitter : ParticleEmitter
 	{
 		var random = Vector3.Random;
 
-		if ( OneSidedAxes.HasFlag( EmitAxes.X ) ) random.x = MathF.Abs( random.x );
-		if ( OneSidedAxes.HasFlag( EmitAxes.Y ) ) random.y = MathF.Abs( random.y );
-		if ( OneSidedAxes.HasFlag( EmitAxes.Z ) ) random.z = MathF.Abs( random.z );
+		var axes = OneSidedAxes;
+		if ( ( axes & EmitAxes.X ) != 0 ) random.x = MathF.Abs( random.x );
+		if ( ( axes & EmitAxes.Y ) != 0 ) random.y = MathF.Abs( random.y );
+		if ( ( axes & EmitAxes.Z ) != 0 ) random.z = MathF.Abs( random.z );
 
 		random *= DistanceBias;
 

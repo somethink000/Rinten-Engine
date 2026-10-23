@@ -837,6 +837,20 @@ internal sealed class MenuRow : Panel
 		Menu.CloseAllPanels();
 	}
 
+	//The option's other way of being picked, where it has one - see Option.RightClicked
+	protected override void OnRightClick( MousePanelEvent e )
+	{
+		base.OnRightClick( e );
+
+		e.StopPropagation();
+
+		if ( option?.RightClicked is not { } picked || !option.Enabled ) return;
+
+		picked();
+
+		Menu.CloseAllPanels();
+	}
+
 	//The option's picture as something a panel can wear, or null.
 	private Texture Picture()
 	{

@@ -299,6 +299,10 @@ internal static class CoreTextureStreaming
 		}
 	}
 
+	//What a step walks and what it hands over, kept between frames: a step runs every one.
+	private static readonly List<Streamed> stepAll = new();
+	private static readonly List<(Streamed One, int Top, ulong Made)> stepReady = new();
+
 	private static void Step()
 	{
 		var now = RealTime.NowDouble;
@@ -328,8 +332,9 @@ internal static class CoreTextureStreaming
 			Collecting = true;
 		}
 
-		List<Streamed> all;
-		lock ( streamed ) all = new List<Streamed>( streamed.Values );
+		var all = stepAll;
+		all.Clear();
+		lock ( streamed ) all.AddRange( streamed.Values );
 
 		var budget = (long)Rinten.Rendering.DrawSettings.TextureBudget * 1024L * 1024L;
 		long held = 0, wantedBytes = 0;
@@ -372,7 +377,8 @@ internal static class CoreTextureStreaming
 		var reading = 0;
 		foreach ( var one in all ) if ( one.Reading is not null || one.Arriving != 0 ) reading++;
 
-		var ready = new List<(Streamed One, int Top, ulong Made)>();
+		var ready = stepReady;
+		ready.Clear();
 
 		foreach ( var one in all )
 		{

@@ -95,9 +95,9 @@ internal static class CorePasses
 			Release( name );
 		}
 
-		//Stored into by a compute pass or not, it is made so that one may: the name says nothing about which,
-		//and a format that cannot be stored into is made in half floats instead - see VkPictures.FormatOf.
-		var picture = CoreRenderDevice.AcquirePicture( kind, width, height, levels, storage: true );
+		//Made so a compute pass may store into it, a format that cannot be stored made in half floats - see VkPictures.FormatOf
+		//The portable frame has no compute
+		var picture = CoreRenderDevice.AcquirePicture( kind, width, height, levels, storage: !CoreRenderDevice.PortableFrame );
 
 		if ( picture == 0 )
 		{

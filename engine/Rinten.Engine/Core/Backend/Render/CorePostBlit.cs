@@ -27,6 +27,16 @@ internal static class CorePostBlit
 	//Which picture the chain left the frame in.
 	internal static CoreRender.TargetKind Settled => from;
 
+	//The portable frame's passes, which alternate between two frame pictures rather than the frame's targets, the
+	//frame bound in each one's colour slot: the two, and where the frame is - the world drawn aside, kept, to begin
+	private static bool portable;
+	private static ulong portableFirst, portableSecond;
+	private static ulong portableFrom, portableTexture;
+	private static bool portableKept;
+
+	/// <summary>What the portable frame's passes left the frame in, and whether it is light rather than kept.</summary>
+	internal static (ulong Texture, bool Light) PortableSettled => ( portableTexture, !portableKept );
+
 
 	//Point effects queued but not drawn: the next pass draws them as one, or the compose compiles them in
 	private static readonly List<CorePointChain.Point> pending = new();
@@ -56,7 +66,8 @@ internal static class CorePostBlit
 	//A point effect asked for - held, see pending. On the screen, where the frame ends, drawn at once.
 	internal static void Point( Material material, RenderAttributes attributes, Rinten.Rendering.CommandList list )
 	{
-		if ( open is not { } frame ) return;
+		//The portable frame's are carried by its finish, gathered before the frame - see CoreSceneDrawer.FoldChain
+		if ( open is not { } frame || portable ) return;
 
 		var shader = material?.core?.Shader;
 
@@ -84,7 +95,7 @@ internal static class CorePostBlit
 	//Draws the held point effects now, as one pass, for something about to read the frame - or a pass each, where the one could not be compiled.
 	internal static void Flush()
 	{
-		if ( pending.Count == 0 || open is not { } frame ) return;
+		if ( pending.Count == 0 || open is not { } frame || portable ) return;
 
 		drawing.Clear();
 		drawing.AddRange( pending );
@@ -152,7 +163,7 @@ internal static class CorePostBlit
 	//The compose's push block: every pass's, with the compose's own numbers in its tail - the size of what it
 	//carries up, whether it softens the edges, and where its point effects' numbers start. See compose.slang.
 	internal static Span<byte> ComposePush( Span<byte> into, Vector2 size, Vector2 source, bool soften, int chain,
-		float near, float far, int colour, int normals, int depth, int velocity )
+		float near, float far, int colour, int normals, int depth, int velocity, float sharpen = 0.0f )
 	{
 		var span = into[..128];
 		span.Clear();
@@ -181,6 +192,7 @@ internal static class CorePostBlit
 		floats[16] = source.x;
 		floats[17] = source.y;
 		floats[18] = soften ? 1.0f : 0.0f;
+		floats[19] = soften ? 0.0f : sharpen;
 
 		floats[31] = chain;
 
@@ -218,6 +230,26 @@ internal static class CorePostBlit
 		onScreen = frame.Target == CoreRender.TargetKind.Screen;
 	}
 
+	/// <summary>Opens the portable frame's passes over the world drawn aside, alternating its two pictures.</summary>
+	internal static void BeginPortable( in Frame frame, ulong world, (ulong First, ulong Second) pictures )
+	{
+		open = frame;
+		holding = true;
+		onScreen = false;
+		portable = true;
+
+		( portableFirst, portableSecond ) = pictures;
+		portableFrom = 0;
+		portableTexture = world;
+		portableKept = true;
+	}
+
+	/// <summary>The stage the portable frame's passes are being asked for now.</summary>
+	internal static void PortableStage( Rinten.Rendering.Stage stage )
+	{
+		if ( open is { } frame ) open = frame with { Stage = (float)(int)stage };
+	}
+
 	//And closes it, so nothing draws outside a stage - a list's picture included.
 	internal static void End()
 	{
@@ -226,6 +258,7 @@ internal static class CorePostBlit
 		CorePasses.Close();
 		open = null;
 		holding = false;
+		portable = false;
 	}
 
 	//Whether anything would be drawn at all.
@@ -376,6 +409,12 @@ internal static class CorePostBlit
 			return;
 		}
 
+		if ( portable )
+		{
+			PortablePass( material, attributes, list, shader, frame, entry, asked );
+			return;
+		}
+
 		//Into the picture the list named with SetRenderTarget, the frame left as it was - see CorePasses. It reads the frame as the next pass over it would.
 		if ( !frameOnly && CorePasses.Wanting )
 		{
@@ -460,6 +499,104 @@ internal static class CorePostBlit
 		if ( offscreen ) CoreRenderDevice.EndTarget();
 
 		if ( !laid ) Turn();
+	}
+
+	//One pass in the portable frame, from the picture the frame is in into the other, which it reads in its colour slot
+	private static void PortablePass( Material material, RenderAttributes attributes, Rinten.Rendering.CommandList list, string shader,
+		in Frame frame, string entry, int asked )
+	{
+		var blend = BlendOf( asked, shader, entry );
+
+		//Into the picture the list named, reading the frame where it is, which stays there - see PassIntoPicture
+		if ( CorePasses.Wanting )
+		{
+			if ( !CorePasses.Open( depth: false, out var wantedFormat ) )
+			{
+				Missing( material.Name, $"the picture {CorePasses.Wanted?.Name} would not open" );
+				return;
+			}
+
+			var named = CorePasses.Wanted;
+
+			PortableDraw( material, attributes, list, shader, frame, entry, blend, wantedFormat, named.Width, named.Height, portableTexture );
+			return;
+		}
+
+		//Laid over the frame where it is, which has to be light to be added to: the world as drawn aside is copied over first
+		if ( blend != 0 && portableKept )
+		{
+			PortablePass( CopyMaterial, null, null, CopyMaterial.core?.Shader, frame, null, 0 );
+			if ( portableKept ) return;
+		}
+
+		var into = blend != 0 ? portableFrom : portableFrom == portableFirst ? portableSecond : portableFirst;
+
+		if ( into == 0 || !CoreRenderDevice.PictureShape( into, out var wide, out var tall, out _, out var format ) ) return;
+
+		CorePasses.Close();
+
+		if ( !CoreRenderDevice.BeginPicture( into, 0, default, discard: blend == 0 ) )
+		{
+			Missing( material.Name, $"the picture it draws into would not open: {CoreRenderDevice.Description}" );
+			return;
+		}
+
+		//One laid over the frame cannot read what it writes, and is given nothing of it to read
+		var drawn = PortableDraw( material, attributes, list, shader, frame, entry, blend, format, wide, tall,
+			blend != 0 ? CoreSceneDrawer.WhiteTexture : portableTexture );
+
+		CoreRenderDevice.EndTarget();
+
+		if ( blend != 0 || !drawn ) return;
+
+		portableFrom = into;
+		portableTexture = CoreRenderDevice.PictureTexture( into );
+		portableKept = false;
+	}
+
+	//The draw of a portable pass into the picture open, reading the frame from the colour slot; false where it could not be made
+	private static bool PortableDraw( Material material, RenderAttributes attributes, Rinten.Rendering.CommandList list, string shader,
+		in Frame frame, string entry, int blend, int format, int wide, int tall, ulong reads )
+	{
+		var kind = new CoreSceneRenderer.PipelineKind( false, false, false )
+		{
+			Shader = shader,
+			Target = CoreRender.TargetKind.Picture,
+			PictureFormat = format,
+			Pulled = true,
+			Post = true,
+			PostBlend = blend,
+			Entry = entry,
+		};
+
+		var pipeline = CoreResources.Pipeline( kind );
+
+		if ( pipeline == 0 )
+		{
+			Missing( material.Name, $"{shader} would not bake for the portable frame: {CoreRenderDevice.ShaderError}" );
+			return false;
+		}
+
+		var layout = Layout( shader );
+
+		Numbers( material, attributes, layout );
+
+		var device = CoreResources.LiveReading( material, reads );
+
+		if ( device == 0 )
+		{
+			Missing( material.Name, "it has nothing on the device" );
+			return false;
+		}
+
+		CoreRenderDevice.ZoneBegin( Named( material, shader, entry ) );
+
+		CoreRenderDevice.Draw( pipeline, 3,
+			Push( frame with { Colour = 1, Normals = 0, Depth = 0, Velocity = 0 }, attributes, material, layout,
+				pictureSize: new Vector2( wide, tall ), list: list, kept: portableKept && reads == portableTexture ), device );
+
+		CoreRenderDevice.ZoneEnd();
+		return true;
 	}
 
 	//One full-screen pass into the list's picture - see Pass.
@@ -564,7 +701,7 @@ internal static class CorePostBlit
 
 	private static byte[] Push( in Frame frame, RenderAttributes attributes,
 		Material material, CoreShaderParams.PostSlot[] layout,
-		Vector2? pictureSize = null, Rinten.Rendering.CommandList list = null )
+		Vector2? pictureSize = null, Rinten.Rendering.CommandList list = null, bool kept = false )
 	{
 		System.Array.Clear( push );
 
@@ -584,7 +721,7 @@ internal static class CorePostBlit
 			wide > 0.0f ? 1.0f / wide : 0.0f,
 			tall > 0.0f ? 1.0f / tall : 0.0f );
 
-		var range = new System.Numerics.Vector4( frame.Near, frame.Far, frame.Stage, 0.0f );
+		var range = new System.Numerics.Vector4( frame.Near, frame.Far, frame.Stage, kept ? 1.0f : 0.0f );
 
 		//Indices rather than handles: what a shader indexes the table with.
 		var pictures = new System.Numerics.Vector4( frame.Colour, frame.Normals, frame.Depth, frame.Velocity );

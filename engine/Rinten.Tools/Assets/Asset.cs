@@ -13,6 +13,7 @@ public abstract partial class Asset
 		"_c",			//.scene_c, what an export packs it into
 		"_d",			//.scene_d, the blob sidecar - see CompiledPaths.BlobSidecar
 		"_c.baked",		//.mdl_c.baked
+		"_c.chunks",	//The terrain chunks baked of a .terrain or .scene - see TerrainBakeCache
 	};
 
 	//The name every related file hangs off: the source path, never the compiled one.
@@ -434,6 +435,15 @@ public abstract partial class Asset
 			try
 			{
 				obj.SaveToDisk( filename, jsonString, background );
+
+				//The terrain chunks the editor baked of what this holds - a terrain, or a scene one is set in - packed beside it for a game
+				if ( Rinten.TerrainBakeCache.Holds( Path ) )
+				{
+					var holder = Path;
+					var pack = Rinten.CompiledPaths.TerrainChunks( filename );
+
+					System.Threading.Tasks.Task.Run( () => Rinten.TerrainBakeCache.WritePack( holder, pack ) );
+				}
 
 				if ( compile ) Compile( false );
 

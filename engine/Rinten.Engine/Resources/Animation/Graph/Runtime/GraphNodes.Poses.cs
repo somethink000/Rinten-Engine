@@ -348,10 +348,10 @@ internal sealed class ClipNode : PoseNode
 
 			var id = marked.Id;
 
-			var byId = match.HasFlag( AnimGraphBuilder.TransitionSyncMatch.EventId )
+			var byId = ( ( match & AnimGraphBuilder.TransitionSyncMatch.EventId ) == AnimGraphBuilder.TransitionSyncMatch.EventId )
 				&& string.Equals( id, point.Id, StringComparison.OrdinalIgnoreCase );
 
-			var byIndex = match.HasFlag( AnimGraphBuilder.TransitionSyncMatch.EventIndex )
+			var byIndex = ( ( match & AnimGraphBuilder.TransitionSyncMatch.EventIndex ) == AnimGraphBuilder.TransitionSyncMatch.EventIndex )
 				&& ordinal == point.Index;
 
 			//Which mark to land on: the one called the same, or the one in the same place in the list. Matching by name first when both are
@@ -371,7 +371,7 @@ internal sealed class ClipNode : PoseNode
 		if ( chosen < 0 ) return false;
 
 		//How far into the mark, if that was asked for: a foot halfway through coming down goes to halfway through coming down, not to the start of it.
-		var fraction = match.HasFlag( AnimGraphBuilder.TransitionSyncMatch.EventPercentage ) ? point.Fraction : 0.0f;
+		var fraction = ( ( match & AnimGraphBuilder.TransitionSyncMatch.EventPercentage ) == AnimGraphBuilder.TransitionSyncMatch.EventPercentage ) ? point.Fraction : 0.0f;
 
 		Seek( context, start + ( length * fraction ) );
 

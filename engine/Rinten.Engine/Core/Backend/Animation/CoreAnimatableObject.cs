@@ -32,6 +32,7 @@ internal sealed class CoreAnimatableObject : IAnimatableObjectBackend
 	{
 		instance = null;
 		jiggle = null;
+		poseBoundsStamp = -1;
 
 		model = owner.Model;
 		skeleton = CoreSkeletons.Skeleton( model );
@@ -260,10 +261,38 @@ internal sealed class CoreAnimatableObject : IAnimatableObjectBackend
 
 	public bool HasBoneOverrides() => IsValid && instance.OverrideCount > 0;
 
-	/// <summary>Nothing better than the model's own bounds, which is what null means here. Growing a box to fit the pose is worth doing and worth doing carefully; a wrong one is a character that disappears at the edge of the screen, which is much harder to notice than one culled slightly late.</summary>
+	/// <summary>Null: the world box is the local one through the object's transform - see LocalBounds.</summary>
 	public BBox? WorldBounds => null;
 
-	public BBox? LocalBounds => null;
+	/// <summary>The pose's bounds in the model's space, from its bones; null where the model's own must do - see CorePoseReach.</summary>
+	public BBox? LocalBounds
+	{
+		get
+		{
+			if ( !IsValid || CoreSkeletons.Reach( model ) is not { } reach ) return null;
+
+			//Shapes are weighed every time: they fade on their own, with nothing in the pose to say so
+			var shapes = owner.Morphs as SceneObjectMorphCollection;
+			var shaped = reach.Shapes.Length > 0 && shapes is { Any: true };
+
+			if ( poseBoundsStamp == instance.Stamp && poseBoundsReach == reach && !shaped ) return poseBounds;
+
+			System.Span<float> weights = shaped && reach.Shapes.Length <= 256 ? stackalloc float[reach.Shapes.Length] : default;
+			if ( shaped && weights.IsEmpty ) weights = new float[reach.Shapes.Length];
+			if ( shaped ) shapes.WeightsInto( weights );
+
+			poseBounds = reach.Bounds( instance.Model, weights );
+			poseBoundsStamp = instance.Stamp;
+			poseBoundsReach = reach;
+
+			return poseBounds;
+		}
+	}
+
+	//The pose's bounds as last found, and the pose and reach they were found from
+	private BBox? poseBounds;
+	private int poseBoundsStamp = -1;
+	private CorePoseReach poseBoundsReach;
 
 	//-- attachments ------------------------------------------------------------
 

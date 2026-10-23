@@ -306,6 +306,12 @@ struct NoOcclusion
 static NoOcclusion g_occlusionMap;
 #endif
 
+//Whether a light's map is being drawn rather than a camera's view: its frame says so by a light count below nought.
+bool LightLooks()
+{
+	return EYE_FRAME( camera ).w < 0.0;
+}
+
 //How many lights this frame has.
 uint LightCount()
 {
@@ -403,66 +409,112 @@ void LightLamp( uint index, inout Light one )
 #endif
 }
 
-//The lights a pixel walks: its grid cell, or all of them without a grid - see CoreLights
+//The lights a point walks (CoreLights): every light one by one without a grid; with one, the suns one by one and then
+//the bits of its tile's lamp mask, cut to the run of lamps its depth bin holds
 struct LightWalk
 {
-	//How many to walk.
-	uint count;
+	//The next light walked one by one, and where that stops
+	uint next;
+	uint end;
 
-	//Where its cell's list starts, in words; nothing where there is no cell.
-	uint first;
+	//The mask word in hand with the bits still to walk, the next word to load and the one past the last
+	uint bits;
+	uint word;
+	uint lastWord;
 
-	bool celled;
+	//Where the tile's mask starts in words, and the bin's first and last lamp
+	uint maskAt;
+	uint lo;
+	uint hi;
 };
 
-LightWalk LightsHere( float2 screen, float viewDepth )
+//Its tile from where the frame's matrix puts it, as the cull cut the tiles, whatever picture or window offset it is drawn into
+LightWalk LightsHere( float3 world )
 {
 	LightWalk walk;
-	walk.count = LightCount();
-	walk.first = 0;
-	walk.celled = false;
+	walk.next = 0;
+	walk.end = LightCount();
+	walk.bits = 0;
+	walk.word = 0;
+	walk.lastWord = 0;
+	walk.maskAt = 0;
+	walk.lo = 0;
+	walk.hi = 0;
+
+	//With one light at most a pixel the walk is no loop: a trip count of one drops the back edge
+	if ( kManyLights == 0 ) walk.end = min( walk.end, 1u );
 
 #ifndef PORTABLE
-	if ( kGridOn == 0 ) return walk;
+	if ( kGridOn == 0 || kManyLights == 0 ) return walk;
 
-	uint cellsX = g_lightData.Load( 4 );
-	if ( cellsX == 0 ) return walk;
+	uint tilesX = g_lightData.Load( 4 );
+	if ( tilesX == 0 ) return walk;
 
-	uint cellsY = g_lightData.Load( 8 );
-	uint cellsZ = g_lightData.Load( 12 );
-	uint perCell = g_lightData.Load( 16 );
-	uint cellsAt = g_lightData.Load( 20 );
+	uint tilesY = g_lightData.Load( 8 );
+	uint bins = g_lightData.Load( 12 );
+	uint suns = g_lightData.Load( 16 );
+	uint masksAt = g_lightData.Load( 20 );
 	float near = asfloat( g_lightData.Load( 24 ) );
 	float scale = asfloat( g_lightData.Load( 28 ) );
+	uint binsAt = g_lightData.Load( 44 );
+	uint maskWords = g_lightData.Load( 48 );
 
-	if ( cellsY == 0 || cellsZ == 0 || near <= 0.0 ) return walk;
+	float4 clip = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
+	float viewDepth = clip.w;
+	float2 ndc = clip.xy / max( abs( clip.w ), 1e-6 );
 
-	//How wide a cell is, out of the header rather than written down here: the grid is cut by CoreLights.TileSize
-	//and this is the one place that has to agree with it. Sixteen where a block was written before that word was.
-	uint tile = max( g_lightData.Load( 40 ), 1u );
+	uint tx = min( uint( saturate( ndc.x * 0.5 + 0.5 ) * tilesX ), tilesX - 1 );
+	uint ty = min( uint( saturate( ndc.y * 0.5 + 0.5 ) * tilesY ), tilesY - 1 );
+	uint bin = min( uint( max( log( max( viewDepth, near ) / near ) * scale, 0.0 ) ), bins - 1 );
 
-	//Along the depth in the logarithm, which is how the cull cut it.
-	uint cx = min( uint( max( screen.x, 0.0 ) ) / tile, cellsX - 1 );
-	uint cy = min( uint( max( screen.y, 0.0 ) ) / tile, cellsY - 1 );
-	uint cz = min( uint( max( log( max( viewDepth, near ) / near ) * scale, 0.0 ) ), cellsZ - 1 );
+	uint run = g_lightData.Load( ( binsAt + bin ) * 4 );
 
-	uint at = cellsAt + ( ( cx + ( cy * cellsX ) + ( cz * cellsX * cellsY ) ) * ( perCell + 1 ) );
+	walk.end = suns;
+	walk.lo = run & 0xFFFFu;
+	walk.hi = run >> 16;
+	walk.maskAt = masksAt + ( ( tx + ( ty * tilesX ) ) * maskWords );
 
-	walk.count = min( g_lightData.Load( at * 4 ), perCell );
-	walk.first = at + 1;
-	walk.celled = true;
+	if ( walk.lo <= walk.hi )
+	{
+		walk.word = walk.lo >> 5;
+		walk.lastWord = ( walk.hi >> 5 ) + 1;
+	}
 #endif
 
 	return walk;
 }
 
-//The number of the light at one step of that walk.
-uint LightHere( LightWalk walk, uint step )
+//The next light of the walk into which; false when it is done
+bool NextLight( inout LightWalk walk, out uint which )
 {
-#ifdef PORTABLE
-	return step;
+	which = walk.next;
+
+	if ( walk.next < walk.end )
+	{
+		walk.next++;
+		return true;
+	}
+
+#ifndef PORTABLE
+	while ( walk.bits == 0u )
+	{
+		if ( walk.word >= walk.lastWord ) return false;
+
+		uint bits = g_lightData.Load( ( walk.maskAt + walk.word ) * 4 );
+
+		//The ends of the bin's run cut out of its first and last word
+		if ( walk.word == ( walk.lo >> 5 ) ) bits &= 0xFFFFFFFFu << ( walk.lo & 31u );
+		if ( walk.word == ( walk.hi >> 5 ) ) bits &= 0xFFFFFFFFu >> ( 31u - ( walk.hi & 31u ) );
+
+		walk.bits = bits;
+		walk.word++;
+	}
+
+	which = ( ( walk.word - 1u ) << 5 ) + firstbitlow( walk.bits );
+	walk.bits &= walk.bits - 1u;
+	return true;
 #else
-	return walk.celled ? g_lightData.Load( ( walk.first + step ) * 4 ) : step;
+	return false;
 #endif
 }
 
@@ -1370,7 +1422,56 @@ struct LampTap
 	float far;
 	float b;
 	float texelWorld;
+
+	//The stepped point from the lamp, and what the movers' frustum projects again - see LampMovers
+	float3 d;
+	float3 normal;
+	float distance;
 };
+
+//Projects the stepped point t.d into a lamp's square of a map, down `forward`, halfTan wide a metre out; false where it
+//falls behind the lamp or past its reach, or with `within` off the square
+bool LampProject( float3 forward, float halfTan, uint square, uint sizeClass, Light light, bool within, inout LampTap t )
+{
+	float size = LampLayerTexels / float( 1u << sizeClass );
+	float fit = ( size - ( 2.0 * LampGuardTexels ) ) / size;
+
+	t.texelWorld = 2.0 * max( t.distance, LampNear ) * halfTan / ( size * fit );
+	float steadyWorld = t.texelWorld * size / LampSteadyTexels;
+
+	t.along = dot( t.d, forward );
+	if ( t.along <= LampNear ) return false;
+
+	float3 right;
+	float3 up;
+	LampAxes( forward, right, up );
+
+	float2 uv = ( float2( dot( t.d, right ), dot( t.d, up ) ) * ( fit / ( halfTan * t.along ) ) * 0.5 ) + 0.5;
+	if ( within && ( any( uv < 0.0 ) || any( uv > 1.0 ) ) ) return false;
+
+	//The square's place in the map, counted layer by layer in squares of its size
+	uint perRow = 1u << sizeClass;
+	uint inLayer = square % ( perRow * perRow );
+	float2 corner = float2( float( inLayer % perRow ), float( inLayer / perRow ) );
+	t.at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
+
+	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
+	//that projection's derivative, as a depth step differs at every range
+	t.far = max( light.position.w, LampNear + 0.01 );
+	t.b = LampNear * t.far / ( t.far - LampNear );
+	float depth = ( t.far / ( t.far - LampNear ) ) - ( t.b / t.along );
+	if ( depth >= 1.0 ) return false;
+
+	float perMetre = t.b / ( t.along * t.along );
+	float bias = LampBiasTexels * steadyWorld * perMetre;
+
+	//Receiver plane slope on the square, constant across it in perspective depth; clamped at grazing
+	float facing = max( -dot( t.normal, t.d ), 0.1 * length( t.d ) );
+	t.slope = float2( dot( t.normal, right ), dot( t.normal, up ) ) * ( t.b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
+
+	t.compare = depth - bias;
+	return true;
+}
 
 //The face chosen for the stepped lookup point; false where the lamp has no faces or the point is outside them
 bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float distance, out LampTap t )
@@ -1389,9 +1490,12 @@ bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float dis
 	float size = LampLayerTexels / float( 1u << sizeClass );
 	float fit = ( size - ( 2.0 * LampGuardTexels ) ) / size;
 
-	t.texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
-	float steadyWorld = t.texelWorld * size / LampSteadyTexels;
-	float3 d = world + ( step * ( steadyWorld * LampLiftTexels ) ) - light.position.xyz;
+	float texelWorld = 2.0 * max( distance, LampNear ) * halfTan / ( size * fit );
+	float steadyWorld = texelWorld * size / LampSteadyTexels;
+
+	t.d = world + ( step * ( steadyWorld * LampLiftTexels ) ) - light.position.xyz;
+	t.normal = normal;
+	t.distance = distance;
 
 	float3 forward = light.direction.xyz;
 	t.face = 0u;
@@ -1399,45 +1503,14 @@ bool LampTapOf( float3 world, float3 normal, float3 step, Light light, float dis
 	if ( !spot )
 	{
 		//Down the largest of the three axes, in the order the faces are laid.
-		float3 extent = abs( d );
+		float3 extent = abs( t.d );
 
-		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( d.x ), 0.0, 0.0 ); t.face = d.x > 0.0 ? 0u : 1u; }
-		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( d.y ), 0.0 ); t.face = d.y > 0.0 ? 2u : 3u; }
-		else { forward = float3( 0.0, 0.0, sign( d.z ) ); t.face = d.z > 0.0 ? 4u : 5u; }
+		if ( extent.x >= extent.y && extent.x >= extent.z ) { forward = float3( sign( t.d.x ), 0.0, 0.0 ); t.face = t.d.x > 0.0 ? 0u : 1u; }
+		else if ( extent.y >= extent.z ) { forward = float3( 0.0, sign( t.d.y ), 0.0 ); t.face = t.d.y > 0.0 ? 2u : 3u; }
+		else { forward = float3( 0.0, 0.0, sign( t.d.z ) ); t.face = t.d.z > 0.0 ? 4u : 5u; }
 	}
 
-	t.along = dot( d, forward );
-	if ( t.along <= LampNear ) return false;
-
-	float3 right;
-	float3 up;
-	LampAxes( forward, right, up );
-
-	float2 uv = ( float2( dot( d, right ), dot( d, up ) ) * ( fit / ( halfTan * t.along ) ) * 0.5 ) + 0.5;
-
-	//The face's place in the map: the lamp's first square plus the face, counted layer by layer in squares of its size
-	uint perRow = 1u << sizeClass;
-	uint square = uint( first ) + t.face;
-	uint within = square % ( perRow * perRow );
-	float2 corner = float2( float( within % perRow ), float( within / perRow ) );
-	t.at = float3( ( corner + uv ) / float( perRow ), float( square / ( perRow * perRow ) ) );
-
-	//Depth from LampNear to the lamp's reach as projected, and the bias, LampBiasTexels in metres, through
-	//that projection's derivative, as a depth step differs at every range
-	t.far = max( light.position.w, LampNear + 0.01 );
-	t.b = LampNear * t.far / ( t.far - LampNear );
-	float depth = ( t.far / ( t.far - LampNear ) ) - ( t.b / t.along );
-	if ( depth >= 1.0 ) return false;
-
-	float perMetre = t.b / ( t.along * t.along );
-	float bias = LampBiasTexels * steadyWorld * perMetre;
-
-	//Receiver plane slope on the face, constant across it in perspective depth; clamped at grazing
-	float facing = max( -dot( normal, d ), 0.1 * length( d ) );
-	t.slope = float2( dot( normal, right ), dot( normal, up ) ) * ( t.b / facing ) * ( 2.0 * halfTan / ( fit * size ) );
-
-	t.compare = depth - bias;
-	return true;
+	return LampProject( forward, halfTan, uint( first ) + t.face, sizeClass, light, false, t );
 }
 
 //What the still world lets through of a lamp at a tap
@@ -1451,10 +1524,21 @@ float LampStill( LampTap t, Light light )
 float LampMovers( LampTap t, Light light )
 {
 	uint moversMap = uint( g_frame[0].sunDepth.z );
-	if ( ( uint( light.shape.y ) & ( 1u << t.face ) ) == 0u || moversMap == 0u ) return 1.0;
+	if ( moversMap == 0u ) return 1.0;
 
-	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), t.at, t.compare, 1.0 / LampLayerTexels, t.slope,
-		light, t.along, t.far, t.b, t.texelWorld );
+	float drawn = light.shape.y;
+	LampTap m = t;
+
+	if ( drawn < 0.0 )
+	{
+		//One frustum round what moves near the lamp, in its first square; off it nothing moving stands between
+		float4 frustum = g_frame[0].lampMovers[min( uint( -drawn ) - 1u, 15u )];
+		if ( !LampProject( frustum.xyz, frustum.w, uint( light.cone.z ), uint( light.cone.w ), light, true, m ) ) return 1.0;
+	}
+	else if ( ( uint( drawn ) & ( 1u << t.face ) ) == 0u ) return 1.0;
+
+	return LampLit( moversMap, uint( g_frame[0].sunDepth.w ), m.at, m.compare, 1.0 / LampLayerTexels, m.slope,
+		light, m.along, m.far, m.b, m.texelWorld );
 }
 
 //Lamp visibility (1 lit) from its cube faces; face chosen for the stepped lookup point
@@ -1747,19 +1831,15 @@ float FogPhase( float cosine )
 }
 
 //Lamp light in fog via the light grid, with falloff and cone but no shadow
-float3 FogLampLight( float3 here, float3 view, float2 screen )
+float3 FogLampLight( float3 here, float3 view )
 {
-	float viewDepth = mul( float4( here, 1.0 ), EYE_FRAME( worldToClip ) ).w;
-
-	LightWalk walk = LightsHere( screen, viewDepth );
-	int count = int( walk.count );
-	if ( kManyLights == 0 ) count = min( count, 1 );
+	LightWalk walk = LightsHere( here );
+	uint which;
 
 	float3 arriving = 0.0;
 
-	for ( int index = 0; index < count; ++index )
+	while ( NextLight( walk, which ) )
 	{
-		uint which = LightHere( walk, uint( index ) );
 		Light light = LightAt( which );
 
 		//The sun is taken by VolumeFog itself, with its shadow.
@@ -1931,7 +2011,7 @@ float3 VolumeFog( float3 lit, float3 world, float3 eye, float2 screen )
 			float density = strength * kFogVolumeDensity * pow( edge, fade );
 
 			float3 here = eye + ray * t;
-			float3 light = ambient + FogLampLight( here, view, screen );
+			float3 light = ambient + FogLampLight( here, view );
 
 			//One sun shadow tap per march step; a point in air needs no plane or soft edge
 			if ( sun )
@@ -2120,23 +2200,25 @@ void BakedLayer( float2 uv, out float4 red, out float4 green, out float4 blue )
 	blue = g_textures[uint( g_frame[0].bakedVolume.z )].SampleLevel( uv, 0.0 );
 }
 
-//Four corners' weights at one x end of a cell: trilinear, times how far past their walls the point is not, times
-//how far in front of the surface they stand as DDGI weighs probes; d is the point's distance from each per axis
-float4 BakedCorners( float dx, float sx, float4 dy, float4 dz, float4 reachX, float4 reachY, float4 reachZ, float3 normal )
+//A lattice point's reach towards +x +y +z (ahead) and -x -y -z (behind) before a wall, in cells - see
+//BakeVolume.ReachByPoint
+void BakedReach( uint walls, float3 point, out float3 ahead, out float3 behind )
 {
-	float4 sy = float4( -1.0, 1.0, -1.0, 1.0 );
-	float4 sz = float4( -1.0, -1.0, 1.0, 1.0 );
+	float3 count = g_frame[0].volumeCount.xyz;
+	float3 packed = round( g_textures[walls].Load( int3( int( point.x + ( point.y * count.x ) ), int( point.z ), 0 ) ).xyz * 255.0 );
 
-	float4 trilinear = ( 1.0 - dx ) * ( 1.0 - dy ) * ( 1.0 - dz );
+	behind = floor( packed / 16.0 );
+	ahead = ( packed - ( behind * 16.0 ) ) / 15.0;
+	behind /= 15.0;
+}
 
-	//An eighth of a cell of give past a wall, more than a nibble's rounding
-	float4 seen = saturate( ( ( reachX - dx ) * 8.0 ) + 1.0 ) * saturate( ( ( reachY - dy ) * 8.0 ) + 1.0 ) * saturate( ( ( reachZ - dz ) * 8.0 ) + 1.0 );
-
-	float4 along = ( sx * dx * normal.x ) + ( sy * dy * normal.y ) + ( sz * dz * normal.z );
-	float4 apart = sqrt( ( dx * dx ) + ( dy * dy ) + ( dz * dz ) );
-	float4 facing = saturate( ( along / max( apart, 1e-4 ) * 0.5 ) + 0.5 );
-
-	return trilinear * seen * ( ( facing * facing ) + 0.2 );
+//How far a lattice point sees a place d from it, by its reach the way d lies on each axis. An eighth of a cell of
+//give past a wall, more than a nibble's rounding; whole at d nought, so it never jumps where d changes sign
+float BakedSees( float3 ahead, float3 behind, float3 d )
+{
+	float3 reach = lerp( behind, ahead, step( 0.0, d ) );
+	float3 seen = saturate( ( ( reach - abs( d ) ) * 8.0 ) + 1.0 );
+	return seen.x * seen.y * seen.z;
 }
 
 //A point's place in the lattice, clamped inside it
@@ -2146,62 +2228,68 @@ float3 BakedLatticeAt( float3 world )
 	return clamp( at, float3( 0.0, 0.0, 0.0 ), g_frame[0].volumeCount.xyz - 1.0 );
 }
 
-//How much each of a lattice point's cell's eight corners counts for it (BakeVolume.Walls, BakedCorners): x's near
-//corners in nearSide, far in farSide, each along y then z. False where the bake has no walls
-bool BakedCornerWeights( float3 at, float3 normal, out float3 cell, out float4 nearSide, out float4 farSide )
+//The middle of at's cell's eight corners, each trilinear, as far in front of the surface as DDGI weighs probes, and as
+//far as it sees both at and the surface from; returns their weights' sum, nought where the bake has no walls
+float BakedMoved( float3 at, float3 from, float3 normal, out float3 spot )
 {
-	float3 count = g_frame[0].volumeCount.xyz;
-	cell = min( floor( at ), count - 2.0 );
-	nearSide = 0.0;
-	farSide = 0.0;
+	spot = at;
 
 	//Frame-uniform - see SkyTableAt.
 	uint walls = uint( g_frame[0].bakedMore.x );
-	if ( walls == 0u ) return false;
+	if ( walls == 0u ) return 0.0;
 
+	float3 cell = min( floor( at ), g_frame[0].volumeCount.xyz - 2.0 );
 	float3 f = at - cell;
 
-	//A row of cells an axis; each texel that axis's reach of the cell's eight corners, a nibble each
-	float u = ( ( cell.y * count.x ) + cell.x + 0.5 ) / ( count.x * count.y );
-	float rows = count.z * 3.0;
+	float3 sum = 0.0;
+	float total = 0.0;
 
-	float4 x = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
-	float4 y = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + count.z + 0.5 ) / rows ), 0.0 ) * 255.0 );
-	float4 z = round( g_textures[walls].SampleLevel( float2( u, ( cell.z + ( count.z * 2.0 ) + 0.5 ) / rows ), 0.0 ) * 255.0 );
+	[unroll]
+	for ( uint k = 0u; k < 8u; ++k )
+	{
+		float3 corner = float3( float( k & 1u ), float( ( k >> 1u ) & 1u ), float( k >> 2u ) );
+		float3 point = cell + corner;
+		float3 w3 = lerp( 1.0 - f, f, corner );
 
-	//High nibbles are the far x corners, low the near; the channels go along y, then z
-	float4 xFar = floor( x / 16.0 );
-	float4 yFar = floor( y / 16.0 );
-	float4 zFar = floor( z / 16.0 );
+		float3 ahead, behind;
+		BakedReach( walls, point, ahead, behind );
 
-	float4 dy = lerp( f.yyyy, 1.0 - f.yyyy, float4( 0.0, 1.0, 0.0, 1.0 ) );
-	float4 dz = lerp( f.zzzz, 1.0 - f.zzzz, float4( 0.0, 0.0, 1.0, 1.0 ) );
+		float3 toward = point - at;
+		float facing = saturate( ( dot( toward, normal ) / max( length( toward ), 1e-4 ) * 0.5 ) + 0.5 );
 
-	nearSide = BakedCorners( f.x, -1.0, dy, dz, ( x - ( xFar * 16.0 ) ) / 15.0, ( y - ( yFar * 16.0 ) ) / 15.0, ( z - ( zFar * 16.0 ) ) / 15.0, normal );
-	farSide = BakedCorners( 1.0 - f.x, 1.0, dy, dz, xFar / 15.0, yFar / 15.0, zFar / 15.0, normal );
+		float weight = w3.x * w3.y * w3.z * ( ( facing * facing ) + 0.2 )
+			* BakedSees( ahead, behind, at - point ) * BakedSees( ahead, behind, from - point );
 
-	return true;
+		sum += corner * weight;
+		total += weight;
+	}
+
+	if ( total > 1e-5 ) spot = cell + ( sum / total );
+	return total;
 }
 
-//Where in the lattice a point reads: moved within its cell towards the corners it sees and that face it (BakeVolume.Walls),
-//so one filtered read takes their light and not the other side of a wall's - as Unity's probe volumes warp theirs
+//Cells a surface's read steps off it along its normal, past BakedSees' give, so a floor reads the room above it
+static const float BakedLift = 0.35;
+
+//Corner weight below which a read gives way to the next - a few percent of what an open cell's corners sum to
+static const float BakedFirm = 0.05;
+
+//Where in the lattice a surface point reads: stepped off, then moved within its cell towards the corners that see it and
+//face it, as Unity's probe volumes warp theirs. Where too few do - a step into what the surface rests on, or a point
+//inside a wall - it eases to the read at the surface itself, then to the plain one
 float3 BakedVolumeSpot( float3 world, float3 normal )
 {
-	float3 at = BakedLatticeAt( world );
+	float3 from = BakedLatticeAt( world );
+	float3 at = BakedLatticeAt( world + ( normal * ( BakedLift / g_frame[0].volumeOrigin.w ) ) );
 
-	float3 cell;
-	float4 nearSide, farSide;
-	if ( !BakedCornerWeights( at, normal, cell, nearSide, farSide ) ) return at;
+	float3 lifted;
+	float seen = BakedMoved( at, from, normal, lifted );
+	if ( seen >= BakedFirm ) return lifted;
 
-	float4 both = nearSide + farSide;
-	float total = dot( both, float4( 1.0, 1.0, 1.0, 1.0 ) );
+	float3 rested;
+	float held = BakedMoved( from, from, normal, rested );
 
-	//No corner sees it: inside a wall, where the plain read is as good as any
-	if ( total < 1e-5 ) return at;
-
-	float3 moved = float3( dot( farSide, float4( 1.0, 1.0, 1.0, 1.0 ) ), both.y + both.w, both.z + both.w ) / total;
-
-	return cell + moved;
+	return lerp( lerp( at, rested, saturate( held / BakedFirm ) ), lifted, seen / BakedFirm );
 }
 
 //One of the volume's per-point pictures at a spot (BakedVolumeSpot), its layers lerped, half a texel inside each

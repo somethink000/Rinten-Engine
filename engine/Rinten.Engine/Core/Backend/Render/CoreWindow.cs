@@ -741,6 +741,10 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 
 	private int WhatIsAt( int x, int y )
 	{
+		//Nothing moves or resizes a fullscreen window, and the caption's strip is left from before - under it
+		//now is whatever took the screen, a scene view's play button, and a press there would drag the window
+		if ( IsFullscreen ) return HitNormal;
+
 		var (width, height) = Size;
 
 		//A maximized window has no edges to pull - the ones it appears to have are the screen's - and dragging it is the window system's own gesture.

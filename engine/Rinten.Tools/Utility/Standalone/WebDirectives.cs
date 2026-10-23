@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Security;
 using System.Text;
 
@@ -10,7 +11,7 @@ namespace Editor;
 internal static class WebDirectives
 {
 	//An rd.xml for these closed generic types.
-	internal static string For( IEnumerable<Type> made, ISet<string> inModule, IEnumerable<Type> kept = null )
+	internal static string For( IEnumerable<Type> made, ISet<string> inModule )
 	{
 		var byAssembly = new SortedDictionary<string, SortedSet<string>>( StringComparer.Ordinal );
 		var accessors = new SortedSet<string>( StringComparer.Ordinal );
@@ -46,15 +47,6 @@ internal static class WebDirectives
 			}
 		}
 
-		//Types made by name - what the engine's type library holds - kept whole: their constructors, their members, what reflection reads off them.
-		foreach ( var type in kept ?? [] )
-		{
-			if ( type.ContainsGenericParameters || type.FullName is null || type.FullName.Contains( '<' ) ) continue;
-			if ( !Within( type, inModule ) ) continue;
-
-			Want( type.Assembly.GetName().Name, $"   <Type Name=\"{Escape( Name( type ) )}\" Dynamic=\"Required All\" />" );
-		}
-
 		var text = new StringBuilder();
 		text.AppendLine( "<Directives xmlns=\"http://schemas.microsoft.com/netfx/2013/01/metadata\">" );
 		text.AppendLine( " <Application>" );
@@ -78,6 +70,74 @@ internal static class WebDirectives
 		text.AppendLine( "</Directives>" );
 
 		return text.ToString();
+	}
+
+	//An ILLink descriptor keeping types made by name (type library, serializer) as far as reflection reads them
+	internal static string Descriptor( IEnumerable<Type> kept, ISet<string> inModule )
+	{
+		var text = new StringBuilder( "<linker>\n" );
+
+		foreach ( var assembly in kept.Where( x => !x.ContainsGenericParameters && x.FullName is not null && !x.FullName.Contains( '<' ) && Within( x, inModule ) )
+			.GroupBy( x => x.Assembly.GetName().Name ).OrderBy( x => x.Key, StringComparer.Ordinal ) )
+		{
+			text.AppendLine( $" <assembly fullname=\"{Escape( assembly.Key )}\">" );
+
+			foreach ( var type in assembly.OrderBy( x => x.FullName, StringComparer.Ordinal ) )
+				text.AppendLine( Reflected( type ) );
+
+			text.AppendLine( " </assembly>" );
+		}
+
+		return text.Append( "</linker>\n" ).ToString();
+	}
+
+	//What reflection reads off a type made by name: fields, constructors, accessors, attributed methods, overrides
+	//and interface methods; the rest only where called
+	private static string Reflected( Type type )
+	{
+		const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+		var names = new SortedSet<string>( StringComparer.Ordinal );
+
+		if ( type.GetConstructors( BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance ).Length > 0 ) names.Add( ".ctor" );
+
+		foreach ( var property in type.GetProperties( all ) )
+			foreach ( var accessor in property.GetAccessors( true ) ) names.Add( accessor.Name );
+
+		foreach ( var each in type.GetEvents( all ) )
+		{
+			if ( each.AddMethod is { } add ) names.Add( add.Name );
+			if ( each.RemoveMethod is { } remove ) names.Add( remove.Name );
+		}
+
+		var implementing = new HashSet<MethodInfo>();
+
+		if ( !type.IsInterface )
+		{
+			foreach ( var contract in type.GetInterfaces() )
+			{
+				try { implementing.UnionWith( type.GetInterfaceMap( contract ).TargetMethods.Where( x => x.DeclaringType == type ) ); }
+				catch ( ArgumentException ) { }
+			}
+		}
+
+		foreach ( var method in type.GetMethods( all ) )
+		{
+			if ( method.IsGenericMethodDefinition || method.IsSpecialName ) continue;
+
+			var marked = method.CustomAttributes.Any( x => !x.AttributeType.Namespace?.StartsWith( "System.Runtime.CompilerServices", StringComparison.Ordinal ) ?? true );
+			var overrides = method.IsVirtual && method.GetBaseDefinition().DeclaringType != type;
+
+			if ( marked || overrides || implementing.Contains( method ) ) names.Add( method.Name );
+		}
+
+		//Nested types are written Outer/Inner in a descriptor
+		var text = new StringBuilder( $"  <type fullname=\"{Escape( type.FullName.Replace( '+', '/' ) )}\" preserve=\"fields\">" );
+
+		foreach ( var name in names.Where( x => !x.Contains( '<' ) ) )
+			text.Append( $"<method name=\"{Escape( name )}\" />" );
+
+		return text.Append( "</type>" ).ToString();
 	}
 
 	//Whether every assembly the type names - its own, its arguments' at any depth - is in the module.

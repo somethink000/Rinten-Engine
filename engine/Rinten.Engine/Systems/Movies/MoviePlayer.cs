@@ -125,8 +125,8 @@ public sealed partial class MoviePlayer : Component
 
 		//Don't try to do anything while deserializing
 
-		if ( Flags.HasFlag( ComponentFlags.Deserializing ) ) return;
-		if ( GameObject.Flags.HasFlag( GameObjectFlags.Deserializing ) ) return;
+		if ( ( ( Flags & ComponentFlags.Deserializing ) == ComponentFlags.Deserializing ) ) return;
+		if ( ( ( GameObject.Flags & GameObjectFlags.Deserializing ) == GameObjectFlags.Deserializing ) ) return;
 
 		//Create / destroy target objects / components
 

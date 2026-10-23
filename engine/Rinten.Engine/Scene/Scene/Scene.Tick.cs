@@ -85,6 +85,8 @@ public partial class Scene : GameObject
 		TimeNow = timeNow;
 		TimeDelta = timeDelta;
 
+		LookForDetail();
+
 		using var timeScope = Time.ScopeInternal( TimeNow, TimeDelta );
 		using var gizmoScope = gizmoInstance.PushInternal();
 
@@ -319,7 +321,7 @@ public partial class Scene : GameObject
 		LookForDetail();
 
 		using var timeScope = Time.ScopeInternal( TimeNow, TimeDelta );
-		using var gizmoScope = gizmoInstance?.Push();
+		using var gizmoScope = gizmoInstance?.PushInternal();
 
 		using ( PerformanceStats.Timings.Async.Scope() )
 		{
@@ -347,13 +349,20 @@ public partial class Scene : GameObject
 	//something is on the screen. See CoreDetail, whose policies it is given to.
 	internal CoreDetail.Look Detail;
 
+	//What the scene is viewed through: an editor scene's editor camera, which Camera excludes, whatever cameras the scene holds
+	internal CameraComponent DetailCamera
+	{
+		get
+		{
+			var (first, then) = IsEditor ? (EditorCamera, Camera) : (Camera, EditorCamera);
+			return first.IsValid() ? first : then;
+		}
+	}
+
 	//Computes the detail view once per tick; with no camera, policies act as if right in front of the eye
 	private void LookForDetail()
 	{
-		var camera = Camera;
-
-		//Editor scenes are viewed through the editor camera, which Camera excludes
-		if ( !camera.IsValid() ) camera = EditorCamera;
+		var camera = DetailCamera;
 
 		if ( !camera.IsValid() )
 		{

@@ -19,6 +19,9 @@ namespace Editor
 		/// <summary>Called when a checkable option is toggled.</summary>
 		public Action<bool> Toggled;
 
+		/// <summary>Called instead of the pick when the option's menu row is right-clicked; the menu closes after.</summary>
+		public Action RightClicked;
+
 		/// <summary>Asked for the checked state rather than keeping one, where the thing being toggled is somewhere else.</summary>
 		public Func<bool> FetchCheckedState;
 

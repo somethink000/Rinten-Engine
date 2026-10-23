@@ -439,7 +439,7 @@ internal static unsafe partial class VkDevice
 
 	private static bool CreateDevice()
 	{
-		using var names = new Utf8Names( 8 );
+		using var names = new Utf8Names( 32 );
 
 		var priority = 1.0f;
 
@@ -469,8 +469,14 @@ internal static unsafe partial class VkDevice
 				( dialect is VkModern || name != CoreLatency.ReflexExtension ),
 			chosen.VendorID ).ToArray();
 
+		//And present ids with waits on them, for pacing the processor to the screen - see CorePresent.
+		var presentExtensions = CorePresent.DeviceExtensions( name => HasDeviceExtension( physicalDevice, name ) ).ToArray();
+
 		//The dialect says what it needs; what it chains stays alive until the device is made - see ChainFeatures
 		var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2 };
+
+		//Whether the rays are offered before the dialect chains its features: it turns on the buffer addresses they need
+		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
 
 		dialect.ChainFeatures( physicalDevice, &features );
 
@@ -479,9 +485,9 @@ internal static unsafe partial class VkDevice
 		VkFovea.ChainFeatures( &features );
 
 		CoreLatency.ChainFeatures( &features );
+		CorePresent.ChainFeatures( &features );
 
 		//And hardware rays, optional, where the card has all they need - see VkRays.
-		VkRays.Choose( physicalDevice, dialect is VkModern, dialect.Tier == RenderTier.Full );
 		VkRays.ChainFeatures( &features );
 
 		//Asked about rather than demanded, which is why none of these is in a dialect's Missing: ground seen
@@ -540,14 +546,14 @@ internal static unsafe partial class VkDevice
 		//no geometry shader is made, but without it that read is undefined
 		features.Features.GeometryShader = supported.GeometryShader;
 
-		//Pipeline statistics queries, only when a run asked for them (see VkDevice.StatsZone)
-		statsQueries = StatsZone is not null && supported.PipelineStatisticsQuery;
+		//Pipeline statistics queries, for RINTEN_ZONE_STATS and the world's triangle count (see VkDevice.CountsFrame)
+		statsQueries = supported.PipelineStatisticsQuery;
 		features.Features.PipelineStatisticsQuery = statsQueries;
 
 		if ( StatsZone is not null && !statsQueries )
 			Log.Warning( $"RINTEN_ZONE_STATS asked for '{StatsZone}' and this device has no pipeline statistics" );
 
-		var deviceExtensions = stackalloc byte*[32];
+		var deviceExtensions = stackalloc byte*[48];
 		var extensionCount = 0u;
 
 		//Mesh stages, where the device has them - asked about, and the indexed draw stands in without.
@@ -598,12 +604,15 @@ internal static unsafe partial class VkDevice
 
 		//NGX's extensions for DLSS where present; skip the buffer-address ext on 1.2 (it's core there)
 		foreach ( var latency in latencyExtensions )
-			if ( extensionCount < 24 ) deviceExtensions[extensionCount++] = names.Add( latency );
+			if ( extensionCount < 40 ) deviceExtensions[extensionCount++] = names.Add( latency );
+
+		foreach ( var present in presentExtensions )
+			if ( extensionCount < 40 ) deviceExtensions[extensionCount++] = names.Add( present );
 
 		foreach ( var wantedByNgx in ngxExtensions )
 		{
 			if ( ngxDeviceAddress && wantedByNgx == "VK_EXT_buffer_device_address" ) continue;
-			if ( extensionCount >= 24 || !HasDeviceExtension( physicalDevice, wantedByNgx ) ) continue;
+			if ( extensionCount >= 40 || !HasDeviceExtension( physicalDevice, wantedByNgx ) ) continue;
 
 			var already = false;
 
@@ -611,6 +620,27 @@ internal static unsafe partial class VkDevice
 				already = System.Runtime.InteropServices.Marshal.PtrToStringUTF8( (nint)deviceExtensions[i] ) == wantedByNgx;
 
 			if ( !already ) deviceExtensions[extensionCount++] = names.Add( wantedByNgx );
+		}
+
+		//The portable frame's edges multisampled and resolved in its pass, depth with them - what a headset and a phone smooth by
+		mostSamples = 1;
+
+		if ( dialect.Tier == RenderTier.Portable && HasDeviceExtension( physicalDevice, "VK_KHR_create_renderpass2" ) &&
+			HasDeviceExtension( physicalDevice, "VK_KHR_depth_stencil_resolve" ) )
+		{
+			PhysicalDeviceProperties limits;
+			vk.GetPhysicalDeviceProperties( physicalDevice, &limits );
+
+			var counts = (uint)( limits.Limits.FramebufferColorSampleCounts & limits.Limits.FramebufferDepthSampleCounts );
+
+			for ( var samples = 8u; samples > 1 && mostSamples == 1; samples /= 2 )
+				if ( ( counts & samples ) != 0 ) mostSamples = samples;
+
+			if ( mostSamples > 1 )
+			{
+				deviceExtensions[extensionCount++] = names.Add( "VK_KHR_create_renderpass2" );
+				deviceExtensions[extensionCount++] = names.Add( "VK_KHR_depth_stencil_resolve" );
+			}
 		}
 
 		var info = new DeviceCreateInfo
@@ -644,6 +674,7 @@ internal static unsafe partial class VkDevice
 		dialect.FeaturesDone();
 		VkFovea.FeaturesDone();
 		CoreLatency.FeaturesDone();
+		CorePresent.FeaturesDone();
 		VkRays.FeaturesDone();
 
 		if ( opened != Result.Success )
@@ -665,11 +696,13 @@ internal static unsafe partial class VkDevice
 		vk.CurrentDevice = device;
 
 		CoreLatency.DeviceMade();
+		CorePresent.DeviceMade();
 		VkRays.DeviceMade();
 
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
 
 		if ( meshShaders && !vk.TryGetDeviceExtension( instance, device, out extMeshShader ) ) meshShaders = false;
+		if ( mostSamples > 1 && !vk.TryGetDeviceExtension( instance, device, out renderPass2 ) ) mostSamples = 1;
 
 		Queue got;
 		vk.GetDeviceQueue( device, graphicsFamily, 0, &got );
@@ -1532,6 +1565,7 @@ internal static unsafe partial class VkDevice
 			//NGX's features and its hold on the device first - see CoreDlss.
 			CoreDlss.DeviceGoing();
 			CoreLatency.DeviceGoing();
+			CorePresent.DeviceGoing();
 
 			vk.DestroyDevice( device, null );
 		}

@@ -55,9 +55,9 @@
 
 			var t = this;
 
-			foreach ( var tag in tags.TryGetAll() )
+			foreach ( var token in ITagSet.Copy( tags.GetTokens() ) )
 			{
-				t = t.WithTag( tag );
+				t = t.WithTag( new StringToken( token ) );
 			}
 
 			return t;
@@ -84,26 +84,24 @@
 			//fast path, can just copy over
 			if ( request.TagAny[0] == 0 )
 			{
-				var c = Math.Min( PhysicsTrace.Request.NumTagFields, tags.Count );
+				var first = ITagSet.Copy( tags );
+				var c = Math.Min( PhysicsTrace.Request.NumTagFields, first.Length );
 
-				int i = 0;
-				foreach ( var tag in tags.Take( PhysicsTrace.Request.NumTagFields ) )
-				{
-					t.request.TagAny[i++] = tag;
-				}
+				for ( var i = 0; i < c; i++ ) t.request.TagAny[i] = first[i];
 
 				return t;
 			}
 
-			foreach ( var te in tags )
+			foreach ( var te in ITagSet.Copy( tags ) )
 			{
 				for ( int i = 0; i < PhysicsTrace.Request.NumTagFields; i++ )
 				{
-					if ( t.request.TagAny[i] == te ) return this;
+					if ( t.request.TagAny[i] == te ) break;
 
 					if ( t.request.TagAny[i] == 0 )
 					{
 						t.request.TagAny[i] = te;
+						break;
 					}
 				}
 			}
@@ -118,9 +116,9 @@
 
 			var t = this;
 
-			foreach ( var tag in tags.TryGetAll() )
+			foreach ( var token in ITagSet.Copy( tags.GetTokens() ) )
 			{
-				t = t.WithOptionalTag( tag );
+				t = t.WithOptionalTag( new StringToken( token ) );
 			}
 
 			return t;
@@ -163,9 +161,9 @@
 
 			var t = this;
 
-			foreach ( var tag in tags.TryGetAll() )
+			foreach ( var token in ITagSet.Copy( tags.GetTokens() ) )
 			{
-				t = t.WithoutTag( tag );
+				t = t.WithoutTag( new StringToken( token ) );
 			}
 
 			return t;

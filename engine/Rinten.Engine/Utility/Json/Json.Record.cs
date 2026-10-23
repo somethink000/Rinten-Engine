@@ -19,7 +19,7 @@ public static partial class Json
 		}
 
 		var ours = new JsonSerializerOptions( options ) { TypeInfoResolver = new DefaultJsonTypeInfoResolver().WithAddedModifier( Recorded ) };
-		var plain = new JsonSerializerOptions( JsonSerializerOptions.Default ) { TypeInfoResolver = new DefaultJsonTypeInfoResolver().WithAddedModifier( Recorded ) };
+		var plain = new JsonSerializerOptions( EnumConvert.Plain ) { TypeInfoResolver = new DefaultJsonTypeInfoResolver().WithAddedModifier( Recorded ) };
 
 		//The records a converter class reads and writes through the serializer - its own nested types, often in a file-local class no library lists.
 		var queueSeed = new List<System.Type>( types );
@@ -41,7 +41,7 @@ public static partial class Json
 		while ( queue.Count > 0 )
 		{
 			var type = queue.Dequeue();
-			if ( type is null || type.IsByRef || type.IsPointer || type.IsByRefLike || type.ContainsGenericParameters || !asked.Add( type ) ) continue;
+			if ( type is null || type.IsByRef || type.IsPointer || type.IsByRefLike || type.ContainsGenericParameters || CompilerMade( type ) || !asked.Add( type ) ) continue;
 
 			foreach ( var each in new[] { ours, plain } )
 			{
@@ -85,11 +85,22 @@ public static partial class Json
 			}
 		}
 
-		//And whatever the running editor has already built for the default options.
-		lock ( made ) NoteDefaults( made, asked );
+		//And whatever the running editor has already built for the options it uses.
+		lock ( made ) NoteBuilt( made, asked );
 
 		described = asked;
 		return made;
+	}
+
+	//A state machine, a closure or a lambda's class: in the library, never serialized, and each would cost a set of generics
+	private static bool CompilerMade( System.Type type )
+	{
+		for ( var each = type; each is not null; each = each.DeclaringType )
+		{
+			if ( each.Name.Contains( '<' ) || each.IsDefined( typeof( System.Runtime.CompilerServices.CompilerGeneratedAttribute ), false ) ) return true;
+		}
+
+		return false;
 	}
 
 	private static bool WritesItself( System.Type type )
@@ -135,14 +146,13 @@ public static partial class Json
 		}
 	}
 
-	//What was built for the serializer's default options, which a modifier cannot reach - they are read-only.
+	//What the running editor built for the plain and the engine's options, which a modifier cannot reach - they are read-only.
 	//Read out of the options' own cache; a tool for making the list, not something the game leans on.
-	private static void NoteDefaults( HashSet<System.Type> into, HashSet<System.Type> described = null )
+	private static void NoteBuilt( HashSet<System.Type> into, HashSet<System.Type> described = null )
 	{
 		const System.Reflection.BindingFlags Inside = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
 
-		//The default options and the engine's own, as the running editor has used them.
-		foreach ( var each in new[] { JsonSerializerOptions.Default, options } )
+		foreach ( var each in new[] { EnumConvert.Plain, options } )
 		{
 			try
 			{
@@ -199,7 +209,7 @@ public static partial class Json
 		{
 			try
 			{
-				NoteDefaults( recorded );
+				NoteBuilt( recorded );
 
 				var lines = new HashSet<string>( recorded.Select( x => x.AssemblyQualifiedName ).Where( x => x is not null ) );
 				if ( System.IO.File.Exists( recordPath ) ) lines.UnionWith( System.IO.File.ReadAllLines( recordPath ) );

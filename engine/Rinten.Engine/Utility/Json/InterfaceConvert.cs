@@ -41,7 +41,7 @@ internal sealed class InterfaceConverter<T> : JsonConverter<T> where T : class
 			return null;
 		}
 
-		var data = JsonSerializer.Deserialize<Wrapper>( ref reader );
+		var data = JsonSerializer.Deserialize<Wrapper>( ref reader, EnumConvert.Plain );
 
 		//Invalid data
 		if ( string.IsNullOrEmpty( data.Type ) || data.Value.ValueKind == JsonValueKind.Undefined )

@@ -20,6 +20,9 @@ internal static unsafe partial class VkFrame
 		/// <summary>Signalled when the image this frame drew into is free.</summary>
 		public VkSemaphore ImageAvailable;
 
+		/// <summary>The same for the second image a frame takes for a generated frame before it.</summary>
+		public VkSemaphore GeneratedAvailable;
+
 		/// <summary>Signalled when the GPU finishes the frame, so its command buffer may be recorded over.</summary>
 		public Fence Finished;
 
@@ -60,6 +63,10 @@ internal static unsafe partial class VkFrame
 		public ulong FrameBlock;
 		public ulong NullBones;
 
+		/// <summary>Morphed models' vertices posed for this frame, a VkBuffers handle - see VkFrame.Posed.</summary>
+		public ulong Posed;
+		public ulong PosedCapacity, PosedUsed, PosedPeak;
+
 		/// <summary>Scratch outgrown mid-frame, kept until the frame's fence proves the GPU done with it.</summary>
 		public readonly List<(VkBuffer Buffer, DeviceMemory Memory)> RetiredScratch = new();
 
@@ -71,7 +78,7 @@ internal static unsafe partial class VkFrame
 		/// <summary>The pool, or null when the queue cannot timestamp at all.</summary>
 		public QueryPool Queries;
 
-		/// <summary>One pipeline statistics query per frame for RINTEN_ZONE_STATS's zone; such queries can't nest</summary>
+		/// <summary>One pipeline statistics query per frame, for RINTEN_ZONE_STATS's zone or the whole frame; such queries can't nest</summary>
 		public QueryPool Stats;
 
 		/// <summary>Whether this frame's one statistics query has been taken, and at what zone depth it was opened.</summary>
@@ -164,6 +171,9 @@ internal static unsafe partial class VkFrame
 		/// <summary>How many copies the instanced draws drew between them.</summary>
 		public uint Instances;
 		public ulong Triangles;
+
+		/// <summary>Triangles the frame handed the assembler - see VkDevice.CountsFrame; below nought where nothing counted.</summary>
+		public long Counted = -1;
 		public ulong ScratchUsed;
 		public uint SkippedBinds;
 
@@ -663,6 +673,14 @@ internal static unsafe partial class VkFrame
 
 		colour.ClearValue.Color = new ClearColorValue( Current.Clear[0], Current.Clear[1], Current.Clear[2], Current.Clear[3] );
 
+		var screenFormat = aside?.Format ?? ( view is not null ? view.OutputFormat : Current.Format );
+		var samples = MainSamples( p, scaled );
+
+		if ( samples > 1 && !VkSwapchain.EnsureSampled( p, screenFormat, samples ) ) samples = 1;
+
+		Current.MainSamples = samples;
+		LastMainSamples = samples;
+
 		//Always attached, whether or not anything drawn this frame tests against it: dynamic rendering demands that
 		//pipelines and the pass agree about the attachments, and one honest arrangement beats two to keep in step.
 		var depth = new RenderingAttachmentInfo
@@ -686,6 +704,36 @@ internal static unsafe partial class VkFrame
 
 		depth.ClearValue.DepthStencil = new ClearDepthStencilValue( 1.0f, 0 );
 
+		//Drawn into the multisampled pair and resolved as the pass ends: colour into what it was going to be, depth into the depth.
+		//The pair is kept only where the pass may be resumed; the resolves always are
+		if ( samples > 1 )
+		{
+			if ( !p.SampledReady )
+			{
+				var colourLayout = ImageLayout.Undefined;
+				var depthLayout = ImageLayout.Undefined;
+
+				MoveTo( frame.Commands, p.SampledColourImage, ref colourLayout, ImageLayout.ColorAttachmentOptimal, ImageAspectFlags.ColorBit );
+				MoveTo( frame.Commands, p.SampledDepthImage, ref depthLayout, ImageLayout.DepthAttachmentOptimal, ImageAspectFlags.DepthBit );
+
+				p.SampledReady = true;
+			}
+
+			var kept = Current.MainBegun || Current.ResumedLastFrame ? AttachmentStoreOp.Store : AttachmentStoreOp.DontCare;
+
+			colour.ResolveMode = ResolveModeFlags.AverageBit;
+			colour.ResolveImageView = colour.ImageView;
+			colour.ResolveImageLayout = ImageLayout.ColorAttachmentOptimal;
+			colour.ImageView = p.SampledColourView;
+			colour.StoreOp = kept;
+
+			depth.ResolveMode = ResolveModeFlags.SampleZeroBit;
+			depth.ResolveImageView = depth.ImageView;
+			depth.ResolveImageLayout = ImageLayout.DepthAttachmentOptimal;
+			depth.ImageView = p.SampledDepthView;
+			depth.StoreOp = kept;
+		}
+
 		//Every eye at once, where the view holds more than one - see ViewMask.
 		var viewMask = ViewMask;
 
@@ -702,8 +750,9 @@ internal static unsafe partial class VkFrame
 			PDepthAttachment = &depth,
 		};
 
-		var formats = VkPassFormats.Of( aside?.Format ?? ( view is not null ? view.OutputFormat : Current.Format ), VkDevice.DepthFormat );
+		var formats = VkPassFormats.Of( screenFormat, VkDevice.DepthFormat );
 		formats.ViewMask = viewMask;
+		formats.Samples = samples;
 
 		//Where the world goes straight to the screen - the portable frame - this is its pass, foveated per eye;
 		//the full frame foveated already, and what goes here, the compose, is seen whole
@@ -733,6 +782,22 @@ internal static unsafe partial class VkFrame
 		DrawTrace.Phase( DrawTrace.Kind.MainPass, traced );
 	}
 
+	/// <summary>Samples the last screen's pass opened took, for the report.</summary>
+	internal static uint LastMainSamples = 1;
+
+	//Samples the screen's pass takes: the player's anti-aliasing where the portable frame resolves it in the pass, over a depth
+	//the pass clears itself; said at the frame's first opening, as a pass resumed has to be the one it was
+	private static uint MainSamples( VkSwapchain.Pictures p, bool scaled )
+	{
+		if ( Current.MainBegun ) return Current.MainSamples;
+		if ( VkDevice.mostSamples <= 1 || VkDevice.Tier != RenderTier.Portable || scaled || p.SceneDrawn || p.DepthFilled ) return 1;
+
+		var asked = Rinten.Rendering.DrawSettings.Msaa;
+		if ( asked < 2 ) return 1;
+
+		return Math.Min( 1u << System.Numerics.BitOperations.Log2( (uint)asked ), VkDevice.mostSamples );
+	}
+
 	//Fovea map for this view's world passes, or null; only when the world is drawn at screen size
 	private static VkFovea.Map Fovea( Frame frame, VkSwapchain.Pictures p, bool bothEyes )
 	{
@@ -750,13 +815,20 @@ internal static unsafe partial class VkFrame
 		}
 
 		if ( p?.Fovea is null ) return null;
-		if ( p.Extent.Width != p.ScreenExtent.Width || p.Extent.Height != p.ScreenExtent.Height ) return null;
+
+		//An adaptive map takes the world at its own size, smaller than the window under an upscaler - see LayRates
+		if ( !p.Fovea.Adaptive && ( p.Extent.Width != p.ScreenExtent.Width || p.Extent.Height != p.ScreenExtent.Height ) ) return null;
 
 		var layers = VkSwapchain.currentView?.Layers ?? 1u;
 		if ( layers > 1 && !bothEyes ) return null;
 
 		var map = VkFovea.Prepare( frame, p, p.Extent, layers );
-		if ( map is not null ) map.DrawnWith = true;
+
+		if ( map is not null )
+		{
+			map.DrawnWith = true;
+			map.Back = AdaptiveBack;
+		}
 
 		return map;
 	}
@@ -845,10 +917,12 @@ internal static unsafe partial class VkFrame
 	//Binds a pipeline, unless it is the one already bound - which in a queue sorted by pipeline is most draws.
 	private static void BindPipeline( Frame frame, Pipeline pipeline )
 	{
-		//A pass drawing both eyes uses the pipeline remade for it - see VkPipelines.Multiview
-		var mask = Current.MainPass && !Current.TargetPass ? ViewMask : 0;
+		//A pass drawing both eyes, or multisampled, uses the pipeline remade for it - see VkPipelines.Variant
+		var main = Current.MainPass && !Current.TargetPass;
+		var mask = main ? ViewMask : 0;
+		var samples = main ? Current.MainSamples : 1;
 
-		if ( mask != 0 ) pipeline = VkPipelines.Multiview( pipeline, mask );
+		if ( mask != 0 || samples > 1 ) pipeline = VkPipelines.Variant( pipeline, mask, samples );
 
 		if ( frame.LastPipeline.Handle == pipeline.Handle )
 		{
@@ -1162,6 +1236,7 @@ internal static unsafe partial class VkFrame
 		frame.Submitted = false;
 
 		DestroyScratch( frame );
+		DestroyPosed( frame );
 
 		if ( frame.Queries.Handle != 0 ) vk.DestroyQueryPool( device, frame.Queries, null );
 		if ( frame.Stats.Handle != 0 ) vk.DestroyQueryPool( device, frame.Stats, null );
@@ -1179,6 +1254,7 @@ internal static unsafe partial class VkFrame
 
 		if ( frame.Finished.Handle != 0 ) vk.DestroyFence( device, frame.Finished, null );
 		if ( frame.ImageAvailable.Handle != 0 ) vk.DestroySemaphore( device, frame.ImageAvailable, null );
+		if ( frame.GeneratedAvailable.Handle != 0 ) vk.DestroySemaphore( device, frame.GeneratedAvailable, null );
 
 		//The pool owns the command buffer; freeing it separately is allowed but pointless.
 		if ( frame.Pool.Handle != 0 ) vk.DestroyCommandPool( device, frame.Pool, null );
@@ -1191,6 +1267,7 @@ internal static unsafe partial class VkFrame
 		frame.Pool = default;
 		frame.Commands = default;
 		frame.ImageAvailable = default;
+		frame.GeneratedAvailable = default;
 		frame.Finished = default;
 		frame.Submitted = false;
 		frame.FrameSetStale = false;
@@ -1276,6 +1353,10 @@ internal static unsafe partial class VkFrame
 			if ( vk.CreateSemaphore( device, &semaphoreInfo, null, &semaphore ) != Result.Success ) return false;
 
 			frame.ImageAvailable = semaphore;
+
+			if ( vk.CreateSemaphore( device, &semaphoreInfo, null, &semaphore ) != Result.Success ) return false;
+
+			frame.GeneratedAvailable = semaphore;
 		}
 
 		var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
@@ -1310,9 +1391,9 @@ internal static unsafe partial class VkFrame
 				frame.Queries = queries;
 		}
 
-		//And the one statistics query, where the device has the feature and somebody asked for a zone by name.
+		//And the one statistics query, where the device has the feature; begun only when asked for - see VkDevice.CountsFrame.
 		//Five counters: what the assembler was handed, what the clipper kept, and the two stages' invocations.
-		if ( VkDevice.StatsZone is not null && VkDevice.statsQueries )
+		if ( VkDevice.statsQueries )
 		{
 			var statsInfo = new QueryPoolCreateInfo
 			{
@@ -1423,15 +1504,20 @@ internal static unsafe partial class VkFrame
 			CountCardIdle( ticks[0], ticks[1], toMs );
 		}
 
-		//And the named zone's cost where asked, in the log every 120th frame: a diagnostic for one question,
-		//not a number the report carries for everyone
+		//The frame's triangles, or where a run named a zone, its five counts in the log every 120th frame
+		into.Counted = -1;
+
 		if ( frame.Stats.Handle != 0 && frame.StatsTaken )
 		{
 			var counts = stackalloc ulong[5];
 
-			if ( VkDevice.vk.GetQueryPoolResults( VkDevice.device, frame.Stats, 0, 1,
+			var counted = VkDevice.vk.GetQueryPoolResults( VkDevice.device, frame.Stats, 0, 1,
 				(nuint)( sizeof( ulong ) * 5 ), counts, sizeof( ulong ) * 5,
-				QueryResultFlags.Result64Bit ) == Result.Success && ( ++VkDevice.statsFrame % 120 ) == 5 )
+				QueryResultFlags.Result64Bit ) == Result.Success;
+
+			if ( counted && VkDevice.StatsZone is null ) into.Counted = (long)counts[0];
+
+			if ( counted && VkDevice.StatsZone is not null && ( ++VkDevice.statsFrame % 120 ) == 5 )
 			{
 				Log.Info( $"zone stats '{VkDevice.StatsZone}': {counts[0]:N0} primitives in, {counts[2]:N0} kept by the clipper, " +
 					$"{counts[1]:N0} vertex stages, {counts[3]:N0} fragment stages, {counts[4]:N0} compute stages" );
@@ -1523,15 +1609,16 @@ internal static unsafe partial class VkFrame
 					frame.Queries, zone.End );
 			}
 
-			//A counted zone closed by the frame ending rather than by its own end: the query has to be ended
-			//all the same, or the pool is left with a query open and the next frame's reset is refused.
-			if ( frame.StatsRunning && frame.StatsDepth == frame.ZoneDepth )
-			{
-				VkDevice.vk.CmdEndQuery( frame.Commands, frame.Stats, 0 );
-				frame.StatsRunning = false;
-			}
-
 			PopLabel( frame );
+		}
+
+		//The whole frame's count, or a counted zone closed by the frame ending rather than by its own end: ended
+		//here outside any pass, or the pool is left with a query open and the next frame's reset is refused
+		if ( frame.StatsRunning )
+		{
+			CloseOpenPasses( frame );
+			VkDevice.vk.CmdEndQuery( frame.Commands, frame.Stats, 0 );
+			frame.StatsRunning = false;
 		}
 
 		frame.DroppedOpen = 0;
@@ -1569,9 +1656,20 @@ internal static unsafe partial class VkFrame
 		vk.ResetCommandPool( device, frame.Pool, 0 );
 		frame.ScratchUsed = 0;
 		DestroyRetiredScratch( frame );
+		ReadyPosed( frame );
 
 		//Where a recording begins is where "a frame" is counted from, under -drawtrace - see DrawTrace.
 		DrawTrace.Frame();
+
+		//Begun before the scratch: rewriting the frame's set readies the portable sun's maps with a barrier. A failure
+		//below leaves it recording, which the pool's reset at the next attempt undoes.
+		var begin = new CommandBufferBeginInfo
+		{
+			SType = StructureType.CommandBufferBeginInfo,
+			Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
+		};
+
+		vk.BeginCommandBuffer( frame.Commands, &begin );
 
 		//Pre-size scratch to last frame's peak so mid-frame growth is rare
 		if ( frame.ScratchPeak > 0 ) EnsureScratch( frame, frame.ScratchPeak );
@@ -1586,7 +1684,6 @@ internal static unsafe partial class VkFrame
 		var alignment = (ulong)VkDevice.storageAlignment;
 		var frameStart = ( VkDevice.BoneBlockSize + alignment - 1 ) / alignment * alignment;
 
-		//Nothing has been recorded yet - the command buffer has not even begun - so a failure here needs nothing unwound.
 		if ( !EnsureScratch( frame, frameStart + VkDevice.FrameBlockReach ) ) return false;
 
 		frame.NullBones = 0;
@@ -1598,14 +1695,6 @@ internal static unsafe partial class VkFrame
 
 		//From here, what is retired may be named by this recording; the graveyard keeps it until its fence
 		VkDevice.RecordingBegan();
-
-		var begin = new CommandBufferBeginInfo
-		{
-			SType = StructureType.CommandBufferBeginInfo,
-			Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
-		};
-
-		vk.BeginCommandBuffer( frame.Commands, &begin );
 
 		//A clean slate for the profiler and bind cache: state and bindings belong to the just-reset buffer
 		Current.WorldOnScreen = false;
@@ -1643,6 +1732,15 @@ internal static unsafe partial class VkFrame
 		frame.StatsRunning = false;
 
 		if ( frame.Stats.Handle != 0 ) vk.CmdResetQueryPool( frame.Commands, frame.Stats, 0, 1 );
+
+		//Counted from here to CloseOpenZones; a depth no zone has, so no zone's end closes it
+		if ( frame.Stats.Handle != 0 && VkDevice.CountsFrame )
+		{
+			vk.CmdBeginQuery( frame.Commands, frame.Stats, 0, 0 );
+			frame.StatsTaken = true;
+			frame.StatsRunning = true;
+			frame.StatsDepth = -1;
+		}
 
 		return true;
 	}

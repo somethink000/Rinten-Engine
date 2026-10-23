@@ -143,12 +143,14 @@ FfxFloat32 LoadInputDepth(FfxUInt32x2 iPxPos) { return FfxLoad( FSR3UPSCALER_BIN
 FfxFloat32 SampleInputDepth(FfxFloat32x2 fUV) { return FfxSample( FSR3UPSCALER_BIND_SRV_INPUT_DEPTH, fUV ).x; }
 #endif
 
-// No reactive mask and no transparency-and-composition mask are handed in, so
-// both read as nothing - which is what AMD's default one-texel masks hold.
+// The reactive mask where the frame laid glass or sprites over the opaque world
+// (ReactiveCs in upscale.slang), nothing where it did not - slot nought. No
+// transparency-and-composition mask is handed in, so that one reads as nothing,
+// which is what AMD's default one-texel mask holds.
 #if defined(FSR3UPSCALER_BIND_SRV_REACTIVE_MASK)
-FfxFloat32 LoadReactiveMask(FfxUInt32x2 iPxPos) { return 0.0f; }
+FfxFloat32 LoadReactiveMask(FfxUInt32x2 iPxPos) { return FfxSlot( FSR3UPSCALER_BIND_SRV_REACTIVE_MASK ) == 0u ? 0.0f : FfxLoad( FSR3UPSCALER_BIND_SRV_REACTIVE_MASK, iPxPos ).x; }
 FfxInt32x2 GetReactiveMaskResourceDimensions() { return RenderSize(); }
-FfxFloat32 SampleReactiveMask(FfxFloat32x2 fUV) { return 0.0f; }
+FfxFloat32 SampleReactiveMask(FfxFloat32x2 fUV) { return FfxSlot( FSR3UPSCALER_BIND_SRV_REACTIVE_MASK ) == 0u ? 0.0f : FfxSample( FSR3UPSCALER_BIND_SRV_REACTIVE_MASK, fUV ).x; }
 #endif
 
 #if defined(FSR3UPSCALER_BIND_SRV_TRANSPARENCY_AND_COMPOSITION_MASK)

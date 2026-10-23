@@ -101,8 +101,8 @@ internal static unsafe partial class VkDevice
 	/// <summary>Set 0 is a material: 4 images plus params; fixed count so any material fits any pipeline</summary>
 	public const uint MaterialTextures = 4;
 
-	/// <summary>Material param slots, one float4 each (unpacked); params past the last slot are silently dropped</summary>
-	public const uint MaterialParamSlots = 64;
+	/// <summary>Material param slots, one float4 each - CoreRenderDevice's, which the packing on the CPU uses too</summary>
+	public const uint MaterialParamSlots = CoreRenderDevice.MaterialParamSlots;
 	public const uint MaterialParamFloats = MaterialParamSlots * 4;
 	public const uint MaterialParamSize = MaterialParamFloats * 4;
 

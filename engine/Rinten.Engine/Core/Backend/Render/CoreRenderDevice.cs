@@ -1824,8 +1824,10 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
-	/// <summary>How many floats a material's parameters are, four to a slot.</summary>
-	public const int MaterialParamSlots = 32;
+	/// <summary>How many float4 slots a material's parameters have; every backend packs, copies and binds this many.</summary>
+	public const int MaterialParamSlots = 64;
+
+	/// <summary>The same in floats, four to a slot.</summary>
 	public const int MaterialParamFloats = MaterialParamSlots * 4;
 
 	/// <summary>The same, with the numbers the shader asked for.</summary>

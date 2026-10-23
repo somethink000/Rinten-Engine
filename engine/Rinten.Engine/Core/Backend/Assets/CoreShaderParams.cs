@@ -458,7 +458,16 @@ internal static class CoreShaderParams
 		text.Append( "};\n" );
 		text.Append( "[[vk::binding(4,0)]] ConstantBuffer<MaterialParams> g_material;\n" );
 
-		Defines( text, parameters, "g_material", int.MaxValue );
+		//Past what a material holds the packer has nowhere to put them, and the shader would read whatever lies there
+		var slots = MaterialSlots( parameters );
+		if ( slots > CoreRenderDevice.MaterialParamSlots )
+		{
+			text.Append( "#error \"PARAMETERS take " ).Append( slots ).Append( " material slots of " )
+				.Append( CoreRenderDevice.MaterialParamSlots ).Append( ": " ).Append( Overflowing( parameters ) )
+				.Append( " do not fit - a texture takes two, every other parameter one\"\n" );
+		}
+
+		Defines( text, parameters, "g_material", CoreRenderDevice.MaterialParamSlots );
 
 		return text.ToString();
 	}
@@ -902,6 +911,40 @@ internal static class CoreShaderParams
 		}
 
 		return false;
+	}
+
+	//Whether a parameter has a place of its own in the material's block, as Into packs it
+	private static bool InMaterialBlock( Parameter parameter )
+		=> !IsSurface( parameter.Name ) && !IsCull( parameter.Name ) && !parameter.IsAttribute;
+
+	/// <summary>The float4 slots a material of this shader fills: the surface's first, then a slot or two per parameter.</summary>
+	internal static int MaterialSlots( Parameter[] parameters )
+	{
+		var slot = 1;
+
+		foreach ( var parameter in parameters ?? Array.Empty<Parameter>() )
+		{
+			if ( InMaterialBlock( parameter ) ) slot += parameter.Slots;
+		}
+
+		return slot;
+	}
+
+	//The names that fall past the last slot, in declared order
+	private static string Overflowing( Parameter[] parameters )
+	{
+		var slot = 1;
+		var names = new List<string>();
+
+		foreach ( var parameter in parameters )
+		{
+			if ( !InMaterialBlock( parameter ) ) continue;
+
+			slot += parameter.Slots;
+			if ( slot > CoreRenderDevice.MaterialParamSlots ) names.Add( parameter.Name );
+		}
+
+		return string.Join( ", ", names );
 	}
 
 	internal static void Into( Span<float> numbers, Parameter[] parameters,

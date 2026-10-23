@@ -11,6 +11,19 @@ internal static class CoreResources
 	private static readonly Dictionary<string, ulong> textures = new();
 	private static readonly Dictionary<string, ulong> materials = new();
 
+	//The shader each of those was built against, by the same key: its numbers are packed to that shader's
+	//PARAMETERS, so an edit of the shader is an edit of every material on it - see Forget
+	private static readonly Dictionary<string, string> materialShaders = new();
+
+	//A file material went into the cache, packed for this shader - none named is the standard surface. Held as the file
+	//the name resolves to, as its PARAMETERS are read from it: an old name an alias stands for edits as that file.
+	internal static void BuiltOn( string held, string shader )
+		=> materialShaders[held] = ShaderFile( shader );
+
+	//The shader file a material's shader name is read from - see Declared.
+	private static string ShaderFile( string shader )
+		=> CoreShaderFile.Real( string.IsNullOrWhiteSpace( shader ) ? CoreSceneRenderer.StandardShader : shader );
+
 	//Meshes keyed by Model object, avoiding a per-frame string key for every renderer
 	private static readonly Dictionary<Model, CoreSceneRenderer.SceneMesh> meshesByModel = new();
 
@@ -1296,8 +1309,41 @@ internal static class CoreResources
 		{
 			if ( !materials.Remove( key, out var material ) ) continue;
 
+			materialShaders.Remove( key );
 			Release( material );
 			dropped = true;
+		}
+
+		//A shader's materials, built from other files but packed to its PARAMETERS: with a parameter added or moved,
+		//the numbers they hold are in the old places, so they are built again rather than read by the new layout.
+		HashSet<string> builtOn = null;
+
+		//Only a shader file has materials packed to it, and the live ones' names are resolved on disk to ask
+		var isShader = IsShaderFile( resourcePath );
+
+		if ( isShader )
+		{
+			foreach ( var (key, shader) in materialShaders )
+			{
+				if ( SameFile( shader, path ) ) ( builtOn ??= new HashSet<string>( System.StringComparer.OrdinalIgnoreCase ) ).Add( key );
+			}
+
+			foreach ( var key in builtOn ?? EmptyBuiltOn )
+			{
+				materialShaders.Remove( key );
+				if ( materials.Remove( key, out var material ) ) Release( material );
+
+				dropped = true;
+			}
+
+			//And the live ones - edited in the editor, or made in code like a terrain's - which rebuild on their revision.
+			foreach ( var (material, _) in liveByMaterial )
+			{
+				if ( material?.core is not { } core || !SameFile( ShaderFile( core.Shader ), path ) ) continue;
+
+				core.Revision++;
+				dropped = true;
+			}
 		}
 
 		foreach ( var key in Naming( textures, path ) )
@@ -1347,8 +1393,18 @@ internal static class CoreResources
 
 		foreach ( var key in Naming( states, path ) ) states.Remove( key );
 
-		//Declared parameters are keyed by shader name alone, so drop them separately
-		foreach ( var key in Naming( declared, path ) )
+		//Declared parameters are keyed by shader name alone, so drop them separately - an alias's too, read from the same file
+		var redeclared = new List<string>( Naming( declared, path ) );
+
+		if ( isShader )
+		{
+			foreach ( var key in declared.Keys )
+			{
+				if ( !redeclared.Contains( key ) && SameFile( ShaderFile( key ), path ) ) redeclared.Add( key );
+			}
+		}
+
+		foreach ( var key in redeclared )
 		{
 			declared.Remove( key );
 
@@ -1412,7 +1468,7 @@ internal static class CoreResources
 
 			foreach ( var named in held.Materials )
 			{
-				if ( !SameFile( named, path ) ) continue;
+				if ( !SameFile( named, path ) && !BuiltOnIt( builtOn, named ) ) continue;
 
 				names = true;
 				break;
@@ -1438,6 +1494,27 @@ internal static class CoreResources
 		}
 
 		if ( dropped ) Generation++;
+	}
+
+	private static readonly HashSet<string> EmptyBuiltOn = new();
+
+	//A shader file, compiled or not - what a material's numbers are laid out by
+	private static bool IsShaderFile( string resourcePath )
+		=> resourcePath.EndsWith( ".shader", System.StringComparison.OrdinalIgnoreCase ) ||
+			resourcePath.EndsWith( ".shader_c", System.StringComparison.OrdinalIgnoreCase );
+
+	//Whether a mesh's material is one of the cached materials dropped above - keyed by its path, with the art's differences after a '#'
+	private static bool BuiltOnIt( HashSet<string> builtOn, string named )
+	{
+		if ( builtOn is null || string.IsNullOrWhiteSpace( named ) ) return false;
+
+		foreach ( var key in builtOn )
+		{
+			var cut = key.IndexOf( '#' );
+			if ( SameFile( cut < 0 ? key : key[..cut], Stem( named ) ) ) return true;
+		}
+
+		return false;
 	}
 
 	//A path without its extension, to match a file against the names it's held under (.vmat/.mat, .tex_c)
@@ -1614,6 +1691,7 @@ internal static class CoreResources
 		CoreMaterialTable.Clear();
 
 		materials.Clear();
+		materialShaders.Clear();
 		liveByMaterial.Clear();
 		liveColours.Clear();
 		reading.Clear();

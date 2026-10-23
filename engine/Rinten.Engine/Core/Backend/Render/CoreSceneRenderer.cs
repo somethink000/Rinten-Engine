@@ -2613,6 +2613,9 @@ internal static unsafe class CoreSceneRenderer
 
 		materials[held] = fallback;
 
+		//Whatever it ends as - built, or held as the checkerboard while its shader will not build - it is that shader's
+		CoreResources.BuiltOn( held, definition.Shader );
+
 		var colour = ResolveMaterialTexture( materialPath, textures, fallback );
 
 		//Flat colour goes into the tint (see Folded), so bind white or the colour gets applied twice

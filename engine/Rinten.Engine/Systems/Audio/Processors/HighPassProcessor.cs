@@ -15,20 +15,21 @@ public sealed class HighPassProcessor : AudioProcessor<HighPassProcessor.State>
 	}
 
 	//Processes each channel individually using a simple one-pole high-pass filter.
-	protected override unsafe void ProcessSingleChannel( AudioChannel channel, Span<float> input )
+	protected override void ProcessSingleChannel( AudioChannel channel, Span<float> input )
 	{
 		if ( input.Length == 0 ) return;
 
-		float alpha = Cutoff;
-		float prevIn = CurrentState.PreviousInput.Get( channel );
-		float prevOut = CurrentState.PreviousOutput.Get( channel );
+		//An RC high-pass: y = a * ( y' + x - x' ), with a = RC / ( RC + dt ) for the cutoff as a share of Nyquist
+		var alpha = 1.0f - LowPassProcessor.Smoothing( Cutoff );
+		var prevIn = CurrentState.PreviousInput.Get( channel );
+		var prevOut = CurrentState.PreviousOutput.Get( channel );
 
-		for ( int i = 0; i < input.Length; i++ )
+		for ( var i = 0; i < input.Length; i++ )
 		{
-			float current = input[i];
-			input[i] = prevOut + alpha * (current - prevIn);
+			var current = input[i];
+			prevOut = alpha * ( prevOut + current - prevIn );
 			prevIn = current;
-			prevOut = input[i];
+			input[i] = prevOut;
 		}
 
 		CurrentState.PreviousInput.Set( channel, prevIn );

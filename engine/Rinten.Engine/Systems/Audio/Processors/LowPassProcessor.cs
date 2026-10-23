@@ -1,6 +1,4 @@
-﻿using System.Numerics;
-
-namespace Rinten.Audio;
+﻿namespace Rinten.Audio;
 
 /// <summary>Just a test - don't count on this sticking around</summary>
 [Expose]
@@ -15,36 +13,27 @@ public sealed class LowPassProcessor : AudioProcessor<LowPassProcessor.State>
 		internal PerChannel<float> PreviousSample;
 	}
 
-	//Processes a single audio channel with a low-pass filter.
-	protected override unsafe void ProcessSingleChannel( AudioChannel channel, Span<float> input )
+	//One pole, per sample: the recursion is serial, so lanes of a vector would each be a filter of every eighth sample
+	protected override void ProcessSingleChannel( AudioChannel channel, Span<float> input )
 	{
-		float alpha = Cutoff; //Simple smoothing factor
-		float previous = CurrentState.PreviousSample.Get( channel );
+		var alpha = Smoothing( Cutoff );
+		var previous = CurrentState.PreviousSample.Get( channel );
 
-		int vectorSize = Vector<float>.Count;
-		int i = 0;
-
-		if ( input.Length >= vectorSize )
+		for ( var i = 0; i < input.Length; i++ )
 		{
-			var alphaVec = new Vector<float>( alpha );
-			var prevVec = new Vector<float>( previous );
-
-			for ( ; i <= input.Length - vectorSize; i += vectorSize )
-			{
-				var inputVec = new Vector<float>( input.Slice( i, vectorSize ) );
-				prevVec = prevVec + alphaVec * (inputVec - prevVec);
-				prevVec.CopyTo( input.Slice( i, vectorSize ) );
-			}
-			previous = prevVec[vectorSize - 1]; //Store last processed value
-		}
-
-		//Process remaining elements
-		for ( ; i < input.Length; i++ )
-		{
-			previous = previous + alpha * (input[i] - previous);
+			previous += alpha * ( input[i] - previous );
 			input[i] = previous;
 		}
 
 		CurrentState.PreviousSample.Set( channel, previous );
+	}
+
+	//How far each sample moves toward the input for a cutoff given as a share of Nyquist - an RC filter's dt / ( RC + dt )
+	internal static float Smoothing( float cutoff )
+	{
+		var frequency = Math.Clamp( cutoff, 0.0f, 1.0f ) * 0.5f;
+		var rc = 1.0f / ( 2.0f * MathF.PI * MathF.Max( frequency, 1e-6f ) );
+
+		return 1.0f / ( rc + 1.0f );
 	}
 }

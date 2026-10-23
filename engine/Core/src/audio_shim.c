@@ -5,12 +5,13 @@
  * Everything that decides what plays - the output pump, the capture buffer,
  * sounds, samplers, pitch - is C# in Core/Backend/Audio. What is here is only
  * a way to reach two libraries whose structs are laid out by their headers and
- * change between versions: ma_device, ma_decoder and ma_resampler are opened
+ * change between versions: ma_device, ma_decoder and ma_linear_resampler are opened
  * here, held behind a pointer, and never seen from the other side. A managed
  * binding that spelled out their fields would be right for exactly one
  * release of miniaudio.
  *
- * Nothing here has an opinion. Every function is one call into the library
+ * Nothing here has an opinion but one - the resampler's filter is kept off
+ * Nyquist, see rn_nyquist_factor. Every function is one call into the library
  * with the arguments translated, and the one piece of state - the struct that
  * carries the managed callback to the device thread - exists because a
  * ma_device wants a C function pointer and a user pointer, and that is what a
@@ -195,16 +196,36 @@ RN_EXPORT void rn_decoder_close( ma_decoder* decoder )
 
 /* -- resamplers ------------------------------------------------------------- */
 
-/* Linear, float32, interleaved. */
-RN_EXPORT ma_resampler* rn_resampler_open( int channels, int in_rate, int out_rate )
+/* The anti-alias filter's cutoff, as a share of what miniaudio would choose: half the lower rate, designed at the
+ * higher. With the two rates nearly equal that is all but at Nyquist, where the order-4 filter's poles sit on the
+ * unit circle and float rounding tips it over - a pitch of 1.0000006 at 44.1k is 44100 to 44099, and the voice, then
+ * the whole mix, goes to silence and clicks and then full-scale noise. Kept 10% below Nyquist there; at rates 10%
+ * or more apart this is 1 and the filter is miniaudio's own. */
+static double rn_nyquist_factor( ma_uint32 in_rate, ma_uint32 out_rate )
 {
-	ma_resampler* resampler = (ma_resampler*)calloc( 1, sizeof( ma_resampler ) );
+	double lower = in_rate < out_rate ? in_rate : out_rate;
+	double higher = in_rate < out_rate ? out_rate : in_rate;
+	double factor = 0.9 * higher / lower;
+
+	return factor < 1.0 ? factor : 1.0;
+}
+
+/* Linear, float32, interleaved. */
+RN_EXPORT ma_linear_resampler* rn_resampler_open( int channels, int in_rate, int out_rate )
+{
+	if ( channels <= 0 || in_rate <= 0 || out_rate <= 0 ) return NULL;
+
+	ma_linear_resampler* resampler = (ma_linear_resampler*)calloc( 1, sizeof( ma_linear_resampler ) );
 	if ( resampler == NULL ) return NULL;
 
-	ma_resampler_config config = ma_resampler_config_init( ma_format_f32, (ma_uint32)channels,
-		(ma_uint32)in_rate, (ma_uint32)out_rate, ma_resample_algorithm_linear );
+	ma_linear_resampler_config config = ma_linear_resampler_config_init( ma_format_f32, (ma_uint32)channels,
+		(ma_uint32)in_rate, (ma_uint32)out_rate );
 
-	if ( ma_resampler_init( &config, NULL, resampler ) != MA_SUCCESS )
+	/* Order 4, which ma_resampler gives its linear backend; its default is in miniaudio's implementation, not the header. */
+	config.lpfOrder = 4;
+	config.lpfNyquistFactor = rn_nyquist_factor( (ma_uint32)in_rate, (ma_uint32)out_rate );
+
+	if ( ma_linear_resampler_init( &config, NULL, resampler ) != MA_SUCCESS )
 	{
 		free( resampler );
 		return NULL;
@@ -213,32 +234,36 @@ RN_EXPORT ma_resampler* rn_resampler_open( int channels, int in_rate, int out_ra
 	return resampler;
 }
 
-RN_EXPORT int rn_resampler_set_rate( ma_resampler* resampler, int in_rate, int out_rate )
+/* The filter is redesigned for the new rates, its state kept, so a pitch can glide. */
+RN_EXPORT int rn_resampler_set_rate( ma_linear_resampler* resampler, int in_rate, int out_rate )
 {
-	if ( resampler == NULL ) return 0;
-	return ma_resampler_set_rate( resampler, (ma_uint32)in_rate, (ma_uint32)out_rate ) == MA_SUCCESS ? 1 : 0;
+	if ( resampler == NULL || in_rate <= 0 || out_rate <= 0 ) return 0;
+
+	resampler->config.lpfNyquistFactor = rn_nyquist_factor( (ma_uint32)in_rate, (ma_uint32)out_rate );
+
+	return ma_linear_resampler_set_rate( resampler, (ma_uint32)in_rate, (ma_uint32)out_rate ) == MA_SUCCESS ? 1 : 0;
 }
 
-RN_EXPORT void rn_resampler_reset( ma_resampler* resampler )
+RN_EXPORT void rn_resampler_reset( ma_linear_resampler* resampler )
 {
 	if ( resampler == NULL ) return;
-	ma_resampler_reset( resampler );
+	ma_linear_resampler_reset( resampler );
 }
 
 /* in_frames and out_frames are how many there are on the way in and how many
  * were used and made on the way out, as miniaudio counts them. */
-RN_EXPORT int rn_resampler_process( ma_resampler* resampler, const float* in, ma_uint64* in_frames,
+RN_EXPORT int rn_resampler_process( ma_linear_resampler* resampler, const float* in, ma_uint64* in_frames,
 	float* out, ma_uint64* out_frames )
 {
 	if ( resampler == NULL ) return 0;
-	return ma_resampler_process_pcm_frames( resampler, in, in_frames, out, out_frames ) == MA_SUCCESS ? 1 : 0;
+	return ma_linear_resampler_process_pcm_frames( resampler, in, in_frames, out, out_frames ) == MA_SUCCESS ? 1 : 0;
 }
 
-RN_EXPORT void rn_resampler_close( ma_resampler* resampler )
+RN_EXPORT void rn_resampler_close( ma_linear_resampler* resampler )
 {
 	if ( resampler == NULL ) return;
 
-	ma_resampler_uninit( resampler, NULL );
+	ma_linear_resampler_uninit( resampler, NULL );
 	free( resampler );
 }
 

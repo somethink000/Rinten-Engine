@@ -347,17 +347,12 @@ internal sealed class CoreMeshRender
 		//binned list both number their entries from nought, so each of those has to fit under it on its own.
 		var mostEntries = CoreRenderDevice.FullIndex ? 1 << 25 : 1 << 17;
 
-		//Each camera list kind gets a run sized to the drawn instances' finest levels, so it cannot overflow
+		//Each camera list kind gets a run sized to the scene's finest levels, capped; a frame past it drops clusters
 		long wanted = 0;
 		for ( var k = 0; k < 3; k++ ) { kindRun[k] = tables.KindTriangles( k ); wanted += kindRun[k]; }
 
 		if ( wanted > MostListTriangles )
-		{
 			for ( var k = 0; k < 3; k++ ) kindRun[k] = kindRun[k] * MostListTriangles / wanted;
-
-			//Log when runs are too short, at most once a second; dropped clusters leave holes
-			SayTheRunsAreShort( wanted, MostListTriangles, "the camera's lists" );
-		}
 
 		//Drawn by the mesh stage, the camera's lists have no runs of their own - the bins' run is the same triangles, and it keeps its size.
 		MeshKinds = prepassMesh != 0 && Rinten.Rendering.Wireframe.Clusters <= 0 ? MeshWhere : 0;
@@ -376,8 +371,6 @@ internal sealed class CoreMeshRender
 		//Bin run: the same triangles sorted by material, plus moving ones, which are only paid for here
 		var moving = tables.MovingTriangles;
 		var movingRun = Math.Min( moving, MostListTriangles );
-
-		if ( moving > movingRun ) SayTheRunsAreShort( moving, movingRun, "the surfaces that move" );
 
 		binIndexAt = runAt;
 		binIndexCapacity = binned + movingRun;
@@ -645,21 +638,6 @@ internal sealed class CoreMeshRender
 		bound[8] = CoreClusters.ClusterTriangles.Buffer;
 		bound[9] = indexBuffer;
 		return bound;
-	}
-
-	//When the run shortfall was last said, so a frame in that state says it once a second.
-	private static long saidRuns;
-
-	//Logs at most once a second that runs were too short and clusters were dropped
-	private static void SayTheRunsAreShort( long wanted, long held, string what )
-	{
-		if ( Environment.TickCount64 - saidRuns < 1000 ) return;
-
-		saidRuns = Environment.TickCount64;
-
-		Log.Warning( $"{what} want {wanted:N0} triangles and their runs hold {held:N0} - " +
-			$"the rest is left out of the picture. Either the level of detail is cutting less than it should " +
-			$"(r_mesh_lod_pixels) or this scene asks for more at once than the runs are sized for." );
 	}
 
 	//How many bins there are: a slice of the distance a material.

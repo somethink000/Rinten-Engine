@@ -7,7 +7,7 @@ FEATURES
 
 PARAMETERS
 {
-	//How many triangles there are, and which picture holds the terrain's numbers.
+	//Source triangles, the terrain's numbers picture, and the vertices and triangles they are cut into.
 	float4 g_vRelief < Attribute( "Relief" ); >;
 }
 
@@ -56,82 +56,118 @@ uint Byte( float value )
 	return uint( saturate( value ) * 255.0 + 0.5 );
 }
 
-[numthreads( 64, 1, 1 )]
-void MainCs( uint3 id : SV_DispatchThreadID )
+//The last triangle whose run starts at or before at, by its vertices' start (y) or its indices' start (z).
+uint TriangleAt( uint at, bool byIndex )
 {
-	if ( id.x >= uint( g_vRelief.x ) ) return;
+	uint low = 0u;
+	uint high = uint( g_vRelief.x ) - 1u;
 
-	uint4 cut = g_triangles[id.x];
-	uint n = max( cut.x, 1u );
+	while ( low < high )
+	{
+		uint mid = ( low + high + 1u ) >> 1u;
+		uint4 cut = g_triangles[mid];
+		uint start = byIndex ? cut.z / 3u : cut.y;
 
-	Corner a = g_corners[( id.x * 3u ) + 0u];
-	Corner b = g_corners[( id.x * 3u ) + 1u];
-	Corner c = g_corners[( id.x * 3u ) + 2u];
+		if ( start <= at ) low = mid;
+		else high = mid - 1u;
+	}
 
-	Ring ring = RingOf();
-	Ground g = GroundPaint();
+	return low;
+}
+
+//A lifted vertex of its triangle's cut, at i steps toward the second corner and j toward the third.
+void WriteVertex( uint t, uint4 cut, uint n, uint i, uint j )
+{
+	Corner a = g_corners[( t * 3u ) + 0u];
+	Corner b = g_corners[( t * 3u ) + 1u];
+	Corner c = g_corners[( t * 3u ) + 2u];
 
 	//A triangle is one chunk's, and wears its palette.
 	float2 palette = a.palette.xy;
-	MaskPlace mask = MaskPlaceOfParams();
 
 	//How long a cut's side is: the coarsest level of a height map worth reading for it.
 	float texel = max( max( distance( a.place.xyz, b.place.xyz ), distance( a.place.xyz, c.place.xyz ) ), 1e-3 ) / float( n );
 
-	for ( uint i = 0u; i <= n; i++ )
+	float wb = float( i ) / float( n );
+	float wc = float( j ) / float( n );
+	float wa = 1.0 - wb - wc;
+
+	float3 place = ( a.place.xyz * wa ) + ( b.place.xyz * wb ) + ( c.place.xyz * wc );
+	float3 normal = normalize( ( a.normal.xyz * wa ) + ( b.normal.xyz * wb ) + ( c.normal.xyz * wc ) );
+	float4 paint = ( a.paint * wa ) + ( b.paint * wb ) + ( c.paint * wc );
+	float4 paintMore = ( a.paintMore * wa ) + ( b.paintMore * wb ) + ( c.paintMore * wc );
+
+	//The layers' lifts weighed by their paint, as the pixel weighs everything else of them - the mask's among it.
+	Ring ring = RingOf();
+	Ground g = GroundPaint();
+
+	float lift = 0.0;
+	float share = RingShare( ring, place );
+
+	if ( share > 0.0 && g.layers > 0u )
 	{
-		for ( uint j = 0u; j <= n - i; j++ )
-		{
-			float wb = float( i ) / float( n );
-			float wc = float( j ) / float( n );
-			float wa = 1.0 - wb - wc;
+		Worn p = PaintAt( paint, paintMore, palette, MaskPlaceOfParams(), place, normal.y, g.layers );
+		float3 sides = TriplanarSides( normal );
 
-			float3 place = ( a.place.xyz * wa ) + ( b.place.xyz * wb ) + ( c.place.xyz * wc );
-			float3 normal = normalize( ( a.normal.xyz * wa ) + ( b.normal.xyz * wb ) + ( c.normal.xyz * wc ) );
-			float4 paint = ( a.paint * wa ) + ( b.paint * wb ) + ( c.paint * wc );
-			float4 paintMore = ( a.paintMore * wa ) + ( b.paintMore * wb ) + ( c.paintMore * wc );
-
-			//The layers' lifts weighed by their paint, as the pixel weighs everything else of them - the mask's among it.
-			float lift = 0.0;
-			float share = RingShare( ring, place );
-
-			if ( share > 0.0 && g.layers > 0u )
-			{
-				Worn p = PaintAt( paint, paintMore, palette, mask, place, normal.y, g.layers );
-				float3 sides = TriplanarSides( normal );
-
-				for ( uint l = 0u; l < PlaceLayers; l++ )
-					if ( p.weight[l] > 0.0 ) lift += LayerLiftAround( p.layer[l], place, sides, texel ) * p.weight[l];
-			}
-
-			place += normal * ( lift * share );
-
-			uint at = ( cut.y + Step( i, j, n ) ) * VertexBytes;
-
-			g_vertices.Store3( at, asuint( place ) );
-			g_vertices.Store( at + 12u, Byte( paint.x ) | ( Byte( paint.y ) << 8 ) | ( Byte( paintMore.z ) << 16 ) | ( Byte( paintMore.w ) << 24 ) );
-			g_vertices.Store( at + 16u, VertexFrameEncode( normal, float4( 1.0, 0.0, 0.0, -1.0 ) ) );
-			g_vertices.Store4( at + 20u, asuint( float4( paint.z, paint.w, palette ) ) );
-			g_vertices.Store4( at + 36u, asuint( float4( paintMore.x, paintMore.y, 1.0, 0.0 ) ) );
-		}
+		for ( uint l = 0u; l < PlaceLayers; l++ )
+			if ( p.weight[l] > 0.0 ) lift += LayerLiftAround( p.layer[l], place, sides, texel ) * p.weight[l];
 	}
 
-	//Two triangles a step, the second where the row has room for it, turned the way the triangle they were cut from is.
-	uint index = cut.z * 4u;
+	place += normal * ( lift * share );
 
-	for ( uint i = 0u; i < n; i++ )
+	uint at = ( cut.y + Step( i, j, n ) ) * VertexBytes;
+
+	g_vertices.Store3( at, asuint( place ) );
+	g_vertices.Store( at + 12u, Byte( paint.x ) | ( Byte( paint.y ) << 8 ) | ( Byte( paintMore.z ) << 16 ) | ( Byte( paintMore.w ) << 24 ) );
+	g_vertices.Store( at + 16u, VertexFrameEncode( normal, float4( 1.0, 0.0, 0.0, -1.0 ) ) );
+	g_vertices.Store4( at + 20u, asuint( float4( paint.z, paint.w, palette ) ) );
+	g_vertices.Store4( at + 36u, asuint( float4( paintMore.x, paintMore.y, 1.0, 0.0 ) ) );
+}
+
+//A thread an output vertex (the first z threads), then a thread an output triangle (the next w): a triangle cut sixteen to a side
+//is 153 vertices, which one thread a source triangle wrote alone while the rest of its wave sat idle
+[numthreads( 64, 1, 1 )]
+void MainCs( uint3 id : SV_DispatchThreadID )
+{
+	uint vertices = uint( g_vRelief.z );
+
+	if ( id.x < vertices )
 	{
-		for ( uint j = 0u; j < n - i; j++ )
-		{
-			g_indices.Store3( index, cut.y + uint3( Step( i, j, n ), Step( i + 1u, j, n ), Step( i, j + 1u, n ) ) );
-			index += 12u;
+		uint t = TriangleAt( id.x, false );
+		uint4 cut = g_triangles[t];
+		uint n = max( cut.x, 1u );
 
-			if ( j + 1u < n - i )
-			{
-				g_indices.Store3( index, cut.y + uint3( Step( i + 1u, j, n ), Step( i + 1u, j + 1u, n ), Step( i, j + 1u, n ) ) );
-				index += 12u;
-			}
-		}
+		//Row i holds n + 1 - i vertices.
+		uint k = id.x - cut.y;
+		uint i = 0u;
+
+		while ( k > n - i ) { k -= n + 1u - i; i++; }
+
+		WriteVertex( t, cut, n, i, k );
+		return;
 	}
+
+	uint q = id.x - vertices;
+	if ( q >= uint( g_vRelief.w ) ) return;
+
+	uint t = TriangleAt( q, true );
+	uint4 cut = g_triangles[t];
+	uint n = max( cut.x, 1u );
+
+	//Row i holds 2 (n - i) - 1 triangles, a step's first then, where the row has room, its second.
+	uint local = q - ( cut.z / 3u );
+	uint r = local;
+	uint i = 0u;
+
+	while ( r >= ( 2u * ( n - i ) ) - 1u ) { r -= ( 2u * ( n - i ) ) - 1u; i++; }
+
+	uint j = r >> 1u;
+
+	//Turned the way the triangle they were cut from is.
+	uint3 corners = ( r & 1u ) == 0u
+		? uint3( Step( i, j, n ), Step( i + 1u, j, n ), Step( i, j + 1u, n ) )
+		: uint3( Step( i + 1u, j, n ), Step( i + 1u, j + 1u, n ), Step( i, j + 1u, n ) );
+
+	g_indices.Store3( ( cut.z + ( local * 3u ) ) * 4u, cut.y + corners );
 }
 #endif

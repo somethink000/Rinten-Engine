@@ -24,8 +24,23 @@ internal sealed class TerrainRelief : IDisposable
 		public Vector4 Place, Normal, Paint, PaintMore, Palette;
 	}
 
-	private readonly List<Corner> corners = new();
-	private readonly List<uint> cuts = new();
+	//A ring as a worker lays it out: the eye it is round, its corners and cuts, and what they come to
+	private sealed class Laid
+	{
+		public Vector3 Eye;
+		public readonly List<Corner> Corners = new();
+		public readonly List<uint> Cuts = new();
+		public int Triangles, Vertices, Indices;
+		public BBox Box;
+	}
+
+	//One at a time: written by the worker while laying is out, then read until the frame has written it to the card (unsent)
+	private readonly Laid laid = new();
+	private System.Threading.Tasks.Task laying;
+	private bool unsent;
+
+	private Vector3 askedAt;
+	private bool asked;
 
 	private GpuBuffer<Corner> cornerBuffer;
 	private GpuBuffer<uint> cutBuffer;
@@ -37,7 +52,6 @@ internal sealed class TerrainRelief : IDisposable
 	private bool waiting, expanded;
 
 	private Vector3 builtAt;
-	private bool built;
 
 	//What the world draws it as.
 	private readonly CoreCardMeshes.Shape shape = new();
@@ -94,36 +108,107 @@ internal sealed class TerrainRelief : IDisposable
 		shape.Hold( vertexBuffer, indexBuffer, triangles > 0 ? indices : 0, grown );
 	}
 
-	/// <summary>Whether the eye has gone far enough from where the ring was built that it wants building again.</summary>
-	public bool Wants( Vector3 eye ) => !built || eye.Distance( builtAt ) > Moved;
+	/// <summary>Whether the eye has gone far enough from where the ring was last asked for that it wants building again.</summary>
+	public bool Wants( Vector3 eye ) => !asked || eye.Distance( askedAt ) > Moved;
 
-	/// <summary>Builds the ring from the ground near the eye and its chunks' palettes, in the terrain's metres.</summary>
-	public void Build( Vector3 eye, IEnumerable<(TerrainSoup Ground, byte[] Palette)> grounds )
+	/// <summary>Whether a ring is being laid out on a worker now, or is laid out and not yet written to the card.</summary>
+	public bool Laying => laying is not null || unsent;
+
+	/// <summary>Lays the ring out on a worker from the ground near the eye, in the terrain's metres; Take puts it on the card.</summary>
+	public void Build( Vector3 eye, (TerrainSoup Ground, byte[] Palette)[] grounds )
 	{
-		builtAt = eye;
-		built = true;
+		if ( Laying ) return;
 
+		askedAt = eye;
+		asked = true;
+
+		laying = System.Threading.Tasks.Task.Run( () => Lay( laid, eye, grounds ) );
+	}
+
+	/// <summary>Puts a ring the worker finished on the card; true when the ring changed, so its place is written again.</summary>
+	public bool Take()
+	{
+		if ( laying is not { IsCompleted: true } done ) return false;
+
+		laying = null;
+
+		if ( done.IsFaulted )
+		{
+			Log.Warning( done.Exception, "Terrain relief ring was not laid out" );
+			return false;
+		}
+
+		builtAt = laid.Eye;
+
+		triangles = laid.Triangles;
+		vertices = laid.Vertices;
+		indices = laid.Indices;
+		box = laid.Box;
+
+		expanded = false;
+		waiting = triangles > 0;
+
+		if ( !waiting )
+		{
+			Hold( lift );
+			return true;
+		}
+
+		cornerBuffer = Fit( cornerBuffer, laid.Corners.Count, GpuBuffer.UsageFlags.Structured );
+		cutBuffer = Fit( cutBuffer, laid.Cuts.Count, GpuBuffer.UsageFlags.Structured );
+
+		if ( vertexBuffer is null || vertexBuffer.ElementCount < vertices )
+		{
+			vertexBuffer?.Dispose();
+			vertexBuffer = new GpuBuffer( Grown( vertices ), PackedVertex.Size, GpuBuffer.UsageFlags.Vertex | GpuBuffer.UsageFlags.Structured, "terrain relief vertices" );
+		}
+
+		if ( indexBuffer is null || indexBuffer.ElementCount < indices )
+		{
+			indexBuffer?.Dispose();
+			indexBuffer = new GpuBuffer( Grown( indices ), sizeof( uint ), GpuBuffer.UsageFlags.Index | GpuBuffer.UsageFlags.Structured, "terrain relief indices" );
+		}
+
+		//Written by the frame in its own order rather than here - see ExpandAll.
+		unsent = true;
+
+		Hold( lift );
+		return true;
+	}
+
+	//The ring's corners and cuts out of the grounds within reach of the eye, on a worker: nothing here touches the scene or the card
+	private static void Lay( Laid into, Vector3 eye, (TerrainSoup Ground, byte[] Palette)[] grounds )
+	{
+		var corners = into.Corners;
+		var cuts = into.Cuts;
+
+		into.Eye = eye;
 		corners.Clear();
 		cuts.Clear();
 
 		var reach = Reach + Fade;
+		var reachSquared = reach * reach;
 
 		Span<float> slots = stackalloc float[Terrain.MaxLayers];
 
 		foreach ( var (ground, palette) in grounds )
 		{
-			var points = ground.Vertices;
-			var order = ground.Indices;
+			var points = CollectionsMarshal.AsSpan( ground.Vertices );
+			var order = CollectionsMarshal.AsSpan( ground.Indices );
 			var numbers = TerrainChunkBaker.PaletteNumbers( palette );
 
-			for ( var t = 0; t + 2 < order.Count; t += 3 )
+			for ( var t = 0; t + 2 < order.Length; t += 3 )
 			{
-				var a = points[order[t]];
-				var b = points[order[t + 1]];
-				var c = points[order[t + 2]];
+				ref readonly var a = ref points[order[t]];
+				ref readonly var b = ref points[order[t + 1]];
+				ref readonly var c = ref points[order[t + 2]];
 
-				var near = MathF.Min( a.Position.Distance( eye ), MathF.Min( b.Position.Distance( eye ), c.Position.Distance( eye ) ) );
-				if ( near > reach ) continue;
+				var nearSquared = MathF.Min( ( a.Position - eye ).LengthSquared,
+					MathF.Min( ( b.Position - eye ).LengthSquared, ( c.Position - eye ).LengthSquared ) );
+
+				if ( nearSquared > reachSquared ) continue;
+
+				var near = MathF.Sqrt( nearSquared );
 
 				corners.Add( CornerOf( a, palette, numbers, slots ) );
 				corners.Add( CornerOf( b, palette, numbers, slots ) );
@@ -139,15 +224,16 @@ internal sealed class TerrainRelief : IDisposable
 			}
 		}
 
-		triangles = corners.Count / 3;
-
-		box = default;
+		var triangles = corners.Count / 3;
+		var box = default( BBox );
 
 		for ( var k = 0; k < corners.Count; k++ )
 		{
 			var at = new Vector3( corners[k].Place.x, corners[k].Place.y, corners[k].Place.z );
 			box = k == 0 ? new BBox( at, at ) : box.AddPoint( at );
 		}
+
+		var cutSpan = CollectionsMarshal.AsSpan( cuts );
 
 		//Where each triangle's vertices and indices start, coarser all round until the whole ring fits.
 		while ( true )
@@ -156,10 +242,10 @@ internal sealed class TerrainRelief : IDisposable
 
 			for ( var t = 0; t < triangles; t++ )
 			{
-				var n = (long)cuts[t * 4];
+				var n = (long)cutSpan[t * 4];
 
-				cuts[( t * 4 ) + 1] = (uint)v;
-				cuts[( t * 4 ) + 2] = (uint)i;
+				cutSpan[( t * 4 ) + 1] = (uint)v;
+				cutSpan[( t * 4 ) + 2] = (uint)i;
 
 				v += ( n + 1 ) * ( n + 2 ) / 2;
 				i += 3 * n * n;
@@ -167,8 +253,8 @@ internal sealed class TerrainRelief : IDisposable
 
 			if ( v <= MostVertices || triangles == 0 )
 			{
-				vertices = (int)v;
-				indices = (int)i;
+				into.Vertices = (int)v;
+				into.Indices = (int)i;
 				break;
 			}
 
@@ -176,39 +262,17 @@ internal sealed class TerrainRelief : IDisposable
 
 			for ( var t = 0; t < triangles; t++ )
 			{
-				if ( cuts[t * 4] <= 1 ) continue;
+				if ( cutSpan[t * 4] <= 1 ) continue;
 
-				cuts[t * 4] /= 2;
+				cutSpan[t * 4] /= 2;
 				any = true;
 			}
 
 			if ( !any ) break;
 		}
 
-		expanded = false;
-		waiting = triangles > 0;
-
-		if ( !waiting ) return;
-
-		cornerBuffer = Fit( cornerBuffer, corners.Count, GpuBuffer.UsageFlags.Structured );
-		cutBuffer = Fit( cutBuffer, cuts.Count, GpuBuffer.UsageFlags.Structured );
-
-		if ( vertexBuffer is null || vertexBuffer.ElementCount < vertices )
-		{
-			vertexBuffer?.Dispose();
-			vertexBuffer = new GpuBuffer( Grown( vertices ), PackedVertex.Size, GpuBuffer.UsageFlags.Vertex | GpuBuffer.UsageFlags.Structured, "terrain relief vertices" );
-		}
-
-		if ( indexBuffer is null || indexBuffer.ElementCount < indices )
-		{
-			indexBuffer?.Dispose();
-			indexBuffer = new GpuBuffer( Grown( indices ), sizeof( uint ), GpuBuffer.UsageFlags.Index | GpuBuffer.UsageFlags.Structured, "terrain relief indices" );
-		}
-
-		cornerBuffer.SetData( corners );
-		cutBuffer.SetData( cuts );
-
-		Hold( lift );
+		into.Triangles = triangles;
+		into.Box = box;
 	}
 
 	/// <summary>The ring is to be made again where it is - the layers it reads changed.</summary>
@@ -265,14 +329,22 @@ internal sealed class TerrainRelief : IDisposable
 		{
 			if ( !one.waiting || one.ParamsIndex == 0 ) continue;
 
+			//In the frame being recorded: a write ahead of it is a submit of its own, and a few of those in a row wait on the card
+			if ( one.unsent )
+			{
+				one.cornerBuffer.SetData( one.laid.Corners );
+				one.cutBuffer.SetData( one.laid.Cuts );
+				one.unsent = false;
+			}
+
 			buffers[0] = one.cornerBuffer.Handle;
 			buffers[1] = one.cutBuffer.Handle;
 			buffers[2] = one.vertexBuffer.Handle;
 			buffers[3] = one.indexBuffer.Handle;
 
-			Expand.Attributes.Set( "Relief", new Vector4( one.triangles, one.ParamsIndex, 0.0f, 0.0f ) );
+			Expand.Attributes.Set( "Relief", new Vector4( one.triangles, one.ParamsIndex, one.vertices, one.indices / 3 ) );
 
-			if ( !Expand.RunApartOver( buffers, one.triangles, 1, 1 ) ) continue;
+			if ( !Expand.RunApartOver( buffers, one.vertices + ( one.indices / 3 ), 1, 1 ) ) continue;
 
 			one.waiting = false;
 			one.expanded = true;

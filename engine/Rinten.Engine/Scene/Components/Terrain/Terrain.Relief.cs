@@ -57,13 +57,14 @@ public partial class Terrain
 		relief.ParamsIndex = ParamsMap?.Index ?? 0;
 		relief.Stand( Scene.SceneWorld, DrawnWith, WorldTransform, Lift() );
 
-		if ( !reliefStale && !relief.Wants( eye ) ) return;
+		//The ring and where the ground sinks under it change in the same frame - see FillRelief.
+		if ( relief.Take() ) UpdateParamsMap();
+
+		if ( relief.Laying || ( !reliefStale && !relief.Wants( eye ) ) ) return;
 
 		reliefStale = false;
 
-		relief.Build( eye, AroundEye( eye, TerrainRelief.Reach + TerrainRelief.Fade ) );
-
-		UpdateParamsMap();
+		relief.Build( eye, AroundEye( eye, TerrainRelief.Reach + TerrainRelief.Fade ).ToArray() );
 	}
 
 	//The grounds of every chunk within a reach of the eye, in the terrain's metres, with their palettes

@@ -243,41 +243,49 @@ function opens(format) {
 	}
 }
 
-// The module, smallest first: the export writes it packed beside itself, brotli
-// and gzip, because a host that compresses on the fly is not something a game on
-// itch.io or GitHub Pages can count on - raw it is a hundred megabytes. Opened
-// here as it arrives. A host that unpacks it on its own (Content-Encoding) hands
-// it over open; one without the packed copies is asked for the raw one.
+//The module, smallest first: brotli and gzip copies sit beside it, since itch.io or GitHub Pages
+//may not compress on the fly. Unpacked whole and checked, so a host that mangles one falls to the next
 async function packedModule(url) {
 	var tries = [];
 	if (opens("brotli")) tries.push([".br", "brotli"]);
 	if (opens("gzip")) tries.push([".gz", "gzip"]);
+	tries.push(["", null]);
+
+	var why = "";
 
 	for (var i = 0; i < tries.length; i++) {
 		try {
 			var answer = await fetch(url + tries[i][0], { cache: "no-cache" });
-			if (!answer.ok || !answer.body) continue;
+			if (!answer.ok) { why = url + tries[i][0] + ": " + answer.status; continue; }
 
-			var encoded = (answer.headers.get("Content-Encoding") || "").toLowerCase();
-			var body = encoded ? answer.body : answer.body.pipeThrough(new DecompressionStream(tries[i][1]));
+			//Open already where the host sent it with Content-Encoding, whatever the header says
+			var bytes = new Uint8Array(await answer.arrayBuffer());
+			if (!isWasm(bytes) && tries[i][1]) bytes = await unpack(bytes, tries[i][1]);
+			if (!isWasm(bytes)) { why = url + tries[i][0] + ": not a module"; continue; }
 
-			return new Response(body, { headers: { "Content-Type": "application/wasm" } });
+			return new Response(bytes, { headers: { "Content-Type": "application/wasm" } });
 		} catch (e) {
+			why = url + tries[i][0] + ": " + (e && e.message ? e.message : e);
+			console.warn(why);
 		}
 	}
 
-	return fetch(url, { cache: "no-cache" });
+	throw new Error("The game's module did not load (" + why + ")");
 }
 
-// The module out of the browser's own cache, where a visit before this one put it
-// open under the hash the export wrote - and from which the browser compiles it
-// again from its own cache of compiled code rather than from nothing. A new export
-// is a new hash; the old copy goes. Without a cache to keep it in (a page not on
-// https or localhost), every visit downloads it.
+function isWasm(bytes) {
+	return bytes.length > 8 && bytes[0] === 0 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d;
+}
+
+async function unpack(bytes, format) {
+	var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+	return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 //A start that failed on a download the network cut off - it changed under the page, as a phone's does
 //between networks - rather than on the game
 function cutOff(why) {
-	return /fetch|network|ReadableStream/i.test(why);
+	return /failed to fetch|network/i.test(why);
 }
 
 //The page loaded anew, twice at most a visit: a module that failed to load stays failed in this page
@@ -299,6 +307,8 @@ function forgetRetries() {
 	try { sessionStorage.removeItem("rinten.retries"); } catch (e) { }
 }
 
+//The module out of the browser's cache under the export's hash, which Chrome compiles from its own code
+//cache; a new export is a new hash and the old copy goes. No cache off https/localhost: every visit downloads
 async function moduleResponse(url) {
 	var hash = manifest && manifest.Module;
 	var store = null;

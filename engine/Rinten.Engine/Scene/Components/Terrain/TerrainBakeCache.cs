@@ -239,16 +239,30 @@ internal static class TerrainBakeCache
 
 	private static byte[] Packed( string shipped, string key, bool whole )
 	{
-		if ( string.IsNullOrEmpty( shipped ) ) return null;
-
-		Pack pack;
+		Pack pack = null;
+		(long At, int Length) entry = default;
 
 		lock ( packs )
 		{
-			if ( !packs.TryGetValue( shipped, out pack ) ) packs[shipped] = pack = Load( CompiledPaths.TerrainChunks( shipped ) );
+			//No file - the copy the editor plays: a key hashes the ground it was baked from, so any loaded pack holding it will do
+			if ( string.IsNullOrEmpty( shipped ) )
+			{
+				foreach ( var loaded in packs.Values )
+				{
+					if ( loaded is null || !loaded.Entries.TryGetValue( key, out entry ) ) continue;
+
+					pack = loaded;
+					break;
+				}
+			}
+			else
+			{
+				if ( !packs.TryGetValue( shipped, out pack ) ) packs[shipped] = pack = Load( CompiledPaths.TerrainChunks( shipped ) );
+				if ( pack is not null && !pack.Entries.TryGetValue( key, out entry ) ) pack = null;
+			}
 		}
 
-		if ( pack is null || !pack.Entries.TryGetValue( key, out var entry ) ) return null;
+		if ( pack is null ) return null;
 
 		try
 		{

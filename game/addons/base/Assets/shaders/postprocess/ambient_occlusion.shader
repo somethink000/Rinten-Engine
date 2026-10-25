@@ -31,6 +31,10 @@ PARAMETERS
 
 	//The indirect light as it was accumulated last frame, by its place in the table, for TemporalIndirectPs
 	float g_flBefore < Attribute( "Before" ); >;
+
+	//DepthPs's chain by its place in the table, and its top level's texels to one of the picture being written
+	float g_flDepths < Attribute( "Depths" ); >;
+	float g_flDepthTexels < Attribute( "DepthTexels" ); Default( 1.0 ); >;
 }
 
 #include "postprocess.slang"
@@ -74,14 +78,39 @@ Rays RaysOf()
 	return r;
 }
 
-//A point of the screen at a depth as written, in the world: its ray, as long as the depth made linear.
-float3 Place( Rays r, float2 uv, float raw )
+//Metres ahead of the eye along its view, from a depth as written
+float AheadOf( float raw )
 {
 	float near = g_vFrameRange.x;
 	float far = g_vFrameRange.y;
-	float ahead = near * far / max( far - raw * ( far - near ), 1e-6 );
 
+	return near * far / max( far - raw * ( far - near ), 1e-6 );
+}
+
+//A point of the screen that far ahead, in the world: its ray, that long
+float3 PlaceAhead( Rays r, float2 uv, float ahead )
+{
 	return r.eye + ( ( r.corner + ( r.across * uv.x ) + ( r.down * uv.y ) ) * ahead );
+}
+
+float3 Place( Rays r, float2 uv, float raw ) { return PlaceAhead( r, uv, AheadOf( raw ) ); }
+
+//Levels in AmbientOcclusion.DepthLevels
+static const float DepthLevels = 5.0;
+
+//A sample texels from the pixel, read from the level of DepthPs's chain that far calls for - XeGTAO's mip offset,
+//so the wide reach near the eye reads a small picture rather than scattering over the whole depth
+float3 SamplePlace( Rays r, float2 uv, float texels )
+{
+	float level = clamp( log2( max( texels * g_flDepthTexels, 1.0 ) ) - 3.3, 0.0, DepthLevels - 1.0 );
+	return PlaceAhead( r, uv, FrameMip( g_flDepths, uv, level ).r );
+}
+
+//Metres ahead at the size the occlusion is drawn, which the mip chain halves on - see SamplePlace
+[shader("fragment")]
+float4 DepthPs( PostV2F i ) : SV_Target0
+{
+	return float4( AheadOf( SceneDepthRaw( i.uv ) ), 0.0, 0.0, 0.0 );
 }
 
 static const float Pi = 3.14159265;
@@ -162,14 +191,15 @@ float4 MainPs( PostV2F i ) : SV_Target0
 		{
 			//Denser near the pixel, where the detail is.
 			float t = ( float( k ) + jitter ) / float( steps );
-			float2 offset = screen * max( t * t * reach, 1.0 + float( k ) ) / size;
+			float texels = max( t * t * reach, 1.0 + float( k ) );
+			float2 offset = screen * texels / size;
 
 			for ( int side = 0; side < 2; side++ )
 			{
 				float2 uv = side == 0 ? i.uv - offset : i.uv + offset;
 				if ( any( uv < 0.0 ) || any( uv > 1.0 ) ) continue;
 
-				float3 sample = Place( rays, uv, SceneDepthRaw( uv ) ) - place;
+				float3 sample = SamplePlace( rays, uv, texels ) - place;
 				float distance = length( sample );
 				float cosine = dot( sample / max( distance, 1e-5 ), view );
 
@@ -288,14 +318,15 @@ float4 IndirectPs( PostV2F i ) : SV_Target0
 		for ( int k = 0; k < steps; k++ )
 		{
 			float t = ( float( k ) + jitter ) / float( steps );
-			float2 offset = screen * max( t * t * reach, 1.0 + float( k ) ) / size;
+			float texels = max( t * t * reach, 1.0 + float( k ) );
+			float2 offset = screen * texels / size;
 
 			for ( int side = 0; side < 2; side++ )
 			{
 				float2 uv = side == 0 ? i.uv - offset : i.uv + offset;
 				if ( any( uv < 0.0 ) || any( uv > 1.0 ) ) continue;
 
-				float3 there = Place( rays, uv, SceneDepthRaw( uv ) );
+				float3 there = SamplePlace( rays, uv, texels );
 				float3 sample = there - place;
 				float distance = length( sample );
 				if ( distance > radius ) continue;

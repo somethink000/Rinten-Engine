@@ -374,7 +374,7 @@ public partial class Terrain
 
 		//Where a far model's error reaches the pixels a model's chain may be off by, in the terrain's metres
 		reach = chunkSpan * TerrainChunkBaker.FarShare * pixels / MathF.Max( Rendering.DrawSettings.MeshLodPixels, 0.1f );
-		reach = MathF.Max( reach, TerrainRelief.Reach + TerrainRelief.Fade );
+		if ( Relieved ) reach = MathF.Max( reach, ReliefDistance );
 
 		foreach ( var wanted in keptWhole.Values ) reach = MathF.Max( reach, wanted );
 

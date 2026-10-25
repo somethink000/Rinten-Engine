@@ -29,6 +29,9 @@ public sealed partial class AmbientOcclusion : BasePostProcess<AmbientOcclusion>
 
 	private static Material Occlusion => field ??= Material.FromShader( "shaders/postprocess/ambient_occlusion.shader" );
 
+	//Levels of the depth chain the horizon samples read; DepthLevels in the shader
+	private const int DepthLevels = 5;
+
 	//The picture of the light the horizons hide, which the frame lays for surfaces - see CoreSceneDrawer
 	internal const string IndirectPicture = "Indirect";
 
@@ -52,6 +55,17 @@ public sealed partial class AmbientOcclusion : BasePostProcess<AmbientOcclusion>
 
 		var cl = NextList( "Ambient Occlusion" );
 		var scale = Math.Clamp( UserResolution, 1, 8 );
+
+		//Metres ahead at the occlusion's size, and its averaged halvings, which far samples read
+		var depths = cl.GetPicture( "OcclusionDepth", PictureFormat.SingleFull, sizeFactor: scale, levels: DepthLevels );
+
+		cl.SetRenderTarget( depths );
+		cl.Blit( Occlusion, entry: "DepthPs" );
+		cl.ClearRenderTarget();
+		cl.GenerateMipMaps( depths, Graphics.DownsampleMethod.Box );
+
+		cl.Attributes.Set( "Depths", depths.ColorTexture );
+		cl.Attributes.Set( "DepthTexels", 1.0f );
 
 		//Occlusion and bent normal from depth, packed into four 8-bit channels
 		var raw = cl.GetPicture( "OcclusionRaw", PictureFormat.Colour, sizeFactor: scale );
@@ -100,6 +114,7 @@ public sealed partial class AmbientOcclusion : BasePostProcess<AmbientOcclusion>
 				var indirect = cl.GetPicture( IndirectPicture, PictureFormat.Hdr, sizeFactor: scale * 2 );
 
 				cl.Attributes.Set( "Last", (float)CoreRender.TextureIndex( device ) );
+				cl.Attributes.Set( "DepthTexels", 2.0f );
 				cl.Attributes.Set( "Radius", 2.0f );
 				cl.Attributes.Set( "Slices", 2.0f );
 				cl.Attributes.Set( "Steps", 4.0f );

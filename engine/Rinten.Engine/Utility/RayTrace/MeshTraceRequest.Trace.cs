@@ -13,9 +13,10 @@ partial struct MeshTraceRequest
 
 		if ( targetModel.IsValid() ) return TargetModelHit();
 
-		var objects = RentWorld( out var count );
-		if ( objects is null ) return best;
+		var objects = targetWorld?.ObjectsNow();
+		if ( objects is not { Length: > 0 } ) return best;
 
+		var count = objects.Length;
 		var near = Near( objects, count );
 
 		try
@@ -34,7 +35,6 @@ partial struct MeshTraceRequest
 		}
 		finally
 		{
-			System.Buffers.ArrayPool<SceneObject>.Shared.Return( objects, clearArray: true );
 			System.Buffers.ArrayPool<bool>.Shared.Return( near );
 		}
 
@@ -53,9 +53,10 @@ partial struct MeshTraceRequest
 			return single.Hit ? new[] { single } : System.Array.Empty<Result>();
 		}
 
-		var objects = RentWorld( out var count );
-		if ( objects is null ) return System.Array.Empty<Result>();
+		var objects = targetWorld?.ObjectsNow();
+		if ( objects is not { Length: > 0 } ) return System.Array.Empty<Result>();
 
+		var count = objects.Length;
 		var near = Near( objects, count );
 
 		try
@@ -73,7 +74,6 @@ partial struct MeshTraceRequest
 		}
 		finally
 		{
-			System.Buffers.ArrayPool<SceneObject>.Shared.Return( objects, clearArray: true );
 			System.Buffers.ArrayPool<bool>.Shared.Return( near );
 		}
 
@@ -114,37 +114,20 @@ partial struct MeshTraceRequest
 		return hit;
 	}
 
-	//World objects copied into a pooled array (caller returns it), or null; avoids allocating per ray
-	private readonly SceneObject[] RentWorld( out int count )
-	{
-		count = 0;
-
-		var world = targetWorld;
-		if ( world is null ) return null;
-
-		lock ( world.InternalSceneObjects )
-		{
-			count = world.InternalSceneObjects.Count;
-			if ( count == 0 ) return null;
-
-			var objects = System.Buffers.ArrayPool<SceneObject>.Shared.Rent( count );
-			world.InternalSceneObjects.CopyTo( objects );
-
-			return objects;
-		}
-	}
-
 	//Which objects the segment may meet - drawn, tagged right, box crossed - asked of each on every thread; the filter and
 	//the shape (whose tree a model builds on first ask) stay on this one. Pooled: the caller hands it back
 	private readonly bool[] Near( SceneObject[] objects, int count )
 	{
 		var near = System.Buffers.ArrayPool<bool>.Shared.Rent( count );
 
+		//One thread per NearPerThread objects: a box test takes nanoseconds, waking every worker for a few dozen cost more
 		Rinten.Jobs.JobSystem.For( count, (Request: this, Objects: objects, Near: near ),
-			static ( s, i ) => s.Near[i] = s.Request.MayMeet( s.Objects[i] ) );
+			static ( s, i ) => s.Near[i] = s.Request.MayMeet( s.Objects[i] ), most: 1 + ( count / NearPerThread ) );
 
 		return near;
 	}
+
+	private const int NearPerThread = 1024;
 
 	private readonly bool MayMeet( SceneObject found )
 	{

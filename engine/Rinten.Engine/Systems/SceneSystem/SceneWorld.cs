@@ -32,6 +32,24 @@ public sealed partial class SceneWorld : IHandle
 
 	internal void TouchMembership() => Membership++;
 
+	//InternalSceneObjects as an array, made again only when Membership moves; shared, so read it and never write it
+	private SceneObject[] objectsNow;
+	private int objectsAt = -1;
+
+	internal SceneObject[] ObjectsNow()
+	{
+		lock ( InternalSceneObjects )
+		{
+			if ( objectsNow is null || objectsAt != Membership )
+			{
+				objectsNow = InternalSceneObjects.ToArray();
+				objectsAt = Membership;
+			}
+
+			return objectsNow;
+		}
+	}
+
 	/// <summary>List of scene objects belonging to this scene world.</summary>
 	public IReadOnlyCollection<SceneObject> SceneObjects
 	{
@@ -105,6 +123,7 @@ public sealed partial class SceneWorld : IHandle
 
 			InternalSceneObjects.Clear();
 			Touch();
+			TouchMembership();
 		}
 	}
 

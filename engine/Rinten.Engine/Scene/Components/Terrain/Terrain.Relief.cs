@@ -11,9 +11,13 @@ public partial class Terrain
 	//Whether the numbers picture last told the ground's corners of a ring to sink under
 	private bool reliefWritten;
 
+	/// <summary>How far from the eye, in metres, the layers' Displacement lifts the ground - its last quarter fading it out; nought for none.</summary>
+	[Property, Group( "Relief" ), Range( 0.0f, 200.0f )]
+	public float ReliefDistance { get; set; } = 40.0f;
+
 	//Full frame and an unturned terrain only: the ring's corners are placed by its scale and position alone
 	private bool Relieved => !Application.IsHeadless && CoreNative.Available && !CoreRenderDevice.PortableFrame
-		&& MathF.Abs( WorldRotation.w ) > 0.99999f
+		&& ReliefDistance > 0.0f && MathF.Abs( WorldRotation.w ) > 0.99999f
 		&& Storage is { } storage && storage.Materials.Any( Displaces );
 
 	//The most any layer lifts the ground, in metres.
@@ -62,11 +66,11 @@ public partial class Terrain
 
 		var pixels = Scene.Detail.Looking ? Scene.Detail.PixelsAtAMetre : UnseenPixelsAtAMetre;
 
-		if ( relief.Laying || ( !reliefStale && !relief.Wants( eye, pixels ) ) ) return;
+		if ( relief.Laying || ( !reliefStale && !relief.Wants( eye, pixels, ReliefDistance ) ) ) return;
 
 		reliefStale = false;
 
-		relief.Build( eye, pixels, AroundEye( eye, TerrainRelief.Reach + TerrainRelief.Fade ).ToArray() );
+		relief.Build( eye, pixels, ReliefDistance, AroundEye( eye, ReliefDistance ).ToArray() );
 	}
 
 	//The grounds of every chunk within a reach of the eye, in the terrain's metres, with their palettes
@@ -108,8 +112,8 @@ public partial class Terrain
 		WriteFloat( 0, RowRing, eye.x );
 		WriteFloat( 1, RowRing, eye.y );
 		WriteFloat( 2, RowRing, eye.z );
-		WriteFloat( 3, RowRing, TerrainRelief.Reach );
-		WriteFloat( 4, RowRing, TerrainRelief.Fade );
+		WriteFloat( 3, RowRing, relief.Reach );
+		WriteFloat( 4, RowRing, relief.Fade );
 		WriteFloat( 5, RowRing, TerrainRelief.Sink );
 		WriteFloat( 6, RowRing, scale.x );
 		WriteFloat( 7, RowRing, scale.y );

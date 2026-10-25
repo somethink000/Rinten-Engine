@@ -6,10 +6,16 @@ namespace Rinten;
 //as a card mesh (CoreCardMeshes) with the ground's material so it casts. Full frame only; collision never sees it
 internal sealed class TerrainRelief : IDisposable
 {
-	/// <summary>Metres the lift reaches and fades over, and how far the ground's corners sink under it.</summary>
-	public const float Reach = 16.0f;
-	public const float Fade = 4.0f;
+	/// <summary>How far the ground's corners sink under the ring, in metres.</summary>
 	public const float Sink = 0.02f;
+
+	//The share of the ring's distance its lift fades over at the far edge
+	private const float FadeShare = 0.25f;
+
+	/// <summary>Metres the laid ring lifts in full, and fades over beyond that - see Terrain.ReliefDistance.</summary>
+	public float Reach => builtDistance * ( 1.0f - FadeShare );
+	public float Fade => builtDistance * FadeShare;
+	private float builtDistance;
 
 	//How far the eye goes before the ring is built round it again, in metres.
 	private const float Moved = 1.0f;
@@ -34,7 +40,7 @@ internal sealed class TerrainRelief : IDisposable
 	private sealed class Laid
 	{
 		public Vector3 Eye;
-		public float Pixels;
+		public float Pixels, Distance;
 		public readonly List<Corner> Corners = new();
 		public readonly List<uint> Cuts = new();
 		public int Triangles, Vertices, Indices;
@@ -47,7 +53,7 @@ internal sealed class TerrainRelief : IDisposable
 	private bool unsent;
 
 	private Vector3 askedAt;
-	private float askedPixels;
+	private float askedPixels, askedDistance;
 	private bool asked;
 
 	private GpuBuffer<Corner> cornerBuffer;
@@ -121,21 +127,23 @@ internal sealed class TerrainRelief : IDisposable
 	}
 
 	/// <summary>Whether the eye has gone far enough, or the screen changed enough, that the ring wants building again.</summary>
-	public bool Wants( Vector3 eye, float pixels ) => !asked || eye.Distance( askedAt ) > Moved || MathF.Abs( pixels - askedPixels ) > askedPixels * 0.1f;
+	public bool Wants( Vector3 eye, float pixels, float distance ) => !asked || eye.Distance( askedAt ) > Moved ||
+		MathF.Abs( pixels - askedPixels ) > askedPixels * 0.1f || distance != askedDistance;
 
 	/// <summary>Whether a ring is being laid out on a worker now, or is laid out and not yet written to the card.</summary>
 	public bool Laying => laying is not null || unsent;
 
 	/// <summary>Lays the ring out on a worker round the eye, for pixels a metre a metre away; Take puts it on the card.</summary>
-	public void Build( Vector3 eye, float pixels, (TerrainSoup Ground, byte[] Palette)[] grounds )
+	public void Build( Vector3 eye, float pixels, float distance, (TerrainSoup Ground, byte[] Palette)[] grounds )
 	{
 		if ( Laying ) return;
 
 		askedAt = eye;
 		askedPixels = pixels;
+		askedDistance = distance;
 		asked = true;
 
-		laying = System.Threading.Tasks.Task.Run( () => Lay( laid, eye, pixels, grounds ) );
+		laying = System.Threading.Tasks.Task.Run( () => Lay( laid, eye, pixels, distance, grounds ) );
 	}
 
 	/// <summary>Puts a ring the worker finished on the card; true when the ring changed, so its place is written again.</summary>
@@ -153,6 +161,7 @@ internal sealed class TerrainRelief : IDisposable
 
 		builtAt = laid.Eye;
 		builtPixels = laid.Pixels;
+		builtDistance = laid.Distance;
 
 		triangles = laid.Triangles;
 		vertices = laid.Vertices;
@@ -191,18 +200,19 @@ internal sealed class TerrainRelief : IDisposable
 	}
 
 	//The ring's corners and cuts out of the grounds within reach of the eye, on a worker: nothing here touches the scene or the card
-	private static void Lay( Laid into, Vector3 eye, float pixels, (TerrainSoup Ground, byte[] Palette)[] grounds )
+	private static void Lay( Laid into, Vector3 eye, float pixels, float distance, (TerrainSoup Ground, byte[] Palette)[] grounds )
 	{
 		var corners = into.Corners;
 		var cuts = into.Cuts;
 
 		into.Eye = eye;
 		into.Pixels = pixels;
+		into.Distance = distance;
 		corners.Clear();
 		cuts.Clear();
 
-		var reach = Reach + Fade;
-		var reachSquared = reach * reach;
+		var full = distance * ( 1.0f - FadeShare );
+		var reachSquared = distance * distance;
 
 		Span<float> slots = stackalloc float[Terrain.MaxLayers];
 
@@ -239,7 +249,7 @@ internal sealed class TerrainRelief : IDisposable
 				var square = MathF.Abs( Vector3.Dot( facing, ( eye - ( ( a.Position + b.Position + c.Position ) / 3.0f ) ).Normal ) );
 				var across = side * pixels / away * MathF.Sqrt( MathF.Max( square, 0.05f ) );
 
-				var n = near >= Reach ? 1u : (uint)Math.Clamp( MathF.Ceiling( across / CutPixels ), 1.0f, MathF.Max( MathF.Ceiling( side / LeastCut ), 1.0f ) );
+				var n = near >= full ? 1u : (uint)Math.Clamp( MathF.Ceiling( across / CutPixels ), 1.0f, MathF.Max( MathF.Ceiling( side / LeastCut ), 1.0f ) );
 
 				cuts.Add( n );
 				cuts.Add( 0 );

@@ -1005,13 +1005,8 @@ static const float ShadowNearTexels = 2.0;
 //noise, Jimenez 2014); set by the shading before it reads shadows, unturned where nothing set it
 static float2 g_shadowTurn = float2( 1.0, 0.0 );
 
-//The pixel being shaded, for the contact shadows read there - see ContactShadow; below nought before anything shaded
-static float2 g_shadowScreen = float2( -1.0, -1.0 );
-
 void ShadowTurnAt( float2 screen )
 {
-	g_shadowScreen = screen;
-
 	float turn = 6.2831853 * frac( 52.9829189 * frac( dot( screen, float2( 0.06711056, 0.00583715 ) ) ) );
 	g_shadowTurn = float2( cos( turn ), sin( turn ) );
 }
@@ -1275,32 +1270,6 @@ float2 SunTilt( float3 normal )
 	return facing.xy / max( -facing.z, 0.1 );
 }
 
-//The contact shadows at the pixel being shaded (1 lit), only for a point on that pixel - fog and the like ask of other
-//places; one where there is no picture - see CoreContactShadows
-float ContactShadow( float3 world )
-{
-#ifdef PORTABLE
-	return 1.0;
-#else
-	uint picture = uint( g_frame[0].sunDepth.z + 0.5 );
-	float2 size = g_frame[0].settings.yz;
-
-	if ( picture == 0u || g_shadowScreen.x < 0.0 || size.x <= 0.0 || LightLooks() ) return 1.0;
-
-	float4 clip = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
-	if ( clip.w <= 0.0 ) return 1.0;
-
-	float2 at = ( ( clip.xy / clip.w ) * 0.5 + 0.5 ) * size;
-	if ( any( abs( at - g_shadowScreen ) > 2.0 ) ) return 1.0;
-
-	//Only the surface it was worked out for: water or glass over it is somewhere else along the same pixel
-	float2 held = g_textures[NonUniformResourceIndex( picture )].SampleLevel( g_shadowScreen / size, 0.0 ).rg;
-	float away = distance( world, EYE_FRAME( camera ).xyz );
-
-	return abs( away - held.y ) <= max( held.y * 0.02, 0.05 ) ? held.x : 1.0;
-#endif
-}
-
 //Where the surface being shaded stands at rest, w one where it moves its own corners and the cluster pass said so: the
 //still world's maps hold it at rest, so it is read there - see depth_id.slang's SHADOW_REST_FIELD
 static float4 g_shadowRest = float4( 0.0, 0.0, 0.0, 0.0 );
@@ -1314,14 +1283,11 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 	return 1.0;
 #endif
 
-	//On the screen where it is drawn, before it is taken back to where it stands at rest for the maps
-	float contact = ContactShadow( world );
-
 	if ( g_shadowRest.w > 0.5 ) world = g_shadowRest.xyz;
 
 	float2 tilt = SunTilt( normal );
 
-	return min( contact, min( SunStill( world, step, tilt, wide ), SunMovers( world, step, tilt, wide, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) ) );
+	return min( SunStill( world, step, tilt, wide ), SunMovers( world, step, tilt, wide, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) );
 }
 
 //The same, stepped off along the normal - what every surface wants.

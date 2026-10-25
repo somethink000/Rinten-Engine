@@ -1123,6 +1123,14 @@ internal static unsafe class CoreSceneRenderer
 		frame[FogVolumeInfoAt + 3] = CoreVolumeFog.Grid.Tall;
 	}
 
+	//The contact shadows' picture by table index, in the lane SetOcclusion keeps nought - see SunShadow
+	internal static void LayContactShadows( float[] frame, int picture )
+	{
+		if ( frame is null || frame.Length < FrameFloats || picture <= 0 ) return;
+
+		frame[SunDepthAt + 2] = picture;
+	}
+
 	//Lays out the depth chain and solid-scene picture for screen-space reflections on water and glass
 	internal static void LayScreenTrace( float[] frame, int chain, int scene )
 	{

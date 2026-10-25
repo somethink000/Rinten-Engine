@@ -28,6 +28,11 @@ V2F MainClusterVs( uint vid : SV_VertexID )
 
 	//The instance, for the pixel stage to take its numbers from.
 	o.depthId = v.instance;
+
+#ifdef ENGINE_SHADOW_REST
+	o.shadowRest = float4( mul( float4( v.position, 1.0 ), g_modelToWorld ).xyz, 1.0 );
+#endif
+
 	return o;
 }
 
@@ -44,6 +49,10 @@ V2F MainClusterVs( uint vid : SV_VertexID )
 CLUSTER_OUT MainClusterPs( V2F i, bool front : SV_IsFrontFace )
 {
 	ClusterInstance( i.depthId );
+
+#ifdef ENGINE_SHADOW_REST
+	g_shadowRest = i.shadowRest;
+#endif
 
 	//Which side of the sheet, only where the material draws both - see F_BACKFACES in complex.shader. A surface that has no such feature is
 	//always looked at from the front. Nested, because a preprocessor asked about a name nobody defined says so even on the far side of an &&.

@@ -122,7 +122,7 @@ public partial class GameObject
 	private bool MayCatch( Ray ray, float depth )
 	{
 		for ( var i = 0; i < catchers.Length; i++ )
-			if ( catchers[i].GizmoMayCatch( ray, depth ) && catchers[i].IsValid() && catchers[i].Enabled ) return true;
+			if ( catchers[i].IsValid() && catchers[i].Enabled && catchers[i].GizmoMayCatch( ray, depth ) ) return true;
 
 		return false;
 	}
@@ -316,6 +316,9 @@ public partial class GameObject
 	private List<GameObject> leafCatchers;
 	private int leafCatchersVersion = -1;
 
+	//Which of them the pointer's ray may reach this frame, worked out on the job system's threads.
+	private bool[] leafCatches = [];
+
 	//The leaves that only lay click targets, walked from the scene rather than under their parents, and only those the pointer's
 	//ray can reach or that are pressed or selected: fourteen thousand models walked a frame for a hitbox each were most of the
 	//editor's frame, where a cached sphere each says in a few nanoseconds that the pointer is nowhere near
@@ -333,17 +336,26 @@ public partial class GameObject
 				if ( go != this && go.SubtreeDrawsGizmos() && go.LeafCatcher ) leafCatchers.Add( go );
 		}
 
-		var ray = Gizmo.CurrentRay;
-		var depth = Gizmo.RayDepth;
 		var everything = Gizmo.Pressed.Any;
-		var selection = Gizmo.Active?.Selection;
+		var selection = Gizmo.Active?.Selection is { Count: > 0 } chosen ? chosen : null;
+		var count = leafCatchers.Count;
 
-		//The sphere first, the dearer questions only of what it lets through
-		foreach ( var go in leafCatchers )
+		//Each its own sphere and nothing shared, so on every thread; drawing and selecting stay on this one
+		if ( !everything )
 		{
-			if ( !everything && !go.MayCatch( ray, depth ) && selection?.Contains( go ) != true )
+			if ( leafCatches.Length < count ) leafCatches = new bool[count + ( count / 4 )];
+
+			Rinten.Jobs.JobSystem.For( count, (Self: this, Ray: Gizmo.CurrentRay, Depth: Gizmo.RayDepth ),
+				static ( s, i ) => s.Self.leafCatches[i] = s.Self.leafCatchers[i].MayCatch( s.Ray, s.Depth ) );
+		}
+
+		for ( var i = 0; i < count; i++ )
+		{
+			var go = leafCatchers[i];
+
+			if ( !everything && !leafCatches[i] && selection?.Contains( go ) != true )
 			{
-				go.HasGizmoHandle = false;
+				if ( go.HasGizmoHandle ) go.HasGizmoHandle = false;
 				continue;
 			}
 

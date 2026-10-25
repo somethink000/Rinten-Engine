@@ -2901,6 +2901,9 @@ internal sealed partial class CoreSceneDrawer
 
 			RunStage( camera, Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
 
+			//Contact shadows off the depth just drawn, the movers' included, where the sun casts at all
+			var contact = !CoreRenderDevice.PortableFrame && !StereoPass && sunCasts && DrawContactShadows( near, far );
+
 			//An "Occlusion" picture drawn here darkens surfaces (AmbientOcclusion); laid into the block, re-sent,
 			//since nothing drawn before reads those lanes
 			var laid = false;
@@ -2927,6 +2930,12 @@ internal sealed partial class CoreSceneDrawer
 			else if ( CorePasses.Find( AmbientOcclusion.IndirectPicture ) is { Index: > 0 } indirect )
 			{
 				CoreSceneRenderer.LayScreenLight( frame, indirect.Index );
+				laid = true;
+			}
+
+			if ( contact && CorePasses.Find( CoreContactShadows.Picture ) is { Index: > 0 } contactPicture )
+			{
+				CoreSceneRenderer.LayContactShadows( frame, contactPicture.Index );
 				laid = true;
 			}
 
@@ -3805,6 +3814,30 @@ internal sealed partial class CoreSceneDrawer
 
 		CorePostBlit.LastBeforeWindow = false;
 		CorePasses.Unwant();
+	}
+
+	//The contact shadows' pass - see CoreContactShadows; whether it drew
+	private bool DrawContactShadows( float near, float far )
+	{
+		OpenPost( Rinten.Rendering.Stage.AfterDepthPrepass, CoreRender.TargetKind.Scene, near, far );
+
+		try
+		{
+			CoreRenderDevice.ZoneBegin( "contact shadows" );
+			CoreContactShadows.List.ExecuteOnRenderThread();
+			CorePostBlit.Flush();
+			CoreRenderDevice.ZoneEnd();
+			return true;
+		}
+		catch ( System.Exception e )
+		{
+			Log.Warning( e, "contact shadows" );
+			return false;
+		}
+		finally
+		{
+			CorePostBlit.End();
+		}
 	}
 
 	private void RunStage( CameraComponent camera, Rinten.Rendering.Stage stage,

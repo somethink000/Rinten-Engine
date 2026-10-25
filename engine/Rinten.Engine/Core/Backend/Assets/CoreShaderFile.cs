@@ -289,6 +289,9 @@ internal static partial class CoreShaderFile
 		//Only a surface whose corners move by themselves has motion the camera and its matrix do not tell
 		var moves = surface && !CoreShaderCompiler.IsPortable( format ) && CoreResources.MovesVertices( path, combo );
 
+		//And carries where its corners stand at rest, which its shadow is cast from - see depth_id.slang and SunShadow
+		if ( moves ) draws = "#define ENGINE_SHADOW_REST 1\n" + draws;
+
 		for ( var i = 0; i < StageCount; i++ )
 		{
 			var stage = (Stage)i;

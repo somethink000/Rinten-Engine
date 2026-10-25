@@ -16,13 +16,15 @@ partial struct MeshTraceRequest
 		var objects = RentWorld( out var count );
 		if ( objects is null ) return best;
 
+		var near = Near( objects, count );
+
 		try
 		{
 			for ( var i = 0; i < count; i++ )
 			{
 				var found = objects[i];
 
-				if ( !IsCandidate( found ) ) continue;
+				if ( !near[i] || !Passes( found ) ) continue;
 				if ( !TryHit( found, out var hit ) ) continue;
 				if ( hit.Fraction >= bestFraction ) continue;
 
@@ -33,6 +35,7 @@ partial struct MeshTraceRequest
 		finally
 		{
 			System.Buffers.ArrayPool<SceneObject>.Shared.Return( objects, clearArray: true );
+			System.Buffers.ArrayPool<bool>.Shared.Return( near );
 		}
 
 		return best;
@@ -53,13 +56,15 @@ partial struct MeshTraceRequest
 		var objects = RentWorld( out var count );
 		if ( objects is null ) return System.Array.Empty<Result>();
 
+		var near = Near( objects, count );
+
 		try
 		{
 			for ( var i = 0; i < count; i++ )
 			{
 				var found = objects[i];
 
-				if ( !IsCandidate( found ) ) continue;
+				if ( !near[i] || !Passes( found ) ) continue;
 				if ( !TryHit( found, out var hit ) ) continue;
 
 				hits ??= new List<Result>();
@@ -69,6 +74,7 @@ partial struct MeshTraceRequest
 		finally
 		{
 			System.Buffers.ArrayPool<SceneObject>.Shared.Return( objects, clearArray: true );
+			System.Buffers.ArrayPool<bool>.Shared.Return( near );
 		}
 
 		if ( hits is null ) return System.Array.Empty<Result>();
@@ -128,8 +134,34 @@ partial struct MeshTraceRequest
 		}
 	}
 
-	//What is worth tracing against: drawn, and let through by the tags and the filter.
-	private readonly bool IsCandidate( SceneObject found )
+	//Which objects the segment may meet - drawn, tagged right, box crossed - asked of each on every thread; the filter and
+	//the shape (whose tree a model builds on first ask) stay on this one. Pooled: the caller hands it back
+	private readonly bool[] Near( SceneObject[] objects, int count )
+	{
+		var near = System.Buffers.ArrayPool<bool>.Shared.Rent( count );
+
+		Rinten.Jobs.JobSystem.For( count, (Request: this, Objects: objects, Near: near ),
+			static ( s, i ) => s.Near[i] = s.Request.MayMeet( s.Objects[i] ) );
+
+		return near;
+	}
+
+	private readonly bool MayMeet( SceneObject found )
+	{
+		if ( !IsDrawnAndTagged( found ) ) return false;
+
+		//Nothing to go by: the shape decides - see TryHit
+		var bounds = found.Bounds;
+		if ( bounds.Size.AlmostEqual( 0.0f ) ) return true;
+
+		return TraceBounds( bounds, request.start, request.end - request.start, out _, out _ );
+	}
+
+	//And what the caller's filter lets through, on this thread.
+	private readonly bool Passes( SceneObject found ) => filterCallback is null || filterCallback( found );
+
+	//What is worth tracing against: drawn, and let through by the tags.
+	private readonly bool IsDrawnAndTagged( SceneObject found )
 	{
 		if ( !found.IsValid() ) return false;
 
@@ -139,11 +171,7 @@ partial struct MeshTraceRequest
 		//Lights and probes have reach bounds, not surfaces; they're picked by their handles instead
 		if ( found is SceneLight or SceneLightProbe ) return false;
 
-		if ( !PassesTags( found ) ) return false;
-
-		if ( filterCallback is not null && !filterCallback( found ) ) return false;
-
-		return true;
+		return PassesTags( found );
 	}
 
 	private readonly unsafe bool PassesTags( SceneObject found )

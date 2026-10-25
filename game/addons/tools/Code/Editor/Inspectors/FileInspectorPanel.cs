@@ -11,6 +11,7 @@ public sealed class FileInspectorPanel : InspectorPanel
 	private readonly Asset _asset;
 	private readonly GameResource _resource;
 	private readonly bool _readOnly;
+	private readonly Widget _widget;
 
 	/// <summary>The page for what was picked, or nothing where no widget claims its kind.</summary>
 	public static FileInspectorPanel For( SerializedObject so )
@@ -59,6 +60,7 @@ public sealed class FileInspectorPanel : InspectorPanel
 		AddClass( "file-inspector column" );
 
 		_asset = asset;
+		_widget = widget;
 		_readOnly = ResourceEdits.IsReadOnly( asset );
 
 		//Only one asset's resource is written back: a widget editing several at once writes them itself, as the sound settings do.
@@ -83,5 +85,13 @@ public sealed class FileInspectorPanel : InspectorPanel
 
 		//Writing clears the flag - see GameResource.SaveToDisk - so this is once per edit rather than once per frame.
 		ResourceEdits.Write( _asset, _resource );
+	}
+
+	//The widget was made for this page; WidgetPanel only borrows it, and a kept one would play on, as a sound's does
+	public override void OnDeleted()
+	{
+		base.OnDeleted();
+
+		if ( _widget.IsValid() ) _widget.Destroy();
 	}
 }

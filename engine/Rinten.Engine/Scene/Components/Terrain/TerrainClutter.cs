@@ -367,7 +367,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			Ground = ground,
 			Modifiers = near?.ToArray() ?? [],
 			Mask = mask,
-			Seed = HashCode.Combine( Seed, layerIndex ),
+			//Not HashCode, whose seed differs every run, scattering the editor's clutter elsewhere in the game
+			Seed = (int)Mix( (uint)Seed, (uint)layerIndex, 0u ),
 			Density = MathF.Max( layer.Density, 1e-4f ),
 			OnLayers = layer.OnLayers.Count > 0 ? OnMask( layer.OnLayers ) : 0u,
 			ScaleMin = layer.Scale.Min,

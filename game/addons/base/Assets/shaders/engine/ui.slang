@@ -560,7 +560,14 @@ float4 MainPs( V2F i ) : SV_Target
 	if ( i.clip.z > i.clip.x || i.clip.w > i.clip.y )
 	{
 		float2 clipHalf = ( i.clip.zw - i.clip.xy ) * 0.5;
-		float2 onWindow = inWorld ? pixel : pixel + g_screen.zw;
+		float2 onWindow = pixel;
+
+#ifdef WEBGL
+		//GL counts the fragment's rows from the bottom; the clip is laid out from the top
+		if ( !inWorld ) onWindow.y = g_screen.y - onWindow.y;
+#endif
+
+		if ( !inWorld ) onWindow += g_screen.zw;
 
 		clipped = 1.0 - smoothstep( -0.5, 0.5,
 			RoundedBox( onWindow - ( i.clip.xy + clipHalf ), clipHalf, i.clipRadii,

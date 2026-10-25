@@ -105,4 +105,12 @@ public sealed class ResourceEditorInspectorPanel : InspectorPanel
 		ResourceEdits.Write( _asset, _resource );
 		_editor?.SavedToDisk();
 	}
+
+	//The editor was made for this page; WidgetPanel only borrows it
+	public override void OnDeleted()
+	{
+		base.OnDeleted();
+
+		if ( _editor is Widget widget && widget.IsValid() ) widget.Destroy();
+	}
 }

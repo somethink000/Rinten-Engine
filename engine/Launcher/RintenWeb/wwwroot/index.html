@@ -258,6 +258,14 @@ async function packedModule(url) {
 			var answer = await fetch(url + tries[i][0], { cache: "no-cache" });
 			if (!answer.ok) { why = url + tries[i][0] + ": " + answer.status; continue; }
 
+			//itch.io unpacks an uploaded .br and serves it gzipped on the fly, unsized: 100 MB that breaks off near the end
+			var encoded = (answer.headers.get("Content-Encoding") || "").toLowerCase();
+			if (tries[i][1] === "brotli" && encoded && encoded !== "br") {
+				why = url + tries[i][0] + ": re-encoded as " + encoded;
+				answer.body && answer.body.cancel();
+				continue;
+			}
+
 			//Open already where the host sent it with Content-Encoding, whatever the header says
 			var bytes = new Uint8Array(await answer.arrayBuffer());
 			if (!isWasm(bytes) && tries[i][1]) bytes = await unpack(bytes, tries[i][1]);

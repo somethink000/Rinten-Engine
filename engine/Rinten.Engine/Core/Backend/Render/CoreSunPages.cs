@@ -90,6 +90,13 @@ internal sealed class CoreSunPages : IDisposable
 	private readonly bool[] held = new bool[MostLevels * Grid * Grid];
 	private readonly bool[] wanted = new bool[Grid * Grid];
 
+	//Slots whose casters changed: baked again when there is room, read as they were until then - a page given up at once
+	//leaves its level unreadable, and every shadow drawn from it drops a level for the frames the bake waits
+	private readonly bool[] stale = new bool[MostLevels * Grid * Grid];
+
+	//Of a level's wanted slots, those holding nothing a pixel may read - see Wanted.
+	private readonly bool[] empty = new bool[Grid * Grid];
+
 	//Where each level's region starts, in its own tiles.
 	private readonly int[] fromX = new int[MostLevels];
 
@@ -125,6 +132,11 @@ internal sealed class CoreSunPages : IDisposable
 	private int moverViews;
 
 	private uint validMask;
+
+	//Levels whole but for their outer EdgePages, as a moving eye leaves them until the strip it moved into is baked;
+	//read short of that rim rather than not at all, or every shadow on screen drops a level each step - see SunStill
+	private uint edgeMask;
+	internal const int EdgePages = 2;
 	private bool casts;
 	private Vector3 eyeSun;
 
@@ -134,6 +146,14 @@ internal sealed class CoreSunPages : IDisposable
 
 	//Bakes drawn since the process started, and pages, for the report.
 	internal static long Bakes, PagesBaked;
+
+	//Frames since the process started on which a level was not to be read even short of its rim, outside a rebake -
+	//shadows there fell to a coarser level, which shows as a flicker on a moving eye
+	internal static long FramesShort, FramesNotWhole;
+
+	//Times the pages began again from nothing, and the last reason - for the report
+	internal static long Restarts;
+	internal static string RestartWhy = "";
 
 	//How many views this frame adds to the cull, after the camera.
 	internal int ViewCount => plannedCount;
@@ -189,13 +209,18 @@ internal sealed class CoreSunPages : IDisposable
 	private void ForgetAll()
 	{
 		Array.Clear( held );
+		Array.Clear( stale );
 		validMask = 0;
+		edgeMask = 0;
 		Array.Fill( levelTouched, true );
 	}
 
 	//Rebakes every page into the other map while pixels keep reading the current, still-whole one
-	private void Restart()
+	private void Restart( [System.Runtime.CompilerServices.CallerLineNumber] int line = 0 )
 	{
+		Restarts++;
+		RestartWhy = $"line {line}";
+
 		//What this map holds, where the pixels have been reading it: only a map the pixels were reading
 		//is worth keeping. A restart during a rebake keeps the bake that was on screen before it.
 		if ( !rebaking && validMask != 0 )
@@ -334,6 +359,7 @@ internal sealed class CoreSunPages : IDisposable
 		//a frame that cannot bake everything the coarse ones are what is worth having first.
 		var total = 0L;
 		validMask = 0;
+		edgeMask = 0;
 
 		for ( var level = levels - 1; level >= 0; level-- )
 		{
@@ -352,7 +378,9 @@ internal sealed class CoreSunPages : IDisposable
 			var missing = Wanted( level );
 			var whole = missing == 0 || PlanLevel( level, ref total );
 
-			if ( whole ) validMask |= 1u << level;
+			//Read wherever every slot holds its tile, stale or not; short of the rim where only the rim is empty
+			if ( whole || !EmptyIn( level, rimToo: true ) ) validMask |= 1u << level;
+			else if ( !EmptyIn( level, rimToo: false ) ) edgeMask |= 1u << level;
 
 			//Known from here: what the plan just took is what the level holds.
 			levelTouched[level] = false;
@@ -363,6 +391,9 @@ internal sealed class CoreSunPages : IDisposable
 
 		//A rebake ends on the frame its last level is taken: the pixels turn from the kept map to this one, whole
 		if ( rebaking && validMask == ( 1u << levels ) - 1u ) rebaking = false;
+
+		if ( !rebaking && ( validMask | edgeMask ) != ( 1u << levels ) - 1u ) FramesShort++;
+		if ( !rebaking && validMask != ( 1u << levels ) - 1u ) FramesNotWhole++;
 
 		//Bakes first, then the movers map, in the order Draw walks them, or the view lists get mismatched
 		for ( var i = 0; i < bakes.Count; i++ )
@@ -419,13 +450,40 @@ internal sealed class CoreSunPages : IDisposable
 				var tx = TileAt( fx, sx );
 				var slot = at + row + sx;
 
-				var need = !held[slot] || heldX[slot] != tx || heldY[slot] != ty;
+				var nothing = !held[slot] || heldX[slot] != tx || heldY[slot] != ty;
+				var need = nothing || stale[slot];
 				wanted[row + sx] = need;
+				empty[row + sx] = nothing;
 				if ( need ) missing++;
 			}
 		}
 
 		return missing;
+	}
+
+	//Whether a level still wants, after its plan, a slot holding nothing - anywhere, or short of its region's outer EdgePages
+	private bool EmptyIn( int level, bool rimToo )
+	{
+		var seamX = Slot( fromX[level] );
+		var seamY = Slot( fromY[level] );
+
+		for ( var sy = 0; sy < Grid; sy++ )
+		{
+			var y = ( sy - seamY ) & ( Grid - 1 );
+			var rimY = y < EdgePages || y >= Grid - EdgePages;
+
+			for ( var sx = 0; sx < Grid; sx++ )
+			{
+				if ( !wanted[( sy * Grid ) + sx] || !empty[( sy * Grid ) + sx] ) continue;
+				if ( rimToo ) return true;
+				if ( rimY ) continue;
+
+				var x = ( sx - seamX ) & ( Grid - 1 );
+				if ( x >= EdgePages && x < Grid - EdgePages ) return true;
+			}
+		}
+
+		return false;
 	}
 
 	//Plans a level's wanted slots as rectangles not crossing the torus seam; returns whether all fit
@@ -503,6 +561,7 @@ internal sealed class CoreSunPages : IDisposable
 			{
 				var slot = at + ( ( sy + y ) * Grid ) + sx + x;
 				held[slot] = true;
+				stale[slot] = false;
 				heldX[slot] = tx + x;
 				heldY[slot] = ty + y;
 			}
@@ -561,7 +620,7 @@ internal sealed class CoreSunPages : IDisposable
 
 						if ( heldX[slot] == tx && heldY[slot] == ty && held[slot] )
 						{
-							held[slot] = false;
+							stale[slot] = true;
 							levelTouched[level] = true;
 						}
 					}
@@ -827,6 +886,7 @@ internal sealed class CoreSunPages : IDisposable
 				held[at + ( ( bake.SlotY + y ) * Grid ) + bake.SlotX + x] = false;
 
 		validMask &= ~( 1u << bake.Level );
+		edgeMask &= ~( 1u << bake.Level );
 		levelTouched[bake.Level] = true;
 	}
 
@@ -854,7 +914,7 @@ internal sealed class CoreSunPages : IDisposable
 
 		CoreSceneRenderer.SetSunPages( frame, reading ? shown.Basis : basis,
 			reading ? shown.PageWorld : pageWorld, levels, low, high > low ? 1.0f / ( high - low ) : 0.0f,
-			eyeThere.x, eyeThere.y, casts ? ( reading ? shown.Mask : validMask ) : 0u, casts,
+			eyeThere.x, eyeThere.y, casts ? ( reading ? shown.Mask : validMask | ( edgeMask << MostLevels ) ) : 0u, casts,
 			portable ? (uint)read : CoreRenderDevice.ShadowMapIndex( maps[read] ), portable ? 2u : CoreRenderDevice.ShadowMapIndex( movers ),
 			portable ? 0u : CoreRenderDevice.ShadowMapIndex( maps[read], depth: true ), portable ? 0u : CoreRenderDevice.ShadowMapIndex( movers, depth: true ),
 			moverCorner.X, moverCorner.Y, casts && moverViews > 0 ? moverWide : 0.0f );

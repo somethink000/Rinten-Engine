@@ -61,6 +61,7 @@ public partial class GameObject
 
 		subtreeVersion = version;
 		subtreeDraws = SelfDrawsGizmos();
+		onlyCatches = SelfOnlyCatches();
 		drawingChildren = 0;
 
 		//All of them, and not until the first that says yes: the walk asks every child in turn anyway, so filling them in here is the same work done once
@@ -69,7 +70,8 @@ public partial class GameObject
 		{
 			if ( Children[i] is not { } child ) continue;
 
-			if ( !child.SubtreeDrawsGizmos() ) continue;
+			//A leaf that only lays click targets is walked from the scene, where the pointer can reach it - see DrawCatchers
+			if ( !child.SubtreeDrawsGizmos() || child.LeafCatcher ) continue;
 
 			subtreeDraws = true;
 
@@ -86,6 +88,44 @@ public partial class GameObject
 	private GameObject[] drawing;
 
 	private int drawingChildren;
+
+	//Whether all this object draws is click targets - see Component.GizmoOnlyCatches - and the components that lay them
+	private bool onlyCatches;
+	private Component[] catchers = [];
+
+	private bool LeafCatcher => onlyCatches && drawingChildren == 0;
+
+	private bool SelfOnlyCatches()
+	{
+		catchers = [];
+
+		if ( Flags.Contains( GameObjectFlags.Bone ) ) return false;
+
+		var found = new List<Component>();
+
+		foreach ( var c in Components.GetAll() )
+		{
+			if ( c is null ) continue;
+			if ( c.OverridesDrawGizmos && !c.GizmoOnlyCatches ) return false;
+
+			var typeDesc = Game.TypeLibrary.GetType( c.GetType() );
+			if ( typeDesc is not null && typeDesc.GetAttributes<EditorHandleAttribute>( true ).Any() ) return false;
+
+			if ( c.OverridesDrawGizmos ) found.Add( c );
+		}
+
+		catchers = found.ToArray();
+		return true;
+	}
+
+	//Whether the pointer's ray can reach a click target of an object that only lays them
+	private bool MayCatch( Ray ray, float depth )
+	{
+		for ( var i = 0; i < catchers.Length; i++ )
+			if ( catchers[i].GizmoMayCatch( ray, depth ) && catchers[i].IsValid() && catchers[i].Enabled ) return true;
+
+		return false;
+	}
 
 	//Whether this object alone has anything to draw.
 	private bool SelfDrawsGizmos()
@@ -261,16 +301,71 @@ public partial class GameObject
 			return;
 		}
 
-		var parentTx = Gizmo.Transform;
-
 		var tx = LocalTransform;
 
 		//Absolute gameobject transform need to be converted back to local because it's already in worldspace
 		if ( Flags.Contains( GameObjectFlags.Absolute ) )
 		{
-			tx = parentTx.ToLocal( tx );
+			tx = Gizmo.Transform.ToLocal( tx );
 		}
 
+		DrawGizmosAt( tx );
+	}
+
+	//The scene's leaves that only lay click targets, as of the scene's shape when it was last worked out - see DrawCatchers.
+	private List<GameObject> leafCatchers;
+	private int leafCatchersVersion = -1;
+
+	//The leaves that only lay click targets, walked from the scene rather than under their parents, and only those the pointer's
+	//ray can reach or that are pressed or selected: fourteen thousand models walked a frame for a hitbox each were most of the
+	//editor's frame, where a cached sphere each says in a few nanoseconds that the pointer is nowhere near
+	private void DrawCatchers()
+	{
+		if ( Scene is not { } scene ) return;
+
+		if ( leafCatchersVersion != scene.DirectoryVersion )
+		{
+			leafCatchersVersion = scene.DirectoryVersion;
+			leafCatchers ??= new List<GameObject>();
+			leafCatchers.Clear();
+
+			foreach ( var go in GetAllObjects( false ) )
+				if ( go != this && go.SubtreeDrawsGizmos() && go.LeafCatcher ) leafCatchers.Add( go );
+		}
+
+		var ray = Gizmo.CurrentRay;
+		var depth = Gizmo.RayDepth;
+		var everything = Gizmo.Pressed.Any;
+		var selection = Gizmo.Active?.Selection;
+
+		//The sphere first, the dearer questions only of what it lets through
+		foreach ( var go in leafCatchers )
+		{
+			if ( !everything && !go.MayCatch( ray, depth ) && selection?.Contains( go ) != true )
+			{
+				go.HasGizmoHandle = false;
+				continue;
+			}
+
+			if ( !go.IsValid() || !go.Active || go.Hidden() ) continue;
+
+			go.DrawGizmosAt( Gizmo.Transform.ToLocal( go.WorldTransform ) );
+		}
+	}
+
+	//Hidden by itself or by anything over it - what the walk tests a child for on the way down.
+	private bool Hidden()
+	{
+		if ( Tags.Has( "hidden" ) ) return true;
+
+		for ( var at = this; at is not null and not Rinten.Scene; at = at.Parent )
+			if ( at.Flags.Contains( GameObjectFlags.Hidden ) ) return true;
+
+		return false;
+	}
+
+	private void DrawGizmosAt( Transform tx )
+	{
 		gizmoPath ??= $"object-{GetHashCode()}";
 
 		using ( Gizmo.ObjectScopeInternal( this, tx, gizmoPath ) )
@@ -317,6 +412,8 @@ public partial class GameObject
 			}
 
 			DrawBoneGizmo();
+
+			if ( this is Rinten.Scene ) DrawCatchers();
 		}
 	}
 

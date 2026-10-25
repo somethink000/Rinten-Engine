@@ -242,11 +242,31 @@ public partial class SceneObject : IHandle
 	}
 
 	//We could do better here, sometimes sceneobjects are set to infinite bounds by design
+	//The model's box put through the transform, and what it was made from: asked of every object by each trace for
+	//picking, every frame the pointer or the camera moves, where turning eight corners each time was most of the cost
+	private BBox modelBoundsWorld, modelBoundsLocal;
+	private Transform modelBoundsAt;
+	private bool modelBoundsKept;
+
+	private BBox ModelBoundsInWorld()
+	{
+		var local = _model.Bounds;
+
+		if ( modelBoundsKept && local == modelBoundsLocal && _transform == modelBoundsAt ) return modelBoundsWorld;
+
+		modelBoundsLocal = local;
+		modelBoundsAt = _transform;
+		modelBoundsWorld = local.Transform( _transform );
+		modelBoundsKept = true;
+
+		return modelBoundsWorld;
+	}
+
 	private BBox GetSafeBounds()
 	{
 		//What was set, or what the model fills where nothing was.
 		var bounds = _bounds ?? ( _model.IsValid()
-			? _model.Bounds.Transform( _transform )
+			? ModelBoundsInWorld()
 			: BBox.FromPositionAndSize( Position ) );
 
 		var volume = bounds.Volume;

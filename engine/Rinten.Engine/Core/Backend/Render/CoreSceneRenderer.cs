@@ -982,7 +982,7 @@ internal static unsafe class CoreSceneRenderer
 		frame[SunPagesAt + 2] = zLow;
 		frame[SunPagesAt + 3] = zScale;
 
-		//The levels that are whole as bits of a float - exact, there are eight.
+		//The levels that are whole as bits of a float, then those whole but for their rim (CoreSunPages.edgeMask) - exact, eighteen bits
 		frame[SunEyeAt + 0] = eyeX;
 		frame[SunEyeAt + 1] = eyeY;
 		frame[SunEyeAt + 2] = whole;

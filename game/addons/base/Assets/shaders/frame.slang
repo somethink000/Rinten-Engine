@@ -974,6 +974,11 @@ static const float SunReachPages = 30.875;
 #endif
 static const float SunPageGrid = 64.0;
 
+//Levels at most, where the bits saying a level is whole but for its rim start, and how wide that rim is in pages -
+//CoreSunPages.MostLevels and EdgePages
+static const uint SunMostLevels = 9u;
+static const float SunEdgePages = 2.0;
+
 //And the map of what moves: texels a zone across.
 static const float MoverTexels = 1024.0;
 
@@ -1223,6 +1228,24 @@ float SunMovers( float3 world, float3 step, float2 tilt, bool wide, float zFrom,
 		: ShadowTap( uint( g_frame[0].sunMaps.y ), tap, compare );
 }
 
+//The level a point this far from the eye reads: the finest that reaches it, and of those the first baked there - every
+//page of it, or every page but its rim (a moving eye's leading strip not yet baked) where the point is short of the rim
+uint SunReadLevel( float away, float page0, uint levels, uint whole )
+{
+	float reach0 = page0 * SunReachPages;
+	uint level = away <= reach0 ? 0u : uint( ceil( log2( away / reach0 ) ) );
+
+	for ( ; level < levels; level++ )
+	{
+		if ( ( whole & ( 1u << level ) ) != 0u ) break;
+
+		bool rimOnly = ( whole & ( 1u << ( level + SunMostLevels ) ) ) != 0u;
+		if ( rimOnly && away <= page0 * exp2( float( level ) ) * ( SunReachPages - SunEdgePages ) ) break;
+	}
+
+	return level;
+}
+
 //The still world's part of the sun's shadow (1 lit), from its pages
 float SunStill( float3 world, float3 step, float2 tilt, bool wide )
 {
@@ -1233,11 +1256,8 @@ float SunStill( float3 world, float3 step, float2 tilt, bool wide )
 	float page0 = g_frame[0].sunPages.x;
 	uint levels = uint( g_frame[0].sunPages.y );
 	uint whole = uint( g_frame[0].sunEye.z );
-	float reach0 = page0 * SunReachPages;
 
-	//The finest level that reaches this far from the eye, and of those the first every page of which has been baked.
-	uint level = away <= reach0 ? 0u : uint( ceil( log2( away / reach0 ) ) );
-	while ( level < levels && ( whole & ( 1u << level ) ) == 0u ) level++;
+	uint level = SunReadLevel( away, page0, levels, whole );
 
 	return level < levels ? SunLevel( level, world, step, tilt, wide, page0, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) : 1.0;
 }
@@ -1330,10 +1350,8 @@ float3 SunLevelView( float3 world, float3 normal )
 	float page0 = g_frame[0].sunPages.x;
 	uint levels = uint( g_frame[0].sunPages.y );
 	uint whole = uint( g_frame[0].sunEye.z );
-	float reach0 = page0 * SunReachPages;
 
-	uint level = away <= reach0 ? 0u : uint( ceil( log2( away / reach0 ) ) );
-	while ( level < levels && ( whole & ( 1u << level ) ) == 0u ) level++;
+	uint level = SunReadLevel( away, page0, levels, whole );
 
 	if ( level >= levels ) return float3( 0.5, 0.5, 0.5 );
 

@@ -364,6 +364,22 @@ public partial class ModelRenderer : Renderer, ExecuteInEditor, ITintable, IMate
 		DrawChanged();
 	}
 
+	internal override bool GizmoOnlyCatches => true;
+
+	//Whether its hitbox can catch the ray at all, by the cull sphere it keeps; Gizmo.Hitbox.Model tests the mesh
+	internal override bool GizmoMayCatch( Ray ray, float depth )
+	{
+		CullSphere( out var centre, out var radius );
+
+		var towards = centre - ray.Position;
+		var along = Vector3.Dot( towards, ray.Forward );
+		var across = towards.LengthSquared - ( along * along );
+
+		if ( across > radius * radius || along + radius < 0.0f || along - radius > depth ) return false;
+
+		return !Game.IsPlaying && RenderType != ShadowRenderType.ShadowsOnly && Model.IsValid();
+	}
+
 	//Lays a mesh-shaped hitbox so the model can be clicked in the viewport; draws nothing
 	protected override void DrawGizmos()
 	{

@@ -153,7 +153,7 @@ internal static class PerfReport
 	private static long particlesAtArm, particleEffectsAtArm, particleStepsAtArm;
 
 	//How many charts of the sun had been traced as the window opened, and how often the world was built for the rays.
-	private static long bakesAtArm;
+	private static long bakesAtArm, shortAtArm, notWholeAtArm, restartsAtArm;
 
 	//The text counters as the window opened - see the text lines of the report
 	private static Rinten.UI.TextStats.Snapshot textAtArm;
@@ -415,6 +415,9 @@ internal static class PerfReport
 			particleStepsAtArm = ParticleGameSystem.Steps;
 
 			bakesAtArm = CoreSunPages.Bakes;
+			shortAtArm = CoreSunPages.FramesShort;
+			notWholeAtArm = CoreSunPages.FramesNotWhole;
+			restartsAtArm = CoreSunPages.Restarts;
 			pagesAtArm = CoreSunPages.PagesBaked;
 			lampFacesAtArm = CoreLampMaps.FacesDrawn;
 			moverFacesAtArm = CoreLampMaps.MoverFacesDrawn;
@@ -1230,7 +1233,9 @@ internal static class PerfReport
 	{
 		report.AppendLine( "-- shadows --------------------------------------------------------------" );
 		report.AppendLine( $"  {CoreSunPages.Bakes - bakesAtArm} bakes of the sun's pages in the window, " +
-			$"{CoreSunPages.PagesBaked - pagesAtArm} pages" );
+			$"{CoreSunPages.PagesBaked - pagesAtArm} pages, {CoreSunPages.FramesShort - shortAtArm} frames a level fell short " +
+			$"({CoreSunPages.FramesNotWhole - notWholeAtArm} with a level not whole), " +
+			$"{CoreSunPages.Restarts - restartsAtArm} restarts (last {CoreSunPages.RestartWhy})" );
 		report.AppendLine( $"  {CoreLampMaps.FacesDrawn - lampFacesAtArm} lamp faces drawn in the window" );
 		report.AppendLine( $"  what moves: {CoreLampMaps.MoverFacesDrawn - moverFacesAtArm} faces, {CoreLampMaps.MoverFrustumsDrawn - moverFrustumsAtArm} frustums" );
 		report.AppendLine();

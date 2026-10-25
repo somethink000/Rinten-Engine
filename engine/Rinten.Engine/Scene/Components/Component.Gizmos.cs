@@ -12,6 +12,12 @@ public abstract partial class Component
 
 	internal bool OverridesDrawGizmos => _typeOverridesDrawGizmos[GetType()];
 
+	//Whether its gizmo only lays targets for a click - then GizmoMayCatch says whether the pointer's ray can reach one, and the
+	//walk passes an object of nothing else by where it cannot; a scene of fourteen thousand models spent most of its frame there
+	internal virtual bool GizmoOnlyCatches => false;
+
+	internal virtual bool GizmoMayCatch( Ray ray, float depth ) => true;
+
 	internal void DrawGizmosInternal()
 	{
 		//Profiled per component type; editor calls this per viewport for many components

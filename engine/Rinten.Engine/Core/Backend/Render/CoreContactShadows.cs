@@ -15,7 +15,8 @@ internal static class CoreContactShadows
 			if ( field is not null ) return field;
 
 			var list = new Rendering.CommandList( "Contact shadows" );
-			var picture = list.GetPicture( Picture, Rendering.PictureFormat.Single );
+			//How lit, and how far from the eye the surface it was worked out for is - see ContactShadow in frame.slang
+			var picture = list.GetPicture( Picture, Rendering.PictureFormat.Pair );
 
 			list.SetRenderTarget( picture );
 			list.Blit( Shader );

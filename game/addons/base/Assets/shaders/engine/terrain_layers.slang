@@ -757,6 +757,7 @@ struct Ring
 	float sink;
 	float3 scale;
 	float3 at;
+	float cutPerMetre;
 };
 
 Ring RingOf()
@@ -769,6 +770,7 @@ Ring RingOf()
 	o.sink = asfloat( Bits( 5, RowRing ) );
 	o.scale = float3( asfloat( Bits( 6, RowRing ) ), asfloat( Bits( 7, RowRing ) ), asfloat( Bits( 8, RowRing ) ) );
 	o.at = float3( asfloat( Bits( 9, RowRing ) ), asfloat( Bits( 10, RowRing ) ), asfloat( Bits( 11, RowRing ) ) );
+	o.cutPerMetre = asfloat( Bits( 12, RowRing ) );
 
 	return o;
 }

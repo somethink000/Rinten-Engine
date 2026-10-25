@@ -94,8 +94,8 @@ public partial class Terrain
 		UpdateParamsMap();
 	}
 
-	//The ring into the numbers picture: where it was built, its reach and fade, the ground's sink and the terrain's place
-	//(Ring in terrain_layers.slang); without a ring nothing sinks
+	//The ring into the numbers picture: where it was built, its reach and fade, the ground's sink, the terrain's place and
+	//how long a cut is a metre out (Ring in terrain_layers.slang); without a ring nothing sinks
 	private void FillRelief()
 	{
 		reliefWritten = relief is not null;
@@ -117,5 +117,6 @@ public partial class Terrain
 		WriteFloat( 9, RowRing, at.x );
 		WriteFloat( 10, RowRing, at.y );
 		WriteFloat( 11, RowRing, at.z );
+		WriteFloat( 12, RowRing, relief.CutPerMetre );
 	}
 }

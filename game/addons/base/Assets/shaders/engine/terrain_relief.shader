@@ -101,6 +101,10 @@ void WriteVertex( uint t, uint4 cut, uint n, uint i, uint j )
 	Ring ring = RingOf();
 	Ground g = GroundPaint();
 
+	//The level read by the corner's own distance, not its triangle's cuts: a corner two triangles share is lifted alike,
+	//and a ring laid again a metre on lifts the same ground the same, where by cut counts it jumped a level at every lay
+	if ( ring.cutPerMetre > 0.0 ) texel = max( distance( place, ring.eye ) * ring.cutPerMetre, 0.05 );
+
 	float lift = 0.0;
 	float share = RingShare( ring, place );
 

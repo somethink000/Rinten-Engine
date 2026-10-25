@@ -34,6 +34,7 @@ internal sealed class TerrainRelief : IDisposable
 	private sealed class Laid
 	{
 		public Vector3 Eye;
+		public float Pixels;
 		public readonly List<Corner> Corners = new();
 		public readonly List<uint> Cuts = new();
 		public int Triangles, Vertices, Indices;
@@ -77,6 +78,10 @@ internal sealed class TerrainRelief : IDisposable
 
 	/// <summary>Where the eye was, in the terrain's metres, when the ring was built round it.</summary>
 	public Vector3 Eye => builtAt;
+
+	/// <summary>Metres of a cut's side a metre from the eye, for the ring on the card - see terrain_relief.shader.</summary>
+	public float CutPerMetre => builtPixels > 0.0f ? CutPixels / builtPixels : 0.0f;
+	private float builtPixels;
 
 	/// <summary>Whether there is a ring the card has made to draw.</summary>
 	public bool Drawn => expanded && indices > 0;
@@ -147,6 +152,7 @@ internal sealed class TerrainRelief : IDisposable
 		}
 
 		builtAt = laid.Eye;
+		builtPixels = laid.Pixels;
 
 		triangles = laid.Triangles;
 		vertices = laid.Vertices;
@@ -191,6 +197,7 @@ internal sealed class TerrainRelief : IDisposable
 		var cuts = into.Cuts;
 
 		into.Eye = eye;
+		into.Pixels = pixels;
 		corners.Clear();
 		cuts.Clear();
 

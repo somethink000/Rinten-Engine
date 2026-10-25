@@ -1293,7 +1293,11 @@ float ContactShadow( float3 world )
 	float2 at = ( ( clip.xy / clip.w ) * 0.5 + 0.5 ) * size;
 	if ( any( abs( at - g_shadowScreen ) > 2.0 ) ) return 1.0;
 
-	return g_textures[NonUniformResourceIndex( picture )].SampleLevel( g_shadowScreen / size, 0.0 ).r;
+	//Only the surface it was worked out for: water or glass over it is somewhere else along the same pixel
+	float2 held = g_textures[NonUniformResourceIndex( picture )].SampleLevel( g_shadowScreen / size, 0.0 ).rg;
+	float away = distance( world, EYE_FRAME( camera ).xyz );
+
+	return abs( away - held.y ) <= max( held.y * 0.02, 0.05 ) ? held.x : 1.0;
 #endif
 }
 

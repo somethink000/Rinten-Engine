@@ -11,9 +11,9 @@ FEATURES
 PARAMETERS
 {
 	//How far towards the sun to look, as a share of the pixel's distance, and the least and most of it in metres.
-	float g_flShare < Attribute( "Share" ); Default( 0.02 ); >;
-	float g_flLeast < Attribute( "Least" ); Default( 0.15 ); >;
-	float g_flMost < Attribute( "Most" ); Default( 1.5 ); >;
+	float g_flShare < Attribute( "Share" ); Default( 0.04 ); >;
+	float g_flLeast < Attribute( "Least" ); Default( 0.3 ); >;
+	float g_flMost < Attribute( "Most" ); Default( 3.0 ); >;
 
 	//Reads along the way.
 	float g_flSteps < Attribute( "Steps" ); Default( 12.0 ); >;
@@ -39,27 +39,46 @@ float Ahead( float raw )
 	return near * far / max( far - raw * ( far - near ), 1e-6 );
 }
 
+//The surface's own plane from how the place moves across one pixel, turned to the eye - see ambient_occlusion.shader
+float3 PlaneOf( float3 place, float3 view )
+{
+	float3 normal = cross( ddx( place ), ddy( place ) );
+	float size = dot( normal, normal );
+
+	normal = size > 1e-20 && size < 1e20 ? normal * rsqrt( size ) : view;
+	return dot( normal, view ) < 0.0 ? -normal : normal;
+}
+
+//The depth at a texel's middle: a read between texels blends a near edge with what is behind it, a caster that is not there
+float DepthAt( float2 uv, float2 size )
+{
+	return SceneDepthRaw( ( floor( uv * size ) + 0.5 ) / size );
+}
+
 [shader("fragment")]
 float4 MainPs( PostV2F i ) : SV_Target0
 {
 	float raw = SceneDepthRaw( i.uv );
-
-	//The sky, or no sun to cast: nothing covers it.
-	if ( raw >= 1.0 || !HasSun() ) return float4( 1.0, 1.0, 1.0, 1.0 );
+	float2 size = max( g_vFrameSize.xy, 1.0 );
 
 	float3 place = PlaceOf( i.uv, raw );
 	float3 eye = EYE_FRAME( camera ).xyz;
+	float3 view = normalize( eye - place );
+	float3 normal = PlaneOf( place, view );
+
+	//With how far it is, so a surface drawn over it later - water, glass - is not shaded by what lies under it
 	float away = distance( place, eye );
+
+	//The sky, no sun, or a surface turned from it, which its light leaves in shade already
 	float3 sun = normalize( g_frame[0].sunDirection.xyz );
+	if ( raw >= 1.0 || !HasSun() || dot( normal, sun ) < 0.05 ) return float4( 1.0, away, 0.0, 0.0 );
 
-	//Longer with distance; started a pixel towards the eye so it does not meet its own surface, and at a turn of its
-	//own a pixel so neighbours share the steps between them
+	//A pixel's width there, across the view
+	float pixel = distance( PlaceOf( i.uv + float2( 1.0 / size.x, 0.0 ), raw ), place );
 	float reach = clamp( away * g_flShare, g_flLeast, g_flMost );
-	float pixel = away * 2.0 / max( g_vFrameSize.y, 1.0 );
-	float3 from = place + ( normalize( eye - place ) * pixel );
 
-	uint2 cell = uint2( i.position.xy ) & 3u;
-	float jitter = ( float( ( cell.x * 4u + cell.y * 11u ) & 15u ) + 0.5 ) / 16.0;
+	//Off the surface along its own normal, so the way never meets the plane it starts on
+	float3 from = place + ( normal * ( pixel * 2.0 ) );
 
 	int steps = clamp( int( g_flSteps ), 4, 32 );
 
@@ -68,7 +87,7 @@ float4 MainPs( PostV2F i ) : SV_Target0
 
 	for ( int k = 0; k < steps; k++ )
 	{
-		float t = ( float( k ) + jitter ) / float( steps );
+		float t = ( float( k ) + 1.0 ) / float( steps );
 		float3 at = from + ( sun * ( reach * t ) );
 
 		float4 clip = mul( float4( at, 1.0 ), EYE_FRAME( worldToClip ) );
@@ -77,17 +96,15 @@ float4 MainPs( PostV2F i ) : SV_Target0
 		float2 uv = ( ( clip.xy / clip.w ) * 0.5 ) + 0.5;
 		if ( any( uv < 0.0 ) || any( uv > 1.0 ) ) break;
 
-		float ray = Ahead( clip.z / clip.w );
-		float there = Ahead( SceneDepthRaw( uv ) );
-		float front = ray - there;
+		float front = Ahead( clip.z / clip.w ) - Ahead( DepthAt( uv, size ) );
 
-		//Something nearer the eye than the way, by more than a step's slack and less than the depth a caster may have
-		if ( front > pixel * 1.5 && front < thick )
+		//In front of the way by more than the slack a step's depth carries, and less than a caster may be thick
+		if ( front > ( pixel * 2.0 ) + ( reach * t * 0.03 ) && front < thick )
 		{
 			//Fading over the last of the way, so where the march gives out is not a hard line
-			return saturate( t * 3.0 - 2.0 ).xxxx;
+			return float4( saturate( t * 3.0 - 2.0 ), away, 0.0, 0.0 );
 		}
 	}
 
-	return float4( 1.0, 1.0, 1.0, 1.0 );
+	return float4( 1.0, away, 0.0, 0.0 );
 }

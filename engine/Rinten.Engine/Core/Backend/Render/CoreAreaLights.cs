@@ -26,10 +26,10 @@ internal static class CoreAreaLights
 	private static bool Ensure()
 	{
 		//The old device's tables went with it; nothing to give back
-		if ( generation != CoreResources.Generation )
+		if ( generation != CoreResources.Cleared )
 		{
 			inverse = scale = 0;
-			generation = CoreResources.Generation;
+			generation = CoreResources.Cleared;
 		}
 
 		if ( inverse != 0 && scale != 0 ) return true;

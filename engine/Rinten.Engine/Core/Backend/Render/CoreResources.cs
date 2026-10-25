@@ -1245,6 +1245,7 @@ internal static class CoreResources
 		if ( string.IsNullOrWhiteSpace( path ) )
 		{
 			Generation++;
+			MeshesForgotten++;
 			return;
 		}
 
@@ -1267,6 +1268,7 @@ internal static class CoreResources
 		}
 
 		Generation++;
+		MeshesForgotten++;
 	}
 
 	//Drops a destroyed mesh from the by-model cache for every model that shared its path
@@ -1592,6 +1594,9 @@ internal static class CoreResources
 
 	//Generation bumps that were only texture swaps, so scene tables needn't rebake shadows for them
 	internal static int PictureGeneration { get; private set; } = 1;
+
+	//Generation bumps that were only a model's meshes given back: what drew them looks again, nothing else
+	internal static int MeshesForgotten { get; private set; } = 1;
 
 	//Bumped only when the whole device goes (Clear), for holders of device pictures across Generation's other bumps
 	internal static int Cleared { get; private set; } = 1;

@@ -779,4 +779,48 @@ float RingShare( Ring ring, float3 local )
 	return saturate( ( ring.reach - distance( local, ring.eye ) ) / ring.fade );
 }
 
+//Metres the ring casts from under itself - more than the moving casters' map's depth steps on flat ground.
+static const float RingShadowSink = 0.05;
+
+//Where a ground vertex stands, in the terrain's metres and the world, and which layers its weights are for
+struct GroundPlace
+{
+	float3 local;
+	float3 world;
+	float2 palette;
+};
+
+//The ground's vertex stage, for terrain.shader and any terrain MaterialOverride: a relief ring corner (marked in uv1.z)
+//is in the terrain's metres with its own palette; the ground's corners under the ring sink so the lifted ground covers them
+GroundPlace PlaceGround( float3 position, float3 normal, float4 uv0, float4 uv1, float2 palette, row_major float4x4 modelToWorld )
+{
+	GroundPlace o;
+	o.local = position;
+	o.palette = palette;
+
+#ifdef PORTABLE
+	o.world = mul( float4( position, 1.0 ), modelToWorld ).xyz;
+#else
+	Ring ring = RingOf();
+
+	if ( uv1.z > 0.5 )
+	{
+		o.world = ( position * ring.scale ) + ring.at;
+		o.palette = uv0.zw;
+
+		//Into a light's map from a little under itself: what it lifts casts, where it lifts nothing it does not shade itself
+		if ( LightLooks() ) o.world -= normal * RingShadowSink;
+	}
+	else
+	{
+		if ( ring.reach > 0.0 )
+			o.local -= normal * ( ring.sink * saturate( ( ring.reach + ( ring.fade * 0.5 ) - distance( position, ring.eye ) ) / ( ring.fade * 0.5 ) ) );
+
+		o.world = mul( float4( o.local, 1.0 ), modelToWorld ).xyz;
+	}
+#endif
+
+	return o;
+}
+
 #endif

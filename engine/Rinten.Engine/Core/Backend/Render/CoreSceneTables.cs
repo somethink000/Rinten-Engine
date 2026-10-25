@@ -319,6 +319,7 @@ internal sealed class CoreSceneTables
 	private readonly List<int> objectSlots = new();
 	private int resources = -1;
 	private int pictures = -1;
+	private int forgotten = -1;
 	private int paths = -1;
 
 	//How many instance slots are in use, including freed ones the card still holds.
@@ -376,17 +377,24 @@ internal sealed class CoreSceneTables
 			Moved.Clear();
 		}
 
+		var meshesGone = false;
+
 		if ( resources != CoreResources.Generation ||
 			paths != Rinten.Rendering.DrawSettings.PathGeneration )
 		{
-			//A bump caused only by texture swaps needs no rebuild; records hold no picture numbers
-			var picturesOnly = resources >= 0 && paths == Rinten.Rendering.DrawSettings.PathGeneration &&
-				CoreResources.Generation - resources == CoreResources.PictureGeneration - pictures;
+			//Texture swaps need no rebuild, as records hold no picture numbers; meshes given back - a terrain chunk
+			//streamed out - only the slots that drew them, or every caster changes and every shadow page bakes again
+			var swaps = CoreResources.PictureGeneration - pictures;
+			var gone = CoreResources.MeshesForgotten - forgotten;
+			var narrow = resources >= 0 && paths == Rinten.Rendering.DrawSettings.PathGeneration &&
+				CoreResources.Generation - resources == swaps + gone;
 
 			resources = CoreResources.Generation;
 			pictures = CoreResources.PictureGeneration;
+			forgotten = CoreResources.MeshesForgotten;
 			paths = Rinten.Rendering.DrawSettings.PathGeneration;
-			rebuiltAll = rebuiltAll || !picturesOnly;
+			rebuiltAll = rebuiltAll || !narrow;
+			meshesGone = narrow && gone > 0;
 		}
 
 		if ( lodGroups != Rinten.Rendering.LodGroups.Generation )
@@ -461,6 +469,12 @@ internal sealed class CoreSceneTables
 		}
 		else
 		{
+			if ( meshesGone )
+			{
+				for ( var i = 0; i < used; i++ )
+					if ( entries[i] is { Live: true, Mesh.Released: true } ) Resolve( i );
+			}
+
 			var changed = ModelRenderer.CullChanged;
 			var held = 0;
 

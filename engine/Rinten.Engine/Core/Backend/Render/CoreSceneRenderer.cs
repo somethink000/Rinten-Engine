@@ -220,6 +220,9 @@ internal static unsafe class CoreSceneRenderer
 		public ulong Vertices;
 		public ulong Indices;
 
+		/// <summary>Given back to the device: whatever still names it has to look its model up again.</summary>
+		public bool Released;
+
 		/// <summary>Whether its skin follows its bones as dual quaternions - see PoseBones.</summary>
 		public bool DualQuaternion;
 
@@ -2222,6 +2225,7 @@ internal static unsafe class CoreSceneRenderer
 	{
 		if ( mesh is null ) return;
 
+		mesh.Released = true;
 		CoreClusters.Give( mesh );
 
 		if ( mesh.Pooled ) CoreGeometryPool.Give( mesh );

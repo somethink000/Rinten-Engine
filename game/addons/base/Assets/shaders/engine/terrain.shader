@@ -82,52 +82,20 @@ struct Out
 #endif
 };
 
-//Metres the ring casts from under itself - more than the moving casters' map's depth steps on flat ground.
-static const float RingShadowSink = 0.05;
-
-//The vertex body, which the classic entry below and the engine's cluster entry both run -
-//see cluster_surface.slang. Nothing is moved: the ground is where its vertices say it is.
+//The vertex body, which the classic entry below and the engine's cluster entry both run - see cluster_surface.slang.
 V2F Vertex( VIn i )
 {
-	row_major float4x4 modelToWorld = g_modelToWorld;
-
-	float3 local = i.position;
-	float3 world;
-	float2 palette = g_vPalette.xy;
-
-#ifdef PORTABLE
-	world = mul( float4( local, 1.0 ), modelToWorld ).xyz;
-#else
-	Ring ring = RingOf();
-
-	//A relief ring corner (marked in uv1.z) is in the terrain's metres with no matrix; the ground's corners under the ring
-	//sink a little so the lifted ground stays over them, and nothing sinks past the ring's edge
-	if ( i.texCoord1.z > 0.5 )
-	{
-		world = ( local * ring.scale ) + ring.at;
-		palette = i.texCoord0.zw;
-
-		//Into a light's map from a little under itself: what it lifts casts, where it lifts nothing it does not shade itself.
-		if ( LightLooks() ) world -= i.normal * RingShadowSink;
-	}
-	else
-	{
-		if ( ring.reach > 0.0 )
-			local -= i.normal * ( ring.sink * saturate( ( ring.reach + ( ring.fade * 0.5 ) - distance( local, ring.eye ) ) / ( ring.fade * 0.5 ) ) );
-
-		world = mul( float4( local, 1.0 ), modelToWorld ).xyz;
-	}
-#endif
+	GroundPlace at = PlaceGround( i.position, i.normal, i.texCoord0, i.texCoord1, g_vPalette.xy, g_modelToWorld );
 
 	V2F o;
-	o.position = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
-	o.world = world;
-	o.local = local;
+	o.position = mul( float4( at.world, 1.0 ), EYE_FRAME( worldToClip ) );
+	o.world = at.world;
+	o.local = at.local;
 	o.normal = i.normal;
 	o.paint = float4( i.colour.xy, i.texCoord0.xy );
 	//Layers 4 and 5 in the second coordinate, 6 and 7 in the colour's other half - see TerrainChunkBaker.
 	o.paintMore = float4( i.texCoord1.xy, i.colour.zw );
-	o.palette = palette;
+	o.palette = at.palette;
 
 	DEPTH_ID_SET( o, float2( 0.0, 0.0 ) );
 

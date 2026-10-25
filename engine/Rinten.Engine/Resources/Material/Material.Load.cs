@@ -366,7 +366,7 @@ public partial class Material
 		made.RawPixels = data;
 		made.DeviceSrgb = !data;
 
-		var texture = new Texture( made );
+		var texture = new Texture( made, image );
 
 		lock ( fileTextures ) fileTextures[key] = texture;
 

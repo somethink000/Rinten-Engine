@@ -44,6 +44,9 @@ public partial class Texture : Resource, IDisposable
 		gotdesc = true;
 	}
 
+	//One the renderer holds for a file, under that file's path, so what resolves pictures by path finds the same one
+	internal Texture( CoreTexture core, string path ) : this( core ) => ResourcePath = path;
+
 	~Texture()
 	{
 		using var finalizing = MainThread.InFinalizer();

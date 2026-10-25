@@ -17,10 +17,11 @@ internal sealed class TerrainRelief : IDisposable
 	//What one ring may come to - a few tens of megabytes at most; past it every triangle is cut coarser until it fits.
 	private const int MostVertices = 400_000;
 
-	//Pixels a cut's side aims to cover on screen, and the most cuts a side: finer, the ground seen edge-on is shaded in quads
-	//that are mostly outside their triangles, and drawn again into every depth and shadow pass
+	//Pixels a cut's side aims to cover on screen - finer, the ground seen edge-on is shaded in quads that are mostly outside
+	//their triangles, and drawn again into every depth and shadow pass - and the shortest a cut gets, in metres, however
+	//coarse the ground: a terrain made from a height map has sides of metres
 	private const float CutPixels = 16.0f;
-	private const uint MostCuts = 16;
+	private const float LeastCut = 0.05f;
 
 	//What the card reads of a corner: where it is, its normal, its chunk's eight slots' paint, and which layers those are.
 	[StructLayout( LayoutKind.Sequential )]
@@ -231,7 +232,7 @@ internal sealed class TerrainRelief : IDisposable
 				var square = MathF.Abs( Vector3.Dot( facing, ( eye - ( ( a.Position + b.Position + c.Position ) / 3.0f ) ).Normal ) );
 				var across = side * pixels / away * MathF.Sqrt( MathF.Max( square, 0.05f ) );
 
-				var n = near >= Reach ? 1u : (uint)Math.Clamp( MathF.Ceiling( across / CutPixels ), 1.0f, MostCuts );
+				var n = near >= Reach ? 1u : (uint)Math.Clamp( MathF.Ceiling( across / CutPixels ), 1.0f, MathF.Max( MathF.Ceiling( side / LeastCut ), 1.0f ) );
 
 				cuts.Add( n );
 				cuts.Add( 0 );

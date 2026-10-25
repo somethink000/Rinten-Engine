@@ -22,7 +22,8 @@ public partial class Terrain
 		}
 	}
 
-	//Nothing is baked again when it changes: the ground's chunks are told to wear it, and it is told which picture holds the terrain's numbers - it has to declare g_flParams , as shaders/engine/terrain.shader does.
+	//Nothing is baked again when it changes: the chunks wear it and it is told g_flParams, which it declares as terrain.shader
+	//does; its vertex stage calls PlaceGround (terrain_layers.slang) to take part in the relief ring
 	/// <summary>Override the terrain rendering with your own material shader. This needs to be explicitly set up to work with the Terrain Shader API.</summary>
 	[Property]
 	public Material MaterialOverride

@@ -68,9 +68,17 @@ internal static class TerrainMeshCopy
 			sourceOf?.Add( vertex );
 		}
 
-		Vector3 GroundNormal( int vertex )
+		//The triangles round a vertex by id: a saved mesh keeps their order but not the order a vertex lists them in, and a sum
+		//in another order differs in its last bits - enough to file the same chunk under another key, missing the shipped bake
+		void Around( int vertex )
 		{
 			mesh.TrianglesAround( vertex, around );
+			around.Sort();
+		}
+
+		Vector3 GroundNormal( int vertex )
+		{
+			Around( vertex );
 
 			var sum = Vector3.Zero;
 
@@ -83,7 +91,7 @@ internal static class TerrainMeshCopy
 
 		Vector3 WornNormal( int vertex, ushort material, Vector3 face )
 		{
-			mesh.TrianglesAround( vertex, around );
+			Around( vertex );
 
 			var sum = Vector3.Zero;
 

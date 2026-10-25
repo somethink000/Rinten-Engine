@@ -17,6 +17,11 @@ internal sealed class TerrainRelief : IDisposable
 	//What one ring may come to - a few tens of megabytes at most; past it every triangle is cut coarser until it fits.
 	private const int MostVertices = 400_000;
 
+	//Pixels a cut's side aims to cover on screen, and the most cuts a side: finer, the ground seen edge-on is shaded in quads
+	//that are mostly outside their triangles, and drawn again into every depth and shadow pass
+	private const float CutPixels = 16.0f;
+	private const uint MostCuts = 16;
+
 	//What the card reads of a corner: where it is, its normal, its chunk's eight slots' paint, and which layers those are.
 	[StructLayout( LayoutKind.Sequential )]
 	private struct Corner
@@ -40,6 +45,7 @@ internal sealed class TerrainRelief : IDisposable
 	private bool unsent;
 
 	private Vector3 askedAt;
+	private float askedPixels;
 	private bool asked;
 
 	private GpuBuffer<Corner> cornerBuffer;
@@ -108,21 +114,22 @@ internal sealed class TerrainRelief : IDisposable
 		shape.Hold( vertexBuffer, indexBuffer, triangles > 0 ? indices : 0, grown );
 	}
 
-	/// <summary>Whether the eye has gone far enough from where the ring was last asked for that it wants building again.</summary>
-	public bool Wants( Vector3 eye ) => !asked || eye.Distance( askedAt ) > Moved;
+	/// <summary>Whether the eye has gone far enough, or the screen changed enough, that the ring wants building again.</summary>
+	public bool Wants( Vector3 eye, float pixels ) => !asked || eye.Distance( askedAt ) > Moved || MathF.Abs( pixels - askedPixels ) > askedPixels * 0.1f;
 
 	/// <summary>Whether a ring is being laid out on a worker now, or is laid out and not yet written to the card.</summary>
 	public bool Laying => laying is not null || unsent;
 
-	/// <summary>Lays the ring out on a worker from the ground near the eye, in the terrain's metres; Take puts it on the card.</summary>
-	public void Build( Vector3 eye, (TerrainSoup Ground, byte[] Palette)[] grounds )
+	/// <summary>Lays the ring out on a worker round the eye, for pixels a metre a metre away; Take puts it on the card.</summary>
+	public void Build( Vector3 eye, float pixels, (TerrainSoup Ground, byte[] Palette)[] grounds )
 	{
 		if ( Laying ) return;
 
 		askedAt = eye;
+		askedPixels = pixels;
 		asked = true;
 
-		laying = System.Threading.Tasks.Task.Run( () => Lay( laid, eye, grounds ) );
+		laying = System.Threading.Tasks.Task.Run( () => Lay( laid, eye, pixels, grounds ) );
 	}
 
 	/// <summary>Puts a ring the worker finished on the card; true when the ring changed, so its place is written again.</summary>
@@ -177,7 +184,7 @@ internal sealed class TerrainRelief : IDisposable
 	}
 
 	//The ring's corners and cuts out of the grounds within reach of the eye, on a worker: nothing here touches the scene or the card
-	private static void Lay( Laid into, Vector3 eye, (TerrainSoup Ground, byte[] Palette)[] grounds )
+	private static void Lay( Laid into, Vector3 eye, float pixels, (TerrainSoup Ground, byte[] Palette)[] grounds )
 	{
 		var corners = into.Corners;
 		var cuts = into.Cuts;
@@ -214,8 +221,17 @@ internal sealed class TerrainRelief : IDisposable
 				corners.Add( CornerOf( b, palette, numbers, slots ) );
 				corners.Add( CornerOf( c, palette, numbers, slots ) );
 
-				//Cuts a side by how near it is: a triangle in the fade's last stretch is lifted by nothing and only covers the sunk ground.
-				uint n = near < 4.0f ? 16u : near < 8.0f ? 8u : near < 12.0f ? 4u : near < Reach ? 2u : 1u;
+				//Cut so a side covers CutPixels where it is nearest the eye, across and - seen at a slant, by how squarely it faces
+				//the eye - shorter the other way, the two met halfway; one in the fade's last stretch is lifted by nothing
+				var side = MathF.Sqrt( MathF.Max( ( b.Position - a.Position ).LengthSquared,
+					MathF.Max( ( c.Position - b.Position ).LengthSquared, ( a.Position - c.Position ).LengthSquared ) ) );
+
+				var away = MathF.Max( near, 0.5f );
+				var facing = Vector3.Cross( b.Position - a.Position, c.Position - a.Position ).Normal;
+				var square = MathF.Abs( Vector3.Dot( facing, ( eye - ( ( a.Position + b.Position + c.Position ) / 3.0f ) ).Normal ) );
+				var across = side * pixels / away * MathF.Sqrt( MathF.Max( square, 0.05f ) );
+
+				var n = near >= Reach ? 1u : (uint)Math.Clamp( MathF.Ceiling( across / CutPixels ), 1.0f, MostCuts );
 
 				cuts.Add( n );
 				cuts.Add( 0 );

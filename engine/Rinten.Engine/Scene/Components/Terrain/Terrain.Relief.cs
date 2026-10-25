@@ -60,11 +60,13 @@ public partial class Terrain
 		//The ring and where the ground sinks under it change in the same frame - see FillRelief.
 		if ( relief.Take() ) UpdateParamsMap();
 
-		if ( relief.Laying || ( !reliefStale && !relief.Wants( eye ) ) ) return;
+		var pixels = Scene.Detail.Looking ? Scene.Detail.PixelsAtAMetre : UnseenPixelsAtAMetre;
+
+		if ( relief.Laying || ( !reliefStale && !relief.Wants( eye, pixels ) ) ) return;
 
 		reliefStale = false;
 
-		relief.Build( eye, AroundEye( eye, TerrainRelief.Reach + TerrainRelief.Fade ).ToArray() );
+		relief.Build( eye, pixels, AroundEye( eye, TerrainRelief.Reach + TerrainRelief.Fade ).ToArray() );
 	}
 
 	//The grounds of every chunk within a reach of the eye, in the terrain's metres, with their palettes

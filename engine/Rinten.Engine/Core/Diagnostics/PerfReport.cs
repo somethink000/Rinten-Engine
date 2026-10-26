@@ -157,7 +157,7 @@ internal static class PerfReport
 
 	//The text counters as the window opened - see the text lines of the report
 	private static Rinten.UI.TextStats.Snapshot textAtArm;
-	private static long pagesAtArm;
+	private static long pagesAtArm, changesAtArm, staledAtArm;
 	private static long lampFacesAtArm, moverFacesAtArm, moverFrustumsAtArm;
 
 	//The collector's counts as the window opened.
@@ -419,6 +419,8 @@ internal static class PerfReport
 			notWholeAtArm = CoreSunPages.FramesNotWhole;
 			restartsAtArm = CoreSunPages.Restarts;
 			pagesAtArm = CoreSunPages.PagesBaked;
+			changesAtArm = CoreSunPages.ChangesNoted;
+			staledAtArm = CoreSunPages.PagesStaled;
 			lampFacesAtArm = CoreLampMaps.FacesDrawn;
 			moverFacesAtArm = CoreLampMaps.MoverFacesDrawn;
 			moverFrustumsAtArm = CoreLampMaps.MoverFrustumsDrawn;
@@ -1236,6 +1238,7 @@ internal static class PerfReport
 			$"{CoreSunPages.PagesBaked - pagesAtArm} pages, {CoreSunPages.FramesShort - shortAtArm} frames a level fell short " +
 			$"({CoreSunPages.FramesNotWhole - notWholeAtArm} with a level not whole), " +
 			$"{CoreSunPages.Restarts - restartsAtArm} restarts (last {CoreSunPages.RestartWhy})" );
+		report.AppendLine( $"  {CoreSunPages.ChangesNoted - changesAtArm} still-world changes noted, leaving {CoreSunPages.PagesStaled - staledAtArm} pages to bake again" );
 		report.AppendLine( $"  {CoreLampMaps.FacesDrawn - lampFacesAtArm} lamp faces drawn in the window" );
 		report.AppendLine( $"  what moves: {CoreLampMaps.MoverFacesDrawn - moverFacesAtArm} faces, {CoreLampMaps.MoverFrustumsDrawn - moverFrustumsAtArm} frustums" );
 		report.AppendLine();

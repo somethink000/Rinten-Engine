@@ -151,6 +151,9 @@ internal sealed class CoreSunPages : IDisposable
 	//shadows there fell to a coarser level, which shows as a flicker on a moving eye
 	internal static long FramesShort, FramesNotWhole;
 
+	//Still-world changes the pages were told of, and the pages they left to bake again - for the report
+	internal static long ChangesNoted, PagesStaled;
+
 	//Times the pages began again from nothing, and the last reason - for the report
 	internal static long Restarts;
 	internal static string RestartWhy = "";
@@ -620,6 +623,7 @@ internal sealed class CoreSunPages : IDisposable
 
 						if ( heldX[slot] == tx && heldY[slot] == ty && held[slot] )
 						{
+							if ( !stale[slot] ) PagesStaled++;
 							stale[slot] = true;
 							levelTouched[level] = true;
 						}
@@ -768,6 +772,8 @@ internal sealed class CoreSunPages : IDisposable
 
 		//Nothing to keep up where they are about to be worked out again anyway.
 		if ( rebuild || !spanKnown ) return;
+
+		ChangesNoted += casters.Changes.Count;
 
 		foreach ( var change in casters.Changes )
 		{

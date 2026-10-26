@@ -299,6 +299,8 @@ public partial class Terrain
 	{
 		if ( chunks.Length == 0 ) return;
 
+		groundStale = true;
+
 		if ( box.Mins.x < chunkOrigin.x || box.Mins.z < chunkOrigin.y
 			|| box.Maxs.x >= chunkOrigin.x + ( chunksWide * chunkSpan ) || box.Maxs.z >= chunkOrigin.y + ( chunksDeep * chunkSpan ) )
 		{

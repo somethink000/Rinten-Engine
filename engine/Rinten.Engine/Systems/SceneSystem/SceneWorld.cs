@@ -32,6 +32,10 @@ public sealed partial class SceneWorld : IHandle
 
 	internal void TouchMembership() => Membership++;
 
+	//A terrain's heights round the eye - its picture's place in the table, and the world x, z of its corner - for the
+	//frame's GroundBelow; nought where none is laid. See Terrain.Ground
+	internal (int Index, float X, float Z) Ground;
+
 	//InternalSceneObjects as an array, made again only when Membership moves; shared, so read it and never write it
 	private SceneObject[] objectsNow;
 	private int objectsAt = -1;

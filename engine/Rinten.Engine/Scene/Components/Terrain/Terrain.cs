@@ -50,6 +50,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 		ReleaseChunks();
 		DropRelief();
 		DropMask();
+		DropGround();
 
 		if ( watched is not null ) watched.Changed -= MeshChanged;
 		watched = null;
@@ -76,10 +77,11 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 			return;
 		}
 
-		//What waits to be baked and what the workers finished; then the relief ring and the paint mask
+		//What waits to be baked and what the workers finished; then the relief ring, the paint mask and the ground's heights
 		PumpChunks();
 		PumpRelief();
 		PumpMask();
+		PumpGround();
 	}
 
 	protected override void OnPreRender()

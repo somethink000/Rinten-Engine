@@ -359,6 +359,44 @@ float3 WorldBehind( float2 screen, float depth )
 	return world.xyz / world.w;
 }
 
+//The terrain's heights round the eye: texels a side and metres a texel - see Terrain.Ground
+static const int GroundTexels = 1024;
+static const float GroundTexel = 0.25;
+
+//How high the ground lies straight under a world point, from the terrain's square round the eye - the same from wherever
+//the eye stands; false outside the square, over a hole, or with no terrain
+bool GroundBelow( float3 world, out float height )
+{
+	height = 0.0;
+
+#ifdef PORTABLE
+	return false;
+#else
+	uint index = uint( g_frame[0].moverZone.w );
+	if ( index == 0u ) return false;
+
+	float2 at = ( ( world.xz - g_frame[0].screenTrace.zw ) / GroundTexel ) - 0.5;
+	if ( any( at < 0.0 ) || any( at >= float( GroundTexels - 1 ) ) ) return false;
+
+	//A float's four bytes a texel, so filtered by hand
+	int2 cell = int2( floor( at ) );
+	float2 f = at - float2( cell );
+	float4 h;
+
+	[unroll]
+	for ( int i = 0; i < 4; i++ )
+	{
+		uint4 b = uint4( round( g_textures[index].Load( int3( cell + int2( i & 1, i >> 1 ), 0 ) ) * 255.0 ) );
+		h[i] = asfloat( b.x | ( b.y << 8 ) | ( b.z << 16 ) | ( b.w << 24 ) );
+	}
+
+	if ( min( min( h.x, h.y ), min( h.z, h.w ) ) < -1e5 ) return false;
+
+	height = lerp( lerp( h.x, h.y, f.x ), lerp( h.z, h.w, f.x ), f.y );
+	return true;
+#endif
+}
+
 //The kind's fraction in twentieths: twice the withheld terms (1 no diffuse, 2 no specular, 3 neither) plus one
 //where the light is in the bake - see CoreSceneRenderer.BuildFrame
 uint LightCode( Light light )

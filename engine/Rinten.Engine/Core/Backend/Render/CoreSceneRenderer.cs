@@ -1000,7 +1000,6 @@ internal static unsafe class CoreSceneRenderer
 		frame[MoverZoneAt + 0] = moverX;
 		frame[MoverZoneAt + 1] = moverY;
 		frame[MoverZoneAt + 2] = moverSide;
-		frame[MoverZoneAt + 3] = 0.0f;
 
 		MoversOn = moverSide > 0.0f;
 	}
@@ -1057,6 +1056,16 @@ internal static unsafe class CoreSceneRenderer
 
 	//Says how big the window the frame is drawn at is and where the sky's table sits - and
 	//that there is no occlusion: that is said by LayOcclusion, once something has drawn some.
+	//The ground's heights round the eye, in the lanes the movers' square and the screen trace leave - see GroundBelow
+	internal static void SetGround( float[] frame, int index, float x, float z )
+	{
+		if ( frame is null || frame.Length < FrameFloats ) return;
+
+		frame[MoverZoneAt + 3] = index;
+		frame[ScreenTraceAt + 2] = x;
+		frame[ScreenTraceAt + 3] = z;
+	}
+
 	internal static void SetOcclusion( float[] frame, float width, float height, int skyTable = 0 )
 	{
 		if ( frame is null || frame.Length < FrameFloats ) return;

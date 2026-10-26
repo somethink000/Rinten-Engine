@@ -79,6 +79,7 @@ struct FrameData
 	float4 sunPages;
 	float4 sunEye;
 	float4 sunMaps;
+	//The movers map's corner and side in the sun's frame; w the ground's heights by table index - see GroundBelow
 	float4 moverZone;
 
 	//The scene's flat ambient light - its AmbientLight components and its directional lights' sky colours,
@@ -106,7 +107,7 @@ struct FrameData
 	float4 sunDepth;
 
 	//What water and glass trace reflections through: the nearest-depth chain and the shaded world's picture
-	//by table index, nought where no reflections were drawn - see ScreenReflected
+	//by table index, nought where no reflections were drawn - see ScreenReflected; zw the ground's corner (GroundBelow)
 	float4 screenTrace;
 
 	//Panorama sky: turn y radians, one w if any (which lays a portable sky table out by direction); panoramaLight

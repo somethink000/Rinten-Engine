@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 
 namespace Rinten;
 
@@ -18,7 +17,7 @@ public partial class Terrain
 	//World x, z of the corner of the square on the card
 	private Vector2 groundAt;
 	private bool groundKept, groundStale;
-	private Task<(byte[] Bytes, Vector2 Corner)> groundLaying;
+	private System.Threading.Tasks.Task<(byte[] Bytes, Vector2 Corner)> groundLaying;
 
 	//Once a frame: a square laid on a worker is put on the card, the world told of it, and another begun where the eye left it
 	private void PumpGround()
@@ -58,27 +57,68 @@ public partial class Terrain
 		groundLaying = System.Threading.Tasks.Task.Run( () => LayGround( mesh, transform, corner ) );
 	}
 
-	//Each texel's ground straight down through its middle, as a float's four bytes; far below where there is none
+	//Each texel's ground under its middle, as a float's four bytes; far below where there is none. The triangles over the
+	//square are laid into it once each, on this one worker - a trace down through every texel keeps every core busy for seconds
 	private static (byte[] Bytes, Vector2 Corner) LayGround( TerrainMesh mesh, Transform transform, Vector2 corner )
 	{
 		var bytes = new byte[GroundTexels * GroundTexels * 4];
-		var top = mesh.Bounds.Maxs.y + 1.0f;
-		var reach = top - mesh.Bounds.Mins.y + 2.0f;
+		var heights = MemoryMarshal.Cast<byte, float>( bytes.AsSpan() );
+		heights.Fill( -1e6f );
 
-		Parallel.For( 0, GroundTexels, row =>
+		//The square in the terrain's plane, wide by an edge so a triangle reaching in from outside is laid too
+		var side = GroundTexels * GroundTexel;
+		var low = new Vector2( float.MaxValue );
+		var high = new Vector2( float.MinValue );
+
+		for ( var k = 0; k < 4; k++ )
 		{
-			var heights = MemoryMarshal.Cast<byte, float>( bytes.AsSpan( row * GroundTexels * 4, GroundTexels * 4 ) );
-			var z = corner.y + ( ( row + 0.5f ) * GroundTexel );
+			var local = transform.PointToLocal( new Vector3( corner.x + ( ( k & 1 ) * side ), 0.0f, corner.y + ( ( k >> 1 ) * side ) ) );
+			low = Vector2.Min( low, new Vector2( local.x, local.z ) );
+			high = Vector2.Max( high, new Vector2( local.x, local.z ) );
+		}
 
-			for ( var x = 0; x < GroundTexels; x++ )
+		var reach = new Vector2( mesh.LongestEdge );
+		var triangles = new List<int>();
+		mesh.TrianglesInRect( low - reach, high + reach, triangles );
+
+		foreach ( var t in triangles )
+		{
+			if ( !mesh.IsTriangleAlive( t ) ) continue;
+
+			mesh.GetTriangle( t, out var ia, out var ib, out var ic );
+			var a = transform.PointToWorld( mesh.PositionOf( ia ) );
+			var b = transform.PointToWorld( mesh.PositionOf( ib ) );
+			var c = transform.PointToWorld( mesh.PositionOf( ic ) );
+
+			//Its area seen from above; one standing on its edge covers no texel's middle
+			var area = ( ( b.x - a.x ) * ( c.z - a.z ) ) - ( ( c.x - a.x ) * ( b.z - a.z ) );
+			if ( MathF.Abs( area ) < 1e-8f ) continue;
+
+			var x0 = Math.Max( (int)MathF.Ceiling( ( MathF.Min( a.x, MathF.Min( b.x, c.x ) ) - corner.x ) / GroundTexel - 0.5f ), 0 );
+			var x1 = Math.Min( (int)MathF.Floor( ( MathF.Max( a.x, MathF.Max( b.x, c.x ) ) - corner.x ) / GroundTexel - 0.5f ), GroundTexels - 1 );
+			var z0 = Math.Max( (int)MathF.Ceiling( ( MathF.Min( a.z, MathF.Min( b.z, c.z ) ) - corner.y ) / GroundTexel - 0.5f ), 0 );
+			var z1 = Math.Min( (int)MathF.Floor( ( MathF.Max( a.z, MathF.Max( b.z, c.z ) ) - corner.y ) / GroundTexel - 0.5f ), GroundTexels - 1 );
+
+			for ( var z = z0; z <= z1; z++ )
 			{
-				var local = transform.PointToLocal( new Vector3( corner.x + ( ( x + 0.5f ) * GroundTexel ), 0.0f, z ) );
+				var pz = corner.y + ( ( z + 0.5f ) * GroundTexel );
 
-				heights[x] = mesh.Trace( new Vector3( local.x, top, local.z ), Vector3.Down, reach, out var travelled, out _, out _ )
-					? transform.PointToWorld( new Vector3( local.x, top - travelled, local.z ) ).y
-					: -1e6f;
+				for ( var x = x0; x <= x1; x++ )
+				{
+					var px = corner.x + ( ( x + 0.5f ) * GroundTexel );
+
+					//Where the middle stands among the corners; a hair outside still counts, so no seam is left between two
+					var wb = ( ( ( px - a.x ) * ( c.z - a.z ) ) - ( ( c.x - a.x ) * ( pz - a.z ) ) ) / area;
+					var wc = ( ( ( b.x - a.x ) * ( pz - a.z ) ) - ( ( px - a.x ) * ( b.z - a.z ) ) ) / area;
+					var wa = 1.0f - wb - wc;
+					if ( wa < -1e-4f || wb < -1e-4f || wc < -1e-4f ) continue;
+
+					//The highest surface over the texel, as HeightAt answers under an overhang
+					var at = ( z * GroundTexels ) + x;
+					heights[at] = MathF.Max( heights[at], ( a.y * wa ) + ( b.y * wb ) + ( c.y * wc ) );
+				}
 			}
-		} );
+		}
 
 		return (bytes, corner);
 	}

@@ -1,6 +1,6 @@
 ﻿namespace Rinten;
 
-//The depth pyramid: this viewport's depth folded down level by level, each the farthest of the four below
+//The depth pyramid: a viewport's depth folded down level by level, each the farthest of the four below
 //it, which is what a cull may test a box against and be certain - see shaders/engine/mesh_cull.slang.
 internal static class CoreDepthPyramid
 {
@@ -22,63 +22,66 @@ internal static class CoreDepthPyramid
 
 	private static int grain = 1024;
 
-	//Pyramid size in patches; the long side is the grain so texels are square
-	internal static int DepthWide => wide;
-
-	internal static int DepthTall => tall;
-
-	private static int wide = 1024;
-	private static int tall = 1024;
-
-	//Shapes the pyramid to the depth size; called once a frame before the header is written
-	internal static void Fit( int width, int height )
-	{
-		if ( width < 1 || height < 1 ) return;
-
-		//Half the depth each way up to the grain, at most 8x8 depth texels per level-0 texel
-		wide = System.Math.Clamp( ( width + 1 ) / 2, ( width + 7 ) / 8, grain );
-		tall = System.Math.Clamp( ( height + 1 ) / 2, ( height + 7 ) / 8, grain );
-
-		wide = System.Math.Max( wide, ( width + 7 ) / 8 );
-		tall = System.Math.Max( tall, ( height + 7 ) / 8 );
-	}
-
 	//How many levels one dispatch writes - the core's PyramidLevelsAtOnce.
 	internal const int LevelsAtOnce = 6;
 
-	//The groups of the pyramid's two launches - a group a 32x32 tile of the first level each writes - packed across in the low half and down
-	//in the high. What the cull's finish pass writes as the second build's arguments, so the two agree on the shape without a readback.
-	internal static (uint First, uint Second) DispatchGroups()
+	//One viewport's pyramid in patches: the first level's texels the depth fills, and the power of two each way it is
+	//kept in, the rest far, so every level halves the one below exactly and spans the whole screen. Each drawer keeps its
+	//own: views of other sizes in the same frame would otherwise rebuild each other's and cull by the wrong one's shape
+	internal readonly record struct Shape( int Wide, int Tall, int ImageWide, int ImageTall )
 	{
-		static uint Packed( int lod )
+		//Level count down to one texel; each holds the farthest of the four below it
+		internal int Levels
 		{
-			var wide = (uint)System.Math.Max( 1, DepthWide >> lod );
-			var tall = (uint)System.Math.Max( 1, DepthTall >> lod );
+			get
+			{
+				var levels = 1;
 
-			return ( ( wide + 31 ) / 32 ) | ( ( ( tall + 31 ) / 32 ) << 16 );
+				for ( int w = Wide, h = Tall; w > 1 || h > 1; w = System.Math.Max( 1, w >> 1 ), h = System.Math.Max( 1, h >> 1 ) )
+					levels++;
+
+				return levels;
+			}
 		}
 
-		return ( Packed( 0 ), DepthLevels > LevelsAtOnce ? Packed( LevelsAtOnce ) : 0u );
-	}
-
-	internal const float DepthBias = 0.08f;
-
-	//Level count down to one texel; each holds the farthest of the four below it
-	internal static int DepthLevels
-	{
-		get
+		//The groups of the pyramid's two launches - a group a 32x32 tile of the first level each writes - packed across in the low half and down
+		//in the high. What the cull's finish pass writes as the second build's arguments, so the two agree on the shape without a readback.
+		internal (uint First, uint Second) DispatchGroups()
 		{
-			var levels = 1;
+			var shape = this;
 
-			for ( int w = DepthWide, h = DepthTall; w > 1 || h > 1;
-				w = System.Math.Max( 1, w >> 1 ), h = System.Math.Max( 1, h >> 1 ) )
+			uint Packed( int lod )
 			{
-				levels++;
+				var wide = (uint)System.Math.Max( 1, shape.Wide >> lod );
+				var tall = (uint)System.Math.Max( 1, shape.Tall >> lod );
+
+				return ( ( wide + 31 ) / 32 ) | ( ( ( tall + 31 ) / 32 ) << 16 );
 			}
 
-			return levels;
+			return ( Packed( 0 ), Levels > LevelsAtOnce ? Packed( LevelsAtOnce ) : 0u );
 		}
 	}
 
+	//The pyramid for a depth this size: half the depth each way up to the grain, at most 8x8 depth texels a level-0 texel,
+	//kept in the next power of two - an odd level would lose its last row or column, and the cull read a strip beside the box
+	internal static Shape Fit( int width, int height )
+	{
+		var wide = Filled( width );
+		var tall = Filled( height );
 
+		return new Shape( Kept( wide ), Kept( tall ), wide, tall );
+	}
+
+	private static int Filled( int depth )
+	{
+		depth = System.Math.Max( depth, 1 );
+		return System.Math.Max( System.Math.Clamp( ( depth + 1 ) / 2, ( depth + 7 ) / 8, grain ), ( depth + 7 ) / 8 );
+	}
+
+	private static int Kept( int filled )
+	{
+		var side = 1;
+		while ( side < filled ) side <<= 1;
+		return side;
+	}
 }

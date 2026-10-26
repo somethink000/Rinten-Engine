@@ -27,6 +27,10 @@ cbuffer Push
 	uint g_sourceY;
 	uint g_imageWide;
 	uint g_imageTall;
+
+	//What of the first level the depth fills; texels past it are far, so a level halves the one below exactly
+	uint g_fillWide;
+	uint g_fillTall;
 };
 
 groupshared float s_tile[32][32];
@@ -37,8 +41,8 @@ float Farthest( uint2 at )
 {
 	//A level exactly half its source each way: one read through the sampler, whose reduction takes the farthest of the four texels
 	//under it, at the middle of the block. The edge clamps where the source is odd, which is the last texel twice - the same answer.
-	bool halved = g_sourceWide <= 2u * g_wide && g_sourceWide + 1u >= 2u * g_wide &&
-		g_sourceTall <= 2u * g_tall && g_sourceTall + 1u >= 2u * g_tall;
+	bool halved = g_sourceWide <= 2u * g_fillWide && g_sourceWide + 1u >= 2u * g_fillWide &&
+		g_sourceTall <= 2u * g_fillTall && g_sourceTall + 1u >= 2u * g_fillTall;
 
 	if ( halved )
 	{
@@ -48,7 +52,7 @@ float Farthest( uint2 at )
 		return g_below.SampleLevel( uv, float( g_sourceLevel ) ).x;
 	}
 
-	float2 scale = float2( g_sourceWide, g_sourceTall ) / float2( g_wide, g_tall );
+	float2 scale = float2( g_sourceWide, g_sourceTall ) / float2( g_fillWide, g_fillTall );
 	uint2 from = uint2( floor( float2( at ) * scale ) );
 	uint2 to = min( uint2( ceil( float2( at + 1 ) * scale ) ), uint2( g_sourceWide, g_sourceTall ) );
 	to = max( to, from + 1 );
@@ -86,7 +90,7 @@ void main( uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID )
 			float value = 0.0;
 			if ( at.x < g_wide && at.y < g_tall )
 			{
-				value = Farthest( at );
+				value = at.x < g_fillWide && at.y < g_fillTall ? Farthest( at ) : 1.0;
 				g_level0[at] = value;
 			}
 			s_tile[local.y + dy][local.x + dx] = value;

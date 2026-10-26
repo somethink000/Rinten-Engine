@@ -46,16 +46,10 @@ public class RenderingSettings : ConfigData
 			? RenderPlatforms.Mobile
 			: RenderPlatforms.Desktop;
 
-	/// <summary>Drop clusters already covered by nearer depth. Off by default; only pays in occluded levels.</summary>
-	[Group( "Mesh Rendering" ), Title( "Cull What Is Covered" ), Order( 2 )]
-	[RunsOn( RenderPlatforms.Desktop | RenderPlatforms.Mobile,
-		"Web builds and phones on the portable frame draw every model the old way, which has no depth to test against at the time it would need it." )]
-	public bool Occlusion { get; set; } = false;
-
 	/// <summary>How much of the screen the depth is reduced to before the cull reads it, in patches across. Finer catches more of what is covered and costs more to build; coarser is cheaper and lets a little through.</summary>
 	[Group( "Mesh Rendering" ), Title( "Occlusion Detail" ), Order( 3 ), Range( 64, 2048 )]
 	[RunsOn( RenderPlatforms.Desktop | RenderPlatforms.Mobile,
-		"Read only where Cull What Is Covered is on." )]
+		"Web builds and phones on the portable frame draw every model the old way, with no depth to test against." )]
 	public int OcclusionGrain { get; set; } = 1024;
 
 	/// <summary>Max screen error in pixels before a cluster's finer children are drawn; the only LOD knob.</summary>
@@ -94,9 +88,6 @@ public class RenderingSettings : ConfigData
 	/// <summary>Writes settings into renderer convars, skipping ones unsupported here or overridden by hand</summary>
 	public void Apply()
 	{
-		if ( !ConVarSystem.Overridden( "r_occlusion" ) )
-			Rendering.DrawSettings.Occlusion = Occlusion && RunsHere( nameof( Occlusion ) );
-
 		if ( !ConVarSystem.Overridden( "r_mesh_lod_pixels" ) )
 			Rendering.DrawSettings.MeshLodPixels = LodPixels;
 

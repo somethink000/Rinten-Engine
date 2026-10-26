@@ -317,11 +317,13 @@ internal sealed class CoreMeshRender
 	//Instances hidden from the camera by table slot bit, or empty for none; set before Begin
 	internal ReadOnlyMemory<uint> HiddenFromCamera { get; set; }
 
-	internal bool Begin( CoreSceneTables tables, ReadOnlySpan<ViewSetup> views, (int Width, int Height) pixels, bool depthKnown )
+	internal bool Begin( CoreSceneTables tables, ReadOnlySpan<ViewSetup> views, (int Width, int Height) pixels, CoreDepthPyramid.Shape pyramid,
+		bool depthKnown, uint prepass )
 	{
 		Ready = false;
 		this.tables = tables;
 		this.pixels = pixels;
+		pyramidShape = pyramid;
 
 		if ( !EnsurePipelines() || tables is null || tables.InstanceCount == 0 || views.IsEmpty || !views[0].Camera ) return false;
 		if ( tables.InstanceBuffer == 0 || tables.MaterialBuffer == 0 ) return false;
@@ -496,11 +498,9 @@ internal sealed class CoreMeshRender
 		paramsWords[18] = (uint)binSlices;
 		paramsWords[32] = (uint)binDraws;
 
-		//Which still clusters the pre-pass draws, by slice - see CoreSceneDrawer.PrepassSlices. Past it the cull writes no run of the pre-pass's indices for
+		//Which still clusters the pre-pass draws, by slice - the drawer's prepassSlices. Past it the cull writes no run of the pre-pass's indices for
 		//them, and their material's far pass writes their depth itself; clamped to the slices there are, where the far pass's cut is too - see ClusterSpanFrom.
-		prepassSlices = CoreSceneDrawer.PrepassSlices == uint.MaxValue
-			? uint.MaxValue
-			: Math.Min( CoreSceneDrawer.PrepassSlices, (uint)binSlices );
+		prepassSlices = prepass == uint.MaxValue ? uint.MaxValue : Math.Min( prepass, (uint)binSlices );
 		paramsWords[35] = prepassSlices;
 
 		//Where the materials' wants are - see wantAt in mesh_tables.slang.
@@ -549,7 +549,8 @@ internal sealed class CoreMeshRender
 
 			floats[w + 40] = view.Eye.x; floats[w + 41] = view.Eye.y; floats[w + 42] = view.Eye.z; floats[w + 43] = view.ErrorScale;
 			floats[w + 44] = view.LodPixels; floats[w + 45] = view.Near; floats[w + 46] = view.Far; floats[w + 47] = view.CullPixels;
-			floats[w + 48] = CoreDepthPyramid.DepthWide; floats[w + 49] = CoreDepthPyramid.DepthTall; floats[w + 50] = CoreDepthPyramid.DepthLevels;
+			//The texels the depth fills; the power of two they are kept in follows from them - see BehindTheDepth
+			floats[w + 48] = pyramidShape.ImageWide; floats[w + 49] = pyramidShape.ImageTall; floats[w + 50] = pyramidShape.Levels;
 			floats[w + 51] = view.Camera && depthKnown ? 1.0f : 0.0f;
 			//The camera's screen, or which casters a light's view takes - see ViewCasters in the cull.
 			floats[w + 52] = view.Camera ? view.HalfHeight : view.Casters;
@@ -832,6 +833,9 @@ internal sealed class CoreMeshRender
 		if ( begun ) CoreRenderDevice.ZoneEnd();
 	}
 
+	//The shape of the pyramid this frame's cull reads - the drawer's, given to Begin
+	private CoreDepthPyramid.Shape pyramidShape;
+
 	internal void Cull( ulong pyramid )
 	{
 		if ( !Ready || CoreClusters.Clusters.Buffer == 0 || CoreClusters.Meshes.Buffer == 0 ) { Ready = false; return; }
@@ -857,7 +861,7 @@ internal sealed class CoreMeshRender
 		}
 
 		//The pass finishes itself: its last group writes the draws' arguments - see Finish in the shader - so the pyramid's groups go in with it.
-		var (first, second) = CoreDepthPyramid.DispatchGroups();
+		var (first, second) = pyramidShape.DispatchGroups();
 
 		CoreRenderDevice.ZoneBegin( "cull clusters" );
 		ok &= CoreRenderDevice.DispatchIndirect( cullPipeline, CullBound(), workBuffer, 0, Push( 1, debug ? 1u : 0u, first, second ), pyramid );
@@ -872,7 +876,7 @@ internal sealed class CoreMeshRender
 	{
 		if ( !Ready ) return;
 
-		var (first, second) = CoreDepthPyramid.DispatchGroups();
+		var (first, second) = pyramidShape.DispatchGroups();
 
 		CoreRenderDevice.ZoneBegin( "cull appeared" );
 		CoreRenderDevice.DispatchIndirect( cullPipeline, CullBound(), workBuffer, 16, Push( 2, debug ? 1u : 0u, first, second ), pyramid );
@@ -1439,7 +1443,7 @@ internal sealed class CoreMeshRender
 			var far = binDraws > 1 && CoreResources.ShadesFar( material.Shader );
 
 			//And a still surface carries its own depth where the frame's pre-pass did not draw it: all of it where there was none, and its far
-			//calls where the pre-pass stopped at the far cut - see CoreSceneDrawer. PrepassSlices, and the cull's Append, which made the cut.
+			//calls where the pre-pass stopped at the far cut - see Begin, and the cull's Append, which made the cut.
 			var carries = ( material.Moves && !elsewhere ) || ( !material.Moves && prepassSlices == 0 );
 			var farCarries = carries || ( !material.Moves && prepassSlices != uint.MaxValue && binDraws > 1 );
 

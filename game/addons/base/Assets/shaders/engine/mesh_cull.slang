@@ -123,18 +123,20 @@ bool BehindTheDepth( View view, float3 middle, float3 reach )
 	if ( high.x < 0.0 || high.y < 0.0 || low.x > 1.0 || low.y > 1.0 ) return false;
 	if ( nearest <= 0.0 ) return false;
 
-	float wide = view.hzb.x;
-	float tall = view.hzb.y;
+	//The first level's texels the depth fills, and the power of two they are kept in - the rest far, see CoreDepthPyramid
+	float2 image = view.hzb.xy;
+	float2 kept = exp2( ceil( log2( max( image, 1.0 ) ) ) );
 	float last = view.hzb.z - 1.0;
 
-	float across = max( ( high.x - low.x ) * wide, ( high.y - low.y ) * tall );
+	float across = max( ( high.x - low.x ) * image.x, ( high.y - low.y ) * image.y );
 	float level = clamp( ceil( log2( max( across, 1.0 ) ) ), 0.0, last );
 	float shrink = exp2( level );
-	float2 levelSize = max( floor( float2( wide, tall ) / shrink ), 1.0 );
+	float2 levelSize = max( floor( kept / shrink ), 1.0 );
 	float2 edge = levelSize - 1.0;
 
-	int2 first = int2( clamp( floor( low * levelSize ), 0.0, edge ) );
-	int2 past = int2( clamp( floor( high * levelSize ), 0.0, edge ) );
+	//Through the first level's texels, where a texel of every level covers exactly its share
+	int2 first = int2( clamp( floor( low * image / shrink ), 0.0, edge ) );
+	int2 past = int2( clamp( floor( high * image / shrink ), 0.0, edge ) );
 	past = min( past, first + 1 );
 
 	int lod = int( level );

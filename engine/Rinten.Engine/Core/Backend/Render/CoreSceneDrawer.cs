@@ -687,7 +687,7 @@ internal sealed partial class CoreSceneDrawer
 				pose: drawn.Pose );
 		}
 
-		//What the engine made on the card, in this world: moving casters too, as it is made again as the eye moves.
+		//What the engine made on the card, in this world: drawn as moving, as it is made again as the eye moves.
 		if ( scene?.SceneWorld is { } world )
 		{
 			CoreCardMeshes.In( world, cardMeshes );
@@ -698,7 +698,8 @@ internal sealed partial class CoreSceneDrawer
 
 				QueueMesh( shape.Mesh, shape.Transform, Color.White, ulong.MaxValue, eye,
 					overrideTexture: overrideTexture, overrideTwoSided: twoSided, overrideTranslucent: translucent,
-					overrideShader: overrideShader, overrideCombo: overrideCombo, inMotion: true, attributes: shape.Attributes );
+					overrideShader: overrideShader, overrideCombo: overrideCombo, noShadow: !shape.Casts, inMotion: true,
+					attributes: shape.Attributes );
 			}
 		}
 
@@ -868,9 +869,10 @@ internal sealed partial class CoreSceneDrawer
 	}
 
 	private ulong depthPyramid;
-	private int depthBufferSide;
-	private int depthBufferDown;
-	private readonly byte[] depthPush = new byte[48];
+
+	//This viewport's pyramid shape, fitted each frame to its depth, and the shape the pyramid on the card was made to
+	private CoreDepthPyramid.Shape pyramidShape, pyramidMade;
+	private readonly byte[] depthPush = new byte[56];
 
 	//Whether the pyramid holds a depth this viewport drew - what the cull may ask.
 	private bool depthKnown;
@@ -880,23 +882,23 @@ internal sealed partial class CoreSceneDrawer
 	{
 		if ( pyramidPipeline == 0 ) return 0;
 
-		if ( depthPyramid != 0 &&
-			( depthBufferSide != CoreDepthPyramid.DepthWide || depthBufferDown != CoreDepthPyramid.DepthTall ) )
+		if ( depthPyramid != 0 && ( pyramidMade.Wide != pyramidShape.Wide || pyramidMade.Tall != pyramidShape.Tall ) )
 		{
 			CoreRenderDevice.DestroyPyramid( depthPyramid );
 			depthPyramid = 0;
 			depthKnown = false;
 		}
 
+		//The same texture holds a resized image while the power of two it is kept in stands
+		pyramidMade = pyramidShape;
+
 		if ( depthPyramid == 0 )
 		{
-			depthBufferSide = CoreDepthPyramid.DepthWide;
-			depthBufferDown = CoreDepthPyramid.DepthTall;
-			depthPyramid = CoreRenderDevice.CreatePyramid( depthBufferSide, depthBufferDown );
+			depthPyramid = CoreRenderDevice.CreatePyramid( pyramidMade.Wide, pyramidMade.Tall );
 			depthKnown = false;
 
 			if ( depthPyramid == 0 )
-				Log.Warning( $"no depth pyramid at {depthBufferSide}x{depthBufferDown}: {CoreRenderDevice.Description}" );
+				Log.Warning( $"no depth pyramid at {pyramidMade.Wide}x{pyramidMade.Tall}: {CoreRenderDevice.Description}" );
 		}
 
 		return depthPyramid;
@@ -917,7 +919,7 @@ internal sealed partial class CoreSceneDrawer
 
 		var built = true;
 
-		var levels = CoreDepthPyramid.DepthLevels;
+		var levels = pyramidMade.Levels;
 		var (depthWide, depthTall) = size;
 
 		//Where the depth actually is: the world's own picture, or the world's rectangle of the
@@ -928,10 +930,10 @@ internal sealed partial class CoreSceneDrawer
 		for ( var lod = 0; lod < levels && built; lod += CoreDepthPyramid.LevelsAtOnce )
 		{
 			var count = System.Math.Min( CoreDepthPyramid.LevelsAtOnce, levels - lod );
-			var wide = System.Math.Max( 1, CoreDepthPyramid.DepthWide >> lod );
-			var tall = System.Math.Max( 1, CoreDepthPyramid.DepthTall >> lod );
-			var sourceWide = lod == 0 ? depthWide : System.Math.Max( 1, CoreDepthPyramid.DepthWide >> ( lod - 1 ) );
-			var sourceTall = lod == 0 ? depthTall : System.Math.Max( 1, CoreDepthPyramid.DepthTall >> ( lod - 1 ) );
+			var wide = System.Math.Max( 1, pyramidMade.Wide >> lod );
+			var tall = System.Math.Max( 1, pyramidMade.Tall >> lod );
+			var sourceWide = lod == 0 ? depthWide : System.Math.Max( 1, pyramidMade.Wide >> ( lod - 1 ) );
+			var sourceTall = lod == 0 ? depthTall : System.Math.Max( 1, pyramidMade.Tall >> ( lod - 1 ) );
 
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 0 ), (uint)wide );
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 4 ), (uint)tall );
@@ -948,6 +950,10 @@ internal sealed partial class CoreSceneDrawer
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 32 ), (uint)from.Y );
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 36 ), (uint)from.Wide );
 			BitConverter.TryWriteBytes( depthPush.AsSpan( 40 ), (uint)from.Tall );
+
+			//What of the first level the depth fills; the rest of the power of two is far
+			BitConverter.TryWriteBytes( depthPush.AsSpan( 44 ), (uint)( lod == 0 ? pyramidMade.ImageWide : wide ) );
+			BitConverter.TryWriteBytes( depthPush.AsSpan( 48 ), (uint)( lod == 0 ? pyramidMade.ImageTall : tall ) );
 
 			built = CoreRenderDevice.BuildPyramid( pyramidPipeline, depthPyramid, lod, count, lod == 0 ? depth : 0, depthPush,
 				args, argsAt + ( ( lod / CoreDepthPyramid.LevelsAtOnce ) * 16 ) );
@@ -1125,8 +1131,8 @@ internal sealed partial class CoreSceneDrawer
 	//Whether this frame's cull tests against depth, and so whether folding the depth is worth it - see KeepDepth
 	private bool occluding;
 
-	//Distance slices of still clusters drawn in the depth pre-pass; 0 none, MaxValue all (see DepthTuner)
-	internal static uint PrepassSlices { get; private set; } = uint.MaxValue;
+	//Distance slices of still clusters this view's depth pre-pass draws; 0 none, MaxValue all
+	private uint prepassSlices = uint.MaxValue;
 
 	//Draws a queue the classic way, with runs of copies drawn once each (portable instanced draw)
 	private void SubmitRuns( ReadOnlySpan<Queued> queue, ReadOnlySpan<bool> takes, bool prepass )
@@ -2321,7 +2327,7 @@ internal sealed partial class CoreSceneDrawer
 		RenderingSettings.EnsureApplied();
 
 		//Before anything reads the shape: views and pyramid must agree
-		CoreDepthPyramid.Fit( width, height );
+		pyramidShape = CoreDepthPyramid.Fit( width, height );
 
 		var gameView = GameViewSource?.Invoke() ?? false;
 		var editorOverlays = EditorOverlaysSource?.Invoke() ?? false;
@@ -2457,6 +2463,9 @@ internal sealed partial class CoreSceneDrawer
 		//No occlusion yet (see LayOcclusion)
 		CoreSceneRenderer.SetOcclusion( frame, shaded.Width, shaded.Height, SkyTableSlot() );
 		skyLight.Lay( frame );
+
+		var ground = scene.IsValid() ? scene.SceneWorld?.Ground ?? default : default;
+		CoreSceneRenderer.SetGround( frame, ground.Index, ground.X, ground.Z );
 
 		//The portable frame's bloom and passes: the world drawn aside and kept past white, its curve left to the finish
 		var passes = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes && PortablePasses( camera );
@@ -2647,12 +2656,9 @@ internal sealed partial class CoreSceneDrawer
 			var pyramid = EnsurePyramid();
 			var canOcclude = pyramid != 0 && perspective;
 
-			//This view's depth and cull way where settings leave it to the frame, measured on the card (DepthTuner);
-			//occlusion is a candidate unless set or ruled out
-			var way = depthTuner.Pick( CoreRenderDevice.ReadFrameSummary( viewport )?.GpuMs ?? 0.0f,
-				canOcclude && !Rinten.Rendering.DrawSettings.Occlusion ? 4 : 3 );
-
-			occluding = canOcclude && ( Rinten.Rendering.DrawSettings.Occlusion || way == DepthWay.Occlusion );
+			//One way a frame, never switched by timing: a way picked frame to frame changed what the cull kept and which
+			//pipeline every material shades with, and meshes blinked with the camera standing still
+			occluding = canOcclude && Rinten.Rendering.DrawSettings.Occlusion;
 
 			//A pyramid not folded this frame is stale, so turning occlusion back on must not cull by it
 			if ( !occluding ) depthKnown = false;
@@ -2663,12 +2669,11 @@ internal sealed partial class CoreSceneDrawer
 			var depthFirst = occluding || Rinten.Rendering.Wireframe.Clusters > 0 || ( camera.PostProcess is not null &&
 				Hung( camera, Rinten.Rendering.Stage.AfterDepthPrepass ) );
 
-			//Else the tuner's pick: nothing, or clusters nearer than the far cut, which cover the screen and hide; far
-			//ones hide little and get depth from their shading pass
-			PrepassSlices = depthFirst || way == DepthWay.FullPrepass ? uint.MaxValue
-				: way == DepthWay.NoPrepass ? 0u : (uint)CoreMeshShaders.FarSlice;
+			//Else the clusters nearer than the far cut, which cover the screen and hide; far ones hide little and get
+			//depth from their shading pass
+			prepassSlices = depthFirst ? uint.MaxValue : (uint)CoreMeshShaders.FarSlice;
 
-			if ( meshRender.Begin( tables, views.AsSpan( 0, count ), pixels, useDepth ) && pyramid != 0 )
+			if ( meshRender.Begin( tables, views.AsSpan( 0, count ), pixels, pyramidShape, useDepth, prepassSlices ) && pyramid != 0 )
 			{
 				meshRender.Cull( pyramid );
 				meshRender.Skin();
@@ -2832,7 +2837,7 @@ internal sealed partial class CoreSceneDrawer
 			//Under a name of its own, so the report can account for it within `depth`
 			CoreRenderDevice.ZoneBegin( "prepass" );
 
-			if ( drawn && PrepassSlices > 0 ) meshRender.DrawCamera( appeared: false );
+			if ( drawn && prepassSlices > 0 ) meshRender.DrawCamera( appeared: false );
 			SubmitLoose( planes, prepass: true );
 
 			CoreRenderDevice.ZoneEnd();

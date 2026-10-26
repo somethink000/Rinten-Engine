@@ -404,6 +404,16 @@ internal static unsafe class CoreRender
 	//How many pipelines the driver baked this run, and the milliseconds it spent - see VkPipelines.Baked.
 	internal static (int Count, double Ms) PipelinesBaked => web ? ( 0, 0.0 ) : ( VkPipelines.Baked, VkPipelines.BakedMs );
 
+	//The longest single bake since the last ask, in ms, and starting the count again - for the report's window
+	internal static double SlowestBake( bool restart )
+	{
+		if ( web ) return 0.0;
+
+		var ms = VkPipelines.SlowestTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+		if ( restart ) VkPipelines.SlowestTicks = 0;
+		return ms;
+	}
+
 	internal static ulong PassCreatePipeline( byte* code, int byteCount )
 		=> Portable ? 0 : VkPipelines.PassCreatePipeline( code, byteCount );
 

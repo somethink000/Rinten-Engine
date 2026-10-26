@@ -158,6 +158,10 @@ internal static class PerfReport
 	//The text counters as the window opened - see the text lines of the report
 	private static Rinten.UI.TextStats.Snapshot textAtArm;
 	private static long pagesAtArm, changesAtArm, staledAtArm;
+
+	//Pipelines the driver had baked when the window opened, and the time it took
+	private static int bakedAtArm;
+	private static double bakedMsAtArm;
 	private static long lampFacesAtArm, moverFacesAtArm, moverFrustumsAtArm;
 
 	//The collector's counts as the window opened.
@@ -419,6 +423,8 @@ internal static class PerfReport
 			notWholeAtArm = CoreSunPages.FramesNotWhole;
 			restartsAtArm = CoreSunPages.Restarts;
 			pagesAtArm = CoreSunPages.PagesBaked;
+			( bakedAtArm, bakedMsAtArm ) = CoreRender.PipelinesBaked;
+			CoreRender.SlowestBake( restart: true );
 			changesAtArm = CoreSunPages.ChangesNoted;
 			staledAtArm = CoreSunPages.PagesStaled;
 			lampFacesAtArm = CoreLampMaps.FacesDrawn;
@@ -614,7 +620,8 @@ internal static class PerfReport
 		var ( baked, bakedMs ) = CoreRender.PipelinesBaked;
 
 		if ( baked > 0 )
-			report.AppendLine( $"  {baked} pipelines baked by the driver this run, {bakedMs:F0} ms of it" );
+			report.AppendLine( $"  {baked} pipelines baked by the driver this run, {bakedMs:F0} ms of it; {baked - bakedAtArm} in the window, " +
+				$"{bakedMs - bakedMsAtArm:F0} ms, the slowest {CoreRender.SlowestBake( restart: false ):F1} ms" );
 
 		WriteGpuMemory( report );
 		WriteGpuMemoryByUse( report );

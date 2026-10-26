@@ -30,6 +30,9 @@ internal static unsafe partial class VkPipelines
 	//Milliseconds the driver has spent baking pipelines this run.
 	internal static double BakedMs => BakedTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
+	//The longest one bake took, in ticks; the report clears it when it arms
+	internal static long SlowestTicks;
+
 	internal static Pipeline Get( ulong handle )
 		=> pipelines.TryGet( handle, out var found ) ? found.Pipeline : default;
 
@@ -626,8 +629,10 @@ internal static unsafe partial class VkPipelines
 					var began = System.Diagnostics.Stopwatch.GetTimestamp();
 					var built = vk.CreateGraphicsPipelines( device, VkDevice.pipelineCache, 1, &info, null, &baked );
 
-					System.Threading.Interlocked.Add( ref BakedTicks, System.Diagnostics.Stopwatch.GetTimestamp() - began );
+					var took = System.Diagnostics.Stopwatch.GetTimestamp() - began;
+					System.Threading.Interlocked.Add( ref BakedTicks, took );
 					System.Threading.Interlocked.Increment( ref Baked );
+					if ( took > SlowestTicks ) SlowestTicks = took;
 
 					if ( built == Result.Success ) made.Pipeline = baked;
 				}

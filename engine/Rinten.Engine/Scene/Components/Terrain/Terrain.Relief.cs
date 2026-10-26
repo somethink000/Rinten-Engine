@@ -8,7 +8,7 @@ public partial class Terrain
 	//The ground under the ring changed - a chunk stood - so it is built again even where the eye has not moved
 	private bool reliefStale;
 
-	//Whether the numbers picture last told the ground's corners of a ring to sink under
+	//Whether the numbers picture last told of a ring
 	private bool reliefWritten;
 
 	/// <summary>How far from the eye, in metres, the layers' Displacement lifts the ground - its last quarter fading it out; nought for none.</summary>
@@ -61,7 +61,7 @@ public partial class Terrain
 		relief.ParamsIndex = ParamsMap?.Index ?? 0;
 		relief.Stand( Scene.SceneWorld, DrawnWith, WorldTransform, Lift() );
 
-		//The ring and where the ground sinks under it change in the same frame - see FillRelief.
+		//The ring and the numbers it is placed by change in the same frame - see FillRelief.
 		if ( relief.Take() ) UpdateParamsMap();
 
 		var pixels = Scene.Detail.Looking ? Scene.Detail.PixelsAtAMetre : UnseenPixelsAtAMetre;
@@ -98,8 +98,8 @@ public partial class Terrain
 		UpdateParamsMap();
 	}
 
-	//The ring into the numbers picture: where it was built, its reach and fade, the ground's sink, the terrain's place and
-	//how long a cut is a metre out (Ring in terrain_layers.slang); without a ring nothing sinks
+	//The ring into the numbers picture: where it was built, its reach and fade, its rise over the ground, the terrain's
+	//place and how long a cut is a metre out (Ring in terrain_layers.slang)
 	private void FillRelief()
 	{
 		reliefWritten = relief is not null;
@@ -114,7 +114,7 @@ public partial class Terrain
 		WriteFloat( 2, RowRing, eye.z );
 		WriteFloat( 3, RowRing, relief.Reach );
 		WriteFloat( 4, RowRing, relief.Fade );
-		WriteFloat( 5, RowRing, TerrainRelief.Sink );
+		WriteFloat( 5, RowRing, TerrainRelief.Rise );
 		WriteFloat( 6, RowRing, scale.x );
 		WriteFloat( 7, RowRing, scale.y );
 		WriteFloat( 8, RowRing, scale.z );

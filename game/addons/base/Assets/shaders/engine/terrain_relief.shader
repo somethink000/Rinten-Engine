@@ -117,7 +117,9 @@ void WriteVertex( uint t, uint4 cut, uint n, uint i, uint j )
 			if ( p.weight[l] > 0.0 ) lift += LayerLiftAround( p.layer[l], place, sides, texel ) * p.weight[l];
 	}
 
-	place += normal * ( lift * share );
+	//A rise over the ground as well, fading with the lift: the pre-pass draws that ground where it lies, and a ring
+	//corner on it would lose the depth to it - then the ground shows through, under its own shadow
+	place += normal * ( ( lift + ring.rise ) * share );
 
 	uint at = ( cut.y + Step( i, j, n ) ) * VertexBytes;
 

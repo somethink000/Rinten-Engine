@@ -1,7 +1,7 @@
 namespace Rinten;
 
-//Geometry a compute pass writes into a vertex and an index buffer, drawn the classic way with a material
-//by the camera's passes and the movers' shadow maps, so it casts as it is drawn. See TerrainRelief
+//Geometry a compute pass writes into a vertex and an index buffer, drawn the classic way with a material by the
+//camera's passes, and into the movers' shadow maps where it casts. See TerrainRelief
 internal static class CoreCardMeshes
 {
 	/// <summary>One such mesh: where it is drawn, with what, and whether its buffers hold anything yet.</summary>
@@ -13,6 +13,9 @@ internal static class CoreCardMeshes
 		public RenderAttributes Attributes;
 		public Func<bool> Ready;
 		public Transform Transform = Transform.Zero;
+
+		/// <summary>Whether it is drawn into the shadow maps of what moves.</summary>
+		public bool Casts = true;
 
 		/// <summary>Points the mesh at its buffers: the first count indices drawn, inside bounds.</summary>
 		public void Hold( GpuBuffer vertices, GpuBuffer indices, int count, BBox bounds )

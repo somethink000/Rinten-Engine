@@ -3,11 +3,13 @@ using System.Runtime.InteropServices;
 namespace Rinten;
 
 //The relief ring: ground near the eye cut finer the nearer and lifted by layer heights (terrain_relief.shader), drawn
-//as a card mesh (CoreCardMeshes) with the ground's material so it casts. Full frame only; collision never sees it
+//as a card mesh (CoreCardMeshes) with the ground's material. Full frame only; collision never sees it.
+//It casts nothing: in the movers' map it would stretch the square over the whole ring, and relief centimetres high
+//would shade itself in blotches the map's texels cannot hold; its shading and the layers' occlusion carry it instead
 internal sealed class TerrainRelief : IDisposable
 {
-	/// <summary>How far the ground's corners sink under the ring, in metres.</summary>
-	public const float Sink = 0.02f;
+	/// <summary>How far the ring stands over the ground it covers, in metres, so it always wins the depth the pre-pass wrote for that ground.</summary>
+	public const float Rise = 0.02f;
 
 	//The share of the ring's distance its lift fades over at the far edge
 	private const float FadeShare = 0.25f;
@@ -97,6 +99,7 @@ internal sealed class TerrainRelief : IDisposable
 		lock ( live ) live.Add( this );
 
 		shape.Attributes = Attributes;
+		shape.Casts = false;
 
 		//Made this frame counts: the card makes it before any pass or map draws it - see ExpandAll.
 		shape.Ready = () => Drawn || ( waiting && ParamsIndex != 0 );
@@ -122,7 +125,7 @@ internal sealed class TerrainRelief : IDisposable
 	{
 		lift = lifted;
 
-		var grown = new BBox( box.Mins - new Vector3( lift ), box.Maxs + new Vector3( lift ) );
+		var grown = new BBox( box.Mins - new Vector3( lift + Rise ), box.Maxs + new Vector3( lift + Rise ) );
 		shape.Hold( vertexBuffer, indexBuffer, triangles > 0 ? indices : 0, grown );
 	}
 

@@ -747,14 +747,14 @@ float LayerLiftAround( uint index, float3 local, float3 sides, float texel )
 	return lift;
 }
 
-//The relief ring as Terrain.Relief writes it: the eye at build, reach and fade, the ground's sink, and the terrain's place
+//The relief ring as Terrain.Relief writes it: the eye at build, reach and fade, its rise over the ground, and the terrain's place
 //(ring corners have no matrix); reach is nought without a ring
 struct Ring
 {
 	float3 eye;
 	float reach;
 	float fade;
-	float sink;
+	float rise;
 	float3 scale;
 	float3 at;
 	float cutPerMetre;
@@ -767,7 +767,7 @@ Ring RingOf()
 	o.eye = float3( asfloat( Bits( 0, RowRing ) ), asfloat( Bits( 1, RowRing ) ), asfloat( Bits( 2, RowRing ) ) );
 	o.reach = asfloat( Bits( 3, RowRing ) );
 	o.fade = max( asfloat( Bits( 4, RowRing ) ), 1e-3 );
-	o.sink = asfloat( Bits( 5, RowRing ) );
+	o.rise = asfloat( Bits( 5, RowRing ) );
 	o.scale = float3( asfloat( Bits( 6, RowRing ) ), asfloat( Bits( 7, RowRing ) ), asfloat( Bits( 8, RowRing ) ) );
 	o.at = float3( asfloat( Bits( 9, RowRing ) ), asfloat( Bits( 10, RowRing ) ), asfloat( Bits( 11, RowRing ) ) );
 	o.cutPerMetre = asfloat( Bits( 12, RowRing ) );
@@ -781,9 +781,6 @@ float RingShare( Ring ring, float3 local )
 	return saturate( ( ring.reach - distance( local, ring.eye ) ) / ring.fade );
 }
 
-//Metres the ring casts from under itself - more than the moving casters' map's depth steps on flat ground.
-static const float RingShadowSink = 0.05;
-
 //Where a ground vertex stands, in the terrain's metres and the world, and which layers its weights are for
 struct GroundPlace
 {
@@ -793,7 +790,7 @@ struct GroundPlace
 };
 
 //The ground's vertex stage, for terrain.shader and any terrain MaterialOverride: a relief ring corner (marked in uv1.z)
-//is in the terrain's metres with its own palette; the ground's corners under the ring sink so the lifted ground covers them
+//is in the terrain's metres with its own palette, standing a rise over the ground it covers (see terrain_relief.shader)
 GroundPlace PlaceGround( float3 position, float3 normal, float4 uv0, float4 uv1, float2 palette, row_major float4x4 modelToWorld )
 {
 	GroundPlace o;
@@ -809,15 +806,9 @@ GroundPlace PlaceGround( float3 position, float3 normal, float4 uv0, float4 uv1,
 	{
 		o.world = ( position * ring.scale ) + ring.at;
 		o.palette = uv0.zw;
-
-		//Into a light's map from a little under itself: what it lifts casts, where it lifts nothing it does not shade itself
-		if ( LightLooks() ) o.world -= normal * RingShadowSink;
 	}
 	else
 	{
-		if ( ring.reach > 0.0 )
-			o.local -= normal * ( ring.sink * saturate( ( ring.reach + ( ring.fade * 0.5 ) - distance( position, ring.eye ) ) / ( ring.fade * 0.5 ) ) );
-
 		o.world = mul( float4( o.local, 1.0 ), modelToWorld ).xyz;
 	}
 #endif

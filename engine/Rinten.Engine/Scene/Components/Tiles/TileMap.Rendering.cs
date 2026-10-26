@@ -38,7 +38,7 @@ public sealed partial class TileMap
 	//Where each layer stands towards the viewer: its place among the layers in z-index order, the list's order within one z-index.
 	private readonly Dictionary<TileMapLayer, int> ranks = new();
 
-	//The chunks in the order they are drawn: lowest z-index first, and within one the back layer first and the ones that blend last.
+	//The chunks in the order they are drawn: lowest z-index first, and within one the back layer first.
 	private readonly List<DrawnChunk> drawOrder = new();
 	private bool drawOrderDirty;
 
@@ -141,7 +141,10 @@ public sealed partial class TileMap
 
 		chunkDrawn ??= drawn[key] = new DrawnChunk();
 
-		BuildTiles( chunkDrawn, set, layer, chunk, rank * LayerSpacing, transform );
+		//Every layer lies in the map's own plane. Which is on top is decided by the order the chunks are drawn in alone (depth passes when
+		//equal - LessOrEqual), not by standing them apart towards the viewer: a layer stood nearer would hide every sprite of the scene behind
+		//it by depth whatever their Order In Layer, and moving the map's layers would move what it hides.
+		BuildTiles( chunkDrawn, set, layer, chunk, transform );
 
 		chunkDrawn.Opaque = layer.Tint.a >= 1.0f;
 		chunkDrawn.Order = rank;
@@ -169,7 +172,7 @@ public sealed partial class TileMap
 
 	//A chunk's cells as sprite records, standing where the map puts them in the world: each the picture of its tile, turned and flipped
 	//as its cell says, tinted by its tile and its layer, and - where it is animated - with its frames for tile_ps.shader to step through.
-	private void BuildTiles( DrawnChunk into, TileSet set, TileMapLayer layer, TileGrid.Chunk chunk, float depth, Transform transform )
+	private void BuildTiles( DrawnChunk into, TileSet set, TileMapLayer layer, TileGrid.Chunk chunk, Transform transform )
 	{
 		var sheet = set.Sheet;
 		var width = (float)Math.Max( sheet.Width, 1 );
@@ -219,7 +222,7 @@ public sealed partial class TileMap
 
 			into.Tiles[count++] = new SpriteBatchSceneObject.SpriteData
 			{
-				Position = transform.PointToWorld( new Vector3( x, y, depth ) ),
+				Position = transform.PointToWorld( new Vector3( x, y, 0f ) ),
 				Rotation = turned[cell.Turns & 3],
 				Scale = half,
 				TextureHandle = picture,
@@ -285,8 +288,8 @@ public sealed partial class TileMap
 		}
 	}
 
-	//Draw the chunks of one z-index, for the view being gathered - called by its scene object while the frame collects what is drawn by hand. Solid chunks
-	//write their depth and need no order among themselves; a layer tinted see-through blends, and is drawn after the solid ones, back layer first.
+	//Draw the chunks of one z-index, for the view being gathered - called by its scene object while the frame collects what is drawn by hand. The layers
+	//all lie in one plane, so they are drawn strictly back layer first, solid or see-through alike: each covers the ones drawn before it.
 	internal void DrawChunks( int zIndex )
 	{
 		if ( drawn.Count == 0 ) return;
@@ -295,8 +298,7 @@ public sealed partial class TileMap
 		{
 			drawOrder.Clear();
 			drawOrder.AddRange( drawn.Values );
-			drawOrder.Sort( static ( a, b ) => a.ZIndex != b.ZIndex ? a.ZIndex.CompareTo( b.ZIndex )
-				: a.Opaque != b.Opaque ? ( a.Opaque ? -1 : 1 ) : a.Order.CompareTo( b.Order ) );
+			drawOrder.Sort( static ( a, b ) => a.ZIndex != b.ZIndex ? a.ZIndex.CompareTo( b.ZIndex ) : a.Order.CompareTo( b.Order ) );
 			drawOrderDirty = false;
 		}
 

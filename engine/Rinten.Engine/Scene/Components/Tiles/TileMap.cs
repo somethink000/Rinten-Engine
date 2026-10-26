@@ -25,9 +25,6 @@ public sealed partial class TileMap : Collider, Component.ExecuteInEditor
 	[Property, WideMode]
 	public List<TileMapLayer> Layers { get; set; } = new();
 
-	/// <summary>How far apart the layers stand towards the viewer, so each is drawn over the one before.</summary>
-	public const float LayerSpacing = 0.01f;
-
 	/// <summary>How thick the collision is, through the plane.</summary>
 	[Property]
 	public float Thickness
@@ -224,7 +221,7 @@ public sealed partial class TileMap : Collider, Component.ExecuteInEditor
 		collisionDirty = true;
 	}
 
-	//A layer's z-index changed: every layer may now stand at another depth, so all of them are drawn again.
+	//A layer's z-index changed: every layer may now be drawn at another place among the others, so all of them are built again.
 	internal void LayerOrderChanged()
 	{
 		foreach ( var layer in Layers ?? [] )

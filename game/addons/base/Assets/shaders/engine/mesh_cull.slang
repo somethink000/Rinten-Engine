@@ -464,10 +464,8 @@ void CullInstance( uint index )
 			if ( view.lod.w > 0.0 && PixelsAcross( view, sphere.xyz, radius ) < view.lod.w ) continue;
 			if ( v == 0 ) code |= 8;
 
-			float3 middle;
-			float3 reach;
-			WorldBox( world, mesh.boxMin.xyz, mesh.boxMax.xyz, 1.0 + max( instance.cullGrow, 0.0 ), middle, reach );
-			if ( BehindTheDepth( view, middle, reach ) ) continue;
+			//No depth test here: the pyramid is last frame's, and an instance dropped by it has no retest to come back by
+			//- with the eye moving, what came into view blinked. Its clusters are tested, and those found hidden retested
 			if ( v == 0 ) code |= 16;
 		}
 		if ( v == 0 ) code |= 32;
@@ -673,8 +671,8 @@ void CullCells( uint cell )
 	for ( uint v = 0; v < params.viewCount && !seen; ++v )
 	{
 		View view = params.views[v];
+		//The frustum only: last frame's depth would drop a cell with no retest to bring it back - see CullInstance
 		if ( !InsideTheFrustum( view, middle, radius ) ) continue;
-		if ( IsCamera( view ) && view.hzb.w > 0.5 && BehindTheDepth( view, middle, radius.xxx ) ) continue;
 		seen = true;
 	}
 

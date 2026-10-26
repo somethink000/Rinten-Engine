@@ -533,6 +533,13 @@ public partial class SceneObject : IHandle
 			set => SetFlag( Rendering.SceneObjectFlags.NeverStill, value );
 		}
 
+		/// <summary>Whether this is one detail of a surface drawn by several - see <see cref="Rendering.SceneObjectFlags.LodStandIn"/>.</summary>
+		public bool LodStandIn
+		{
+			get => HasFlag( Rendering.SceneObjectFlags.LodStandIn );
+			set => SetFlag( Rendering.SceneObjectFlags.LodStandIn, value );
+		}
+
 		public bool IsOpaque
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.IsOpaque );

@@ -71,6 +71,9 @@ internal sealed class CoreSceneTables
 		/// <summary>Whether it said it is here for a moment - see SceneObjectFlags.NeverStill.</summary>
 		public bool NeverStill;
 
+		/// <summary>Whether it is one detail of a surface drawn by several - see SceneObjectFlags.LodStandIn.</summary>
+		public bool LodStandIn;
+
 		/// <summary>Stands for nothing in the scene: a model at a place, handed over once - see AddStatic.</summary>
 		public bool Static;
 		public Transform StaticTransform;
@@ -1295,6 +1298,7 @@ internal sealed class CoreSceneTables
 			attributes = found.HasAttributes ? found.AttributesIfAny : null;
 			if ( !found.Flags.CastShadows ) renderType = ModelRenderer.ShadowRenderType.Off;
 			entry.NeverStill = found.Flags.NeverStill;
+			entry.LodStandIn = found.Flags.LodStandIn;
 			entry.Layer = LayerOf( !found.Flags.ExcludeGameLayer, found.Flags.OverlayLayer,
 				found.Flags.HasFlag( Rendering.SceneObjectFlags.UIOverlayLayer ), ref renderType );
 			entry.ObjectVersion = found.Version;

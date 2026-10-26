@@ -59,6 +59,10 @@ internal enum SceneObjectFlags : ulong
 
 	/// <summary>Never baked into the sun's still-world pages; for short-lived things like debug overlays.</summary>
 	NeverStill = 1LU << 53,
+
+	/// <summary>One of the shapes a surface is drawn by at different detail: one standing or going is not a change to the still
+	/// world's shadow, which whoever places them says themselves (CoreCasters.Stir) where the surface itself changed.</summary>
+	LodStandIn = 1LU << 54,
 	ExecuteBefore = 1LU << 57,
 	ExecuteAfter = 1LU << 58,
 

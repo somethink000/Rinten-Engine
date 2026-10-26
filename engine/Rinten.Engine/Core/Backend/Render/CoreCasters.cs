@@ -26,6 +26,9 @@ internal sealed class CoreCasters
 	private bool[] still = [];
 	private bool[] moving = [];
 
+	//Whether the slot was a stand-in on its last look, for when it is gone by the next - see LodStandIn
+	private bool[] standIn = [];
+
 	//Whether the frame has a bake, so that what is not static counts as moving - see Look
 	private bool movable;
 	private uint[] moves = [];
@@ -125,6 +128,7 @@ internal sealed class CoreCasters
 			Array.Resize( ref sphere, room );
 			Array.Resize( ref still, room );
 			Array.Resize( ref moving, room );
+			Array.Resize( ref standIn, room );
 			Array.Resize( ref moves, room );
 			Array.Resize( ref triangles, room );
 			Array.Resize( ref moverAt, room );
@@ -228,7 +232,12 @@ internal sealed class CoreCasters
 		var was = still[slot] ? sphere[slot] : Nothing;
 		var now = nowStill ? nowSphere : Nothing;
 
-		if ( was != now || ( nowStill && moves[slot] != record.MoveCount ) )
+		//A stand-in for a surface coming or going is that surface at another detail, not a change to it - see LodStandIn
+		var isStandIn = entry?.LodStandIn ?? standIn[slot];
+		var swapped = isStandIn && ( was.W < 0.0f ) != ( now.W < 0.0f );
+		standIn[slot] = isStandIn;
+
+		if ( !swapped && ( was != now || ( nowStill && moves[slot] != record.MoveCount ) ) )
 			Changes.Add( new Change( slot, was, now ) );
 
 		sphere[slot] = nowSphere;

@@ -28,6 +28,9 @@ public partial class Terrain
 		/// <summary>Whether its ground changed since last gathered, not only wanted whole or far.</summary>
 		public bool Changed;
 
+		/// <summary>Whether its shape changed since it last stood - then the shadow over it is baked again, which a swap between whole and far is not.</summary>
+		public bool Reshaped = true;
+
 		/// <summary>Whether the physics world holds its collision - see Solidify. Its triangles are kept either way.</summary>
 		public bool Solid = true;
 
@@ -236,6 +239,9 @@ public partial class Terrain
 
 	private void ReleaseChunks()
 	{
+		//The ground goes as a whole, which its stand-ins do not say themselves
+		if ( chunks.Length > 0 && Storage?.Mesh is { } mesh ) CoreCasters.Stir( mesh.Bounds.Transform( WorldTransform ) );
+
 		foreach ( var chunk in chunks ) Release( chunk, true );
 
 		chunks = [];
@@ -331,6 +337,7 @@ public partial class Terrain
 				var chunk = chunks[( z * chunksWide ) + x];
 
 				chunk.Changed = true;
+				chunk.Reshaped = true;
 				Again( chunk );
 			}
 		}
@@ -901,7 +908,15 @@ public partial class Terrain
 		ShowFar( chunk );
 		Release( was, false );
 
+		//Its models are stand-ins, so the still world's shadow is told only where the ground itself is new
 		var index = Array.IndexOf( chunks, chunk );
+
+		if ( chunk.Reshaped && index >= 0 )
+		{
+			chunk.Reshaped = false;
+			CoreCasters.Stir( ChunkBox( index ).Transform( WorldTransform ) );
+		}
+
 		if ( index >= 0 ) ChunkBaked?.Invoke( index % chunksWide, index / chunksWide );
 
 		reliefStale = true;
@@ -917,9 +932,20 @@ public partial class Terrain
 		return model is not null && model != Model.Error ? model : null;
 	}
 
+	//The square of the terrain's own space a chunk covers, the ground's whole height up and down
+	private BBox ChunkBox( int index )
+	{
+		var x0 = chunkOrigin.x + ( ( index % chunksWide ) * chunkSpan );
+		var z0 = chunkOrigin.y + ( ( index / chunksWide ) * chunkSpan );
+		var bounds = Storage?.Mesh?.Bounds ?? default;
+
+		return new BBox( new Vector3( x0, bounds.Mins.y, z0 ), new Vector3( x0 + chunkSpan, bounds.Maxs.y, z0 + chunkSpan ) );
+	}
+
 	private SceneObject Place( SceneObject made, Material wears )
 	{
 		made.Component = this;
+		made.Flags.LodStandIn = true;
 		made.Tags.SetFrom( GameObject.Tags );
 
 		if ( wears is not null ) made.SetMaterialOverride( wears );

@@ -416,6 +416,22 @@ void ApplyDecals( inout Surface s )
 	}
 }
 
+//The camera's occlusion picture at a pixel - r the light let through, gba the bent normal - and false where none was
+//drawn; the share it is laid at is g_frame[0].settings.x. A picture a pass drew, which the portable frame has none of
+bool ScreenOcclusion( float2 pixel, out float4 held )
+{
+	held = float4( 1.0, 0.5, 0.5, 0.5 );
+
+#ifndef PORTABLE
+	if ( kOcclusionOn == 0 || g_frame[0].settings.x <= 0.0 || g_frame[0].settings.y <= 0.0 ) return false;
+
+	held = g_occlusionMap.SampleLevel( pixel / g_frame[0].settings.yz, 0.0 );
+	return true;
+#else
+	return false;
+#endif
+}
+
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
@@ -689,13 +705,10 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//its length is how far the directions agreed, and the normal leans that much
 	float3 skyward = normal;
 
-	//A picture a pass drew, which the portable frame has none of.
-#ifndef PORTABLE
-	if ( kOcclusionOn != 0 && g_frame[0].settings.x > 0.0 && g_frame[0].settings.y > 0.0 )
-	{
-		float2 screen = s.screen / g_frame[0].settings.yz;
-		float4 held = g_occlusionMap.SampleLevel( screen, 0.0 );
+	float4 held;
 
+	if ( ScreenOcclusion( s.screen, held ) )
+	{
 		visible = lerp( 1.0, held.r, g_frame[0].settings.x );
 
 		//Kept nought to one, in eight bits - see ambient_occlusion.shader.
@@ -703,7 +716,6 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		float lean = saturate( length( bent ) ) * g_frame[0].settings.x;
 		if ( lean > 0.01 ) skyward = normalize( lerp( normal, normalize( bent ), lean ) );
 	}
-#endif
 
 	//The light the occlusion's horizons hide, out of last frame's picture: where it is, the occluded share of the
 	//ambient is replaced by it, the bake's included - see IndirectPs in ambient_occlusion.shader

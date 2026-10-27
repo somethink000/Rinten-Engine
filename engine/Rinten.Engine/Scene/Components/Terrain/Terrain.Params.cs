@@ -96,7 +96,7 @@ public partial class Terrain
 				LayerPicture( layer, "Normal", srgb: false ) );
 
 			WriteShorts( i, RowLayerPacks,
-				BitConverter.HalfToUInt16Bits( (Half)CoreResources.Number( layer?.core, "g_flDisplacement", 0.0f ) ),
+				BitConverter.HalfToUInt16Bits( (Half)DisplacementOf( layer ) ),
 				LayerPicture( layer, "g_tHeight", srgb: false ) );
 
 			WriteShorts( i, RowLayerMaps2,

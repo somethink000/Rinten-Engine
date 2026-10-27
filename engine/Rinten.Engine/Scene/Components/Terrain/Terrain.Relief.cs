@@ -26,13 +26,31 @@ public partial class Terrain
 		var most = 0.0f;
 
 		foreach ( var layer in Storage.Materials )
-			if ( Displaces( layer ) ) most = MathF.Max( most, CoreResources.Number( layer.core, "g_flDisplacement", 0.0f ) );
+			if ( Displaces( layer ) ) most = MathF.Max( most, DisplacementOf( layer ) );
 
 		return most;
 	}
 
 	private static bool Displaces( Material layer )
-		=> layer is not null && CoreResources.Number( layer.core, "g_flDisplacement", 0.0f ) > 0.0f && layer.GetTexture( "g_tHeight" ) is not null;
+		=> DisplacementOf( layer ) > 0.0f && layer.GetTexture( "g_tHeight" ) is not null;
+
+	//Metres, terrain_layer.shader's Range: the ground's small detail, which the physics and all that stands on it do not follow
+	private const float MostDisplacement = 0.5f;
+
+	//The layers said to be past it, so each is said once
+	private static readonly HashSet<string> overDisplaced = new();
+
+	//A layer's Displacement held to its range: more lifts the near ground over everything standing on it, metres up
+	private static float DisplacementOf( Material layer )
+	{
+		var asked = CoreResources.Number( layer?.core, "g_flDisplacement", 0.0f );
+		if ( asked <= MostDisplacement ) return MathF.Max( asked, 0.0f );
+
+		if ( overDisplaced.Add( layer.ResourcePath ?? layer.Name ?? "" ) )
+			Log.Warning( $"{layer.ResourcePath ?? layer.Name}: Displacement {asked:0.##} m lifts the ground over what stands on it - held to {MostDisplacement} m" );
+
+		return MostDisplacement;
+	}
 
 	//Once a frame: the ring built again round the eye where it has gone far enough, or the ground under it changed
 	private void PumpRelief()

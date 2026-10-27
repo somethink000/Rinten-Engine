@@ -186,6 +186,9 @@ internal static unsafe class CoreSceneRenderer
 		/// <summary>DepthOnly: pre-pass with the surface's shader. Wireframe: edges, baked on demand.</summary>
 		public bool DepthOnly { get; init; }
 
+		/// <summary>Drawn into a light's map, whose depth is not reversed - see CoreRenderDevice.DepthCompare.</summary>
+		public bool Light { get; init; }
+
 		public bool Wireframe { get; init; }
 
 		/// <summary>Draws lines rather than triangles (Graphics.Draw( GpuBuffer )); topology is baked in.</summary>
@@ -1942,7 +1945,7 @@ internal static unsafe class CoreSceneRenderer
 				//Passed with the target: the mover pre-pass draws depth alone, and a colour attachment would not match
 				depthOnly: kind.DepthOnly,
 				target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1,
-				compare: CoreRenderDevice.DepthCompare.LessOrEqual,
+				compare: kind.Light ? CoreRenderDevice.DepthCompare.LightNearerOrSame : CoreRenderDevice.DepthCompare.NearerOrSame,
 
 				//The screen-covering pass, so worth baking several ways - see ShadeSpecialize
 				specialize: kind.Specialize );
@@ -1976,7 +1979,8 @@ internal static unsafe class CoreSceneRenderer
 		if ( depthOnly )
 		{
 			return CoreRenderDevice.CreatePipeline( vertex, pixel, layout, depthTest: true,
-				cullBack: !kind.TwoSided, depthOnly: true, target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1 );
+				cullBack: !kind.TwoSided, depthOnly: true, target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1,
+				compare: kind.Light ? CoreRenderDevice.DepthCompare.LightNearerOrSame : CoreRenderDevice.DepthCompare.NearerOrSame );
 		}
 
 		//A full-screen pass over a finished picture: no vertices, no depth, no culling

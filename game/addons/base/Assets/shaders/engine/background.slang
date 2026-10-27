@@ -25,8 +25,8 @@ V2F MainVs( uint id : SV_VertexID )
 
 	V2F o;
 
-	//At the far plane, like the sky, so the depth test keeps it behind everything that drew.
-	o.position = float4( ( corner * 2.0 ) - 1.0, 1.0, 1.0 );
+	//At the far plane, like the sky, so the depth test keeps it behind everything that drew; depth is reversed, far is nought
+	o.position = float4( ( corner * 2.0 ) - 1.0, 0.0, 1.0 );
 	return o;
 }
 

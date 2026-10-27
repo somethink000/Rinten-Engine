@@ -65,7 +65,7 @@ float Defocus( float2 uv )
 	float depth = SceneDepthRaw( uv );
 
 	//The sky is as far away as anything gets.
-	if ( depth >= 1.0 ) return 1.0;
+	if ( IsFarDepth( depth ) ) return 1.0;
 
 	float3 place = PlaceOf( uv, depth );
 	float away = abs( length( place - EYE_FRAME( camera ).xyz ) - g_flFocalDistance );

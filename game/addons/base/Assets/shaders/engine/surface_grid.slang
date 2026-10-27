@@ -64,7 +64,8 @@ V2F MainVs( VIn i )
 	o.normal = float3( dot( normal, g_worldX.xyz ), dot( normal, g_worldY.xyz ), dot( normal, g_worldZ.xyz ) );
 
 	o.position = mul( float4( world, 1.0 ), g_worldToClip );
-	o.position.z -= g_bias * o.position.w;
+	//Towards the eye, which a reversed depth counts upward - see NearDepth in frame.slang
+	o.position.z += g_bias * o.position.w;
 
 	return o;
 }

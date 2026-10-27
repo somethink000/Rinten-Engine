@@ -702,7 +702,7 @@ internal static unsafe partial class VkFrame
 
 		if ( Current.MainBegun ) Current.ResumedThisFrame = true;
 
-		depth.ClearValue.DepthStencil = new ClearDepthStencilValue( 1.0f, 0 );
+		depth.ClearValue.DepthStencil = new ClearDepthStencilValue( CoreRenderDevice.FarDepth, 0 );
 
 		//Drawn into the multisampled pair and resolved as the pass ends: colour into what it was going to be, depth into the depth.
 		//The pair is kept only where the pass may be resumed; the resolves always are

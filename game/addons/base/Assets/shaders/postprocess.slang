@@ -100,7 +100,8 @@ float3 SceneNormal( float2 uv ) { return normalize( SceneSurface( uv ).xyz * 2.0
 //How rough the surface is, up to where it stops being a mirror - see SurfaceWord in surface_shading.slang
 float SceneRoughness( float2 uv ) { return saturate( ( 1.0 - length( SceneSurface( uv ).xyz * 2.0 - 1.0 ) ) / 0.8 ); }
 
-//The depth as it was written: nought at the near plane, one at the far - and one where nothing was drawn, which is the sky.
+//The depth as it was written: one at the near plane, nought at the far - and nought where nothing was drawn, which is the
+//sky (IsFarDepth). Reversed - see NearDepth in frame.slang.
 float SceneDepthRaw( float2 uv ) { return FramePicture( g_vFramePictures.z, uv ).r; }
 
 //And that as a distance in metres. A pixel with nothing drawn on it comes back at the far plane,
@@ -109,12 +110,9 @@ float SceneDepth( float2 uv )
 {
 	float raw = SceneDepthRaw( uv );
 
-	if ( raw >= 1.0 ) return g_vFrameRange.y;
+	if ( IsFarDepth( raw ) ) return g_vFrameRange.y;
 
-	float near = g_vFrameRange.x;
-	float far = g_vFrameRange.y;
-
-	return near * far / max( far - raw * ( far - near ), 1e-6 );
+	return DepthAhead( raw, g_vFrameRange.x, g_vFrameRange.y );
 }
 
 //Screen motion since last frame, in uv, pointing where it went; multiply by g_vFrameSize for px
@@ -129,7 +127,7 @@ float2 SceneMotionCamera( float2 uv )
 	float raw = SceneDepthRaw( uv );
 
 	//The sky has no place in the world to have moved from.
-	if ( raw >= 1.0 ) return float2( 0.0, 0.0 );
+	if ( IsFarDepth( raw ) ) return float2( 0.0, 0.0 );
 
 	float4 clip = float4( ( uv * 2.0 ) - 1.0, raw, 1.0 );
 	float4 world = mul( clip, EYE_FRAME( clipToWorld ) );

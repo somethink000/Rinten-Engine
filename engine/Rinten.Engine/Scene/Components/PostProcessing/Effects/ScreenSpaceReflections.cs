@@ -73,7 +73,8 @@ public class ScreenSpaceReflections : BasePostProcess<ScreenSpaceReflections>
 		cl.SetRenderTarget( depths );
 		cl.Blit( Trace, entry: "NearestPs" );
 		cl.ClearRenderTarget();
-		cl.GenerateMipMaps( depths, Graphics.DownsampleMethod.Min );
+		//The nearest of each four is the greatest, a camera's depth being reversed - see CoreSceneDrawer.Reversed
+		cl.GenerateMipMaps( depths, Graphics.DownsampleMethod.Max );
 
 		var reflection = cl.GetPicture( "Reflection", PictureFormat.Hdr,
 			sizeFactor: Math.Clamp( DownsampleRatio, 1, 8 ) );

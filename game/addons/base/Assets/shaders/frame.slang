@@ -112,6 +112,20 @@ cbuffer Push
 #include "frame_data.slang"
 #include "picture_size.slang"
 
+//A camera's depth runs from one at the near plane to nought at the far, reversed so a float keeps its precision far
+//off - see CoreSceneDrawer.Reversed. Nought is also what is there where nothing was drawn. A light's map is not reversed.
+static const float NearDepth = 1.0;
+static const float FarDepth = 0.0;
+
+//Whether a camera's depth is the far plane: nothing drawn there - the sky.
+bool IsFarDepth( float raw ) { return raw <= FarDepth; }
+
+//The nearer of two camera depths
+float NearestDepth( float a, float b ) { return max( a, b ); }
+
+//Metres ahead of the eye along its view for a camera depth, given its near and far planes.
+float DepthAhead( float raw, float near, float far ) { return near * far / max( near + ( raw * ( far - near ) ), 1e-6 ); }
+
 //A material's numbers, for a shader without its own; a PARAMETERS block writes its own and sets this define
 //- see CoreShaderParams
 #ifndef ENGINE_MATERIAL_BLOCK
@@ -333,14 +347,14 @@ bool HasDepthBehind()
 #endif
 }
 
-//The depth of the opaque world at a point on the screen, as the pre-pass wrote it: nought at the near plane,
-//one at the far and where nothing was drawn. `screen` is SV_Position.xy. One where the frame kept no picture.
+//The depth of the opaque world at a point on the screen, as the pre-pass wrote it: one at the near plane, nought
+//at the far and where nothing was drawn (IsFarDepth). `screen` is SV_Position.xy. FarDepth where the frame kept no picture.
 float DepthBehind( float2 screen )
 {
 #ifdef PORTABLE
-	return 1.0;
+	return FarDepth;
 #else
-	if ( g_frame[0].viewInfo.z <= 0.0 ) return 1.0;
+	if ( g_frame[0].viewInfo.z <= 0.0 ) return FarDepth;
 
 	float2 uv = screen / g_frame[0].settings.yz;
 
@@ -1039,14 +1053,13 @@ static const float ShadowSoftestTexels = 16.0;
 //The near edge ShadowEdge checks first, and past which ShadowFilter turns from its grid to its spiral
 static const float ShadowNearTexels = 2.0;
 
-//A pixel's turn of the soft filter's spiral as its cosine and sine, from where it is on the screen (interleaved gradient
-//noise, Jimenez 2014); set by the shading before it reads shadows, unturned where nothing set it
-static float2 g_shadowTurn = float2( 1.0, 0.0 );
-
-void ShadowTurnAt( float2 screen )
+//The soft filter's spiral turn at a point of a map, as its cosine and sine: by the map texel it falls in (interleaved gradient
+//noise, Jimenez 2014), so the pattern stands on the world - by the screen pixel, a turned camera shook every soft edge
+float2 ShadowTurn( float3 at, float texel )
 {
-	float turn = 6.2831853 * frac( 52.9829189 * frac( dot( screen, float2( 0.06711056, 0.00583715 ) ) ) );
-	g_shadowTurn = float2( cos( turn ), sin( turn ) );
+	float2 cell = floor( at.xy / texel ) + float2( at.z * 17.0, 0.0 );
+	float turn = 6.2831853 * frac( 52.9829189 * frac( dot( cell, float2( 0.06711056, 0.00583715 ) ) ) );
+	return float2( cos( turn ), sin( turn ) );
 }
 
 //Five taps near and four out as far as the filter can spread (widest, in texels) detect a shadow edge; when they
@@ -1114,7 +1127,7 @@ float ShadowBlocker( uint depthMap, float3 at, float compare, float texel, float
 }
 
 //PCSS filter `soft` texels each side: 4x4 compared taps on a grid up to ShadowNearTexels, past it 24 on a golden-angle
-//spiral turned by g_shadowTurn, as a stretched grid would band; under half a texel ShadowSharp
+//spiral turned by ShadowTurn, as a stretched grid would band; under half a texel ShadowSharp
 float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slope, float soft )
 {
 	if ( soft < 0.5 ) return ShadowSharp( map, at, compare, slope );
@@ -1125,16 +1138,15 @@ float ShadowFilter( uint map, float3 at, float compare, float texel, float2 slop
 	{
 		static const uint Taps = 24u;
 		float spiral = 0.0;
+		float2 turn = ShadowTurn( at, texel );
 
 		[unroll]
 		for ( uint k = 0u; k < Taps; k++ )
 		{
-			//Evenly over the disc by area, each tap a golden angle round from the last: constants once unrolled,
-			//turned by the pixel's turn
+			//Evenly over the disc by area, each tap a golden angle round from the last: constants once unrolled
 			float r = sqrt( ( float( k ) + 0.5 ) / float( Taps ) );
 			float a = float( k ) * 2.39996323;
 			float2 spot = float2( cos( a ), sin( a ) ) * r;
-			float2 turn = g_shadowTurn;
 			float2 o = float2( ( spot.x * turn.x ) - ( spot.y * turn.y ), ( spot.x * turn.y ) + ( spot.y * turn.x ) ) * soft;
 
 			spiral += ShadowCompare( map, at + float3( o * texel, 0.0 ), compare + dot( o, slope ) );

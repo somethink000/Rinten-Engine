@@ -43,7 +43,7 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	if ( strength <= 0.01 || g_flReflection <= 0.0 ) discard;
 
 	float depth = SceneDepthRaw( i.uv );
-	if ( depth >= 1.0 ) discard;
+	if ( IsFarDepth( depth ) ) discard;
 
 	float3 camera = EYE_FRAME( camera ).xyz;
 	float3 place = PlaceOf( i.uv, depth );

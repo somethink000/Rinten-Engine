@@ -355,15 +355,16 @@ internal static class BrowserPipelines
 				.Append( "\",\"depthWriteEnabled\":" ).Append( depthWrite != 0 ? "true" : "false" )
 				.Append( ",\"depthCompare\":\"" ).Append( depthTest switch
 				{
-					//As VkPipelines has them: less-or-equal, so the sky - drawn at the far plane, over a depth cleared to it - passes where nothing stands.
+					//As VkPipelines has them: a camera's depth is reversed, a light's map is not - see CoreRenderDevice.DepthCompare
 					0 or 3 => "always",
 					2 => "equal",
-					_ => "less-equal",
+					4 => "less-equal",
+					_ => "greater-equal",
 				} ).Append( '"' );
 
 			//A shadow map is drawn from the light and read from the camera, and the two disagree by a fraction
 			//of a texel. The bias is what stops that disagreement from being a stripe across every lit surface.
-			if ( depthOnly != 0 ) json.Append( ",\"depthBias\":2,\"depthBiasSlopeScale\":2" );
+			if ( depthOnly != 0 && depthTest == (int)CoreRenderDevice.DepthCompare.LightNearerOrSame ) json.Append( ",\"depthBias\":2,\"depthBiasSlopeScale\":2" );
 
 			json.Append( '}' );
 		}

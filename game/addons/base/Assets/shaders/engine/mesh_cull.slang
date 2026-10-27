@@ -103,7 +103,8 @@ bool BehindTheDepth( View view, float3 middle, float3 reach )
 
 	float2 low = float2( 1e9, 1e9 );
 	float2 high = float2( -1e9, -1e9 );
-	float nearest = 1e9;
+	//Depth is reversed - near 1, far 0 - so the box's nearest corner is its greatest
+	float nearest = -1e9;
 
 	for ( uint corner = 0; corner < 8; ++corner )
 	{
@@ -117,11 +118,11 @@ bool BehindTheDepth( View view, float3 middle, float3 reach )
 		float2 on = ( ndc.xy * 0.5 ) + 0.5;
 		low = min( low, on );
 		high = max( high, on );
-		nearest = min( nearest, ndc.z );
+		nearest = max( nearest, ndc.z );
 	}
 
 	if ( high.x < 0.0 || high.y < 0.0 || low.x > 1.0 || low.y > 1.0 ) return false;
-	if ( nearest <= 0.0 ) return false;
+	if ( nearest >= 1.0 ) return false;
 
 	//The first level's texels the depth fills, and the power of two they are kept in - the rest far, see CoreDepthPyramid
 	float2 image = view.hzb.xy;
@@ -140,12 +141,12 @@ bool BehindTheDepth( View view, float3 middle, float3 reach )
 	past = min( past, first + 1 );
 
 	int lod = int( level );
-	float stored = 0.0;
+	float stored = 1.0;
 	for ( int y = first.y; y <= past.y; y++ )
 		for ( int x = first.x; x <= past.x; x++ )
-			stored = max( stored, g_pyramid.Load( int3( x, y, lod ) ).x );
+			stored = min( stored, g_pyramid.Load( int3( x, y, lod ) ).x );
 
-	return nearest > stored;
+	return nearest < stored;
 }
 
 //A cluster's box in the world, as an axis-aligned one round the turned box.

@@ -270,8 +270,8 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 	float3 m1 = 0.0;
 	float3 m2 = 0.0;
 
-	//And which of the nine drew the nearest surface, whose motion is the one followed: an edge moves with the thing in front, not with what it hides.
-	float nearestDepth = 2.0;
+	//And which of the nine drew the nearest surface - the greatest depth, reversed - whose motion is followed: an edge moves with what is in front
+	float nearestDepth = -1.0;
 	int2 nearestStep = int2( 0, 0 );
 
 	[unroll]
@@ -290,7 +290,7 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 			m1 += held.rgb;
 			m2 += held.rgb * held.rgb;
 
-			if ( held.a < nearestDepth )
+			if ( held.a > nearestDepth )
 			{
 				nearestDepth = held.a;
 				nearestStep = int2( x, y );

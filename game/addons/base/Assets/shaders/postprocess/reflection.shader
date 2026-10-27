@@ -96,9 +96,9 @@ float4 NearestPs( PostV2F i ) : SV_Target0
 {
 	float2 half = 0.5 * g_vFrameSize.zw;
 
-	return min(
-		min( SceneDepthRaw( i.uv + float2( -half.x, -half.y ) ), SceneDepthRaw( i.uv + float2( half.x, -half.y ) ) ),
-		min( SceneDepthRaw( i.uv + float2( -half.x, half.y ) ), SceneDepthRaw( i.uv + float2( half.x, half.y ) ) ) );
+	return NearestDepth(
+		NearestDepth( SceneDepthRaw( i.uv + float2( -half.x, -half.y ) ), SceneDepthRaw( i.uv + float2( half.x, -half.y ) ) ),
+		NearestDepth( SceneDepthRaw( i.uv + float2( -half.x, half.y ) ), SceneDepthRaw( i.uv + float2( half.x, half.y ) ) ) );
 }
 
 //The trace itself is ScreenTrace in screen_trace.slang, which frame.slang brings in - water and glass trace with the same one.
@@ -161,7 +161,7 @@ float4 Reflected( PostV2F i, bool rays )
 	if ( surface.a <= 0.01 || g_flDepths <= 0.0 ) return float4( 0.0, 0.0, 0.0, -1.0 );
 
 	float depth = SceneDepthRaw( uv );
-	if ( depth >= 1.0 ) return float4( 0.0, 0.0, 0.0, -1.0 );
+	if ( IsFarDepth( depth ) ) return float4( 0.0, 0.0, 0.0, -1.0 );
 
 	float3 camera = EYE_FRAME( camera ).xyz;
 	float3 place = PlaceOf( uv, depth );

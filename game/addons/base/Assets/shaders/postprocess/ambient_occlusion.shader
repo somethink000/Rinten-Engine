@@ -62,10 +62,10 @@ Rays RaysOf()
 	Rays r;
 	r.eye = EYE_FRAME( camera ).xyz;
 
-	float3 ahead = normalize( PlaceOf( float2( 0.5, 0.5 ), 1.0 ) - r.eye );
-	float3 c00 = PlaceOf( float2( 0.0, 0.0 ), 1.0 ) - r.eye;
-	float3 c10 = PlaceOf( float2( 1.0, 0.0 ), 1.0 ) - r.eye;
-	float3 c01 = PlaceOf( float2( 0.0, 1.0 ), 1.0 ) - r.eye;
+	float3 ahead = normalize( PlaceOf( float2( 0.5, 0.5 ), NearDepth ) - r.eye );
+	float3 c00 = PlaceOf( float2( 0.0, 0.0 ), NearDepth ) - r.eye;
+	float3 c10 = PlaceOf( float2( 1.0, 0.0 ), NearDepth ) - r.eye;
+	float3 c01 = PlaceOf( float2( 0.0, 1.0 ), NearDepth ) - r.eye;
 
 	c00 /= dot( c00, ahead );
 	c10 /= dot( c10, ahead );
@@ -81,10 +81,7 @@ Rays RaysOf()
 //Metres ahead of the eye along its view, from a depth as written
 float AheadOf( float raw )
 {
-	float near = g_vFrameRange.x;
-	float far = g_vFrameRange.y;
-
-	return near * far / max( far - raw * ( far - near ), 1e-6 );
+	return DepthAhead( raw, g_vFrameRange.x, g_vFrameRange.y );
 }
 
 //A point of the screen that far ahead, in the world: its ray, that long
@@ -145,7 +142,7 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	float3 normal = PlaneOf( place, view );
 
 	//Nothing was drawn here: the sky is not occluded by anything.
-	if ( raw >= 1.0 ) return float4( 1.0, 0.5, 0.5, 0.5 );
+	if ( IsFarDepth( raw ) ) return float4( 1.0, 0.5, 0.5, 0.5 );
 
 	//Texels a metre spans at this depth: the ray's width per screen at a metre, times the distance ahead
 	float2 size = g_vFrameSize.xy;
@@ -280,7 +277,7 @@ float4 IndirectPs( PostV2F i ) : SV_Target0
 	float3 view = normalize( rays.eye - place );
 	float3 normal = PlaneOf( place, view );
 
-	if ( raw >= 1.0 || g_flLast < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
+	if ( IsFarDepth( raw ) || g_flLast < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
 
 	float2 size = g_vFrameSize.xy;
 	float ahead = dot( place - rays.eye, normalize( rays.corner + ( rays.across + rays.down ) * 0.5 ) );
@@ -382,7 +379,7 @@ float4 TemporalIndirectPs( PostV2F i ) : SV_Target0
 	float4 now = FramePicture( g_flSource, i.uv );
 	float raw = SceneDepthRaw( i.uv );
 
-	if ( g_flBefore < 0.5 || raw >= 1.0 ) return now;
+	if ( g_flBefore < 0.5 || IsFarDepth( raw ) ) return now;
 
 	float4 before = mul( float4( PlaceOf( i.uv, raw ), 1.0 ), EYE_FRAME( previousWorldToClip ) );
 	if ( before.w <= 1e-4 ) return now;

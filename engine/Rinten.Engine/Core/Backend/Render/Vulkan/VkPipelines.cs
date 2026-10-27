@@ -567,9 +567,15 @@ internal static unsafe partial class VkPipelines
 						DepthTestEnable = depthTest != 0,
 						DepthWriteEnable = depthWrite != 0,
 
-						//LessOrEqual so a depth pre-pass doesn't reject itself; 2 is Equal, 3 is Always
-						DepthCompareOp = depthTest == 2 ? CompareOp.Equal
-							: depthTest == 3 ? CompareOp.Always : CompareOp.LessOrEqual,
+						//Or-equal so a depth pre-pass doesn't reject itself; a camera's depth is reversed, a light's map is not - see
+						//CoreRenderDevice.DepthCompare: 1 nearer in a camera, 2 equal, 3 always, 4 nearer in a light's map
+						DepthCompareOp = depthTest switch
+						{
+							2 => CompareOp.Equal,
+							3 => CompareOp.Always,
+							4 => CompareOp.LessOrEqual,
+							_ => CompareOp.GreaterOrEqual,
+						},
 					};
 
 					//The pipeline names the formats it will meet, which is why it has to be told which picture it is

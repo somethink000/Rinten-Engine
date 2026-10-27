@@ -1,5 +1,5 @@
-//The world's depth, as the pre-pass wrote it, into a picture of its own - see DepthPicture. Nought at the near plane, one at the far,
-//one where nothing was drawn; a surface reads it back through DepthBehind in frame.slang and turns it into the point behind itself.
+//The world's depth, as the pre-pass wrote it, into a picture of its own - see DepthPicture. One at the near plane, nought at the far,
+//nought where nothing was drawn; a surface reads it back through DepthBehind in frame.slang and turns it into the point behind itself.
 
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1

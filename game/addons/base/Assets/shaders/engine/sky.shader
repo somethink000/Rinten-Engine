@@ -218,7 +218,7 @@ V2F MainVs( uint id : SV_VertexID )
 	V2F o;
 
 	//At the far plane, so the depth test keeps it behind everything solid.
-	o.position = float4( clip, 1.0, 1.0 );
+	o.position = float4( clip, FarDepth, 1.0 );
 
 	o.direction = SkyRay( clip );
 

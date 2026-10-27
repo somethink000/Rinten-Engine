@@ -19,7 +19,7 @@ internal readonly record struct XrEyeView( Vector3 Position, Rotation Rotation,
 		projection.M22 = -projection.M22;
 		projection.M32 = -projection.M32;
 
-		return projection;
+		return CoreSceneDrawer.Reversed( projection );
 	}
 
 	/// <summary>One field enclosing both eyes, for a stereo pass to cull, sort and plan the sun with</summary>

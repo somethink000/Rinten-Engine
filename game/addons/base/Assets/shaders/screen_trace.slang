@@ -1,4 +1,5 @@
-//Screen-space ray trace through a nearest-depth mip chain, refined on full depth at the end
+//Screen-space ray trace through a nearest-depth mip chain, refined on full depth at the end. Depth is a camera's, reversed:
+//it falls with distance, so nearer is greater - see NearDepth in frame.slang
 
 //Where a ray met the depth: whether it did, where on the screen, and how much to believe it - less at the edge
 //of the screen and at the end of the ray, where a reflection that stopped dead would give the technique away.
@@ -25,7 +26,7 @@ float3 ScreenTracePlace( float2 uv, float depth, row_major float4x4 clipToWorld 
 	return world.xyz / max( world.w, 0.000001 );
 }
 
-//The depth as written at a texel of the full-size depth - or, with none, of the chain's finest level, which is the best there is.
+//The depth at a texel of the full-size depth - or, with none, of the chain's finest level, which is the best there is.
 float ScreenTraceDepth( uint fine, uint chain, float2 texel, float2 fineSize )
 {
 	float2 uv = ( clamp( texel, 0.0, fineSize - 1.0 ) + 0.5 ) / fineSize;
@@ -69,14 +70,14 @@ bool ScreenTraceFine( uint chain, uint fine, uint normals, float3 o, float3 d, f
 		float zIn = o.z + ( d.z * t );
 		float zOut = o.z + ( d.z * leaves );
 
-		if ( surface < 1.0 && max( zIn, zOut ) >= surface )
+		if ( !IsFarDepth( surface ) && min( zIn, zOut ) <= surface )
 		{
 			//Reached from in front, inside this texel: there.
-			if ( zIn <= surface )
+			if ( zIn >= surface )
 			{
 				if ( ScreenTraceFaces( normals, texel, fineSize, ray ) )
 				{
-					t = d.z > 0.0 ? t + ( ( surface - zIn ) / d.z ) : t;
+					t = d.z < 0.0 ? t + ( ( surface - zIn ) / d.z ) : t;
 					return true;
 				}
 			}
@@ -166,10 +167,10 @@ ScreenHit ScreenTrace( uint chain, uint fine, uint normals, float3 from, float3 
 
 		float nearest = ScreenTraceNearest( chain, cell, float( level ), size );
 
-		if ( p.z < nearest )
+		if ( p.z > nearest )
 		{
 			//In front of everything in the cell here. Going deeper, it may reach the nearest before it leaves: then there, a level finer.
-			float reaches = d.z > 0.0 ? ( nearest - o.z ) / d.z : 1e9;
+			float reaches = d.z < 0.0 ? ( nearest - o.z ) / d.z : 1e9;
 
 			if ( reaches < exit )
 			{
@@ -228,7 +229,7 @@ ScreenHit ScreenTrace( uint chain, uint fine, uint normals, float3 from, float3 
 		float rayFar = length( ScreenTracePlace( uv, p.z, clipToWorld ) - camera );
 		float gap = abs( rayFar - length( ScreenTracePlace( uv, surface, clipToWorld ) - camera ) );
 
-		hit.found = surface < 1.0 && gap < 0.25 + ( 0.05 * rayFar ) &&
+		hit.found = !IsFarDepth( surface ) && gap < 0.25 + ( 0.05 * rayFar ) &&
 			ScreenTraceFaces( normals, texel, fineSize, ray );
 	}
 

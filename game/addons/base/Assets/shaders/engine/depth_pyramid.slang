@@ -35,6 +35,12 @@ cbuffer Push
 
 groupshared float s_tile[32][32];
 
+//Depth is reversed - near 1, far 0 - so the farthest of several is the least
+static const float FarDepth = 0.0;
+
+//Past the level's edge: the most a reading can be, so it never wins the least
+static const float Beyond = 1.0;
+
 //The farthest depth below one texel of the first level: the texels of the source its footprint
 //covers - a pair each way from the level below, whatever the depth's size is to the pyramid's.
 float Farthest( uint2 at )
@@ -53,9 +59,9 @@ float Farthest( uint2 at )
 		int2 origin = int2( g_sourceX, g_sourceY );
 		int level = int( g_sourceLevel );
 
-		return max(
-			max( g_below.Load( int3( origin + int2( low ), level ) ).x, g_below.Load( int3( origin + int2( high.x, low.y ), level ) ).x ),
-			max( g_below.Load( int3( origin + int2( low.x, high.y ), level ) ).x, g_below.Load( int3( origin + int2( high ), level ) ).x ) );
+		return min(
+			min( g_below.Load( int3( origin + int2( low ), level ) ).x, g_below.Load( int3( origin + int2( high.x, low.y ), level ) ).x ),
+			min( g_below.Load( int3( origin + int2( low.x, high.y ), level ) ).x, g_below.Load( int3( origin + int2( high ), level ) ).x ) );
 	}
 
 	float2 scale = float2( g_sourceWide, g_sourceTall ) / float2( g_fillWide, g_fillTall );
@@ -64,10 +70,10 @@ float Farthest( uint2 at )
 	to = max( to, from + 1 );
 	to = min( to, from + 8 );
 
-	float farthest = 0.0;
+	float farthest = Beyond;
 	for ( uint y = from.y; y < to.y; y++ )
 		for ( uint x = from.x; x < to.x; x++ )
-			farthest = max( farthest,
+			farthest = min( farthest,
 				g_below.Load( int3( g_sourceX + x, g_sourceY + y, g_sourceLevel ) ).x );
 
 	return farthest;
@@ -93,10 +99,10 @@ void main( uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID )
 		for ( uint dx = 0; dx < 2; dx++ )
 		{
 			uint2 at = origin + local + uint2( dx, dy );
-			float value = 0.0;
+			float value = Beyond;
 			if ( at.x < g_wide && at.y < g_tall )
 			{
-				value = at.x < g_fillWide && at.y < g_fillTall ? Farthest( at ) : 1.0;
+				value = at.x < g_fillWide && at.y < g_fillTall ? Farthest( at ) : FarDepth;
 				g_level0[at] = value;
 			}
 			s_tile[local.y + dy][local.x + dx] = value;
@@ -109,12 +115,12 @@ void main( uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID )
 		GroupMemoryBarrierWithGroupSync();
 
 		bool mine = thread.x < side && thread.y < side;
-		float value = 0.0;
+		float value = Beyond;
 		if ( mine )
 		{
 			uint2 at = thread.xy * 2;
-			value = max( max( s_tile[at.y][at.x], s_tile[at.y][at.x + 1] ),
-				max( s_tile[at.y + 1][at.x], s_tile[at.y + 1][at.x + 1] ) );
+			value = min( min( s_tile[at.y][at.x], s_tile[at.y][at.x + 1] ),
+				min( s_tile[at.y + 1][at.x], s_tile[at.y + 1][at.x + 1] ) );
 		}
 
 		GroupMemoryBarrierWithGroupSync();

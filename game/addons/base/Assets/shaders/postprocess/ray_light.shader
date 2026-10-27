@@ -72,7 +72,7 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	return float4( 0.0, 0.0, 0.0, 1.0 );
 #else
 	float raw = SceneDepthRaw( i.uv );
-	if ( raw >= 1.0 || g_frame[0].rays.z < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
+	if ( IsFarDepth( raw ) || g_frame[0].rays.z < 0.5 ) return float4( 0.0, 0.0, 0.0, 1.0 );
 
 	float3 place = PlaceOf( i.uv, raw );
 	float3 eye = EYE_FRAME( camera ).xyz;
@@ -189,7 +189,7 @@ float4 TemporalPs( PostV2F i ) : SV_Target0
 	float raw = SceneDepthRaw( i.uv );
 
 	float2 was;
-	if ( g_flBefore < 0.5 || raw >= 1.0 || !ScreenOf( PlaceOf( i.uv, raw ), EYE_FRAME( previousWorldToClip ), was ) ) return now;
+	if ( g_flBefore < 0.5 || IsFarDepth( raw ) || !ScreenOf( PlaceOf( i.uv, raw ), EYE_FRAME( previousWorldToClip ), was ) ) return now;
 
 	return lerp( FramePicture( g_flBefore, was ), now, 0.1 );
 }

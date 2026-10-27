@@ -911,7 +911,7 @@ internal static unsafe partial class VkFrame
 				depth.ImageLayout = ImageLayout.DepthAttachmentOptimal;
 				depth.LoadOp = clear != 0 ? AttachmentLoadOp.Clear : AttachmentLoadOp.Load;
 				depth.StoreOp = AttachmentStoreOp.Store;
-				depth.ClearValue.DepthStencil = new ClearDepthStencilValue( 1.0f, 0 );
+				depth.ClearValue.DepthStencil = new ClearDepthStencilValue( CoreRenderDevice.FarDepth, 0 );
 
 				hasDepth = true;
 				colourCount = 0;
@@ -939,7 +939,7 @@ internal static unsafe partial class VkFrame
 				//Keep depth if a pre-pass filled it or the pass is reopening mid-world; colour still clears
 				depth.LoadOp = p.DepthFilled || p.SceneDrawn ? AttachmentLoadOp.Load : AttachmentLoadOp.Clear;
 				depth.StoreOp = AttachmentStoreOp.Store;
-				depth.ClearValue.DepthStencil = new ClearDepthStencilValue( 1.0f, 0 );
+				depth.ClearValue.DepthStencil = new ClearDepthStencilValue( CoreRenderDevice.FarDepth, 0 );
 
 				hasDepth = true;
 				p.SceneDrawn = true;

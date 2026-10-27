@@ -304,14 +304,15 @@ internal static class CoreFrameGeneration
 		var aspect = rw / (float)rh;
 		var horizontal = 2.0f * MathF.Atan( MathF.Tan( field * 0.5f ) * aspect );
 		var cotHalf = MathF.Cos( 0.5f * field ) / MathF.Sin( 0.5f * field );
-		var fQ = far / ( near - far );
+		//Device depth to view depth, as CoreFsr3 gives it: inverted and finite
+		var fQ = near / ( far - near );
 
 		SetLine( c, 0, dw, dh, flowFrameIndex, 0.0f );
 		SetLine( c, 1, 0.0f, 0.0f, 0.0f, 0.0f );
 		SetLine( c, 2, rw, rh, dw, dh );
 		SetLine( c, 3, 1.0f / dw, 1.0f / dh, near, far );
 		SetLine( c, 4, 0.0f, 0.0f, dw, dh );
-		SetLine( c, 5, -fQ, fQ * near, 1.0f / ( cotHalf / aspect ), 1.0f / cotHalf );
+		SetLine( c, 5, -fQ, fQ * far, 1.0f / ( cotHalf / aspect ), 1.0f / cotHalf );
 		SetLine( c, 6, Math.Clamp( delta, 0.0f, 1.0f ), reset ? 1.0f : 0.0f, 1.0f, 0.0f );
 		SetLine( c, 7, 1.0f / dw, 1.0f / dh, FlowBlock, MathF.Tan( horizontal * 0.5f ) );
 
@@ -324,8 +325,8 @@ internal static class CoreFrameGeneration
 
 		first = false;
 
-		//The previous frame's nearest depth, kept by an atomic minimum from the far plane down
-		Clear( reconstructedPrevious, Pass.ClearWhole, 1.0f );
+		//The previous frame's nearest depth, kept by an atomic maximum up from the far plane
+		Clear( reconstructedPrevious, Pass.ClearWhole, CoreRenderDevice.FarDepth );
 
 		Dispatch( Pass.ReconstructAndDilate, [motion, depth], [reconstructedPrevious, dilatedMotion, dilatedDepth], null,
 			( rw + 7 ) / 8, ( rh + 7 ) / 8 );
@@ -454,7 +455,7 @@ internal static class CoreFrameGeneration
 
 		if ( ok && !reset )
 		{
-			Clear( reconstructedInterpolated, Pass.ClearWhole, 1.0f );
+			Clear( reconstructedInterpolated, Pass.ClearWhole, CoreRenderDevice.FarDepth );
 
 			pyramidOut[0] = gameField;
 			pyramidAt[0] = 0;

@@ -44,10 +44,10 @@ groupshared uint g_rough[8];
 static const uint TileSide = GroupPixels + 2;
 groupshared float g_luma[TileSide * TileSide];
 
-//Where what is at uv now was a frame before, at the far plane: the view's turn, which is most of what moves a picture
+//Where what is at uv now was a frame before, at the far plane (nought, reversed): the view's turn, most of what moves a picture
 float2 Back( float2 uv )
 {
-	float4 clip = float4( ( uv * 2.0 ) - 1.0, 1.0, 1.0 );
+	float4 clip = float4( ( uv * 2.0 ) - 1.0, 0.0, 1.0 );
 	float3 before = float3( dot( clip, g_back[0] ), dot( clip, g_back[1] ), dot( clip, g_back[2] ) );
 
 	return before.z > 1e-6 ? ( ( ( before.xy / before.z ) * 0.5 ) + 0.5 ) - uv : float2( 0.0, 0.0 );

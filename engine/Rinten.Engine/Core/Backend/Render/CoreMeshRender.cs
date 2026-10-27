@@ -111,9 +111,60 @@ internal sealed class CoreMeshRender
 	private static ulong ratePipeline;
 	private readonly ulong[] shapesBound = new ulong[2];
 	private readonly byte[] shapesPush = new byte[20];
-	//The camera's pre-pass: the depth alone, back faces culled; the two-sided and cut-out lists draw with a light's.
-	private static ulong prepassPipeline;
-	private static ulong depthPipeline, depthAlphaPipeline;
+	//The depth of a view's three lists - one-sided with back faces culled, two-sided, cut out - from indices and, where the device
+	//has one, by a mesh stage (nought where not: then the indexed draws do it). One set for the camera, whose depth is reversed,
+	//and one for the lights' maps, which are not - see CoreRenderDevice.DepthCompare
+	private struct DepthSet
+	{
+		public ulong Prepass, Depth, DepthAlpha;
+		public ulong PrepassMesh, DepthMesh, DepthAlphaMesh;
+
+		public static DepthSet Make( bool light )
+		{
+			var made = new DepthSet
+			{
+				Prepass = Raster( "", CoreRender.TargetKind.Depth, cullBack: true, light: light ),
+				Depth = Raster( "", CoreRender.TargetKind.Depth, cullBack: false, light: light ),
+				DepthAlpha = Raster( EngineShaders.Alpha, CoreRender.TargetKind.Depth, cullBack: false, light: light ),
+			};
+
+			//All three by a mesh stage or none - see MeshKinds
+			if ( CoreRenderDevice.MeshShaders )
+			{
+				made.PrepassMesh = RasterMesh( "", cullBack: true, light: light );
+				made.DepthMesh = RasterMesh( "", cullBack: false, light: light );
+				made.DepthAlphaMesh = RasterMesh( EngineShaders.Alpha, cullBack: false, light: light );
+
+				if ( made.PrepassMesh == 0 || made.DepthMesh == 0 || made.DepthAlphaMesh == 0 )
+				{
+					Log.Warning( $"the mesh stage would not bake, and the depth is drawn from indices: {CoreRenderDevice.ShaderError}" );
+					Destroy( ref made.PrepassMesh );
+					Destroy( ref made.DepthMesh );
+					Destroy( ref made.DepthAlphaMesh );
+				}
+			}
+
+			return made;
+		}
+
+		public void Release()
+		{
+			Destroy( ref Prepass );
+			Destroy( ref Depth );
+			Destroy( ref DepthAlpha );
+			Destroy( ref PrepassMesh );
+			Destroy( ref DepthMesh );
+			Destroy( ref DepthAlphaMesh );
+		}
+
+		private static void Destroy( ref ulong pipeline )
+		{
+			if ( pipeline != 0 ) CoreRenderDevice.DestroyPipeline( pipeline );
+			pipeline = 0;
+		}
+	}
+
+	private static DepthSet cameraDepth, lightDepth;
 	private static ulong viewPipeline;
 
 	private readonly uint[] paramsWords = new uint[ParamsWords];
@@ -194,41 +245,18 @@ internal sealed class CoreMeshRender
 			CoreRender.AdaptiveShadingPipeline( ratePipeline );
 		}
 
-		prepassPipeline = Raster( "", CoreRender.TargetKind.Depth, cullBack: true );
+		cameraDepth = DepthSet.Make( light: false );
+		lightDepth = DepthSet.Make( light: true );
 
-		//And the same three by a mesh stage, where the device has them - see MeshKinds. All three or none.
-		if ( CoreRenderDevice.MeshShaders )
-		{
-			prepassMesh = RasterMesh( "", cullBack: true );
-			depthMesh = RasterMesh( "", cullBack: false );
-			depthAlphaMesh = RasterMesh( EngineShaders.Alpha, cullBack: false );
-
-			if ( prepassMesh == 0 || depthMesh == 0 || depthAlphaMesh == 0 )
-			{
-				Log.Warning( $"the mesh stage would not bake, and the depth is drawn from indices: {CoreRenderDevice.ShaderError}" );
-
-				foreach ( var one in new[] { prepassMesh, depthMesh, depthAlphaMesh } )
-					if ( one != 0 ) CoreRenderDevice.DestroyPipeline( one );
-
-				prepassMesh = depthMesh = depthAlphaMesh = 0;
-			}
-		}
-		depthPipeline = Raster( "", CoreRender.TargetKind.Depth, cullBack: false );
-		depthAlphaPipeline = Raster( EngineShaders.Alpha, CoreRender.TargetKind.Depth, cullBack: false );
-
-		if ( prepassPipeline == 0 || depthPipeline == 0 )
+		if ( cameraDepth.Prepass == 0 || cameraDepth.Depth == 0 || lightDepth.Prepass == 0 || lightDepth.Depth == 0 )
 			Log.Warning( $"the mesh raster did not compile: {CoreRenderDevice.ShaderError}" );
 
 		//Over the world's picture, equal to the depth the pre-pass wrote and writing none - the same rule the materials draw by.
 		viewPipeline = Raster( EngineShaders.View, CoreRender.TargetKind.Scene, cullBack: false, over: true );
 		if ( viewPipeline == 0 ) Log.Warning( $"the cluster view did not compile: {CoreRenderDevice.ShaderError}" );
 
-		return cullPipeline != 0 && prepassPipeline != 0 && depthPipeline != 0;
+		return cullPipeline != 0 && cameraDepth.Prepass != 0 && cameraDepth.Depth != 0 && lightDepth.Prepass != 0 && lightDepth.Depth != 0;
 	}
-
-	//The depth by a mesh stage - the pre-pass, the two-sided and the cut-out lists, the camera's and every light's
-	//- where the device has one. Nought where it has not; then the indexed draws do it, as they do everywhere.
-	private static ulong prepassMesh, depthMesh, depthAlphaMesh;
 
 	//Depth lists drawn by the mesh stage: bits for solid, two-sided, cut-out and 8 for lights
 	internal int MeshKinds { get; private set; }
@@ -236,7 +264,7 @@ internal sealed class CoreMeshRender
 	//Mesh stage lists: camera solid and two-sided, and lights; cut-out stays indexed
 	private const int MeshWhere = 1 | 2 | 8;
 
-	private static ulong RasterMesh( string defines, bool cullBack )
+	private static ulong RasterMesh( string defines, bool cullBack, bool light = false )
 	{
 		var withMesh = "#define MESH 1\n" + defines;
 
@@ -246,11 +274,12 @@ internal sealed class CoreMeshRender
 
 		return CoreRenderDevice.CreatePipeline( ms, ps, CoreRender.VertexLayoutKind.MeshShader, depthTest: true,
 			CoreRender.Topology.Triangles, blend: false, depthWrite: true, cullBack: cullBack, depthOnly: true,
-			target: CoreRender.TargetKind.Depth, compare: CoreRenderDevice.DepthCompare.LessOrEqual );
+			target: CoreRender.TargetKind.Depth,
+			compare: light ? CoreRenderDevice.DepthCompare.LightNearerOrSame : CoreRenderDevice.DepthCompare.NearerOrSame );
 	}
 
 	//One raster pipeline: the depth, or with over a colour over a depth already there.
-	private static ulong Raster( string defines, CoreRender.TargetKind target, bool cullBack, bool over = false )
+	private static ulong Raster( string defines, CoreRender.TargetKind target, bool cullBack, bool over = false, bool light = false )
 	{
 		var vs = CoreShaderCache.Pass( EngineShaders.MeshRaster, "MainVs", CoreShaderCompiler.Stage.Vertex, defines );
 		var ps = CoreShaderCache.Pass( EngineShaders.MeshRaster, "MainPs", CoreShaderCompiler.Stage.Pixel, defines );
@@ -258,22 +287,20 @@ internal sealed class CoreMeshRender
 
 		return CoreRenderDevice.CreatePipeline( vs, ps, CoreRender.VertexLayoutKind.None, depthTest: true,
 			CoreRender.Topology.Triangles, blend: false, depthWrite: !over, cullBack: cullBack, depthOnly: !over, target: target,
-			compare: over ? CoreRenderDevice.DepthCompare.Equal : CoreRenderDevice.DepthCompare.LessOrEqual );
+			compare: over ? CoreRenderDevice.DepthCompare.Equal
+				: light ? CoreRenderDevice.DepthCompare.LightNearerOrSame : CoreRenderDevice.DepthCompare.NearerOrSame );
 	}
 
 	internal static void ReleasePipelines()
 	{
 		CoreRender.AdaptiveShadingPipeline( 0 );
 
-		foreach ( var one in new[] { cullPipeline, skinPipeline, shapesPipeline, ratePipeline, viewPipeline, prepassPipeline, depthPipeline, depthAlphaPipeline } )
+		foreach ( var one in new[] { cullPipeline, skinPipeline, shapesPipeline, ratePipeline, viewPipeline } )
 			if ( one != 0 ) CoreRenderDevice.DestroyPipeline( one );
 
 		cullPipeline = skinPipeline = shapesPipeline = ratePipeline = 0;
-		foreach ( var one in new[] { prepassMesh, depthMesh, depthAlphaMesh } )
-			if ( one != 0 ) CoreRenderDevice.DestroyPipeline( one );
-
-		prepassMesh = depthMesh = depthAlphaMesh = 0;
-		prepassPipeline = depthPipeline = depthAlphaPipeline = 0;
+		cameraDepth.Release();
+		lightDepth.Release();
 		viewPipeline = 0;
 		pipelinesTried = false;
 	}
@@ -357,7 +384,7 @@ internal sealed class CoreMeshRender
 			for ( var k = 0; k < 3; k++ ) kindRun[k] = kindRun[k] * MostListTriangles / wanted;
 
 		//Drawn by the mesh stage, the camera's lists have no runs of their own - the bins' run is the same triangles, and it keeps its size.
-		MeshKinds = prepassMesh != 0 && Rinten.Rendering.Wireframe.Clusters <= 0 ? MeshWhere : 0;
+		MeshKinds = cameraDepth.PrepassMesh != 0 && lightDepth.PrepassMesh != 0 && Rinten.Rendering.Wireframe.Clusters <= 0 ? MeshWhere : 0;
 
 		var runAt = 0L;
 		var binned = 0L;
@@ -948,20 +975,20 @@ internal sealed class CoreMeshRender
 		if ( !Ready ) return;
 
 		var first = appeared ? 3 : 0;
-		DrawDepth( first, prepassPipeline, prepassMesh );
-		DrawDepth( first + 1, depthPipeline, depthMesh );
-		DrawDepth( first + 2, depthAlphaPipeline, depthAlphaMesh );
+		DrawDepth( first, cameraDepth.Prepass, cameraDepth.PrepassMesh );
+		DrawDepth( first + 1, cameraDepth.Depth, cameraDepth.DepthMesh );
+		DrawDepth( first + 2, cameraDepth.DepthAlpha, cameraDepth.DepthAlphaMesh );
 	}
 
-	//Draws a light's view (index 1+) into the open shadow layer with the pre-pass pipelines
+	//Draws a light's view (index 1+) into the open shadow layer with the light depth set
 	internal void DrawView( int view )
 	{
 		if ( !Ready || view < 1 || view >= viewCount ) return;
 
 		var first = CameraLists + ( ( view - 1 ) * ListsPerView );
-		DrawDepth( first, prepassPipeline, prepassMesh );
-		DrawDepth( first + 1, depthPipeline, depthMesh );
-		DrawDepth( first + 2, depthAlphaPipeline, depthAlphaMesh );
+		DrawDepth( first, lightDepth.Prepass, lightDepth.PrepassMesh );
+		DrawDepth( first + 1, lightDepth.Depth, lightDepth.DepthMesh );
+		DrawDepth( first + 2, lightDepth.DepthAlpha, lightDepth.DepthAlphaMesh );
 	}
 
 	private static readonly bool debug = Environment.GetEnvironmentVariable( "RINTEN_MESH_DEBUG" ) == "1";

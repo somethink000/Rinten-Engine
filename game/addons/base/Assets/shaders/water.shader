@@ -133,7 +133,7 @@ Out Shade( V2F i )
 	{
 		float raw = DepthBehind( i.position.xy );
 
-		if ( raw < 1.0 )
+		if ( !IsFarDepth( raw ) )
 		{
 			//The view distance to the bed less the view distance to the surface: what the ray crosses inside the water.
 			float3 bed = WorldBehind( i.position.xy, raw );

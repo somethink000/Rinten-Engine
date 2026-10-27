@@ -519,7 +519,9 @@ internal static unsafe class BrowserSwapchain
 		{
 			json.Append( ",\"depth\":{\"view\":" ).Append( depth )
 				.Append( ",\"depthLoad\":\"" ).Append( clearDepth ? "clear" : "load" )
-				.Append( "\",\"depthStore\":\"store\",\"depthClear\":1}" );
+				.Append( "\",\"depthStore\":\"store\",\"depthClear\":" );
+			Number( json, CoreRenderDevice.FarDepth );
+			json.Append( '}' );
 		}
 
 		json.Append( '}' );

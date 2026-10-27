@@ -1257,15 +1257,12 @@ internal sealed partial class CoreSceneDrawer
 	private CoreSceneRenderer.PipelineKind KindOf( in Queued queued, bool prepass )
 		=> prepass
 			? queued.Kind with { DepthOnly = true, Translucent = false, Target = CoreRender.TargetKind.Depth,
-				Stereo = StereoPass }
+				Stereo = StereoPass, Light = inLightView }
 			: Wired( queued.Kind with { Target = worldTarget, Finishes = worldFinishes, ScreenChain = worldFinishes ? worldChain : null } );
 
 	private void Submit( in Queued queued, bool prepass = false )
 	{
-		var kind = prepass
-			? queued.Kind with { DepthOnly = true, Translucent = false, Target = CoreRender.TargetKind.Depth,
-				Stereo = StereoPass }
-			: Wired( queued.Kind with { Target = worldTarget, Finishes = worldFinishes, ScreenChain = worldFinishes ? worldChain : null } );
+		var kind = KindOf( in queued, prepass );
 
 		//A pass carrying the frame's point effects still compiling for this one: the
 		//curve alone meanwhile. And one the frame is waiting on, asked for here too.
@@ -6216,7 +6213,18 @@ internal sealed partial class CoreSceneDrawer
 		return System.MathF.Min( System.MathF.Sqrt( 1.0f + across * across + up * up ), 4.0f );
 	}
 
-	//Camera projection, Y flipped for Vulkan.
+	//A projection's depth turned round: near at one, far at nought. A float is finest near nought, so the far
+	//distance gets that precision and surfaces centimetres apart stay apart hundreds of metres out
+	internal static System.Numerics.Matrix4x4 Reversed( System.Numerics.Matrix4x4 m )
+	{
+		m.M13 = m.M14 - m.M13;
+		m.M23 = m.M24 - m.M23;
+		m.M33 = m.M34 - m.M33;
+		m.M43 = m.M44 - m.M43;
+		return m;
+	}
+
+	//Camera projection, Y flipped for Vulkan, depth reversed.
 	internal static System.Numerics.Matrix4x4 ProjectionMatrix( bool orthographic, float fovDegrees,
 		float orthoHeight, float aspect, float near, float far )
 	{
@@ -6236,7 +6244,7 @@ internal sealed partial class CoreSceneDrawer
 		}
 
 		projection.M22 = -projection.M22;
-		return projection;
+		return Reversed( projection );
 	}
 
 	//-eyepush: overlays always read the view from the frame block, to test that path on a desktop

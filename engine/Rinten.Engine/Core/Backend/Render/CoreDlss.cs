@@ -470,10 +470,10 @@ internal sealed unsafe class CoreDlss
 		} );
 
 		//The world is light past white; its motion is at its own size and has no jitter in it; its depth runs
-		//from nought at the near plane. The exposure the compose applies is DLSS's to find: AutoExposure.
-		const int IsHdr = 1 << 0, MvLowRes = 1 << 1, AutoExposure = 1 << 6;
+		//from one at the near plane (DepthInverted). The exposure the compose applies is DLSS's to find: AutoExposure.
+		const int IsHdr = 1 << 0, MvLowRes = 1 << 1, DepthInverted = 1 << 3, AutoExposure = 1 << 6;
 
-		SetI( "DLSS.Feature.Create.Flags\0"u8, IsHdr | MvLowRes | AutoExposure );
+		SetI( "DLSS.Feature.Create.Flags\0"u8, IsHdr | MvLowRes | DepthInverted | AutoExposure );
 		SetI( "DLSS.Enable.Output.Subrects\0"u8, 0 );
 
 		//Which network each preset draws with: nought is the runtime's own choice.

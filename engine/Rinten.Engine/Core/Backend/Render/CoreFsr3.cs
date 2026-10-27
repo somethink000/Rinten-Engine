@@ -293,13 +293,13 @@ internal sealed class CoreFsr3
 		var horizontal = 2.0f * MathF.Atan( MathF.Tan( field * 0.5f ) * aspect );
 		var cotHalf = MathF.Cos( 0.5f * field ) / MathF.Sin( 0.5f * field );
 
-		//Device depth to view depth, non-inverted and finite: near at nought.
-		var fQ = far / ( near - far );
+		//Device depth to view depth, inverted and finite (near at one, see CoreSceneDrawer.Reversed): view = fQ * far / ( d + fQ )
+		var fQ = near / ( far - near );
 
 		SetLine( c, 0, render.Width, render.Height, previousRender.Width, previousRender.Height );
 		SetLine( c, 1, display.Width, display.Height, previousDisplay.Width, previousDisplay.Height );
 		SetLine( c, 2, render.Width, render.Height, display.Width, display.Height );
-		SetLine( c, 3, -fQ, fQ * near, 1.0f / ( cotHalf / aspect ), 1.0f / cotHalf );
+		SetLine( c, 3, -fQ, fQ * far, 1.0f / ( cotHalf / aspect ), 1.0f / cotHalf );
 		SetLine( c, 4, jitter.x, jitter.y, previousJitter.x, previousJitter.y );
 
 		//Already uv, so a scale of one; and the downscale is render over display.
@@ -332,8 +332,8 @@ internal sealed class CoreFsr3
 			Clear( frameInfo, Pass.ClearFull, new Vector4( -1.0f, 1.0f, 0.0f, 0.0f ) );
 		}
 
-		//The nearest depth each texel was last frame, kept by an atomic minimum from the far plane down; and SPD's counter and chain, every frame.
-		Clear( reconstructedDepth, Pass.ClearWhole, new Vector4( 1.0f, 0.0f, 0.0f, 0.0f ) );
+		//The nearest depth each texel was last frame, kept by an atomic maximum up from the far plane; and SPD's counter and chain, every frame
+		Clear( reconstructedDepth, Pass.ClearWhole, new Vector4( CoreRenderDevice.FarDepth, 0.0f, 0.0f, 0.0f ) );
 		Clear( spdAtomic, Pass.ClearWhole, default );
 
 		for ( var level = 0; level < spdLevels; level++ )

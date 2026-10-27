@@ -8,8 +8,8 @@
 #define FFX_HLSL 1
 #define FFX_HALF 0
 
-//Nought is the near plane and one the far.
-#define FFX_FRAMEINTERPOLATION_OPTION_INVERTED_DEPTH 0
+//Depth is reversed: one is the near plane and nought the far
+#define FFX_FRAMEINTERPOLATION_OPTION_INVERTED_DEPTH 1
 
 //The motion is at the world's size and carries no jitter - see MotionCs in upscale.slang.
 #define FFX_FRAMEINTERPOLATION_OPTION_LOW_RES_MOTION_VECTORS 1

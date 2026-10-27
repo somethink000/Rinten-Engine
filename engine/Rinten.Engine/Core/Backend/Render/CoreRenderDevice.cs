@@ -1227,14 +1227,21 @@ internal static unsafe class CoreRenderDevice
 	public static bool WaitIdle()
 		=> CoreNative.Available && CoreRender.WaitIdle() != 0;
 
-	/// <summary>How a depth-tested pipeline compares - the values sbc_render_pipeline_create reads.</summary>
+	/// <summary>How a depth-tested pipeline compares, by what passes rather than by operator: a camera's depth is reversed - nearer is
+	/// greater, see CoreSceneDrawer.ProjectionMatrix - and a light's map is not. The values sbc_render_pipeline_create reads.</summary>
 	public enum DepthCompare
 	{
-		LessOrEqual = 1,
+		/// <summary>Drawn where it is as near as what is there or nearer, in a camera's depth.</summary>
+		NearerOrSame = 1,
 		Equal = 2,
 		Always = 3,
 
+		/// <summary>The same in a light's map, which keeps nearer as less.</summary>
+		LightNearerOrSame = 4,
 	}
+
+	/// <summary>What a camera's depth is cleared to and reads where nothing was drawn: the far plane, reversed.</summary>
+	public const float FarDepth = 0.0f;
 
 	//Max specialization constants per pipeline; ids below CoreResources.FirstShaderFold are the frame's
 	internal const int SpecializationCount = 21;
@@ -1244,7 +1251,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.Topology topology = CoreRender.Topology.Triangles, bool blend = false,
 		bool? depthWrite = null, bool cullBack = false, bool depthOnly = false,
 		CoreRender.TargetKind target = CoreRender.TargetKind.Screen, bool lines = false,
-		bool additive = false, DepthCompare compare = DepthCompare.LessOrEqual,
+		bool additive = false, DepthCompare compare = DepthCompare.NearerOrSame,
 		bool screen = false, int specialize = -1, bool colourAlone = false, int pictureFormat = -1,
 		bool addByAlpha = false, bool multiply = false )
 	{

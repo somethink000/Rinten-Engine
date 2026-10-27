@@ -435,9 +435,6 @@ bool ScreenOcclusion( float2 pixel, out float4 held )
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
-	//This pixel's turn of the soft shadows' taps - see ShadowFilter
-	ShadowTurnAt( s.screen );
-
 	//The decals first, where the frame has any: what they paint is what the lights see - see ApplyDecals.
 	if ( kDecalsOn != 0 ) ApplyDecals( s );
 

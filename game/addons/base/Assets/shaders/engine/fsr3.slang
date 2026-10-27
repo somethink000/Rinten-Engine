@@ -28,8 +28,8 @@
 #define FFX_FSR3UPSCALER_OPTION_LOW_RESOLUTION_MOTION_VECTORS 1
 #define FFX_FSR3UPSCALER_OPTION_JITTERED_MOTION_VECTORS 0
 
-//Nought is the near plane and one the far.
-#define FFX_FSR3UPSCALER_OPTION_INVERTED_DEPTH 0
+//Depth is reversed: one is the near plane and nought the far
+#define FFX_FSR3UPSCALER_OPTION_INVERTED_DEPTH 1
 
 //The Lanczos kernel worked out rather than read from a table - AMD's default, and one texture fewer.
 #define FFX_FSR3UPSCALER_OPTION_UPSAMPLE_USE_LANCZOS_TYPE 2

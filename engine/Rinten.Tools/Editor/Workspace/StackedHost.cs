@@ -47,6 +47,13 @@ internal class StackedHost : Widget
 		} ) );
 	}
 
+	//A stacked widget back over the whole host, after something else had it placed elsewhere.
+	internal void Fit( Widget widget )
+	{
+		widget.Position = 0;
+		widget.Size = Size;
+	}
+
 	/// <summary>Shows nothing.</summary>
 	public void Clear()
 	{

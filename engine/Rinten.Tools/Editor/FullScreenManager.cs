@@ -70,6 +70,11 @@ internal partial class FullScreenManager
 			{
 				PreviousLayout.PutBack( PreviousIndex, PreviousCell );
 			}
+			else if ( PreviousParent is StackedHost host )
+			{
+				//No layout there to size it, so it would keep the whole window and cover the docks beside it
+				host.Fit( Widget );
+			}
 			else if ( PreviousParent.IsValid() )
 			{
 				PreviousParent.Layout?.Add( Widget );

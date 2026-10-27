@@ -22,20 +22,27 @@ public class ResourceSystem
 	//as on-demand load fallback during network deserialization when a resource hasn't been loaded on the client yet.
 	private Dictionary<ulong, string> PathIndex { get; } = new();
 
+	//Every index above, under one lock: resources are made on worker threads too - a model built off the main thread
+	//registers itself there - and a dictionary written from two threads at once is corrupted
+	private readonly object indexLock = new();
+
 	//Used to register resources path for use in networking
 	internal void RegisterPath( string path )
 	{
 		path = Resource.FixPath( path );
 		if ( string.IsNullOrEmpty( path ) ) return;
-		PathIndex[path.FastHash64()] = path;
+		lock ( indexLock ) PathIndex[path.FastHash64()] = path;
 	}
 
 	internal void Register( Resource resource )
 	{
+		lock ( indexLock )
+		{
 #pragma warning disable CS0618 //Type or member is obsolete
-		ResourceIndex[resource.ResourceId] = resource;
+			ResourceIndex[resource.ResourceId] = resource;
 #pragma warning restore CS0618 //Type or member is obsolete
-		ResourceIndexLong[resource.ResourceIdLong] = resource;
+			ResourceIndexLong[resource.ResourceIdLong] = resource;
+		}
 
 		if ( resource is GameResource gameResource && !gameResource.IsPromise )
 		{
@@ -46,26 +53,31 @@ public class ResourceSystem
 	//Register a resource with a weak reference, allowing GC to collect it when no longer in use.
 	internal void RegisterWeak( Resource resource )
 	{
+		lock ( indexLock )
+		{
 #pragma warning disable CS0618 //Type or member is obsolete
-		WeakIndex[resource.ResourceId] = new WeakReference<Resource>( resource );
+			WeakIndex[resource.ResourceId] = new WeakReference<Resource>( resource );
 #pragma warning restore CS0618 //Type or member is obsolete
-		WeakIndexLong[resource.ResourceIdLong] = new WeakReference<Resource>( resource );
+			WeakIndexLong[resource.ResourceIdLong] = new WeakReference<Resource>( resource );
+		}
 	}
 
 	internal void Unregister( Resource resource )
 	{
-		//This isn't thread safe
-		ThreadSafe.AssertIsMainThread();
-
 		//Only remove entries that index this exact resource. A stale instance whose index entry was replaced
 		//(e.g. re-registered under the same path) must not unregister the live resource when it gets finalized.
-		var removed = RemoveIndexed( ResourceIndexLong, resource.ResourceIdLong, resource );
-		removed |= RemoveIndexedWeak( WeakIndexLong, resource.ResourceIdLong, resource );
+		bool removed;
+
+		lock ( indexLock )
+		{
+			removed = RemoveIndexed( ResourceIndexLong, resource.ResourceIdLong, resource );
+			removed |= RemoveIndexedWeak( WeakIndexLong, resource.ResourceIdLong, resource );
 
 #pragma warning disable CS0618 //Type or member is obsolete
-		removed |= RemoveIndexed( ResourceIndex, resource.ResourceId, resource );
-		removed |= RemoveIndexedWeak( WeakIndex, resource.ResourceId, resource );
+			removed |= RemoveIndexed( ResourceIndex, resource.ResourceId, resource );
+			removed |= RemoveIndexedWeak( WeakIndex, resource.ResourceId, resource );
 #pragma warning restore CS0618 //Type or member is obsolete
+		}
 
 		if ( removed && resource is GameResource gameResource && !gameResource.IsPromise )
 		{
@@ -114,24 +126,20 @@ public class ResourceSystem
 
 		_lastWeakPrune = 0;
 
-		var dead = WeakIndex.Where( kvp => !kvp.Value.TryGetTarget( out _ ) ).Select( kvp => kvp.Key ).ToList();
-		foreach ( var key in dead )
+		lock ( indexLock )
 		{
-			WeakIndex.Remove( key );
-		}
+			var dead = WeakIndex.Where( kvp => !kvp.Value.TryGetTarget( out _ ) ).Select( kvp => kvp.Key ).ToList();
+			foreach ( var key in dead ) WeakIndex.Remove( key );
 
-		var deadNative = WeakIndexLong.Where( kvp => !kvp.Value.TryGetTarget( out _ ) ).Select( kvp => kvp.Key ).ToList();
-		foreach ( var key in deadNative )
-		{
-			WeakIndexLong.Remove( key );
+			var deadNative = WeakIndexLong.Where( kvp => !kvp.Value.TryGetTarget( out _ ) ).Select( kvp => kvp.Key ).ToList();
+			foreach ( var key in deadNative ) WeakIndexLong.Remove( key );
 		}
 	}
 
 	internal void Clear()
 	{
-		//TODO: remove from native too?
-
-		var toDispose = ResourceIndex.Values.ToArray();
+		Resource[] toDispose;
+		lock ( indexLock ) toDispose = ResourceIndex.Values.ToArray();
 
 		foreach ( var resource in toDispose.OfType<GameResource>() )
 		{
@@ -144,12 +152,15 @@ public class ResourceSystem
 			resource?.Destroy();
 		}
 
-		ResourceIndex.Clear();
-		WeakIndex.Clear();
+		lock ( indexLock )
+		{
+			ResourceIndex.Clear();
+			WeakIndex.Clear();
 
-		ResourceIndexLong.Clear();
-		WeakIndexLong.Clear();
-		PathIndex.Clear();
+			ResourceIndexLong.Clear();
+			WeakIndexLong.Clear();
+			PathIndex.Clear();
+		}
 
 		TypeCache.Clear();
 	}
@@ -158,7 +169,10 @@ public class ResourceSystem
 	//given prefix. Used for hotload scenarios like SVG textures with query parameters.
 	internal IEnumerable<T> FindWeakByPathPrefix<T>( string pathPrefix ) where T : Resource
 	{
-		foreach ( var kvp in WeakIndex )
+		KeyValuePair<int, WeakReference<Resource>>[] held;
+		lock ( indexLock ) held = WeakIndex.ToArray();
+
+		foreach ( var kvp in held )
 		{
 			if ( !kvp.Value.TryGetTarget( out var resource ) )
 				continue;
@@ -176,17 +190,13 @@ public class ResourceSystem
 		filepath = Resource.FixPath( filepath );
 		ulong identifier = filepath.FastHash64();
 
-		if ( ResourceIndexLong.TryGetValue( identifier, out var resource ) )
+		lock ( indexLock )
 		{
-			if ( resource.GetType().IsAssignableTo( t ) )
-				return resource;
+			if ( ResourceIndexLong.TryGetValue( identifier, out var resource ) )
+				return resource.GetType().IsAssignableTo( t ) ? resource : null;
 
-			return null;
-		}
-
-		if ( WeakIndexLong.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
-		{
-			if ( weakResource.GetType().IsAssignableTo( t ) )
+			if ( WeakIndexLong.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) &&
+				weakResource.GetType().IsAssignableTo( t ) )
 				return weakResource;
 		}
 
@@ -197,11 +207,14 @@ public class ResourceSystem
 	[Obsolete( "Use Get<T>(path) instead. Identifier based access will be removed in a future update." )]
 	public T Get<T>( int identifier ) where T : Resource
 	{
-		if ( ResourceIndex.TryGetValue( identifier, out var resource ) )
-			return resource as T;
+		lock ( indexLock )
+		{
+			if ( ResourceIndex.TryGetValue( identifier, out var resource ) )
+				return resource as T;
 
-		if ( WeakIndex.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
-			return weakResource as T;
+			if ( WeakIndex.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
+				return weakResource as T;
+		}
 
 		return default;
 	}
@@ -209,18 +222,21 @@ public class ResourceSystem
 	//Internal use only — do not expose ulong IDs publicly.
 	internal T GetByIdLong<T>( ulong idLong ) where T : Resource
 	{
-		if ( ResourceIndexLong.TryGetValue( idLong, out var resource ) )
-			return resource as T;
+		lock ( indexLock )
+		{
+			if ( ResourceIndexLong.TryGetValue( idLong, out var resource ) )
+				return resource as T;
 
-		if ( WeakIndexLong.TryGetValue( idLong, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
-			return weakResource as T;
+			if ( WeakIndexLong.TryGetValue( idLong, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
+				return weakResource as T;
+		}
 
 		return default;
 	}
 
 	internal string LookupPath( ulong idLong )
 	{
-		return PathIndex.GetValueOrDefault( idLong );
+		lock ( indexLock ) return PathIndex.GetValueOrDefault( idLong );
 	}
 
 	/// <summary>Get a cached resource by its file path.</summary>
@@ -241,7 +257,7 @@ public class ResourceSystem
 	/// <summary>Get all cached resources of given type.</summary>
 	public IEnumerable<T> GetAll<T>()
 	{
-		return ResourceIndex.Values.OfType<T>().Distinct();
+		lock ( indexLock ) return ResourceIndex.Values.OfType<T>().Distinct().ToArray();
 	}
 
 	/// <summary>Get all cached resources of given type in a specific folder.</summary>
@@ -249,7 +265,11 @@ public class ResourceSystem
 	{
 		filepath = filepath.Replace( '\\', '/' );
 		if ( !filepath.EndsWith( "/" ) ) filepath += "/";
-		return ResourceIndex.Values.OfType<T>().Distinct().Where( x =>
+
+		T[] all;
+		lock ( indexLock ) all = ResourceIndex.Values.OfType<T>().Distinct().ToArray();
+
+		return all.Where( x =>
 		{
 			if ( x.ResourcePath.StartsWith( filepath ) )
 			{
@@ -265,23 +285,26 @@ public class ResourceSystem
 	{
 		var stats = new ResourceStats();
 
-		foreach ( var resource in ResourceIndex.Values )
+		lock ( indexLock )
 		{
-			var typeName = resource.GetType().Name;
-			stats.StrongIndex.TryGetValue( typeName, out var count );
-			stats.StrongIndex[typeName] = count + 1;
-		}
+			foreach ( var resource in ResourceIndex.Values )
+			{
+				var typeName = resource.GetType().Name;
+				stats.StrongIndex.TryGetValue( typeName, out var count );
+				stats.StrongIndex[typeName] = count + 1;
+			}
 
-		foreach ( var kvp in WeakIndex )
-		{
-			var alive = kvp.Value.TryGetTarget( out var resource );
-			var typeName = alive ? resource.GetType().Name : "(dead)";
-			stats.WeakIndexEntries.TryGetValue( typeName, out var count );
-			stats.WeakIndexEntries[typeName] = count + 1;
-		}
+			foreach ( var kvp in WeakIndex )
+			{
+				var alive = kvp.Value.TryGetTarget( out var resource );
+				var typeName = alive ? resource.GetType().Name : "(dead)";
+				stats.WeakIndexEntries.TryGetValue( typeName, out var count );
+				stats.WeakIndexEntries[typeName] = count + 1;
+			}
 
-		stats.StrongTotal = ResourceIndex.Count;
-		stats.WeakTotal = WeakIndex.Count;
+			stats.StrongTotal = ResourceIndex.Count;
+			stats.WeakTotal = WeakIndex.Count;
+		}
 
 		return stats;
 	}

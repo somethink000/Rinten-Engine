@@ -149,7 +149,49 @@ public static partial class EditorUtility
 	public static void OpenFileFolder( string filepath )
 	{
 		filepath = System.IO.Path.GetFullPath( filepath );
-		System.Diagnostics.Process.Start( "explorer.exe", string.Format( "/select,\"{0}\"", filepath ) );
+
+		if ( OperatingSystem.IsWindows() )
+		{
+			System.Diagnostics.Process.Start( "explorer.exe", $"/select,\"{filepath}\"" );
+			return;
+		}
+
+		if ( OperatingSystem.IsMacOS() )
+		{
+			System.Diagnostics.Process.Start( "open", [ "-R", filepath ] );
+			return;
+		}
+
+		_ = ShowItemOnLinux( filepath );
+	}
+
+	//The freedesktop file manager call that selects the file; a desktop without one gets the folder opened
+	private static async Task ShowItemOnLinux( string filepath )
+	{
+		try
+		{
+			//dbus-send splits an array at commas, so one in the path goes escaped
+			var uri = new Uri( filepath ).AbsoluteUri.Replace( ",", "%2C" );
+
+			using var send = System.Diagnostics.Process.Start( new System.Diagnostics.ProcessStartInfo( "dbus-send",
+				[ "--session", "--print-reply", "--dest=org.freedesktop.FileManager1", "--type=method_call",
+				"/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems", $"array:string:{uri}", "string:" ] )
+			{
+				UseShellExecute = false,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+			} );
+
+			await send.WaitForExitAsync();
+			if ( send.ExitCode == 0 ) return;
+		}
+		catch ( System.ComponentModel.Win32Exception )
+		{
+			//No dbus-send on this machine
+		}
+
+		var folder = System.IO.Path.GetDirectoryName( filepath );
+		if ( System.IO.Directory.Exists( folder ) ) OpenFolder( folder );
 	}
 
 	private static string GetDestinationPath( string source, string directory )

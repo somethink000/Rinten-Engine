@@ -1524,8 +1524,8 @@ internal sealed class CoreUiWindow : IDisposable
 		//Wait for the size to settle before rebuilding the swapchain; the desktop stretches the old frame meanwhile
 		if ( attached != (width, height) && ( !SwapchainHold || Settled( width, height ) ) )
 		{
-			CoreRenderDevice.Resize( swapchain, width, height );
-			attached = (width, height);
+			//Remembered only once it took, so a size the window system refused mid-change is asked for again
+			if ( CoreRenderDevice.Resize( swapchain, width, height ) ) attached = (width, height);
 			windowStale = true;
 		}
 

@@ -33,6 +33,9 @@ internal static unsafe partial class VkFrame
 
 			VkSwapchain.active = found;
 
+			//A failed rebuild leaves no swapchain and no resize may follow (Windows leaving fullscreen); asked again each frame
+			if ( Current.Handle.Handle == 0 && !Current.Recording && Current.Surface.Handle != 0 ) VkSwapchain.Rebuild();
+
 			if ( Current.Handle.Handle == 0 || Current.Recording )
 			{
 				VkSwapchain.active = VkSwapchain.placeholder;

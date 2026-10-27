@@ -1647,7 +1647,10 @@ internal static class MeshSimplifier
 			componentErrors[i] = componentErrors[( i * 4 ) + 3];
 	}
 
-	private static int PruneComponents( Span<uint> indices, uint[] components, float[] componentErrors, float errorCutoff, ref float nextError )
+	//Drops the triangles of every component no bigger than the cutoff; the biggest dropped goes into prunedError, as a piece
+	//taken away is that much error, or a level that lost whole clumps would say it was off by less than a pixel
+	private static int PruneComponents( Span<uint> indices, uint[] components, float[] componentErrors, float errorCutoff, ref float nextError,
+		ref float prunedError )
 	{
 		var write = 0;
 		var minError = float.MaxValue;
@@ -1657,15 +1660,18 @@ internal static class MeshSimplifier
 			uint v0 = indices[i + 0], v1 = indices[i + 1], v2 = indices[i + 2];
 			var c = (int)components[v0];
 
-			if ( componentErrors[c] > errorCutoff )
+			if ( componentErrors[c] <= errorCutoff )
 			{
-				minError = minError > componentErrors[c] ? componentErrors[c] : minError;
-
-				indices[write + 0] = v0;
-				indices[write + 1] = v1;
-				indices[write + 2] = v2;
-				write += 3;
+				prunedError = prunedError < componentErrors[c] ? componentErrors[c] : prunedError;
+				continue;
 			}
+
+			minError = minError > componentErrors[c] ? componentErrors[c] : minError;
+
+			indices[write + 0] = v0;
+			indices[write + 1] = v1;
+			indices[write + 2] = v2;
+			write += 3;
 		}
 
 		nextError = minError;
@@ -1857,7 +1863,11 @@ internal static class MeshSimplifier
 			resultCount = RemapIndexBuffer( result[..resultCount], collapseRemap, remap );
 
 			if ( ( options & Options.Prune ) != 0 && resultCount > targetIndexCount && componentNextError <= vertexError )
-				resultCount = PruneComponents( result[..resultCount], components, componentErrors, vertexError, ref componentNextError );
+			{
+				var pruned = 0.0f;
+				resultCount = PruneComponents( result[..resultCount], components, componentErrors, vertexError, ref componentNextError, ref pruned );
+				error = error < pruned ? pruned : error;
+			}
 		}
 
 		//Short of the target with nothing left to collapse: prune harder, up to the error limit.
@@ -1868,11 +1878,8 @@ internal static class MeshSimplifier
 			var componentCutoff = componentNextError * 1.5f < errorLimit ? componentNextError * 1.5f : errorLimit;
 
 			var componentMaxError = 0.0f;
-			for ( var i = 0; i < componentCount; ++i )
-				if ( componentErrors[i] > componentMaxError && componentErrors[i] <= componentCutoff )
-					componentMaxError = componentErrors[i];
-
-			var newCount = PruneComponents( result[..resultCount], components, componentErrors, componentCutoff, ref componentNextError );
+			var newCount = PruneComponents( result[..resultCount], components, componentErrors, componentCutoff, ref componentNextError,
+				ref componentMaxError );
 			if ( newCount == resultCount && !componentNextStale ) break;
 
 			componentNextStale = false;

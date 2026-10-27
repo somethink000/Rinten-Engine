@@ -28,7 +28,7 @@ internal static unsafe class ModelFormat
 	public const uint VersionOldest = 5;
 
 	//Bumped when importers change their output, so the editor can rebuild models built by older ones
-	public const uint ImportGeneration = 67;   //67: islands within a cone, so a rounded model does not fold
+	public const uint ImportGeneration = 68;   //68: a level counts the pieces it prunes in its error
 
 	/// <summary>The first generation whose header carries <see cref="Header.surfaces"/>.</summary>
 	public const uint GenerationSurfaces = 31;

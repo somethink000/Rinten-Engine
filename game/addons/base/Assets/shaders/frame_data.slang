@@ -53,7 +53,7 @@ struct FrameData
 	float4 fogShape;  //Distance exponent, height exponent, enabled, colour from the sky
 
 	//Baked lighting: lightmap sheet for static surfaces, probe volume for moving ones; zero = no bake
-	float4 bakedMaps;    //Sheet's table index x, nought y, its sky's z, one where there is a sheet w
+	float4 bakedMaps;    //Sheet's table index x, its shade's y (nought where none), its sky's z, one where there is a sheet w
 	float4 bakedVolume;  //The three pictures' places xyz, one where there is a volume w
 	float4 volumeOrigin; //First lattice point xyz, one over the step between points w
 	float4 volumeCount;  //Points along x, y and z, the sky's visibility picture w (nought for none)
@@ -168,6 +168,10 @@ struct FrameData
 	//The lamps' movers frustums by slot, which a light's shape.y names below nought: down xyz, how wide a metre out w -
 	//see CoreLampMaps.FitMovers
 	float4 lampMovers[16];
+
+	//The still world's depth down the sun from the bake (BakeSunMap): world to the map across, down and deep, a row each
+	//(xyz dotted, w added); then its table index x, texels a side y, a texel over the depth range z - nought x for none
+	float4 bakedSun[4];
 };
 
 #ifdef WEBGL

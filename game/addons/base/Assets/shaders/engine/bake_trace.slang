@@ -991,7 +991,9 @@ float3 Reflect( float3 v, float3 n ) { return v - ( n * ( 2.0 * dot( v, n ) ) );
 //Each lamp's light, and as each mirror shows it - BakeScene.Direct and Reflected: the lamp as the point's image behind the
 //mirror sees it, where the way crosses the mirror and both legs are clear. One loop for both, so the lamp's sampling and
 //the shadow ray are one copy each in the kernel
-float3 Direct( float3 position, float3 normal, float3 geometric, inout Random random, bool bakedOnly, inout float3 towards )
+//through and whole: each shade channel's light by luma as it arrived and as it would unshadowed - BakeScene.Direct
+float3 Direct( float3 position, float3 normal, float3 geometric, inout Random random, bool bakedOnly, inout float3 towards,
+	inout float4 through, inout float4 whole )
 {
 	float3 sum = float3( 0.0, 0.0, 0.0 );
 	uint count = LightCount();
@@ -1001,6 +1003,10 @@ float3 Direct( float3 position, float3 normal, float3 geometric, inout Random ra
 	{
 		uint flags = Word( LightsAt() + ( i * LightWords ) + 15 );
 		if ( bakedOnly && ( flags & LightBaked ) == 0u ) continue;
+
+		//One more than its shade channel, nought where it has none - see BakeLight.Shade
+		uint shade = Word( LightsAt() + ( i * LightWords ) + 16 );
+		float4 channel = float4( shade == 1u ? 1.0 : 0.0, shade == 2u ? 1.0 : 0.0, shade == 3u ? 1.0 : 0.0, shade == 4u ? 1.0 : 0.0 );
 
 		for ( uint k = 0u; k < images; ++k )
 		{
@@ -1058,6 +1064,7 @@ float3 Direct( float3 position, float3 normal, float3 geometric, inout Random ra
 			}
 
 			uint legs = k > 0u ? 2u : 1u;
+			float open = Luma( lit );
 
 			if ( ( flags & LightShadows ) != 0u )
 			{
@@ -1070,6 +1077,12 @@ float3 Direct( float3 position, float3 normal, float3 geometric, inout Random ra
 
 			sum += lit;
 			towards += ( k > 0u ? way : l ) * Luma( lit );
+
+			if ( k == 0u )
+			{
+				through += channel * Luma( lit );
+				whole += channel * open;
+			}
 		}
 	}
 
@@ -1275,7 +1288,8 @@ float3 Sheen( Surface s, float3 towards, inout Random random )
 	else
 	{
 		float3 ignored = float3( 0.0, 0.0, 0.0 );
-		leaving += there.albedo * ( Direct( there.position, there.normal, there.geometric, random, false, ignored )
+		float4 unkept = 0.0, unkeptWhole = 0.0;
+		leaving += there.albedo * ( Direct( there.position, there.normal, there.geometric, random, false, ignored, unkept, unkeptWhole )
 			+ GlowDirect( there.position, there.normal, there.geometric, random, ignored ) );
 	}
 
@@ -1350,7 +1364,8 @@ float3 Arriving( float3 origin, float3 direction, float density, inout Random ra
 		}
 
 		float3 ignored = float3( 0.0, 0.0, 0.0 );
-		gathered += carried * s.albedo * ( Direct( s.position, s.normal, s.geometric, random, false, ignored )
+		float4 unkept = 0.0, unkeptWhole = 0.0;
+		gathered += carried * s.albedo * ( Direct( s.position, s.normal, s.geometric, random, false, ignored, unkept, unkeptWhole )
 			+ GlowDirect( s.position, s.normal, s.geometric, random, ignored ) );
 
 		carried *= s.albedo;
@@ -1400,7 +1415,7 @@ void main( uint3 id : SV_DispatchThreadID )
 	float4 across = g_texels[( texel * 5 ) + 3];
 	float4 down = g_texels[( texel * 5 ) + 4];
 
-	uint at = texel * 9u;
+	uint at = texel * 11u;
 
 	float4 sumSquares = g_sums[at + 0u];
 	float4 insideSpare = g_sums[at + 1u];
@@ -1409,6 +1424,10 @@ void main( uint3 id : SV_DispatchThreadID )
 	//The light's first band a colour, bounced then straight - see BakeSheet.Encode
 	float3 bouncedR = g_sums[at + 3u].xyz, bouncedG = g_sums[at + 4u].xyz, bouncedB = g_sums[at + 5u].xyz;
 	float3 straightR = g_sums[at + 6u].xyz, straightG = g_sums[at + 7u].xyz, straightB = g_sums[at + 8u].xyz;
+
+	//Each shade channel's light as it arrived, and as it would unshadowed - see BakeSheet.ShadeOf
+	float4 shadeThrough = g_sums[at + 9u];
+	float4 shadeWhole = g_sums[at + 10u];
 
 	for ( uint s = 0; s < g_samples; ++s )
 	{
@@ -1474,8 +1493,17 @@ void main( uint3 id : SV_DispatchThreadID )
 			lean = float3( 0.0, 0.0, 0.0 );
 			direct = float3( 0.0, 0.0, 0.0 );
 
+			//The face's alone: a leaf's back is no texel's shadow
+			float4 seen = 0.0, whole = 0.0;
+
 			if ( ( g_mode & ModeNoDirect ) == 0u )
-				direct = Direct( p, sn, sg, random, ( g_mode & ModeAllLights ) == 0u, lean ) + GlowDirect( p, sn, sg, random, lean );
+				direct = Direct( p, sn, sg, random, ( g_mode & ModeAllLights ) == 0u, lean, seen, whole ) + GlowDirect( p, sn, sg, random, lean );
+
+			if ( side == 0u )
+			{
+				shadeThrough += seen;
+				shadeWhole += whole;
+			}
 
 			//Half of what a face would take, as F_TRANSMISSION shades it: with the bounced light, and in no band
 			if ( side == 1u )
@@ -1520,6 +1548,8 @@ void main( uint3 id : SV_DispatchThreadID )
 	g_sums[at + 6u] = float4( straightR, 0.0 );
 	g_sums[at + 7u] = float4( straightG, 0.0 );
 	g_sums[at + 8u] = float4( straightB, 0.0 );
+	g_sums[at + 9u] = shadeThrough;
+	g_sums[at + 10u] = shadeWhole;
 }
 
 //---- a point of the volume - BakeVolume.Trace ----------------------------------

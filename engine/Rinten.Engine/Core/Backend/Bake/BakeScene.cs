@@ -291,7 +291,7 @@ internal sealed class BakeMaterial
 		return made;
 	}
 
-	private static BakePicture Picture( Texture texture, bool colour, Dictionary<Texture, BakePicture> pictures )
+	internal static BakePicture Picture( Texture texture, bool colour, Dictionary<Texture, BakePicture> pictures )
 	{
 		if ( texture is null ) return null;
 		if ( pictures.TryGetValue( texture, out var held ) ) return held;
@@ -320,6 +320,9 @@ internal sealed class BakeLight
 
 	/// <summary>The whole of it is in the bake, and none of it in the frame - see Light.NotBaked.</summary>
 	public bool Whole;
+
+	/// <summary>Its channel of the shade sheet, what the bake let through of it a texel; -1 where it has none - see AssignShades.</summary>
+	public int Shade = -1;
 
 	/// <summary>A point light's shape (PointLight.AreaShapes), half extents and width axis - see AreaLamp.</summary>
 	public int Shape;
@@ -503,21 +506,12 @@ internal sealed class BakeScene
 				Receivers.Add( new BakeReceiver( built, model, first, count ) );
 		}
 
-		//The ground: the terrain's chunks are models of their own with no sheet among their coordinates - the second
-		//set carries paint - so they stop light and throw it back, and read the volume like anything without one.
+		//The ground stops light and throws it back, and reads the volume like anything without a sheet - see AddTerrain
 		foreach ( var terrain in scene.GetAllComponents<Terrain>() )
 		{
 			if ( !terrain.IsValid() || !terrain.Enabled || !terrain.Active ) continue;
 
-			foreach ( var part in scene.SceneWorld.SceneObjects )
-			{
-				if ( part is null || !part.IsValid() || part.Component != terrain ) continue;
-				if ( part.Model is not { } model || !model.IsValid() ) continue;
-
-				var first = corners.Count / 3;
-				AddModel( model, part.Transform, Color.White, ulong.MaxValue, part.MaterialOverride, null );
-				Grow( first, ( corners.Count / 3 ) - first, ref any );
-			}
+			AddTerrain( terrain, ref any );
 		}
 
 		Positions = positions.ToArray();
@@ -686,6 +680,77 @@ internal sealed class BakeScene
 		return sheet;
 	}
 
+	//A terrain's whole ground, from its chunks' physics triangles: the drawn models carry paint where colour goes, and
+	//stand in coarse far from the eye. Each corner is what its paint makes of the layers' colour pictures, on average
+	private void AddTerrain( Terrain terrain, ref bool any )
+	{
+		if ( terrain.Storage?.Materials is not { } layers ) return;
+
+		var layerColour = new Vec3[Math.Min( layers.Count, Terrain.MostLayers )];
+
+		for ( var l = 0; l < layerColour.Length; ++l )
+		{
+			var layer = layers[l];
+			var mean = BakeMaterial.Picture( layer?.GetTexture( "Color" ), true, pictures )?.Mean() ?? Vec4.One;
+			var tint = CoreResources.LiveTint( layer );
+
+			layerColour[l] = new Vec3( mean.X * tint.r, mean.Y * tint.g, mean.Z * tint.b );
+		}
+
+		var world = terrain.WorldTransform;
+		var material = MaterialIndex( null );
+		Span<float> weights = stackalloc float[Terrain.MostLayers];
+
+		foreach ( var (points, indices) in terrain.GroundForBake() )
+		{
+			var first = corners.Count / 3;
+			var start = positions.Count;
+
+			foreach ( var point in points )
+			{
+				weights.Clear();
+				var found = terrain.PaintAt( point, weights, out var up );
+
+				var colour = Vec3.Zero;
+				var total = 0.0f;
+
+				for ( var l = 0; l < layerColour.Length; ++l )
+				{
+					colour += layerColour[l] * weights[l];
+					total += weights[l];
+				}
+
+				var at = world.PointToWorld( point );
+				var normal = ( world.Rotation * up ).Normal;
+
+				positions.Add( new Vec3( at.x, at.y, at.z ) );
+				normals.Add( new Vec3( normal.x, normal.y, normal.z ) );
+				uv0.Add( default );
+				uv1.Add( default );
+				colours.Add( found && total > 1e-5f ? colour / total : Vec3.One );
+			}
+
+			for ( var i = 0; i + 2 < indices.Count; i += 3 )
+			{
+				var a = start + indices[i];
+				var b = start + indices[i + 1];
+				var c = start + indices[i + 2];
+
+				//Wound to face where the ground does: the physics has no front
+				var face = Vec3.Cross( positions[b] - positions[a], positions[c] - positions[a] );
+				var flip = Vec3.Dot( face, normals[a] + normals[b] + normals[c] ) < 0.0f;
+
+				corners.Add( a );
+				corners.Add( flip ? c : b );
+				corners.Add( flip ? b : c );
+				materialOf.Add( material );
+				tintOf.Add( Vec3.One );
+			}
+
+			Grow( first, ( corners.Count / 3 ) - first, ref any );
+		}
+	}
+
 	//Where a mesh with no material stands: plain white, which is what the frame draws it as.
 	private int plain = -1;
 
@@ -774,6 +839,39 @@ internal sealed class BakeScene
 			if ( made.Colour == Vec3.Zero ) continue;
 
 			Lights.Add( made );
+		}
+
+		AssignShades();
+	}
+
+	/// <summary>Channels in the shade sheet, one a light that casts, as UE gives stationary lights.</summary>
+	public const int ShadeChannels = 4;
+
+	//Suns first, then the brightest lamps: no two lights that reach a common point share a channel. A light left
+	//without one has movers' shadows over its bake taken by the still world's map instead - see SunBakedShade
+	private void AssignShades()
+	{
+		var order = Lights.Where( x => x.Shadows ).OrderBy( x => x.Kind == 0 ? 0 : 1 ).ThenByDescending( x => BakeMath.Luma( x.Colour ) ).ToList();
+		var given = new List<BakeLight>();
+
+		foreach ( var light in order )
+		{
+			var taken = 0;
+
+			foreach ( var other in given )
+			{
+				var meet = light.Kind == 0 || other.Kind == 0 || Vec3.Distance( light.Position, other.Position ) < light.Range + other.Range;
+				if ( meet ) taken |= 1 << other.Shade;
+			}
+
+			for ( var c = 0; c < ShadeChannels; ++c )
+			{
+				if ( ( taken & ( 1 << c ) ) != 0 ) continue;
+
+				light.Shade = c;
+				given.Add( light );
+				break;
+			}
 		}
 	}
 
@@ -1390,6 +1488,14 @@ internal sealed class BakeScene
 	/// <summary>Direct lamp light over pi at a point, and its dominant direction; as surface_shading.slang.</summary>
 	public Vec3 Direct( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, bool bakedOnly, ref Vec3 towards )
 	{
+		Vec4 through = default, open = default;
+		return Direct( position, normal, geometric, ref random, bakedOnly, ref towards, ref through, ref open );
+	}
+
+	/// <summary>As Direct, summing each shade channel's light by luma as it arrived and as it would unshadowed.</summary>
+	public Vec3 Direct( Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, bool bakedOnly, ref Vec3 towards,
+		ref Vec4 through, ref Vec4 open )
+	{
 		var sum = Vec3.Zero;
 		if ( Pass != 0 ) return sum;
 
@@ -1397,7 +1503,13 @@ internal sealed class BakeScene
 		{
 			if ( bakedOnly && !light.Whole ) continue;
 
-			var arriving = DirectOne( light, position, normal, geometric, ref random, out var l );
+			var arriving = DirectOne( light, position, normal, geometric, ref random, out var l, out var unshadowed );
+
+			if ( light.Shade >= 0 )
+			{
+				through[light.Shade] += BakeMath.Luma( arriving );
+				open[light.Shade] += BakeMath.Luma( unshadowed );
+			}
 
 			sum += arriving;
 			towards += l * BakeMath.Luma( arriving );
@@ -1425,10 +1537,15 @@ internal sealed class BakeScene
 		return square > edge ? own * edge / square : own;
 	}
 
-	/// <summary>One light's share of <see cref="Direct"/>, and which way it arrives from.</summary>
+	/// <summary>One light's share of Direct, and which way it arrives from.</summary>
 	public Vec3 DirectOne( BakeLight light, Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, out Vec3 l )
+		=> DirectOne( light, position, normal, geometric, ref random, out l, out _ );
+
+	//And what would have arrived with nothing in the way
+	private Vec3 DirectOne( BakeLight light, Vec3 position, Vec3 normal, Vec3 geometric, ref BakeRandom random, out Vec3 l, out Vec3 unshadowed )
 	{
 		var lit = Unshadowed( light, position, normal, geometric, ref random, out l, out var aim, out var distance );
+		unshadowed = lit;
 		if ( !Passes( lit ) || !light.Shadows ) return lit;
 
 		//What glass between lets by - see Transmittance

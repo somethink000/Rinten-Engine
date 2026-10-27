@@ -583,9 +583,11 @@ internal static unsafe class CoreSceneRenderer
 			LightBlock[at + 4] = source.Colour.r;
 			LightBlock[at + 5] = source.Colour.g;
 			LightBlock[at + 6] = source.Colour.b;
-			//Kind; in its fraction, in twentieths, twice what it is withheld from and one where it is baked - see LightCode
+			//Kind; in its fraction, in 128ths, one where it is baked, twice what it is withheld from and eight times one more
+			//than its channel of the bake's shade - see LightCode. Under a half, so every kind test still reads the kind
 			var baked = lights[i] is { } inBake && BakedOn && CoreBakedLighting.InBake( inBake );
-			LightBlock[at + 7] = source.Kind + ( ( ( source.Withholds * 2 ) + ( baked ? 1 : 0 ) ) * 0.05f );
+			var shade = baked ? CoreBakedLighting.ShadeOf( lights[i] ) : 0;
+			LightBlock[at + 7] = source.Kind + ( ( ( baked ? 1 : 0 ) + ( source.Withholds * 2 ) + ( shade * 8 ) ) / 128.0f );
 
 			LightBlock[at + 8] = source.Forward.x;
 			LightBlock[at + 9] = source.Forward.y;
@@ -946,7 +948,10 @@ internal static unsafe class CoreSceneRenderer
 	internal const int LampMoversAt = Lights2DAt + ( SceneLight2DSystem.MostLights * Light2DFloats );
 	internal const int MostMoverFrustums = 16;
 
-	internal const int FrameFloats = LampMoversAt + ( MostMoverFrustums * 4 );
+	//The sun's still shadow from the bake, four float4s - see bakedSun in frame_data.slang and CoreBakedLighting.WriteSunMap.
+	internal const int BakedSunAt = LampMoversAt + ( MostMoverFrustums * 4 );
+
+	internal const int FrameFloats = BakedSunAt + 16;
 
 	[ConVar( "r_shadow_filter", ConVarFlags.Saved, Min = 0, Max = 2,
 		Help = "Shadow edges: 0 one compare, 1 a fixed soft edge, 2 as soft as the light's source makes them (PCSS). Set by Shadow Quality." )]

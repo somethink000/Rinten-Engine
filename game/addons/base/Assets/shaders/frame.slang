@@ -411,16 +411,22 @@ bool GroundBelow( float3 world, out float height )
 #endif
 }
 
-//The kind's fraction in twentieths: twice the withheld terms (1 no diffuse, 2 no specular, 3 neither) plus one
-//where the light is in the bake - see CoreSceneRenderer.BuildFrame
+//The kind's fraction in 128ths: one where the light is in the bake, twice the withheld terms (1 no diffuse, 2 no
+//specular, 3 neither), eight times one more than its channel of the sheet's shade - see CoreSceneRenderer.BuildFrame
 uint LightCode( Light light )
 {
-	return uint( round( frac( light.colour.w ) * 20.0 ) );
+	return uint( round( frac( light.colour.w ) * 128.0 ) );
+}
+
+//One more than the light's channel of the sheet's shade, nought where it has none - see BakedShadeAt
+uint LightShade( Light light )
+{
+	return LightCode( light ) >> 3;
 }
 
 uint LightWithholds( Light light )
 {
-	return LightCode( light ) >> 1;
+	return ( LightCode( light ) >> 1 ) & 3u;
 }
 
 //Whether the light is in the bake: a lightmapped surface has it already and takes only what movers shade of it
@@ -1320,6 +1326,61 @@ float2 SunTilt( float3 normal )
 	return facing.xy / max( -facing.z, 0.1 );
 }
 
+#ifndef PORTABLE
+//One depth of the bake's still shadow down the sun, nought to one - two a texel, high byte first: see BakeSunMap
+float SunBakedDepth( uint map, int2 texel )
+{
+	float4 pair = g_textures[map].Load( int3( texel.x >> 1, texel.y, 0 ) );
+	float2 bytes = round( ( ( texel.x & 1 ) != 0 ? pair.zw : pair.xy ) * 255.0 );
+	return ( ( bytes.x * 256.0 ) + bytes.y ) / 65534.0;
+}
+#endif
+
+//The still world's shadow down the sun as the bake left it, filtered over the four texels round the point: one where
+//nothing still stands between; below nought where the frame has no baked map or the point is off it - see bakedSun
+float SunBakedStill( float3 world, float3 normal )
+{
+#ifdef PORTABLE
+	return -1.0;
+#else
+	//Frame-uniform - see SkyTableAt.
+	float4 info = g_frame[0].bakedSun[3];
+	uint map = uint( info.x );
+	if ( map == 0u ) return -1.0;
+
+	float side = info.y;
+
+	//A texel and a half off the surface, so it does not shadow itself across its own slope
+	float3 at = world + ( normal * ( 1.5 * info.z / max( length( g_frame[0].bakedSun[2].xyz ), 1e-6 ) ) );
+	float u = dot( at, g_frame[0].bakedSun[0].xyz ) + g_frame[0].bakedSun[0].w;
+	float v = dot( at, g_frame[0].bakedSun[1].xyz ) + g_frame[0].bakedSun[1].w;
+	float deep = dot( at, g_frame[0].bakedSun[2].xyz ) + g_frame[0].bakedSun[2].w;
+
+	if ( u <= 0.0 || v <= 0.0 || u >= 1.0 || v >= 1.0 ) return -1.0;
+
+	float2 spot = ( float2( u, v ) * side ) - 0.5;
+	int2 cell = int2( floor( spot ) );
+	float2 f = spot - float2( cell );
+	int last = int( side ) - 1;
+	float bias = info.z;
+
+	float4 lit;
+	lit.x = deep <= SunBakedDepth( map, clamp( cell, 0, last ) ) + bias ? 1.0 : 0.0;
+	lit.y = deep <= SunBakedDepth( map, clamp( cell + int2( 1, 0 ), 0, last ) ) + bias ? 1.0 : 0.0;
+	lit.z = deep <= SunBakedDepth( map, clamp( cell + int2( 0, 1 ), 0, last ) ) + bias ? 1.0 : 0.0;
+	lit.w = deep <= SunBakedDepth( map, clamp( cell + int2( 1, 1 ), 0, last ) ) + bias ? 1.0 : 0.0;
+
+	return lerp( lerp( lit.x, lit.y, f.x ), lerp( lit.z, lit.w, f.x ), f.y );
+#endif
+}
+
+//The still world's sun shadow: the bake's where it has one, the still pages' where it has not
+float SunStillShade( float3 world, float3 step, float2 tilt, bool wide )
+{
+	float baked = SunBakedStill( world, step );
+	return baked >= 0.0 ? baked : SunStill( world, step, tilt, wide );
+}
+
 //Where the surface being shaded stands at rest, w one where it moves its own corners and the cluster pass said so: the
 //still world's maps hold it at rest, so it is read there - see depth_id.slang's SHADOW_REST_FIELD
 static float4 g_shadowRest = float4( 0.0, 0.0, 0.0, 0.0 );
@@ -1337,7 +1398,7 @@ float SunShadow( float3 world, float3 normal, float3 step, bool wide = true )
 
 	float2 tilt = SunTilt( normal );
 
-	return min( SunStill( world, step, tilt, wide ), SunMovers( world, step, tilt, wide, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) );
+	return min( SunStillShade( world, step, tilt, wide ), SunMovers( world, step, tilt, wide, g_frame[0].sunPages.z, g_frame[0].sunPages.w ) );
 }
 
 //The same, stepped off along the normal - what every surface wants.
@@ -1346,10 +1407,10 @@ float SunShadow( float3 world, float3 normal )
 	return SunShadow( world, normal, normal );
 }
 
-//How much of a baked sun movers take from a surface that has it in its lightmap, in `moved`: where the still world
-//lets it through and a mover does not. Returns what reaches the point past both, from one tap of the still pages -
-//the highlight's shadow, which a lightmap has no direction for
-float SunBakedShade( float3 world, float3 normal, out float moved )
+//How much of a baked sun movers take from a surface that has it in its lightmap, in `moved`: where the bake let it
+//through (held, from the sheet's shade; below nought the still pages say) and a mover does not. Returns what reaches
+//the point past both, from one tap of the still pages - the highlight's shadow, which a lightmap has no way for
+float SunBakedShade( float3 world, float3 normal, float held, out float moved )
 {
 	moved = 0.0;
 
@@ -1357,9 +1418,9 @@ float SunBakedShade( float3 world, float3 normal, out float moved )
 
 	float2 tilt = SunTilt( normal );
 	float movers = SunMovers( world, normal, tilt, true, g_frame[0].sunPages.z, g_frame[0].sunPages.w );
-	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * SunStill( world, normal, tilt, true );
+	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * ( held >= 0.0 ? held : SunStillShade( world, normal, tilt, true ) );
 
-	return SunStill( world, normal, tilt, false ) * movers;
+	return SunStillShade( world, normal, tilt, false ) * movers;
 }
 
 #ifndef PORTABLE
@@ -1632,7 +1693,7 @@ float LampShadow( float3 world, float3 normal, float3 step, Light light, float d
 
 //How much of a baked lamp movers take from a surface that has it in its lightmap, in `moved`; returns what reaches
 //the point past the still world and the movers, from one tap - the highlight's shadow. See SunBakedShade
-float LampBakedShade( float3 world, float3 normal, Light light, float distance, out float moved )
+float LampBakedShade( float3 world, float3 normal, Light light, float distance, float held, out float moved )
 {
 	moved = 0.0;
 
@@ -1640,7 +1701,7 @@ float LampBakedShade( float3 world, float3 normal, Light light, float distance, 
 	if ( !LampTapOf( world, normal, normal, light, distance, t ) ) return 1.0;
 
 	float movers = LampMovers( t, light );
-	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * LampStill( t, light );
+	if ( movers < 1.0 ) moved = ( 1.0 - movers ) * ( held >= 0.0 ? held : LampStill( t, light ) );
 
 	return ShadowSharp( uint( g_frame[0].sunMaps.w ), t.at, t.compare, t.slope ) * movers;
 }
@@ -2127,6 +2188,19 @@ bool HasBakedSheet()
 	return g_frame[0].portableBake.x > 0.5;
 #else
 	return kBakedOn != 0 && g_frame[0].bakedMaps.w > 0.5;
+#endif
+}
+
+//How much of each shade channel's light the bake let through at a lightmap spot, one linear tap; below nought where
+//the bake kept none, and a baked light's movers then take from the still world's maps - see BakeSheet.Shade
+float4 BakedShadeAt( float2 uv )
+{
+#ifdef PORTABLE
+	return float4( -1.0, -1.0, -1.0, -1.0 );
+#else
+	//Frame-uniform - see SkyTableAt.
+	uint shade = uint( g_frame[0].bakedMaps.y );
+	return shade != 0u ? g_textures[shade].SampleLevel( uv, 0.0 ) : float4( -1.0, -1.0, -1.0, -1.0 );
 #endif
 }
 

@@ -47,6 +47,30 @@ public sealed class BakedLightingData : BlobData
 	/// <summary>Every light in the bake - its bounce, and its direct light on lightmapped surfaces.</summary>
 	public List<Guid> Baked { get; set; } = new();
 
+	/// <summary>Each of Baked's channel in SheetShade, one more than it; nought where it has none.</summary>
+	public byte[] BakedShades { get; set; } = [];
+
+	/// <summary>Four bytes a texel: how much of each channel's light the bake let through - see BakeLight.Shade.</summary>
+	public byte[] SheetShade { get; set; } = [];
+
+	/// <summary>The still world's depth down the baked sun, a side of texels - see BakeSunMap; nought where none.</summary>
+	public int SunMapSide { get; set; }
+
+	/// <summary>World to the map, three rows of four, then a texel's width over its depth range.</summary>
+	public float[] SunMapRows { get; set; } = [];
+
+	/// <summary>Two depths of two bytes a texel of four, high byte first.</summary>
+	public byte[] SunMap { get; set; } = [];
+
+	/// <summary>The sun the map is of.</summary>
+	public Guid SunMapSun { get; set; }
+
+	/// <summary>Whether the sun's still shadow is kept, for every surface without a lightmap to read.</summary>
+	public bool HasSunMap => SunMapSide > 0 && SunMap.Length == SunMapSide * SunMapSide * 2 && SunMapRows.Length == 13;
+
+	/// <summary>Whether the sheet's shade is kept, for movers' shadows over a baked light to take only what the bake let by.</summary>
+	public bool HasShade => HasSheet && SheetShade.Length == SheetWidth * SheetHeight * 4 && BakedShades.Length == Baked.Count;
+
 	/// <summary>One BakedGlow group's light alone, scaled by its brightness in the frame.</summary>
 	public struct Glow
 	{
@@ -156,6 +180,9 @@ public sealed class BakedLightingData : BlobData
 
 	public bool IsEmpty => !HasSheet && !HasVolume;
 
+	//2: the sheet's shade and the baked lights' channels in it; 3: the sun's still shadow
+	public override int Version => 3;
+
 	internal void Touched() => Revision = System.Threading.Interlocked.Increment( ref stamped );
 
 	public override void Serialize( ref Writer writer )
@@ -217,6 +244,14 @@ public sealed class BakedLightingData : BlobData
 		Packed( ref s, TexelKeys );
 		Packed( ref s, TexelLinks );
 		Packed( ref s, TexelWeights );
+
+		PackedBytes( ref s, BakedShades );
+		PackedBytes( ref s, SheetShade );
+
+		s.Write( SunMapSide );
+		Packed( ref s, SunMapRows );
+		PackedBytes( ref s, SunMap );
+		s.Write( SunMapSun );
 
 		writer.Stream = s;
 	}
@@ -282,6 +317,20 @@ public sealed class BakedLightingData : BlobData
 		TexelKeys = Unpacked<int>( ref s );
 		TexelLinks = Unpacked<ushort>( ref s );
 		TexelWeights = Unpacked( ref s );
+
+		if ( reader.DataVersion >= 2 )
+		{
+			BakedShades = UnpackedBytes( ref s );
+			SheetShade = UnpackedBytes( ref s );
+		}
+
+		if ( reader.DataVersion >= 3 )
+		{
+			SunMapSide = s.Read<int>();
+			SunMapRows = Unpacked<float>( ref s );
+			SunMap = UnpackedBytes( ref s );
+			SunMapSun = s.Read<Guid>();
+		}
 
 		reader.Stream = s;
 		Touched();

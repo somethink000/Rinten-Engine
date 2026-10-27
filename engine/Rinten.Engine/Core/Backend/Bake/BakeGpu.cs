@@ -35,9 +35,9 @@ internal static class BakeGpu
 	private const int LightWords = 24;
 	private const int EmitterWords = 12;
 
-	//Floats of sums a sheet texel hands back: light, insides and straight light, the sky's escapes, and the bounced and
-	//the straight light's first band a colour, four each - see bake_trace.slang's main
-	internal const int SheetFloats = 36;
+	//Floats of sums a sheet texel hands back: light, insides and straight light, the sky's escapes, the bounced and the
+	//straight light's first band a colour, and the shade channels' light as it arrived and unshadowed, four each - see main
+	internal const int SheetFloats = 44;
 
 	//Floats of sums a point of the volume hands back - see bake_trace.slang's ProbeCs
 	internal const int ProbeFloats = 20;
@@ -641,6 +641,7 @@ internal static class BakeGpu
 			w[at + 13] = F( light.Falloff );
 			w[at + 14] = F( light.Radius );
 			w[at + 15] = ( light.Shadows ? 1u : 0u ) | ( light.Whole ? 2u : 0u );
+			w[at + 16] = (uint)( light.Shade + 1 );
 
 			w[at + 17] = (uint)light.Shape;
 			w[at + 18] = F( light.HalfWidth );

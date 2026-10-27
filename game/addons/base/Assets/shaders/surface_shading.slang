@@ -433,6 +433,22 @@ bool ScreenOcclusion( float2 pixel, out float4 held )
 }
 
 //Subsurface scatter (0-1): diffuse wraps past the terminator, red furthest; 0 equals ShadeSurface
+//What the bake let through of a baked light here, out of the sheet's shade read once a pixel; below nought where the
+//light has no channel of it - see BakedShadeAt
+float ShadeHeld( Light light, float2 lightmap, inout float4 shades, inout bool read )
+{
+	uint channel = LightShade( light );
+	if ( channel == 0u ) return -1.0;
+
+	if ( !read )
+	{
+		shades = BakedShadeAt( lightmap );
+		read = true;
+	}
+
+	return shades[channel - 1u];
+}
+
 Shaded ShadeSurfaceWith( Surface s, float scatter )
 {
 	//The decals first, where the frame has any: what they paint is what the lights see - see ApplyDecals.
@@ -463,6 +479,10 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	//A surface with its own lightmap has the baked lights in it already - see LightBaked
 	bool sheetLit = HasBakedSheet() && ( s.lightmap.x + s.lightmap.y ) > 0.0;
 
+	//What the bake let through of each shade channel's light here, read at the first baked light that has one
+	float4 shades = float4( -1.0, -1.0, -1.0, -1.0 );
+	bool shadesRead = false;
+
 	while ( NextLight( walk, which ) )
 	{
 		Light light = LightAt( which );
@@ -491,7 +511,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 			bool areaTaken = sheetLit && LightBaked( light );
 			float areaShadow;
 			float areaSeen = areaTaken
-				? LampBakedShade( s.world, geometric, light, distance, areaShadow )
+				? LampBakedShade( s.world, geometric, light, distance, ShadeHeld( light, s.lightmap, shades, shadesRead ), areaShadow )
 				: LampShadow( s.world, geometric, light, distance );
 
 			if ( !areaTaken ) areaShadow = areaSeen;
@@ -596,9 +616,11 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 
 		if ( taken )
 		{
+			float held = ShadeHeld( light, s.lightmap, shades, shadesRead );
+
 			seen = light.colour.w < 0.5
-				? SunBakedShade( s.world, geometric, shadow )
-				: LampBakedShade( s.world, geometric, light, distance, shadow );
+				? SunBakedShade( s.world, geometric, held, shadow )
+				: LampBakedShade( s.world, geometric, light, distance, held, shadow );
 		}
 		else if ( light.colour.w < 0.5 )
 		{

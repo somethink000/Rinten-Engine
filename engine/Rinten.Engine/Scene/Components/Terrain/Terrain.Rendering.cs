@@ -84,6 +84,14 @@ public partial class Terrain
 	internal TerrainSoup BakedGround( int x, int z )
 		=> x < 0 || z < 0 || x >= chunksWide || z >= chunksDeep ? null : chunks[( z * chunksWide ) + x].Baked?.Ground;
 
+	//Each chunk's whole ground as the physics holds it, in the terrain's own space: fine wherever the eye is, as the drawn
+	//models are not, and with what was set in - what a light bake traces
+	internal IEnumerable<(List<Vector3> Points, List<int> Indices)> GroundForBake()
+	{
+		foreach ( var chunk in chunks )
+			if ( chunk.Baked is { } bake && bake.CollisionIndices.Count >= 3 ) yield return (bake.CollisionPoints, bake.CollisionIndices);
+	}
+
 	//Everything laid over the terrain now.
 	internal IEnumerable<TerrainModifier> Modifiers => modifiers.Values;
 

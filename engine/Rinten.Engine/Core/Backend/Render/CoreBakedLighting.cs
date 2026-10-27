@@ -12,10 +12,11 @@ internal static partial class CoreBakedLighting
 	private sealed class Held
 	{
 		public int Revision = -1;
-		public ulong Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls;
+		public ulong Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls, Shade, SunMap;
 
-		/// <summary>The lights in the bake, whose light a lightmapped surface already has - see InBake.</summary>
-		public readonly HashSet<Guid> Baked = new();
+		/// <summary>The lights in the bake, whose light a lightmapped surface already has, and one more than each one's
+		/// channel of the sheet's shade, nought where it has none - see InBake.</summary>
+		public readonly Dictionary<Guid, int> Baked = new();
 
 		/// <summary>Each glow layer's sheet and volume, and its group - see BakedGlow.</summary>
 		public readonly ulong[] GlowSheet = new ulong[BakedGlow.Groups], GlowVolume = new ulong[BakedGlow.Groups];
@@ -29,7 +30,7 @@ internal static partial class CoreBakedLighting
 
 		public void Release()
 		{
-			foreach ( var texture in new[] { Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls } )
+			foreach ( var texture in new[] { Sheet, Band, Red, Green, Blue, SheetSky, VolumeSky, Walls, Shade, SunMap } )
 				if ( texture != 0 ) CoreRenderDevice.DestroyTexture( texture );
 
 			for ( var i = 0; i < BakedGlow.Groups; ++i )
@@ -48,7 +49,7 @@ internal static partial class CoreBakedLighting
 			Array.Clear( GlowVolume );
 			Array.Clear( GlowGroup );
 
-			Sheet = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = 0;
+			Sheet = Band = Red = Green = Blue = SheetSky = VolumeSky = Walls = Shade = SunMap = 0;
 			Baked.Clear();
 			Revision = -1;
 		}
@@ -135,6 +136,7 @@ internal static partial class CoreBakedLighting
 		writing = null;
 
 		Array.Clear( frame, CoreSceneRenderer.PortableBakeAt, 4 );
+		Array.Clear( frame, CoreSceneRenderer.BakedSunAt, 16 );
 		PortableSheet = PortableVolume = 0;
 
 		var bake = Of( scene );
@@ -165,6 +167,7 @@ internal static partial class CoreBakedLighting
 		if ( on.Sheet != 0 )
 		{
 			frame[at + 0] = CoreRender.TextureIndex( on.Sheet );
+			frame[at + 1] = on.Shade != 0 ? CoreRender.TextureIndex( on.Shade ) : 0.0f;
 			frame[at + 2] = on.SheetSky != 0 ? CoreRender.TextureIndex( on.SheetSky ) : 0.0f;
 			frame[at + 3] = 1.0f;
 			frame[at + 19] = on.Band != 0 ? CoreRender.TextureIndex( on.Band ) : 0.0f;
@@ -206,8 +209,24 @@ internal static partial class CoreBakedLighting
 		}
 
 		WriteGlows( frame, at + 20, on, scene );
+		WriteSunMap( frame, on, data, scene );
 
 		return any;
+	}
+
+	//The sun's still shadow, while the frame's sun is the one it was baked down and is still in the bake - see bakedSun
+	private static void WriteSunMap( float[] frame, Held on, BakedLightingData data, Scene scene )
+	{
+		if ( on.SunMap == 0 ) return;
+		if ( CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene ) is not { Shadows: true, NotBaked: false } sun || sun.Id != data.SunMapSun ) return;
+
+		var at = CoreSceneRenderer.BakedSunAt;
+		data.SunMapRows.AsSpan( 0, 12 ).CopyTo( frame.AsSpan( at, 12 ) );
+
+		frame[at + 12] = CoreRender.TextureIndex( on.SunMap );
+		frame[at + 13] = data.SunMapSide;
+		frame[at + 14] = data.SunMapRows[12];
+		frame[at + 15] = 1.0f;
 	}
 
 	/// <summary>Whether a scene has a bake it reads.</summary>
@@ -226,14 +245,19 @@ internal static partial class CoreBakedLighting
 	//Whether a light is in the bake the frame being written reads: a lightmapped surface has its light already and
 	//takes only what movers shade of it, as UE's stationary lights; valid after Write
 	internal static bool InBake( Light light )
-		=> writing is not null && light is { NotBaked: false } && writing.Baked.Contains( light.Id );
+		=> writing is not null && light is { NotBaked: false } && writing.Baked.ContainsKey( light.Id );
+
+	//One more than a baked light's channel of the sheet's shade the frame being written reads; nought where none
+	internal static int ShadeOf( Light light )
+		=> writing is not null && writing.Shade != 0 && light is { NotBaked: false } && writing.Baked.TryGetValue( light.Id, out var shade ) ? shade : 0;
 
 	private static void Upload( Held on, BakedLightingData data )
 	{
 		on.Release();
 		on.Revision = data.Revision;
 
-		foreach ( var light in data.Baked ) on.Baked.Add( light );
+		for ( var i = 0; i < data.Baked.Count; ++i )
+			on.Baked[data.Baked[i]] = data.HasShade ? data.BakedShades[i] : 0;
 
 		if ( data.HasBounce ) on.Bounce = new CoreLiveBounce( data );
 
@@ -243,7 +267,13 @@ internal static partial class CoreBakedLighting
 		if ( data.HasSheet )
 		{
 			on.Sheet = CoreRenderDevice.CreateTextureHalf( data.Sheet, data.SheetWidth, data.SheetHeight );
+
+			//Bytes, linear, read once a pixel under a baked light - see BakedShadeAt
+			if ( data.HasShade ) on.Shade = CoreRenderDevice.CreateTextureRgba( data.SheetShade, data.SheetWidth, data.SheetHeight, false );
 		}
+
+		//Two depths a texel, read by Load - see SunBakedStill
+		if ( data.HasSunMap ) on.SunMap = CoreRenderDevice.CreateTextureRgba( data.SunMap, data.SunMapSide / 2, data.SunMapSide, false );
 
 		if ( data.HasVolume )
 		{
@@ -402,10 +432,15 @@ internal static partial class CoreBakedLighting
 		BakeSheet sheet = null;
 		var volume = new BakeVolume();
 		var surfels = new BakeSurfels();
+		var sunMap = new BakeSunMap();
+
+		//The frame's sun, where it is in the bake: the still world's shadow down it is kept - see BakeSunMap
+		var mappedSun = CoreSceneRenderer.FirstEnabled<DirectionalLight>( scene ) is { NotBaked: false, Shadows: true } frameSun ? frameSun.Id : Guid.Empty;
+		var sunMapped = false;
 
 		//The main bake's results, kept as the glow groups' passes reuse the same sheet and lattice
 		Half[] sheetLight = null, sheetSky = null, volumeRed = null, volumeGreen = null, volumeBlue = null, volumeSky = null;
-		byte[] sheetBand = null;
+		byte[] sheetBand = null, sheetShade = null;
 		byte[] volumeWalls = null;
 		int bounceWidth = 0, bounceHeight = 0;
 
@@ -430,8 +465,10 @@ internal static partial class CoreBakedLighting
 				sheet.Denoise( world, denoise );
 				sheet.Dilate();
 				sheet.Encode();
-				( sheetLight, sheetSky, sheetBand ) = ( sheet.Light, sheet.Sky, sheet.Band );
+				( sheetLight, sheetSky, sheetBand, sheetShade ) = ( sheet.Light, sheet.Sky, sheet.Band, sheet.Shade );
 			}
+
+			sunMapped = sunMap.Trace( world, mappedSun, progress, stop );
 
 			volume.Lay( world.Bounds, spacing );
 
@@ -545,6 +582,20 @@ internal static partial class CoreBakedLighting
 
 		foreach ( var light in world.Lights ) data.Baked.Add( light.Id );
 
+		if ( sunMapped )
+		{
+			data.SunMapSide = sunMap.Side;
+			data.SunMapRows = [
+				sunMap.Across.X, sunMap.Across.Y, sunMap.Across.Z, sunMap.Across.W,
+				sunMap.Down.X, sunMap.Down.Y, sunMap.Down.Z, sunMap.Down.W,
+				sunMap.Deep.X, sunMap.Deep.Y, sunMap.Deep.Z, sunMap.Deep.W,
+				sunMap.TexelDeep ];
+			data.SunMap = sunMap.Packed;
+			data.SunMapSun = sunMap.Sun;
+		}
+
+		data.BakedShades = world.Lights.Select( x => (byte)( x.Shade + 1 ) ).ToArray();
+
 		if ( sheet is not null )
 		{
 			data.SheetWidth = sheet.Width;
@@ -552,6 +603,7 @@ internal static partial class CoreBakedLighting
 			data.Sheet = sheetLight;
 			data.SheetSky = sheetSky ?? [];
 			data.SheetBand = sheetBand ?? [];
+			data.SheetShade = sheetShade ?? [];
 
 			foreach ( var receiver in world.Receivers )
 			{

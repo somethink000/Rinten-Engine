@@ -28,6 +28,9 @@ internal sealed class BakeSheet
 	/// <summary>The light's first band over the light, half size, four bytes a texel in runs of red, green, blue.</summary>
 	public byte[] Band;
 
+	/// <summary>Four bytes a texel: how much of each shade channel's light the bake let through - see BakeLight.Shade.</summary>
+	public byte[] Shade;
+
 	//One entry an atlas texel while baking.
 	private Vec3[] position;
 	private Vec3[] normal;
@@ -65,6 +68,9 @@ internal sealed class BakeSheet
 
 	//The sky straight from the texel: the escaping rays' direction summed xyz, their share w
 	private Vec4[] sky;
+
+	//Each shade channel's light that arrived over what would have unshadowed, by luma; one where none would
+	private Vec4[] shade;
 
 	/// <summary>Gives each receiver a square at the density, within <paramref name="most"/>; too big gets less.</summary>
 	public static bool Pack( BakeScene scene, float density, int most, out int side )
@@ -641,6 +647,7 @@ internal sealed class BakeSheet
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
+		shade = new Vec4[count];
 
 		Span<Vec3> bands = stackalloc Vec3[6];
 
@@ -656,7 +663,11 @@ internal sealed class BakeSheet
 
 			for ( var k = 0; k < 6; ++k ) bands[k] = new Vec3( sums[o + 12 + ( k * 4 )], sums[o + 13 + ( k * 4 )], sums[o + 14 + ( k * 4 )] );
 
+			var through = new Vec4( sums[o + 36], sums[o + 37], sums[o + 38], sums[o + 39] );
+			var open = new Vec4( sums[o + 40], sums[o + 41], sums[o + 42], sums[o + 43] );
+
 			End( at, sum, straight, squares, inside, samples, bands );
+			shade[at] = ShadeOf( through, open );
 			sky[at] = SkyOf( new Vec4( sums[o + 8], sums[o + 9], sums[o + 10], sums[o + 11] ), Math.Max( samples - inside, 1 ), scene.SkyStrength );
 		}
 	}
@@ -724,6 +735,7 @@ internal sealed class BakeSheet
 		variance = new float[count];
 		valid = new bool[count];
 		sky = new Vec4[count];
+		shade = new Vec4[count];
 
 		var texels = new List<int>();
 		for ( var i = 0; i < count; ++i ) if ( !float.IsPositiveInfinity( owned[i] ) ) texels.Add( i );
@@ -746,6 +758,8 @@ internal sealed class BakeSheet
 			var squares = 0.0f;
 			var inside = 0;
 			var open = Vec4.Zero;
+			var shadeLit = Vec4.Zero;
+			var shadeWhole = Vec4.Zero;
 			Span<Vec3> bands = stackalloc Vec3[6];
 
 			for ( var s = 0; s < samples; ++s )
@@ -787,7 +801,8 @@ internal sealed class BakeSheet
 
 				var lean = Vec3.Zero;
 				var lit = ( mode & BakeGpu.ModeNoDirect ) != 0 ? Vec3.Zero
-					: scene.Direct( p, n, g, ref random, ( mode & BakeGpu.ModeAllLights ) == 0, ref lean ) + scene.GlowDirect( p, n, g, ref random, ref lean );
+					: scene.Direct( p, n, g, ref random, ( mode & BakeGpu.ModeAllLights ) == 0, ref lean, ref shadeLit, ref shadeWhole )
+						+ scene.GlowDirect( p, n, g, ref random, ref lean );
 
 				//And a leaf's back, through it: with the bounced light, which the denoiser smooths, and in no band
 				var through = transmitter[at] == 0 ? Vec3.Zero
@@ -818,6 +833,7 @@ internal sealed class BakeSheet
 
 			End( at, sum, straight, squares, inside, samples, bands );
 			sky[at] = SkyOf( open, Math.Max( samples - inside, 1 ), scene.SkyStrength );
+			shade[at] = ShadeOf( shadeLit, shadeWhole );
 
 			progress.Step();
 		} );
@@ -843,6 +859,17 @@ internal sealed class BakeSheet
 
 		//Mostly under a wall or inside a pillar: filled from its neighbours instead
 		valid[at] = inside < samples * 0.75f;
+	}
+
+	//A channel's share that arrived; a texel no light of it reaches has nothing to shadow and is whole
+	private static Vec4 ShadeOf( Vec4 through, Vec4 open )
+	{
+		var shade = Vec4.One;
+
+		for ( var c = 0; c < BakeScene.ShadeChannels; ++c )
+			if ( open[c] > 1e-8f ) shade[c] = Math.Clamp( through[c] / open[c], 0.0f, 1.0f );
+
+		return shade;
 	}
 
 	//Escaping rays' direction sum and count into the way the sky is open and how much of it, at the bake's sky strength
@@ -1053,6 +1080,7 @@ internal sealed class BakeSheet
 					var sum = Vec3.Zero;
 					var straight = Vec3.Zero;
 					var skies = Vec4.Zero;
+					var shades = Vec4.Zero;
 					bands.Clear();
 					var n = 0;
 
@@ -1100,6 +1128,7 @@ internal sealed class BakeSheet
 								bands[3 + c] += straightBand[( near * 3 ) + c];
 							}
 							skies += sky[near];
+							shades += shade[near];
 							n++;
 						}
 					}
@@ -1115,6 +1144,7 @@ internal sealed class BakeSheet
 						straightBand[( at * 3 ) + c] = bands[3 + c] / n;
 					}
 					sky[at] = skies / n;
+					shade[at] = shades / n;
 
 					//Its normal from the same neighbours, for the directions below; its face for the next ring
 					if ( float.IsPositiveInfinity( owned[at] ) ) normal[at] = Vec3.Zero;
@@ -1138,6 +1168,7 @@ internal sealed class BakeSheet
 
 		Light = new Half[count * 4];
 		Sky = new Half[count * 4];
+		Shade = new byte[count * 4];
 		EncodeBand();
 
 		for ( var i = 0; i < count; ++i )
@@ -1157,6 +1188,10 @@ internal sealed class BakeSheet
 			Sky[( i * 4 ) + 1] = (Half)openWay.Y;
 			Sky[( i * 4 ) + 2] = (Half)openWay.Z;
 			Sky[( i * 4 ) + 3] = (Half)Math.Min( open.W, 60000.0f );
+
+			//Where no surface is, whole: nothing reads it there but the frame's filter at a square's edge
+			var lets = ownerOf[i] < 0 ? Vec4.One : shade[i];
+			for ( var c = 0; c < 4; ++c ) Shade[( i * 4 ) + c] = (byte)MathF.Round( Math.Clamp( lets[c], 0.0f, 1.0f ) * 255.0f );
 		}
 	}
 

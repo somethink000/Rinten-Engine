@@ -38,6 +38,13 @@ internal static class FontIndex
 		return true;
 	}
 
+	/// <summary>The family a font file says it is, or null where it does not read as a font.</summary>
+	public static string FamilyOf( string file )
+	{
+		using var face = SKTypeface.FromFile( file );
+		return face?.FamilyName;
+	}
+
 	/// <summary>The faces an index names. Lines that do not read are skipped.</summary>
 	public static List<Entry> Read( string text )
 	{

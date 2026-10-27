@@ -261,6 +261,7 @@ partial class StandaloneExporter
 		if ( !Directory.Exists( root ) ) yield break;
 
 		var headset = PlaysInHeadset();
+		var unnamed = unnamedBase ??= UnnamedBaseFiles( root );
 
 		foreach ( var file in Directory.EnumerateFiles( root, "*", SearchOption.AllDirectories ) )
 		{
@@ -268,6 +269,7 @@ partial class StandaloneExporter
 
 			if ( BaseEditorOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) ) continue;
 			if ( !headset && BaseVrOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) ) continue;
+			if ( unnamed.Contains( Path.GetFullPath( file ) ) ) continue;
 
 			//Dot folders and files are the editor's own bookkeeping - caches, thumbnails.
 			if ( relative.Split( '/' ).Any( x => x.StartsWith( '.' ) ) ) continue;
@@ -291,6 +293,144 @@ partial class StandaloneExporter
 		var definitions = Directory.GetFiles( Path.GetDirectoryName( meshSource ), "*.mdl" );
 
 		return definitions.Length > 0 && definitions.All( x => File.Exists( x + "_c" ) );
+	}
+
+	//Base files a game reaches only by naming them, once per export; full paths
+	private HashSet<string> unnamedBase;
+
+	//Base models the engine loads by path at runtime, named in a game or not
+	private static readonly string[] EngineModels = [ "models/dev/error.mdl" ];
+
+	//Families the engine draws with itself: its defaults, and the frame graph's and debug overlays' mono
+	private static readonly string[] EngineFonts = [ "Roboto", "Inter", "Roboto Mono" ];
+
+	//Files the game names whatever it is: a scene's models, a style's fonts
+	private static readonly HashSet<string> NamingFiles = new( StringComparer.OrdinalIgnoreCase )
+	{
+		".cs", ".razor", ".scss", ".css", ".json", ".mdl", ".scene", ".prefab", ".mat",
+	};
+
+	//Base models and font faces nothing in the game or the base code names: the skeleton and its clips, Poppins
+	private HashSet<string> UnnamedBaseFiles( string root )
+	{
+		var unnamed = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+		var named = NamesInGame( root );
+		var kept = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+
+		var models = Path.Combine( root, "models" );
+
+		if ( Directory.Exists( models ) )
+		{
+			foreach ( var definition in Directory.EnumerateFiles( models, "*.mdl", SearchOption.AllDirectories ) )
+			{
+				var relative = Path.GetRelativePath( root, definition ).Replace( '\\', '/' );
+
+				//The headset's own rule says whether those go - see BaseVrOnly
+				if ( BaseVrOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) ) continue;
+
+				var used = EngineModels.Contains( relative, StringComparer.OrdinalIgnoreCase )
+					|| named.Contains( relative[..^".mdl".Length].ToLowerInvariant(), StringComparison.Ordinal );
+
+				( used ? kept : unnamed ).UnionWith( ModelFiles( root, definition, relative ) );
+			}
+		}
+
+		//A clip two models share stays with the one that ships
+		unnamed.ExceptWith( kept );
+
+		var fonts = Path.Combine( root, "fonts" );
+
+		if ( Directory.Exists( fonts ) )
+		{
+			foreach ( var file in Directory.EnumerateFiles( fonts, "*", SearchOption.AllDirectories ) )
+			{
+				var extension = Path.GetExtension( file );
+				if ( !extension.Equals( ".ttf", StringComparison.OrdinalIgnoreCase ) && !extension.Equals( ".otf", StringComparison.OrdinalIgnoreCase ) ) continue;
+
+				if ( FontIndex.FamilyOf( file ) is not { Length: > 0 } family ) continue;
+				if ( EngineFonts.Contains( family, StringComparer.OrdinalIgnoreCase ) ) continue;
+				if ( named.Contains( family.ToLowerInvariant(), StringComparison.Ordinal ) ) continue;
+
+				unnamed.Add( Path.GetFullPath( file ) );
+			}
+		}
+
+		if ( unnamed.Count > 0 )
+		{
+			var bytes = unnamed.Sum( x => new FileInfo( x ).Length );
+			Logger.Info( $"left out {unnamed.Count} base files nothing in the game names ({bytes / 1048576.0:F1} MB)" );
+		}
+
+		return unnamed;
+	}
+
+	//A base model's definition, what it compiles to, its graphs and its clips, as full paths
+	private static IEnumerable<string> ModelFiles( string root, string definition, string relative )
+	{
+		yield return Path.GetFullPath( definition );
+		yield return Path.GetFullPath( Path.Combine( root, CompiledPaths.Model( relative ) ) );
+
+		//The graph, and any variation of it: thing.mdl_ag_c, thing+name.mdl_ag_c
+		var stem = Path.GetFileNameWithoutExtension( definition );
+
+		foreach ( var graph in Directory.EnumerateFiles( Path.GetDirectoryName( definition ), stem + "*.mdl_ag_c" ) )
+		{
+			var name = Path.GetFileName( graph );
+			if ( name.StartsWith( stem + ".", StringComparison.OrdinalIgnoreCase ) || name.StartsWith( stem + "+", StringComparison.OrdinalIgnoreCase ) )
+				yield return Path.GetFullPath( graph );
+		}
+
+		if ( Rinten.ModelDefinitionCompiler.ReadDefinitionOnly( definition ) is not { } read ) yield break;
+
+		foreach ( var clip in Rinten.CoreSkeletons.ClipsOf( relative, read ).Values )
+		{
+			if ( string.IsNullOrWhiteSpace( clip ) || Path.IsPathRooted( clip ) ) continue;
+			yield return Path.GetFullPath( Path.Combine( root, clip.TrimStart( '/' ) ) );
+		}
+	}
+
+	//Everything the game and the base code could name a file in, as one lowercase text to search
+	private string NamesInGame( string root )
+	{
+		var text = new System.Text.StringBuilder();
+
+		void Read( string folder, Func<string, bool> skip = null )
+		{
+			if ( string.IsNullOrEmpty( folder ) || !Directory.Exists( folder ) ) return;
+
+			foreach ( var file in Directory.EnumerateFiles( folder, "*", SearchOption.AllDirectories ) )
+			{
+				var relative = Path.GetRelativePath( folder, file ).Replace( '\\', '/' );
+				var parts = relative.Split( '/' );
+
+				//Dot folders and build output: caches and copies, not what the game names
+				if ( parts.Any( x => x.StartsWith( '.' ) || x.Equals( "obj", StringComparison.OrdinalIgnoreCase ) || x.Equals( "bin", StringComparison.OrdinalIgnoreCase ) ) ) continue;
+				if ( skip?.Invoke( relative ) == true ) continue;
+
+				var extension = Path.GetExtension( file );
+				if ( !NamingFiles.Contains( extension ) && !PackedKinds().Contains( extension ) ) continue;
+
+				text.Append( File.ReadAllText( file ) ).Append( '\n' );
+			}
+		}
+
+		var project = _exportConfig.Project;
+
+		if ( project.HasAssetsPath() ) Read( project.GetAssetsPath() );
+		if ( project.HasCodePath() ) Read( project.GetCodePath() );
+
+		foreach ( var library in LibrarySystem.All )
+		{
+			if ( library.Project.HasAssetsPath() ) Read( library.Project.GetAssetsPath() );
+			if ( library.Project.HasCodePath() ) Read( library.Project.GetCodePath() );
+		}
+
+		//The base code ships with every game, and the base content that always does: its prefabs, its materials
+		Read( Path.Combine( root, "..", "code" ) );
+		Read( root, relative => relative.StartsWith( "models/", StringComparison.OrdinalIgnoreCase )
+			|| BaseEditorOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) );
+
+		return text.ToString().ToLowerInvariant();
 	}
 
 	private static IEnumerable<string> GetBlacklistedFiles( string[] blacklist, string absoluteDirectory )

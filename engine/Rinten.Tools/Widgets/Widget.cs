@@ -778,6 +778,7 @@ namespace Editor
 		private static string CursorName( CursorShape shape ) => shape switch
 		{
 			CursorShape.None => null,
+			CursorShape.Blank => "none",
 			CursorShape.Finger => "pointer",
 			CursorShape.IBeam => "text",
 			CursorShape.SizeH => "ew-resize",

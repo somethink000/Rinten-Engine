@@ -824,7 +824,7 @@ internal sealed unsafe partial class ModelBuilder
 	{
 		WeldVertices();
 
-		return ModelFile.LoadMemory( BuildBytes() );
+		return ModelFile.LoadOwned( BuildBytes() );
 	}
 
 	//What the editor's compiler wants: it writes through the asset system rather than to a path, and used to get here through a temporary file.

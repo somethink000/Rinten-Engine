@@ -58,6 +58,14 @@ internal sealed unsafe class ModelFile : IDisposable
 		return Adopt( held, read.Length );
 	}
 
+	//A model out of bytes nobody else holds, read where they lie - see ModelBuilder.Build, whose fresh array would be copied for nothing
+	internal static ModelFile LoadOwned( byte[] bytes )
+	{
+		if ( bytes is null || bytes.Length < ModelFormat.HeaderSizeBeforeClusters ) return null;
+
+		return bytes.Length < ModelFormat.HeaderSize ? LoadMemory( bytes ) : Adopt( bytes, bytes.Length );
+	}
+
 	//Reads a model out of bytes it now owns and may rewrite; the file is the first fileLength of them
 	private static ModelFile Adopt( byte[] held, int fileLength )
 	{

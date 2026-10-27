@@ -32,7 +32,7 @@ internal static class PerfReport
 		Rinten.Utility.CommandLine.HasSwitch( "-perfwindowflicker" ) ||
 		Rinten.Utility.CommandLine.HasSwitch( "-perfwindowseq" );
 
-	//-perfwindowseq: folder for half-size window frames (first SequenceFrames only); diagnosis only
+	//-perfwindowseq: folder for full-size window frames, the world's layer pasted in (first SequenceFrames only); diagnosis only
 	private static readonly string Sequence = Rinten.Utility.CommandLine.GetSwitch( "-perfwindowseq", "" ).TrimQuoted();
 
 	//How many frames Sequence keeps.
@@ -261,30 +261,26 @@ internal static class PerfReport
 		}
 	}
 
-	//The window as it was this frame, at half size, into the next file of Sequence.
+	//The window as it was this frame, with the world's layer the compositor lays under it, into the next file of Sequence.
+	//Whole: what shimmers far off is a pixel wide, and halving the frame averaged it away
 	private static void WriteSequenceFrame( int wide, int tall )
 	{
-		var halfWide = wide / 2;
-		var halfTall = tall / 2;
-		var rgb = new byte[halfWide * halfTall * 3];
+		var frame = (byte[])scanPixels.Clone();
+		PasteLayer( frame, wide, tall );
 
-		for ( var y = 0; y < halfTall; y++ )
+		var rgb = new byte[wide * tall * 3];
+
+		for ( var i = 0; i < wide * tall; i++ )
 		{
-			for ( var x = 0; x < halfWide; x++ )
-			{
-				var from = ( ( y * 2 * wide ) + ( x * 2 ) ) * 4;
-				var to = ( ( y * halfWide ) + x ) * 3;
-
-				rgb[to] = scanPixels[from];
-				rgb[to + 1] = scanPixels[from + 1];
-				rgb[to + 2] = scanPixels[from + 2];
-			}
+			rgb[i * 3] = frame[i * 4];
+			rgb[( i * 3 ) + 1] = frame[( i * 4 ) + 1];
+			rgb[( i * 3 ) + 2] = frame[( i * 4 ) + 2];
 		}
 
 		System.IO.Directory.CreateDirectory( Sequence );
 
 		using var file = System.IO.File.Create( System.IO.Path.Combine( Sequence, $"{sequenceWritten:D4}.ppm" ) );
-		file.Write( System.Text.Encoding.ASCII.GetBytes( $"P6\n{halfWide} {halfTall}\n255\n" ) );
+		file.Write( System.Text.Encoding.ASCII.GetBytes( $"P6\n{wide} {tall}\n255\n" ) );
 		file.Write( rgb );
 
 		sequenceWritten++;

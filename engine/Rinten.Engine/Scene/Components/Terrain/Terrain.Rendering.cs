@@ -945,7 +945,7 @@ public partial class Terrain
 	private SceneObject Place( SceneObject made, Material wears )
 	{
 		made.Component = this;
-		made.Flags.LodStandIn = true;
+		made.StandInError = chunkSpan * TerrainChunkBaker.FarShare;
 		made.Tags.SetFrom( GameObject.Tags );
 
 		if ( wears is not null ) made.SetMaterialOverride( wears );

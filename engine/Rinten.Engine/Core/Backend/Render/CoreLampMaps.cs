@@ -910,18 +910,21 @@ internal sealed class CoreLampMaps : IDisposable
 		{
 			foreach ( var lamp in lamps.Values )
 			{
-				Touch( lamp, change.Was );
-				Touch( lamp, change.Now );
+				Touch( lamp, change.Was, change.Error );
+				Touch( lamp, change.Now, change.Error );
 			}
 		}
 	}
 
-	private static void Touch( Lamp lamp, System.Numerics.Vector4 sphere )
+	//A stand-in swapped (error above nought) touches only a lamp whose texel there is finer than its error, as CoreSunPages does
+	private static void Touch( Lamp lamp, System.Numerics.Vector4 sphere, float error )
 	{
 		if ( sphere.W < 0.0f ) return;
 
 		var centre = new Vector3( sphere.X, sphere.Y, sphere.Z );
-		if ( ( centre - lamp.Position ).Length - sphere.W > lamp.Range ) return;
+		var nearest = ( centre - lamp.Position ).Length - sphere.W;
+		if ( nearest > lamp.Range ) return;
+		if ( error > 0.0f && 2.0f * MathF.Max( nearest, Near ) * HalfTan( lamp ) / lamp.Size >= error ) return;
 
 		lamp.Triangles = -1;
 

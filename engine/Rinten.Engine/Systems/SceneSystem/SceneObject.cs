@@ -305,6 +305,21 @@ public partial class SceneObject : IHandle
 		set => Bounds = value.Transform( Transform );
 	}
 
+	//Metres this object may stray from the surface it stands in for, where it is one detail of a surface drawn by several; nought
+	//for anything else. Its coming or going re-bakes only the shadow finer than that - whoever places it stirs real changes itself
+	internal float StandInError
+	{
+		get => _standInError;
+		set
+		{
+			if ( _standInError == value ) return;
+			_standInError = value;
+			Touched();
+		}
+	}
+
+	private float _standInError;
+
 	/// <summary>Whether this scene object should render or not.</summary>
 	public bool RenderingEnabled
 	{
@@ -531,13 +546,6 @@ public partial class SceneObject : IHandle
 		{
 			get => HasFlag( Rendering.SceneObjectFlags.NeverStill );
 			set => SetFlag( Rendering.SceneObjectFlags.NeverStill, value );
-		}
-
-		/// <summary>Whether this is one detail of a surface drawn by several - see <see cref="Rendering.SceneObjectFlags.LodStandIn"/>.</summary>
-		public bool LodStandIn
-		{
-			get => HasFlag( Rendering.SceneObjectFlags.LodStandIn );
-			set => SetFlag( Rendering.SceneObjectFlags.LodStandIn, value );
 		}
 
 		public bool IsOpaque

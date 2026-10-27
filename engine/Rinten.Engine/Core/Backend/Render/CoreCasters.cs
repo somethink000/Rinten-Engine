@@ -7,15 +7,20 @@ namespace Rinten;
 internal sealed class CoreCasters
 {
 	//One instance whose part in the still world changed: its sphere as it was and as it is - w below nought where it was or is not part of it.
+	//Error is non-nought where it is a stand-in coming or going (SceneObject.StandInError): the same surface, off by at most that many metres
 	internal readonly struct Change
 	{
 		public readonly int Slot;
 		public readonly System.Numerics.Vector4 Was, Now;
+		public readonly float Error;
 
-		public Change( int slot, System.Numerics.Vector4 was, System.Numerics.Vector4 now )
+		public Change( int slot, System.Numerics.Vector4 was, System.Numerics.Vector4 now, float error = 0.0f )
 		{
-			Slot = slot; Was = was; Now = now;
+			Slot = slot; Was = was; Now = now; Error = error;
 		}
+
+		/// <summary>Whether it is a stand-in swapped rather than the surface changed.</summary>
+		public bool Swapped => Error > 0.0f;
 	}
 
 	private static readonly System.Numerics.Vector4 Nothing = new( 0.0f, 0.0f, 0.0f, -1.0f );
@@ -26,8 +31,8 @@ internal sealed class CoreCasters
 	private bool[] still = [];
 	private bool[] moving = [];
 
-	//Whether the slot was a stand-in on its last look, for when it is gone by the next - see LodStandIn
-	private bool[] standIn = [];
+	//The slot's stand-in error on its last look, for when it is gone by the next - see SceneObject.StandInError
+	private float[] standIn = [];
 
 	//Whether the frame has a bake, so that what is not static counts as moving - see Look
 	private bool movable;
@@ -232,13 +237,13 @@ internal sealed class CoreCasters
 		var was = still[slot] ? sphere[slot] : Nothing;
 		var now = nowStill ? nowSphere : Nothing;
 
-		//A stand-in for a surface coming or going is that surface at another detail, not a change to it - see LodStandIn
-		var isStandIn = entry?.LodStandIn ?? standIn[slot];
-		var swapped = isStandIn && ( was.W < 0.0f ) != ( now.W < 0.0f );
-		standIn[slot] = isStandIn;
+		//A stand-in coming or going is its surface at another detail, off by no more than its error
+		var error = entry?.StandInError ?? standIn[slot];
+		var swapped = error > 0.0f && ( was.W < 0.0f ) != ( now.W < 0.0f );
+		standIn[slot] = error;
 
-		if ( !swapped && ( was != now || ( nowStill && moves[slot] != record.MoveCount ) ) )
-			Changes.Add( new Change( slot, was, now ) );
+		if ( was != now || ( nowStill && moves[slot] != record.MoveCount ) )
+			Changes.Add( new Change( slot, was, now, swapped ? error : 0.0f ) );
 
 		sphere[slot] = nowSphere;
 		still[slot] = nowStill;

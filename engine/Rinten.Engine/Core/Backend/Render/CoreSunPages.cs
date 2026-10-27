@@ -109,7 +109,7 @@ internal sealed class CoreSunPages : IDisposable
 	private readonly int[] fromY = new int[MostLevels];
 
 	//Spheres whose pages have to be baked again - from what the casters said changed, applied on the next plan.
-	private readonly List<System.Numerics.Vector4> dirty = new();
+	private readonly List<(System.Numerics.Vector4 Sphere, float Error)> dirty = new();
 
 	//The still world's footprints in the sun's frame, for a bake's count of what lands in it; radius < 0 where unused
 	private float[] footX = [], footY = [], footR = [];
@@ -594,10 +594,11 @@ internal sealed class CoreSunPages : IDisposable
 		return sum;
 	}
 
-	//The spheres the casters said changed, as slots of every level that no longer hold what they show.
+	//The spheres the casters said changed, as slots of every level that no longer hold what they show; a stand-in's swap, only
+	//the levels whose texel is finer than its error - a coarser one would bake the same picture again
 	private void ApplyDirty()
 	{
-		foreach ( var sphere in dirty )
+		foreach ( var (sphere, error) in dirty )
 		{
 			var centre = ToSun( new Vector3( sphere.X, sphere.Y, sphere.Z ) );
 			var r = sphere.W;
@@ -605,6 +606,8 @@ internal sealed class CoreSunPages : IDisposable
 			for ( var level = 0; level < levels; level++ )
 			{
 				var page = PageOf( level );
+				if ( error > 0.0f && page / PageTexels >= error ) break;
+
 				var x0 = (int)MathF.Floor( ( centre.x - r ) / page );
 				var x1 = (int)MathF.Floor( ( centre.x + r ) / page );
 				var y0 = (int)MathF.Floor( ( centre.y - r ) / page );
@@ -773,12 +776,12 @@ internal sealed class CoreSunPages : IDisposable
 		//Nothing to keep up where they are about to be worked out again anyway.
 		if ( rebuild || !spanKnown ) return;
 
-		ChangesNoted += casters.Changes.Count;
-
 		foreach ( var change in casters.Changes )
 		{
-			if ( change.Was.W >= 0.0f ) dirty.Add( change.Was );
-			if ( change.Now.W >= 0.0f ) dirty.Add( change.Now );
+			//A stand-in swapped stales only the levels fine enough to see its error - see ApplyDirty
+			if ( !change.Swapped ) ChangesNoted++;
+			if ( change.Was.W >= 0.0f ) dirty.Add( (change.Was, change.Error) );
+			if ( change.Now.W >= 0.0f ) dirty.Add( (change.Now, change.Error) );
 
 			//A slot of the tables, whose footprint moves with it; the ground's changes have none - see CoreCasters.Stir.
 			if ( change.Slot >= 0 ) Foot( change.Slot );

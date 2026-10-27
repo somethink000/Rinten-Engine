@@ -461,6 +461,19 @@ internal sealed class CoreUiWindow : IDisposable
 	/// <summary>How big the inside of the window is, in pixels.</summary>
 	public (int Width, int Height) Size => window?.SizeInPixels ?? (0, 0);
 
+	/// <summary>Pixels per interface unit: what the panels are laid out in is this much smaller than the window's pixels.</summary>
+	public float Scale => window?.DisplayScale ?? 1.0f;
+
+	/// <summary>How big the inside of the window is, in interface units.</summary>
+	public Vector2 InterfaceSize
+	{
+		get
+		{
+			var (width, height) = Size;
+			return new Vector2( width, height ) / Scale;
+		}
+	}
+
 	/// <summary>Area the window system may drag the window by: the caption bar minus its buttons, set by its drawer</summary>
 	public (int X, int Y, int Width, int Height) DragStrip
 	{
@@ -740,6 +753,14 @@ internal sealed class CoreUiWindow : IDisposable
 		return null;
 	}
 
+	//Pixels per interface unit of the window the pointer is in, or of the first window before it has been in any
+	internal static float PointerScale => PointerWindow?.Scale ?? 1.0f;
+
+	//Pixels per window unit of that window
+	internal static float PointerDensity => PointerWindow?.window?.PixelDensity ?? 1.0f;
+
+	private static CoreUiWindow PointerWindow => Pointed ?? ( open.Count > 0 ? open[0] : null );
+
 	//Pointer in the pixels of the window it is in, the same value panels are hit-tested against
 	internal static Vector2 Pointer
 	{
@@ -800,6 +821,12 @@ internal sealed class CoreUiWindow : IDisposable
 			log.Warning( $"no window: {CoreWindow.LastError}" );
 			return null;
 		}
+
+		//The size is asked in interface units; where the window system counts in pixels (Windows at 150%) that is a bigger window
+		var unitsPerAsked = window.DisplayScale / window.PixelDensity;
+
+		if ( MathF.Abs( unitsPerAsked - 1.0f ) > 0.01f )
+			window.SetSize( (int)MathF.Round( width * unitsPerAsked ), (int)MathF.Round( height * unitsPerAsked ) );
 
 		//Once, with the first window: from here on the window system tells us when it is dragging one, and a drag is drawn rather than smeared.
 		if ( CoreWindow.LiveResize && !watching )
@@ -1366,6 +1393,8 @@ internal sealed class CoreUiWindow : IDisposable
 
 			using ( Diagnostics.Performance.Scope( "Panel PreLayout" ) )
 			{
+				if ( Root is UiWindowRoot root ) root.WindowScale = Scale;
+
 				Root.PreLayout( new Rect( 0, 0, width, height ) );
 			}
 
@@ -1957,7 +1986,7 @@ internal sealed class CoreUiWindow : IDisposable
 			if ( window is null ) return;
 
 			window.Position = (value.Left.FloorToInt(), value.Top.FloorToInt());
-			window.SetSize( value.Width.CeilToInt(), value.Height.CeilToInt() );
+			window.SetSizeInPixels( value.Width.CeilToInt(), value.Height.CeilToInt() );
 		}
 	}
 
@@ -2419,10 +2448,12 @@ internal sealed class UiWindowInput : PanelInput
 	};
 }
 
-//The root of a window's panels. Scaled one to one: a window is measured in pixels and its widgets are
-//written in pixels, unlike a game's interface, which is scaled so that the same layout suits every screen.
+//The root of a window's panels, scaled by the desktop's own setting rather than by the window's size the way a game's interface is
 internal sealed class UiWindowRoot : RootPanel
 {
+	//Pixels per interface unit of the window this is in; set by the window before each layout
+	internal float WindowScale = 1.0f;
+
 	//Baked into the type: the tests build one directly, and the only other maker is CoreUiWindow.Open.
 	public UiWindowRoot()
 	{
@@ -2436,7 +2467,7 @@ internal sealed class UiWindowRoot : RootPanel
 
 	protected override void UpdateScale( Rect screenSize )
 	{
-		Scale = 1.0f;
+		Scale = WindowScale;
 	}
 
 	bool handingOn;

@@ -22,6 +22,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	private const ulong SDL_WINDOW_NOT_FOCUSABLE = 0x0000000080000000ul;
 	private const ulong SDL_WINDOW_VULKAN = 0x0000000010000000ul;
 
+	//A back buffer at the display's own pixels; without it a scaled Wayland or macOS desktop stretches a small one
+	private const ulong SDL_WINDOW_HIGH_PIXEL_DENSITY = 0x0000000000002000ul;
+
 	[LibraryImport( SDL, EntryPoint = "SDL_InitSubSystem" )]
 	[return: MarshalAs( UnmanagedType.U1 )]
 	private static partial bool SDL_InitSubSystem( uint flags );
@@ -109,6 +112,12 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	[LibraryImport( SDL, EntryPoint = "SDL_SetWindowSize" )]
 	[return: MarshalAs( UnmanagedType.U1 )]
 	private static partial bool SDL_SetWindowSize( IntPtr window, int width, int height );
+
+	[LibraryImport( SDL, EntryPoint = "SDL_GetWindowPixelDensity" )]
+	private static partial float SDL_GetWindowPixelDensity( IntPtr window );
+
+	[LibraryImport( SDL, EntryPoint = "SDL_GetWindowDisplayScale" )]
+	private static partial float SDL_GetWindowDisplayScale( IntPtr window );
 
 	[LibraryImport( SDL, EntryPoint = "SDL_SyncWindow" )]
 	[return: MarshalAs( UnmanagedType.U1 )]
@@ -321,12 +330,12 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	}
 
 	//Rather than working out where that is on the desktop and warping there: the number came from a widget in this window, so this is the window it means, and the window system knows where that is better than we do.
-	/// <summary>Puts the pointer somewhere inside this window, in this window's own coordinates.</summary>
+	/// <summary>Puts the pointer somewhere inside this window, in its pixels.</summary>
 	public void WarpPointer( Vector2 at )
 	{
 		if ( Handle == IntPtr.Zero ) return;
 
-		SDL_WarpMouseInWindow( Handle, at.x, at.y );
+		SDL_WarpMouseInWindow( Handle, at.x / density, at.y / density );
 	}
 
 	//Clears pointer position and held buttons when the window's input is handed elsewhere
@@ -516,9 +525,11 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			//frame (see CoreUiWindow.Resized), on the main thread: these arrive while the queue is pumped, not from the watch -liveresize adds.
 			case SDL_EVENT_WINDOW_RESIZED:
 			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
 			case SDL_EVENT_WINDOW_MINIMIZED:
 			case SDL_EVENT_WINDOW_MAXIMIZED:
 			case SDL_EVENT_WINDOW_RESTORED:
+				RefreshScale();
 				shapeChanged = true;
 				break;
 		}
@@ -613,6 +624,34 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		}
 	}
 
+	/// <summary>Pixels per window unit: 2 on a doubled Wayland or macOS desktop, 1 wherever the window system counts in pixels.</summary>
+	public float PixelDensity => density;
+
+	/// <summary>Pixels per interface unit - the desktop's scale setting, 1.5 for 150%.</summary>
+	public float DisplayScale => displayScale;
+
+	//Asked of SDL when the window opens and when it says either changed, so that every pointer event does not ask
+	private float density = 1.0f;
+	private float displayScale = 1.0f;
+
+	private void RefreshScale()
+	{
+		if ( Adopted || Handle == IntPtr.Zero ) return;
+
+		var pixels = SDL_GetWindowPixelDensity( Handle );
+		var scale = SDL_GetWindowDisplayScale( Handle );
+
+		density = pixels > 0.0f ? pixels : 1.0f;
+		displayScale = scale > 0.0f ? scale : density;
+	}
+
+	//The density of a window of ours by its handle, 1 for one we do not know
+	internal static float DensityOf( IntPtr handle ) => FindHandle( handle )?.density ?? 1.0f;
+
+	/// <summary>Asks for a size in pixels; the window system is asked in its own units.</summary>
+	public bool SetSizeInPixels( int width, int height )
+		=> SetSize( Math.Max( 1, (int)MathF.Ceiling( width / density ) ), Math.Max( 1, (int)MathF.Ceiling( height / density ) ) );
+
 	private (int Width, int Height) canvasPixels;
 
 	(int Width, int Height) CanvasSize()
@@ -677,7 +716,7 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	//Windows that answer a hit test, by the handle SDL passes back.
 	private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, CoreWindow> framed = new();
 
-	/// <summary>Caption area that drags the window, in window units; set by the caption drawer, excluding buttons</summary>
+	/// <summary>Caption area that drags the window, in pixels; set by the caption drawer, excluding buttons</summary>
 	public (int X, int Y, int Width, int Height) DragStrip
 	{
 		get => strips.Length > 0 ? strips[0] : default;
@@ -697,7 +736,7 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 
 	private (int X, int Y, int Width, int Height)[] strips = NoStrips;
 
-	/// <summary>How near an edge counts as a pull on that edge, in window units.</summary>
+	/// <summary>How near an edge counts as a pull on that edge, in interface units.</summary>
 	public int ResizeBorder { get; set; } = 5;
 
 	/// <summary>Restores the system window frame, for when our own caption couldn't be built</summary>
@@ -731,7 +770,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			if ( area == null ) return HitNormal;
 			if ( !framed.TryGetValue( handle, out var window ) ) return HitNormal;
 
-			return window.WhatIsAt( area->X, area->Y );
+			//SDL asks in window units; the strips and the edges are in pixels
+			return window.WhatIsAt( (int)( area->X * window.density ), (int)( area->Y * window.density ) );
 		}
 		catch
 		{
@@ -745,15 +785,16 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		//now is whatever took the screen, a scene view's play button, and a press there would drag the window
 		if ( IsFullscreen ) return HitNormal;
 
-		var (width, height) = Size;
+		var (width, height) = SizeInPixels;
+		var border = ResizeBorder * displayScale;
 
 		//A maximized window has no edges to pull - the ones it appears to have are the screen's - and dragging it is the window system's own gesture.
-		if ( width > 0 && height > 0 && ResizeBorder > 0 && !IsMaximized )
+		if ( width > 0 && height > 0 && border > 0 && !IsMaximized )
 		{
-			var left = x <= ResizeBorder;
-			var right = x >= width - ResizeBorder;
-			var top = y <= ResizeBorder;
-			var bottom = y >= height - ResizeBorder;
+			var left = x <= border;
+			var right = x >= width - border;
+			var top = y <= border;
+			var bottom = y >= height - border;
 
 			if ( top && left ) return HitResizeTopLeft;
 			if ( top && right ) return HitResizeTopRight;
@@ -864,7 +905,7 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			utility = false;
 		}
 
-		var flags = ( OperatingSystem.IsBrowser() ? 0ul : SDL_WINDOW_VULKAN ) | (utility
+		var flags = ( OperatingSystem.IsBrowser() ? 0ul : SDL_WINDOW_VULKAN | SDL_WINDOW_HIGH_PIXEL_DENSITY ) | (utility
 			? SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_UTILITY | SDL_WINDOW_NOT_FOCUSABLE
 			: SDL_WINDOW_RESIZABLE | ( borderless ? SDL_WINDOW_BORDERLESS : 0ul ));
 
@@ -886,6 +927,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		if ( handle == IntPtr.Zero ) return null;
 
 		var window = new CoreWindow { Handle = handle, madeByUs = ours };
+
+		window.RefreshScale();
 
 		if ( !window.ReadNativeHandles() )
 		{
@@ -1676,6 +1719,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 
 		if ( owner is null ) UnownedEvents++;
 
+		//Into pixels once, here, so the interface, the game and the caption all read the pointer in the units they draw in
+		if ( owner is not null && owner.density != 1.0f && IsMouseEvent( type ) ) InPixels( type, buffer, owner.density );
+
 		if ( type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && owner is not null )
 			owner.CloseRequested = true;
 
@@ -1709,6 +1755,31 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 
 		//A window we do not know about is the engine's own - a mixed build still makes one - and its events belong to the game.
 		if ( owner is null || owner.RoutesToGame ) CoreInput.Dispatch( buffer );
+	}
+
+	//A mouse event's positions and movement scaled from window units to pixels, in place. The wheel's amount is notches and stays.
+	private static void InPixels( uint type, byte* buffer, float density )
+	{
+		switch ( type )
+		{
+			case SDL_EVENT_MOUSE_MOTION:
+				*(float*)(buffer + 28) *= density;
+				*(float*)(buffer + 32) *= density;
+				*(float*)(buffer + 36) *= density;
+				*(float*)(buffer + 40) *= density;
+				break;
+
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+				*(float*)(buffer + 28) *= density;
+				*(float*)(buffer + 32) *= density;
+				break;
+
+			case SDL_EVENT_MOUSE_WHEEL:
+				*(float*)(buffer + 36) *= density;
+				*(float*)(buffer + 40) *= density;
+				break;
+		}
 	}
 
 	//Whether an event is about a window, and so carries one's number where the rest carry a device or nothing. Whether an event is somebody playing
@@ -1782,6 +1853,7 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	private const uint SDL_EVENT_WINDOW_MINIMIZED = 0x209;
 	private const uint SDL_EVENT_WINDOW_MAXIMIZED = 0x20A;
 	private const uint SDL_EVENT_WINDOW_RESTORED = 0x20B;
+	private const uint SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED = 0x214;
 
 	[System.Runtime.InteropServices.UnmanagedFunctionPointer( System.Runtime.InteropServices.CallingConvention.Cdecl )]
 	private unsafe delegate bool EventWatch( IntPtr userData, byte* buffer );

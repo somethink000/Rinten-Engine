@@ -30,12 +30,14 @@ internal sealed class StylePickerHighlight
 			layer.AddChild( box );
 		}
 
+		//Measured in pixels, placed in the overlay's units
 		var rect = target is Panel panel ? panel.GetScreenPixelRect() : target.OuterRect;
+		var scale = layer.ScaleFromScreen;
 
-		box.Style.Left = rect.Left + offset.x;
-		box.Style.Top = rect.Top + offset.y;
-		box.Style.Width = rect.Width;
-		box.Style.Height = rect.Height;
+		box.Style.Left = ( rect.Left + offset.x ) * scale;
+		box.Style.Top = ( rect.Top + offset.y ) * scale;
+		box.Style.Width = rect.Width * scale;
+		box.Style.Height = rect.Height * scale;
 		box.SetClass( "hidden", false );
 	}
 

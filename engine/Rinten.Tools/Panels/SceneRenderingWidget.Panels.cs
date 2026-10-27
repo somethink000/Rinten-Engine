@@ -34,6 +34,7 @@ public partial class SceneRenderingWidget : ISceneRenderHost, IPlaySurface, ISce
 	bool ISceneRenderHost.IsSurfaceVisible => this.IsValid() && Visible;
 	Vector2 ISceneRenderHost.SurfaceSize => Size;
 	Vector2 ISceneRenderHost.SurfaceScreenPosition => ScreenPosition;
+	float ISceneRenderHost.SurfaceScale => DpiScale;
 	bool ISceneRenderHost.IsUnderMouse => IsUnderMouse;
 
 	string ISceneRenderHost.HostDescription => Surface is null

@@ -50,7 +50,7 @@ public abstract class PaintPanel : EditorPanel
 		var wanted = asked;
 		asked = false;
 
-		bake.Paint( this, new Rect( 0, 0, size.x, size.y ), wanted, paintedOnce, PaintInto );
+		bake.Paint( this, new Rect( 0, 0, size.x, size.y ), wanted, paintedOnce, PaintInto, ScaleToScreen );
 
 		paintedOnce = true;
 	}
@@ -70,7 +70,7 @@ public abstract class PaintPanel : EditorPanel
 
 		try
 		{
-			using ( Paint.Start( canvas, flags ) )
+			using ( Paint.Start( canvas, flags, ScaleToScreen ) )
 			{
 				Paint.LocalRect = rect;
 

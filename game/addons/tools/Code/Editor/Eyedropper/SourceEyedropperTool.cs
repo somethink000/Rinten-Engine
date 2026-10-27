@@ -94,18 +94,18 @@ internal static class SourceEyedropperTool
 		highlight?.PointAt( hoveredPanel, layer, hoveredOffset, SourceLabel( hoveredPanel ), hoveredPart );
 	}
 
-	//The panel under the cursor, and where its own space starts in the window's - shared with the UI Panels
-	//dock's picker. Over a game view, pick the game's own UI using the cursor in the picture's pixels
+	//The panel under the cursor, and where its own space starts in the window's pixels. Over a game
+	//view, pick the game's own UI using the cursor in the picture's pixels
 	internal static IPanel PanelAtCursor( EditorOverlay layer, out Vector2 offset )
 	{
-		var found = FindPanelAt( Application.CursorPosition, layer );
+		var found = FindPanelAt( Application.CursorPixels, layer );
 
 		offset = default;
 
 		if ( GameViewAt( Application.CursorPosition ) is { } view && OverThePicture( found, view ) )
 		{
-			var corner = view.ScreenPosition;
-			var inside = FindGamePanelAt( Application.CursorPosition - corner );
+			var corner = view.GetScreenPixelRect().Position;
+			var inside = FindGamePanelAt( Application.CursorPixels - corner );
 
 			if ( inside.IsValid() )
 			{
@@ -117,7 +117,7 @@ internal static class SourceEyedropperTool
 		return found;
 	}
 
-	//The widget part under the cursor (e.g. a row via Widget.PartAt), in window coordinates
+	//The widget part under the cursor (e.g. a row via Widget.PartAt), in window pixels
 	static Rect? PartOf( IPanel panel )
 	{
 		if ( !panel.IsValid() ) return null;
@@ -128,8 +128,10 @@ internal static class SourceEyedropperTool
 		if ( widget.PartAt( widget.FromScreen( Application.CursorPosition ) ) is not { } part )
 			return null;
 
-		//The widget answers in its own coordinates; the box is placed in the window's, which is where the widget's own corner is measured.
-		return new Rect( part.Position + widget.ScreenPosition, part.Size );
+		//The widget answers in its own units, from its own corner
+		var scale = widget.DpiScale;
+
+		return new Rect( ( part.Position + widget.ScreenPosition ) * scale, part.Size * scale );
 	}
 
 	//True if the hit is the game picture, not an editor overlay (stats, gizmo, toolbar) over it

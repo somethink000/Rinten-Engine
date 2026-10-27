@@ -1447,7 +1447,8 @@ public partial class DockManager
 			return true;
 		}
 
-		landing = AimAt( CoreWindow.CarriedAt - ScreenPosition, out landingOuter );
+		//The window system says where in pixels; the docks are laid out in interface units
+		landing = AimAt( CoreWindow.CarriedAt / mine.Scale - ScreenPosition, out landingOuter );
 
 		ShowCarryLayer( true );
 		return true;
@@ -1460,7 +1461,7 @@ public partial class DockManager
 
 		if ( on is not null && on == CoreUiWindow.Holding( Surface ) && dock.IsValid() )
 		{
-			landing = AimAt( at - ScreenPosition, out landingOuter );
+			landing = AimAt( at / on.Scale - ScreenPosition, out landingOuter );
 
 			if ( landing != DockArea.Hidden )
 			{

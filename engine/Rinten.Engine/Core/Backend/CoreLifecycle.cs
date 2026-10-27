@@ -215,7 +215,7 @@ internal static class CoreLifecycle
 				}
 				else if ( window is not null && window.SizeInPixels != (w, h) )
 				{
-					window.SetSize( w, h );
+					window.SetSizeInPixels( w, h );
 				}
 
 				break;

@@ -129,7 +129,7 @@ public sealed class ClutterEntriesGridControl : BaseControl, IEditorDropTarget
 	}
 
 	//Whether the pointer is still over this control, for a tile deciding if it was thrown away.
-	internal bool ContainsCursor() => GetScreenPixelRect().IsInside( Application.CursorPosition );
+	internal bool ContainsCursor() => GetScreenStyleRect().IsInside( Application.CursorPosition );
 
 	internal void Remove( ClutterEntry entry )
 	{

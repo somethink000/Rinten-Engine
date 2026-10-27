@@ -365,7 +365,7 @@ public partial class Widget
 
 		try
 		{
-			using ( Paint.Start( surface, flags ) )
+			using ( Paint.Start( surface, flags, DpiScale ) )
 			{
 				Paint.LocalRect = rect;
 

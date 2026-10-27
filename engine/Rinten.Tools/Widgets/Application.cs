@@ -25,23 +25,23 @@ public static class Application
 		Rinten.Engine.IToolsDll.Current?.Spin();
 	}
 
-	public static float DpiScale
-	{
-		//Ours draw a widget's pixel for a screen's pixel, so there is nothing between the two to scale by.
-		get => 1.0f;
-	}
+	/// <summary>Pixels per interface unit of the window the pointer is in - the desktop's scale setting.</summary>
+	public static float DpiScale => CoreUiWindow.PointerScale;
 
-	/// <summary>Pointer position in its window's pixels, same space as Widget.ScreenPosition</summary>
+	/// <summary>Pointer position in its window's interface units, same space as Widget.ScreenPosition</summary>
 	public static Vector2 CursorPosition
 	{
-		get => CoreUiWindow.Pointer;
+		get => CoreUiWindow.Pointer / CoreUiWindow.PointerScale;
 		set
 		{
-			CoreUiWindow.PutPointer( value );
+			CoreUiWindow.PutPointer( value * CoreUiWindow.PointerScale );
 
 			lastCursorPos = UnscaledCursorPosition;
 		}
 	}
+
+	/// <summary>Pointer position in its window's pixels, the space panels are laid out and hit-tested in</summary>
+	public static Vector2 CursorPixels => CoreUiWindow.Pointer;
 
 	/// <summary>The cursor position, not scaled for DPI</summary>
 	public static Vector2 UnscaledCursorPosition
@@ -78,9 +78,8 @@ public static class Application
 
 	internal static void StartFrame()
 	{
-		//we scale the delta by dpi scale. This should give something close to the values
-		//they will be expecting, but will also provide fractions which CursorPos does not.
-		CursorDelta = (UnscaledCursorPosition - lastCursorPos) / DpiScale;
+		//Desktop units to interface units, with the fractions CursorPosition does not have
+		CursorDelta = (UnscaledCursorPosition - lastCursorPos) * CoreUiWindow.PointerDensity / DpiScale;
 
 		//record this for next time around
 		lastCursorPos = UnscaledCursorPosition;

@@ -29,11 +29,14 @@ public interface ISceneRenderHost
 	/// <summary>Whether the surface is on screen at all.</summary>
 	bool IsSurfaceVisible { get; }
 
-	/// <summary>How big the surface is, in editor pixels.</summary>
+	/// <summary>How big the surface is, in interface units.</summary>
 	Vector2 SurfaceSize { get; }
 
-	/// <summary>Where the surface is on the desktop, in editor pixels.</summary>
+	/// <summary>Where the surface is in its window, in interface units.</summary>
 	Vector2 SurfaceScreenPosition { get; }
+
+	/// <summary>Pixels per interface unit where the surface is shown, which is what the picture is drawn at.</summary>
+	float SurfaceScale { get; }
 
 	/// <summary>Whether the pointer is over the surface.</summary>
 	bool IsUnderMouse { get; }

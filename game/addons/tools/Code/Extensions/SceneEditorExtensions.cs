@@ -46,7 +46,8 @@ public static class SceneEditorExtensions
 			pos.x < rect.Left ? rect.Right : pos.x > rect.Right ? rect.Left : pos.x,
 			pos.y < rect.Top ? rect.Bottom : pos.y > rect.Bottom ? rect.Top : pos.y );
 
-		Application.UnscaledCursorPosition += newPos - pos;
+		//Within the window rather than across the desktop: the move is in the window's own units, and Wayland has no desktop to warp across
+		Application.CursorPosition += newPos - pos;
 
 		return true;
 	}

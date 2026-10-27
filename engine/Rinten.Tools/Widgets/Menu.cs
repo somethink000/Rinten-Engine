@@ -373,7 +373,7 @@ namespace Editor
 		{
 			if ( anchor is null ) return;
 
-			OpenBelowRight( anchor.GetScreenPixelRect(), gap, modal, anchor );
+			OpenBelowRight( anchor.GetScreenStyleRect(), gap, modal, anchor );
 		}
 
 		/// <summary>Opens below an anchor rect with the menu's right edge on the anchor's right edge.</summary>
@@ -387,7 +387,7 @@ namespace Editor
 		{
 			if ( anchor is null ) return;
 
-			OpenBelowLeft( anchor.GetScreenPixelRect(), gap, modal, anchor );
+			OpenBelowLeft( anchor.GetScreenStyleRect(), gap, modal, anchor );
 		}
 
 		/// <summary>Opens below an anchor rect with the menu's left edge on the anchor's left edge.</summary>

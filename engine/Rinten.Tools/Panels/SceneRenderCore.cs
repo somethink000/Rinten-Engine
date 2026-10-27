@@ -120,9 +120,11 @@ public sealed class SceneRenderCore : IDisposable
 		{
 			if ( !worldScene.IsValid() || !worldCamera.IsValid() ) return false;
 
+			var pixels = size * host.SurfaceScale;
+
 			using ( worldScene.Push() )
 			{
-				if ( !preview.DrawOwn( worldScene, worldCamera, size.x.CeilToInt(), size.y.CeilToInt() ) ) return false;
+				if ( !preview.DrawOwn( worldScene, worldCamera, pixels.x.CeilToInt(), pixels.y.CeilToInt() ) ) return false;
 			}
 		}
 
@@ -150,10 +152,15 @@ public sealed class SceneRenderCore : IDisposable
 		var camera = host.Camera.IsValid() ? host.Camera : scene.Camera;
 		var size = host.SurfaceSize;
 
+		//The picture is the display's pixels. The editor's camera stays in interface units, as the pointer and the gizmos are;
+		//the game's sees the pixels it is drawn at, as it would in a window of its own
+		var pixels = size * host.SurfaceScale;
+
 		//Set the camera's screen size to this surface before the tools' frame; game view leaves it alone
 		if ( camera.IsValid() )
 		{
-			var viewport = new Vector2( size.x < 1.0f ? 1.0f : size.x, size.y < 1.0f ? 1.0f : size.y );
+			var screen = host.EnableEngineOverlays ? pixels : size;
+			var viewport = new Vector2( screen.x < 1.0f ? 1.0f : screen.x, screen.y < 1.0f ? 1.0f : screen.y );
 
 			if ( !host.EnableEngineOverlays ) camera.CustomSize = viewport;
 
@@ -185,8 +192,8 @@ public sealed class SceneRenderCore : IDisposable
 
 		if ( !camera.IsValid() || !CoreScenePreview.Available ) return;
 
-		var width = size.x.CeilToInt();
-		var height = size.y.CeilToInt();
+		var width = pixels.x.CeilToInt();
+		var height = pixels.y.CeilToInt();
 
 		if ( width < 8 || height < 8 ) return;
 
@@ -327,7 +334,7 @@ public sealed class SceneRenderCore : IDisposable
 			Screen.Viewport = new Vector2( width, height );
 
 			//And where that screen is in the window, so the pointer the window reports is put on it - see InputRouter.ScreenOrigin.
-			Rinten.Engine.InputRouter.ScreenOrigin = host.SurfaceScreenPosition;
+			Rinten.Engine.InputRouter.ScreenOrigin = host.SurfaceScreenPosition * host.SurfaceScale;
 
 			ClaimPointer();
 
@@ -364,8 +371,9 @@ public sealed class SceneRenderCore : IDisposable
 			return;
 		}
 
-		var size = host.SurfaceSize;
-		var local = Application.CursorPosition - host.SurfaceScreenPosition;
+		//In the game's pixels, which are the window's
+		var size = host.SurfaceSize * host.SurfaceScale;
+		var local = Application.CursorPixels - host.SurfaceScreenPosition * host.SurfaceScale;
 
 		var inside = local.x >= 0 && local.y >= 0 && local.x < size.x && local.y < size.y;
 		var buttons = Application.MouseButtons;

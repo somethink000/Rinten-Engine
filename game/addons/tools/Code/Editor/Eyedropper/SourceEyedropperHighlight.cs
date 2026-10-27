@@ -47,15 +47,17 @@ internal sealed class SourceEyedropperHighlight
 			layer.AddChild( box );
 		}
 
+		//Measured in pixels, placed in the overlay's units
 		var rect = part ?? target.OuterRect;
+		var scale = layer.ScaleFromScreen;
 
-		box.Style.Left = rect.Left + offset.x;
-		box.Style.Top = rect.Top + offset.y;
-		box.Style.Width = rect.Width;
-		box.Style.Height = rect.Height;
+		box.Style.Left = ( rect.Left + offset.x ) * scale;
+		box.Style.Top = ( rect.Top + offset.y ) * scale;
+		box.Style.Width = rect.Width * scale;
+		box.Style.Height = rect.Height * scale;
 		box.SetClass( "hidden", false );
 
-		Say( label, rect.Top + offset.y );
+		Say( label, ( rect.Top + offset.y ) * scale );
 	}
 
 	//Writes the caption above the box, or under it where the box is against the top of the window.

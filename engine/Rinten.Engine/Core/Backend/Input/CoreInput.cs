@@ -271,12 +271,14 @@ internal static unsafe partial class CoreInput
 	];
 	static readonly bool[] webKeyDown = new bool[WebKeys.Length];
 
-	//Puts the cursor somewhere, in the window's own coordinates.
+	//Puts the cursor somewhere, in the window's pixels.
 	internal static void SetCursorPosition( int x, int y )
 	{
 		if ( NoSdl || Window == IntPtr.Zero ) return;
 
-		SDL_WarpMouseInWindow( Window, x, y );
+		var density = CoreWindow.DensityOf( Window );
+
+		SDL_WarpMouseInWindow( Window, x / density, y / density );
 	}
 
 	//Whether a window may put text into a panel - which is what turns composed text, and the on-screen keyboard on the platforms that have one, on and off.
@@ -300,13 +302,15 @@ internal static unsafe partial class CoreInput
 
 	private static bool imeAllowed;
 
-	//Where the text being typed is, so the platform can put its candidate window somewhere that does not cover it.
+	//Where the text being typed is, in the window's pixels, so the platform can put its candidate window somewhere that does not cover it.
 	internal static void SetIMETextLocation( int x, int y, int width, int height )
 	{
 		if ( NoSdl || Window == IntPtr.Zero ) return;
 
+		var density = CoreWindow.DensityOf( Window );
+
 		//SDL_Rect is four ints and the cursor offset is measured from the start of the text, which we do not track - the whole box will do.
-		var rect = stackalloc int[4] { x, y, width, height };
+		var rect = stackalloc int[4] { (int)( x / density ), (int)( y / density ), (int)MathF.Ceiling( width / density ), (int)MathF.Ceiling( height / density ) };
 		SDL_SetTextInputArea( Window, rect, 0 );
 	}
 

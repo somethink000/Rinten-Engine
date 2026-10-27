@@ -87,25 +87,8 @@ public sealed class EditorOverlay : Panel
 		return wanted;
 	}
 
-	//Overlay pixels for a panel that may live inside a widget surface.
-	static Rect GetOverlayAnchorRect( Panel source )
-	{
-		var pixel = source.GetScreenPixelRect();
-
-		for ( var panel = source; panel is not null; panel = panel.Parent )
-		{
-			if ( panel is not WidgetSurface surface || !surface.Widget.IsValid() )
-				continue;
-
-			var surfacePixel = surface.GetScreenPixelRect();
-			var localInSurface = pixel.Position - surfacePixel.Position;
-			var screen = surface.Widget.ToScreen( localInSurface );
-
-			return new Rect( screen.x, screen.y, pixel.Width, pixel.Height );
-		}
-
-		return pixel;
-	}
+	//Overlay pixels for a panel, widget surfaces included: one window, one pixel space.
+	static Rect GetOverlayAnchorRect( Panel source ) => source.GetScreenPixelRect();
 
 	/// <summary>The overlay already on this widget's window, or null.</summary>
 	public static EditorOverlay Find( Widget widget )

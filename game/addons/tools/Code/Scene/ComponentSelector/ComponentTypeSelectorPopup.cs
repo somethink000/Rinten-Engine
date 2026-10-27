@@ -135,8 +135,8 @@ public sealed class ComponentTypeSelectorPopup : Popup
 			return;
 
 		const float width = 240f;
-		var buttonRect = filterButton.GetScreenPixelRect();
-		var hostRect = GetScreenPixelRect();
+		var buttonRect = filterButton.GetScreenStyleRect();
+		var hostRect = GetScreenStyleRect();
 
 		filterDrop.Style.Width = Length.Pixels( width );
 		filterDrop.Style.Left = Length.Pixels( buttonRect.Right - hostRect.Left - width );

@@ -340,13 +340,13 @@ public partial class Window
 	{
 		if ( inside is null ) return;
 
-		var (width, height) = inside.Size;
+		var room = inside.InterfaceSize;
 
-		if ( width <= 0 || height <= 0 ) return;
+		if ( room.x <= 0 || room.y <= 0 ) return;
 
 		var middle = new Vector2(
-			MathF.Round( ( width - Size.x ) * 0.5f ),
-			MathF.Round( ( height - Size.y ) * 0.5f ) );
+			MathF.Round( ( room.x - Size.x ) * 0.5f ),
+			MathF.Round( ( room.y - Size.y ) * 0.5f ) );
 
 		if ( Position == middle ) return;
 
@@ -358,13 +358,13 @@ public partial class Window
 	{
 		if ( shell is null ) return;
 
-		var (width, height) = shell.Size;
+		var room = shell.InterfaceSize;
 
-		if ( width <= 0 || height <= 0 ) return;
+		if ( room.x <= 0 || room.y <= 0 ) return;
 
 		var top = 0;
 
-		var wanted = new Vector2( width, MathF.Max( height - shell.CaptionHeight, 0 ) );
+		var wanted = new Vector2( room.x, MathF.Max( room.y - shell.CaptionHeight, 0 ) );
 
 		//Against what the window last was rather than against the widget's own size: a widget with a fixed or a maximum size
 		//never becomes what it was handed, and comparing the two would arrange it again every frame for the rest of its life.

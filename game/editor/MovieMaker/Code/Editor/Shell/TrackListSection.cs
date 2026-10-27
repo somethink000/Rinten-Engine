@@ -71,7 +71,7 @@ public sealed class TrackListSection : MovieSection
 		menu.AddOption( "Documentation", "help", () => EditorUtility.OpenFile( MovieEditor.HelpUrl ) )
 			.ToolTip = "Open the MovieMaker documentation.";
 
-		menu.OpenAt( group.GetScreenPixelRect().BottomLeft, group );
+		menu.OpenAt( group.GetScreenStyleRect().BottomLeft, group );
 	}
 
 	private void BuildPlayerGroup( Session session )

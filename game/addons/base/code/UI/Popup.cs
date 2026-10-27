@@ -56,17 +56,18 @@ public partial class Popup : BasePopup
 	{
 		if ( PopupSource is null || !PopupSource.IsValid() ) return;
 
-		var sourcePixel = SourceScreenRect();
-		var parentPixel = Parent?.GetScreenPixelRect() ?? default;
-		var wantedScreen = new Vector2( sourcePixel.Left, sourcePixel.Bottom + PopupSourceOffset );
-		var popupSize = new Vector2( sourcePixel.Width, Box.Rect.Height > 0 ? Box.Rect.Height : 1 );
-		var placed = PopupSource.PlaceOverlayPopup( wantedScreen, popupSize );
+		//All in style units, which is what the overlay places in and the style is written in
+		var source = PopupSource.GetScreenStyleRect();
+		var parent = Parent?.GetScreenStyleRect() ?? default;
+		var wanted = new Vector2( source.Left, source.Bottom + PopupSourceOffset );
+		var popupSize = new Vector2( source.Width, Box.Rect.Height > 0 ? Box.Rect.Height * ScaleFromScreen : 1 );
+		var placed = PopupSource.PlaceOverlayPopup( wanted, popupSize );
 
 		Style.Right = null;
 		Style.Bottom = null;
-		Style.Left = placed.x - parentPixel.Left;
-		Style.Top = placed.y - parentPixel.Top;
-		Style.Width = sourcePixel.Width;
+		Style.Left = placed.x - parent.Left;
+		Style.Top = placed.y - parent.Top;
+		Style.Width = source.Width;
 	}
 
 	public enum PositionMode
@@ -275,7 +276,7 @@ public partial class Popup : BasePopup
 
 		var layoutScale = onOverlay && Parent.IsValid() ? Parent.ScaleFromScreen : 1.0f;
 		var rect = AnchorInParent( PopupSource, Parent, onOverlay );
-		var parentRect = ParentBounds( Parent, onOverlay );
+		var parentRect = ParentBounds( Parent );
 
 		//Right and Bottom are measured from the parent's edges, so the parent is what they have to be worked
 		//out against - the screen is only the same thing when the popup happens to hang off the root panel.
@@ -368,7 +369,7 @@ public partial class Popup : BasePopup
 						//Left and Top are the parent's, and the cursor is the window's - a popup hung
 						//off a panel partway down the tree lands offset by wherever that panel sits.
 						var scale = onOverlay ? layoutScale : PopupSource.ScaleFromScreen;
-						var at = Mouse.Position * scale - (Parent.IsValid() ? Parent.Box.Rect.Position : Vector2.Zero);
+						var at = ( Mouse.Position - (Parent.IsValid() ? Parent.Box.Rect.Position : Vector2.Zero) ) * scale;
 
 						Style.Left = at.x;
 						Style.Top = at.y + PopupSourceOffset;
@@ -416,16 +417,13 @@ public partial class Popup : BasePopup
 			sourcePixel.Height * scale );
 	}
 
-	static Rect ParentBounds( Panel parent, bool overlayCoords )
+	//In style units: the anchor's pixels are scaled into them where they are used
+	static Rect ParentBounds( Panel parent )
 	{
 		if ( !parent.IsValid() )
 			return default;
 
 		var box = parent.Box.Rect;
-
-		if ( overlayCoords )
-			return new Rect( 0, 0, box.Width, box.Height );
-
 		var scale = parent.ScaleFromScreen;
 		return new Rect( 0, 0, box.Width * scale, box.Height * scale );
 	}

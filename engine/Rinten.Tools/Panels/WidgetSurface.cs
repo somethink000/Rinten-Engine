@@ -300,7 +300,7 @@ internal sealed class WidgetSurface : Panel
 
 	//Draws the widget into the picture its panel wears, where it asked to be drawn or where the room it has changed shape.
 	private void PaintCanvas( Rect rect, bool asked )
-		=> bake.Paint( this, rect, asked, paintedOnce, PaintDelegate() );
+		=> bake.Paint( this, rect, asked, paintedOnce, PaintDelegate(), ScaleToScreen );
 
 	//Paint delegate cached, since a method group allocates a new Func every time
 	private Func<Bitmap, Rect, bool> PaintDelegate() => paintDelegate ??= Widget.PaintInto;

@@ -66,7 +66,10 @@ internal static class EditorProgressWindow
 
 		if ( width <= 1 || height <= 1 ) return;
 
-		shell.Placement = new Rect( x + Margin, y + height - Height - Margin, Width, Height );
+		//Its own size as the window system counts it, which the scale made of Width and Height when it opened
+		var size = shell.Placement.Size;
+
+		shell.Placement = new Rect( x + Margin, y + height - size.y - Margin, size.x, size.y );
 	}
 
 	/// <summary>On the screen while there is something to say, and away when there is not.</summary>

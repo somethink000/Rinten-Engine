@@ -462,7 +462,7 @@ namespace Editor
 
 
 		/// <summary>The scale this widget is using (multiplying Size by this value gives the actual native size)</summary>
-		public float DpiScale => 1.0f;
+		public float DpiScale => Surface is { IsValid: true } surface ? surface.ScaleToScreen : 1.0f;
 
 		public void Focus( bool activateWindow = true )
 		{
@@ -806,7 +806,7 @@ namespace Editor
 		}
 
 
-		/// <summary>This widget's top-left, in the window's own pixels.</summary>
+		/// <summary>This widget's top-left in its window, in interface units.</summary>
 		public Vector2 ScreenPosition => ToScreen( default );
 
 		/// <summary>Rect of the part drawn at a local point, for widgets with painted rows; null if none</summary>
@@ -818,8 +818,7 @@ namespace Editor
 
 			if ( Surface is { IsValid: true } surface )
 			{
-				var rect = surface.GetScreenPixelRect();
-				return rect.Position + p * surface.ScaleToScreen;
+				return surface.GetScreenPixelRect().Position * surface.ScaleFromScreen + p;
 			}
 
 			for ( var widget = this; widget is not null; widget = widget.Parent )
@@ -832,7 +831,7 @@ namespace Editor
 			return p;
 		}
 
-		/// <summary>The pointer, in this widget's own pixels.</summary>
+		/// <summary>A point in its window's interface units, in this widget's own.</summary>
 		public Vector2 FromScreen( Vector2 p ) => p - ToScreen( default );
 
 		/// <summary>Pretends a key was pressed on this widget.</summary>

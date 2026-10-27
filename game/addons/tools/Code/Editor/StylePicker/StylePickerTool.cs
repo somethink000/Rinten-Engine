@@ -103,13 +103,13 @@ internal static class StylePickerTool
 		catcher?.CoverFor( layer );
 		catcher?.KeepOnTop();
 
-		hoveredPanel = FindPanelAt( Application.CursorPosition, layer );
+		hoveredPanel = FindPanelAt( Application.CursorPixels, layer );
 		hoveredOffset = default;
 
 		if ( GameViewAt( Application.CursorPosition ) is { } view )
 		{
-			var corner = view.ScreenPosition;
-			var inside = FindGamePanelAt( Application.CursorPosition - corner, layer?.Parent );
+			var corner = view.GetScreenPixelRect().Position;
+			var inside = FindGamePanelAt( Application.CursorPixels - corner, layer?.Parent );
 
 			if ( inside.IsValid() )
 			{

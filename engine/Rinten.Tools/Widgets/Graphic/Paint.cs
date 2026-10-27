@@ -116,7 +116,12 @@ namespace Editor
 
 		public static void Rotate( float degrees, Vector2 center ) => canvas.Bitmap.RotateBy( degrees, center );
 
-		public static void ResetTransform() => canvas.Bitmap.ResetTransform();
+		//Back to the widget's own units, which are the bitmap's pixels scaled by the display
+		public static void ResetTransform()
+		{
+			canvas.Bitmap.ResetTransform();
+			canvas.Bitmap.ScaleBy( _dpiScale, _dpiScale );
+		}
 
 		public static void ClipRect( Rect rect ) => canvas.Bitmap.ClipRect( rect );
 

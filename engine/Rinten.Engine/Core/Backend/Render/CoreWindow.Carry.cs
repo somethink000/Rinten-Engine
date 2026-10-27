@@ -84,7 +84,8 @@ internal sealed unsafe partial class CoreWindow
 
 		var toplevel = SDL_GetPointerProperty( SDL_GetWindowProperties( Handle ), "SDL.window.wayland.xdg_toplevel", IntPtr.Zero );
 
-		if ( !CoreWaylandDrag.Carry( (IntPtr)NativeWindow, toplevel, (int)grab.x, (int)grab.y ) ) return;
+		//The compositor holds the window by a point on its surface, in surface units
+		if ( !CoreWaylandDrag.Carry( (IntPtr)NativeWindow, toplevel, (int)( grab.x / density ), (int)( grab.y / density ) ) ) return;
 
 		Carried = this;
 		CarriedOver = null;
@@ -105,7 +106,7 @@ internal sealed unsafe partial class CoreWindow
 		if ( Carried is null ) return false;
 
 		var window = Find( *(uint*)(buffer + 16) );
-		var at = new Vector2( *(float*)(buffer + 20), *(float*)(buffer + 24) );
+		var at = new Vector2( *(float*)(buffer + 20), *(float*)(buffer + 24) ) * ( window?.density ?? 1.0f );
 
 		switch ( type )
 		{

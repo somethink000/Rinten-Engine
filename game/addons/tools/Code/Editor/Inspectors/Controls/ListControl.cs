@@ -115,7 +115,7 @@ public class ListControl : BaseControl
 		foreach ( var child in body.Children )
 		{
 			if ( child is not ListEntryPanel entry ) continue;
-			if ( !entry.GetScreenPixelRect().IsInside( pos ) ) continue;
+			if ( !entry.GetScreenStyleRect().IsInside( pos ) ) continue;
 
 			found = entry;
 			break;

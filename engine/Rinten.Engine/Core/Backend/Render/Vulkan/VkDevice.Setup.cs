@@ -1315,37 +1315,6 @@ internal static unsafe partial class VkDevice
 			passSetLayout = layout;
 		}
 
-		//The sampler that takes the farthest of a quad rather than the average of it - see farthestSampler.
-		{
-			var farthest = new SamplerReductionModeCreateInfo
-			{
-				SType = StructureType.SamplerReductionModeCreateInfo,
-				ReductionMode = filterMinmax ? SamplerReductionMode.Max : SamplerReductionMode.WeightedAverage,
-			};
-
-			var info = new SamplerCreateInfo
-			{
-				SType = StructureType.SamplerCreateInfo,
-
-				//A structure that arrived with 1.2, and says nothing but the default while no device has been
-				//asked for the other mode - so a device older than that is not handed it. See VkDialect.
-				PNext = Tier == RenderTier.Full ? &farthest : null,
-				MagFilter = Filter.Linear,
-				MinFilter = Filter.Linear,
-				MipmapMode = SamplerMipmapMode.Nearest,
-				AddressModeU = SamplerAddressMode.ClampToEdge,
-				AddressModeV = SamplerAddressMode.ClampToEdge,
-				AddressModeW = SamplerAddressMode.ClampToEdge,
-				MinLod = 0.0f,
-				MaxLod = 16.0f,
-			};
-
-			Sampler reduce;
-			if ( vk.CreateSampler( device, &info, null, &reduce ) != Result.Success ) return false;
-
-			farthestSampler = reduce;
-		}
-
 		//The parameters a material has when it says nothing: a middling roughness, no metal, no
 		//glow, and a cutoff below anything - each in a slot of its own, the rest of them zero.
 		{
@@ -1539,7 +1508,6 @@ internal static unsafe partial class VkDevice
 		if ( pyramidSetLayout.Handle != 0 ) vk.DestroyDescriptorSetLayout( device, pyramidSetLayout, null );
 		if ( foldSetLayout.Handle != 0 ) vk.DestroyDescriptorSetLayout( device, foldSetLayout, null );
 		if ( passSetLayout.Handle != 0 ) vk.DestroyDescriptorSetLayout( device, passSetLayout, null );
-		if ( farthestSampler.Handle != 0 ) vk.DestroySampler( device, farthestSampler, null );
 		if ( boneSetLayout.Handle != 0 ) vk.DestroyDescriptorSetLayout( device, boneSetLayout, null );
 		if ( objectSetLayout.Handle != 0 ) vk.DestroyDescriptorSetLayout( device, objectSetLayout, null );
 
@@ -1607,7 +1575,6 @@ internal static unsafe partial class VkDevice
 		sampler = default;
 		clampSampler = default;
 		pointSampler = default;
-		farthestSampler = default;
 
 		textureSetLayout = default;
 		pyramidSetLayout = default;

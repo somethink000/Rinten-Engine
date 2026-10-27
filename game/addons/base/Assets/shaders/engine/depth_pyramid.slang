@@ -1,7 +1,7 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader is - includes
 //and all - and a project may put its own file of this name in its assets to replace it. See CoreShaderCache.Pass.
 
-//Builds six depth pyramid levels per dispatch with a max-reduction sampler and group memory
+//Builds six depth pyramid levels per dispatch: each texel the farthest of the texels under it, read one by one
 
 [[vk::binding(0,1)]] Sampler2D g_below;
 [[vk::binding(1,1)]] RWTexture2D<float> g_level0;
@@ -39,17 +39,23 @@ groupshared float s_tile[32][32];
 //covers - a pair each way from the level below, whatever the depth's size is to the pyramid's.
 float Farthest( uint2 at )
 {
-	//A level exactly half its source each way: one read through the sampler, whose reduction takes the farthest of the four texels
-	//under it, at the middle of the block. The edge clamps where the source is odd, which is the last texel twice - the same answer.
+	//A level exactly half its source each way: the four texels under it, each read, the farthest kept. Not one filtered read -
+	//a sampler that averages them says a gap past a near edge is near, and what shows through it is culled. The edge clamps
+	//where the source is odd, which is the last texel twice - the same answer.
 	bool halved = g_sourceWide <= 2u * g_fillWide && g_sourceWide + 1u >= 2u * g_fillWide &&
 		g_sourceTall <= 2u * g_fillTall && g_sourceTall + 1u >= 2u * g_fillTall;
 
 	if ( halved )
 	{
-		float2 uv = ( float2( g_sourceX, g_sourceY ) + float2( at ) * 2.0 + 1.0 ) /
-			float2( g_imageWide, g_imageTall );
+		uint2 last = uint2( g_sourceWide, g_sourceTall ) - 1u;
+		uint2 low = min( at * 2u, last );
+		uint2 high = min( at * 2u + 1u, last );
+		int2 origin = int2( g_sourceX, g_sourceY );
+		int level = int( g_sourceLevel );
 
-		return g_below.SampleLevel( uv, float( g_sourceLevel ) ).x;
+		return max(
+			max( g_below.Load( int3( origin + int2( low ), level ) ).x, g_below.Load( int3( origin + int2( high.x, low.y ), level ) ).x ),
+			max( g_below.Load( int3( origin + int2( low.x, high.y ), level ) ).x, g_below.Load( int3( origin + int2( high ), level ) ).x ) );
 	}
 
 	float2 scale = float2( g_sourceWide, g_sourceTall ) / float2( g_fillWide, g_fillTall );

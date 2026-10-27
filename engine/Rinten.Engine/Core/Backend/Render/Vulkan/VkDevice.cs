@@ -218,11 +218,7 @@ internal static unsafe partial class VkDevice
 	internal static Sampler clampSampler;
 	internal static Sampler pointSampler;
 
-	//Max-reduction sampler for the depth pyramid: coarse texels must report the farthest depth
-	internal static Sampler farthestSampler;
 
-	//Whether the device has samplerFilterMinmax, so the pyramid takes the farthest, not the average
-	internal static bool filterMinmax;
 
 	internal static DescriptorSetLayout textureSetLayout;
 

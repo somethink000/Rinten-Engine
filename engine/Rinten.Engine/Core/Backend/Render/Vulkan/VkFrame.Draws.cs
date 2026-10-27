@@ -2167,7 +2167,7 @@ internal static unsafe partial class VkFrame
 
 			var below = new DescriptorImageInfo
 			{
-				Sampler = VkDevice.farthestSampler,
+				Sampler = VkDevice.pointSampler,
 				ImageView = from,
 				ImageLayout = lod == 0 ? ImageLayout.ShaderReadOnlyOptimal : ImageLayout.General,
 			};

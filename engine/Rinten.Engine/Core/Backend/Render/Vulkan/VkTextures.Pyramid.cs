@@ -230,12 +230,12 @@ internal static unsafe partial class VkTextures
 			made.Set = set;
 
 			//Every slot of the material set points at the whole chain: a dispatch reads the first, and the rest have to name something
-			//the driver may answer for. Sampled with the one that takes the farthest of a quad - see VkDevice.farthestSampler.
+			//the driver may answer for. Read texel by texel, so the sampler is only what the set has to name.
 			var views = stackalloc ImageView[(int)VkDevice.MaterialTextures];
 			for ( var i = 0; i < VkDevice.MaterialTextures; ++i ) views[i] = whole;
 
 			//In GENERAL, and said so: the chain is written as a storage image and read as a picture without ever leaving that layout.
-			WriteMaterialSet( made.Set, views, VkDevice.defaultParams, VkDevice.farthestSampler, ImageLayout.General );
+			WriteMaterialSet( made.Set, views, VkDevice.defaultParams, VkDevice.pointSampler, ImageLayout.General );
 
 			var handle = nextHandle++;
 

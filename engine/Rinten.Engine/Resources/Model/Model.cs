@@ -10,6 +10,10 @@ public sealed partial class Model : Resource
 
 	internal bool procedural;
 
+	//What CoreResources knows this model's device mesh by, without holding the model - see CoreResources.Gone
+	internal readonly long MeshId = System.Threading.Interlocked.Increment( ref meshIds );
+	private static long meshIds;
+
 	//Set when the model came from our own format; checked first, the legacy path is the fallback
 	internal CoreModel core;
 
@@ -60,8 +64,14 @@ public sealed partial class Model : Resource
 
 	internal override void Destroy()
 	{
+		//Its device mesh goes with it, on the main thread, from whichever thread let it go - the finalizer's for a model built at runtime
+		var mesh = MeshId;
+		MainThread.Queue( () => CoreResources.Gone( mesh ) );
+
 		core?.Dispose();
 		core = null;
+
+		base.Destroy();
 	}
 
 	//Called when the resource is reloaded. We should clear any cached values.

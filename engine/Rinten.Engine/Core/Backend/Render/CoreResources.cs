@@ -24,8 +24,10 @@ internal static class CoreResources
 	private static string ShaderFile( string shader )
 		=> CoreShaderFile.Real( string.IsNullOrWhiteSpace( shader ) ? CoreSceneRenderer.StandardShader : shader );
 
-	//Meshes keyed by Model object, avoiding a per-frame string key for every renderer
-	private static readonly Dictionary<Model, CoreSceneRenderer.SceneMesh> meshesByModel = new();
+	//Meshes by the model's MeshId, avoiding a per-frame string key for every renderer. Not by the Model itself: a key held
+	//here would keep every model ever drawn alive, and its mesh with it - see Gone. Beside each, its own key in meshes
+	private static readonly Dictionary<long, CoreSceneRenderer.SceneMesh> meshesByModel = new();
+	private static readonly Dictionary<long, string> ownKeys = new();
 
 	//What a live material was built into, weak on the material so play-mode copies don't leak
 	private static readonly ConditionalWeakTable<Material, LiveEntry> liveByMaterial = new();
@@ -196,7 +198,7 @@ internal static class CoreResources
 
 		//A model that is loaded stays loaded, so a hit here is the answer. A miss falls through to the path
 		//cache below, which is where a mesh is actually built - and where a failure is remembered as one.
-		if ( meshesByModel.TryGetValue( model, out var cached ) && cached is not null )
+		if ( meshesByModel.TryGetValue( model.MeshId, out var cached ) && cached is not null )
 			return cached;
 
 		var made = CoreSceneRenderer.LoadMesh( model, meshes, textures, Fallback, materials );
@@ -208,7 +210,9 @@ internal static class CoreResources
 			AskAgain( model );
 		}
 
-		meshesByModel[model] = made;
+		meshesByModel[model.MeshId] = made;
+		if ( CoreSceneRenderer.OwnKey( model ) is { } own ) ownKeys[model.MeshId] = own;
+
 		return made;
 	}
 
@@ -1233,12 +1237,31 @@ internal static class CoreResources
 	public static CoreSceneRenderer.MeshDraw WithGroupMaterial( CoreSceneRenderer.MeshDraw part, int group )
 		=> CoreSceneRenderer.WithGroupMaterial( part, group, textures, Fallback, materials );
 
+	//A model that is gone, by its MeshId: the mesh only it drew goes from the card. One read from a path other models share
+	//stays for them. Main thread - see Model.Destroy, which may run on the finalizer's
+	internal static void Gone( long model )
+	{
+		if ( !meshesByModel.Remove( model, out var held ) ) return;
+
+		if ( !ownKeys.Remove( model, out var own ) ) return;
+
+		meshes.Remove( own );
+
+		if ( held is null ) return;
+
+		Destroy( held );
+		Generation++;
+		MeshesForgotten++;
+	}
+
 	/// <summary>Drop a model's GPU mesh so the next draw reads the file again.</summary>
 	public static void Forget( Model model )
 	{
 		if ( model is null ) return;
 
-		if ( meshesByModel.Remove( model, out var held ) && held is not null )
+		ownKeys.Remove( model.MeshId );
+
+		if ( meshesByModel.Remove( model.MeshId, out var held ) && held is not null )
 			Destroy( held );
 
 		var path = (model.ResourcePath ?? model.Name ?? "").Replace( '\\', '/' );
@@ -1274,19 +1297,23 @@ internal static class CoreResources
 	//Drops a destroyed mesh from the by-model cache for every model that shared its path
 	private static void ForgetHolders( CoreSceneRenderer.SceneMesh mesh )
 	{
-		List<Model> holders = null;
+		List<long> holders = null;
 
 		foreach ( var (model, byModel) in meshesByModel )
 		{
 			if ( byModel != mesh ) continue;
 
-			holders ??= new List<Model>();
+			holders ??= new List<long>();
 			holders.Add( model );
 		}
 
 		if ( holders is null ) return;
 
-		foreach ( var model in holders ) meshesByModel.Remove( model );
+		foreach ( var model in holders )
+		{
+			meshesByModel.Remove( model );
+			ownKeys.Remove( model );
+		}
 	}
 
 	/// <summary>Drops everything built from one file so it reloads, including meshes holding its material.</summary>
@@ -1673,6 +1700,7 @@ internal static class CoreResources
 		CoreShaderCache.Changed();
 		meshes.Clear();
 		meshesByModel.Clear();
+		ownKeys.Clear();
 
 		//What was decided about which path a shader's meshes take goes with the builds
 		//it was decided from - see Forget, which drops the same three a file at a time.

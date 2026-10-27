@@ -2258,26 +2258,24 @@ internal static unsafe class CoreSceneRenderer
 	}
 
 
+	//The key a model's mesh is cached under when it is that model's alone - its own vertices, or the file its core holds -
+	//and null where it is cached by a path other models share
+	internal static string OwnKey( Model model )
+	{
+		if ( model is null ) return null;
+		if ( model.pulled is { Length: > 0 } ) return $"#pulled:{model.GetHashCode():x8}:{model.ResourcePath}";
+		if ( model.core is { IsValid: true } && model.core.Loaded is { } ready ) return $"#handle:{ready.Id}:{model.ResourcePath}";
+
+		return null;
+	}
+
 	//Forgets a cached failed build of a real model so the next frame retries (its file may be mid-write)
 	internal static void ForgetFailedMesh( Model model, Dictionary<string, SceneMesh> meshes )
 	{
 		if ( model is null || meshes is null ) return;
 
-		var path = model.ResourcePath;
-
-		if ( model.pulled is { Length: > 0 } )
-		{
-			meshes.Remove( $"#pulled:{model.GetHashCode():x8}:{path}" );
-			return;
-		}
-
-		if ( model.core is { IsValid: true } && model.core.Loaded is { } ready )
-		{
-			meshes.Remove( $"#handle:{ready.Id}:{path}" );
-			return;
-		}
-
-		if ( !string.IsNullOrWhiteSpace( path ) ) meshes.Remove( path );
+		var key = OwnKey( model ) ?? model.ResourcePath;
+		if ( !string.IsNullOrWhiteSpace( key ) ) meshes.Remove( key );
 	}
 
 	internal static SceneMesh LoadMesh( Model model,
@@ -2300,7 +2298,7 @@ internal static unsafe class CoreSceneRenderer
 	private static SceneMesh PulledMesh( Model model, Dictionary<string, SceneMesh> meshes )
 	{
 		//Keyed by the model rather than by a path, because there is no path.
-		var key = $"#pulled:{model.GetHashCode():x8}:{model.ResourcePath}";
+		var key = OwnKey( model );
 
 		if ( meshes.TryGetValue( key, out var cached ) ) return cached;
 

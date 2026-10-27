@@ -12,6 +12,10 @@ function RintenNativeBind(host) {
 	var deltaX = 0;
 	var deltaY = 0;
 
+	//The wheel since the engine last asked, in notches up and right as SDL counts them
+	var wheelX = 0;
+	var wheelY = 0;
+
 	//What the last fetchBytes brought back, handed over once and dropped.
 	var fetched = null;
 
@@ -187,6 +191,14 @@ function RintenNativeBind(host) {
 			} catch (err) {}
 		}
 		target.addEventListener("pointerup", release);
+		//As SDL's own page reads it: a notch three lines or a hundred pixels, down the page is down the wheel. Not
+		//passive, so the page - an itch.io frame round the game - does not scroll under it instead
+		target.addEventListener("wheel", function (e) {
+			var notch = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 1 : 1 / 100;
+			wheelX += e.deltaX * notch;
+			wheelY -= e.deltaY * notch;
+			e.preventDefault();
+		}, { passive: false });
 		//A touch the browser took back - a system gesture, the page losing the finger - ends without a pointerup, and the button stayed down for ever.
 		target.addEventListener("pointercancel", function (e) {
 			buttons &= ~(1 << Math.max(e.button, 0));
@@ -290,6 +302,8 @@ function RintenNativeBind(host) {
 		pointerY: function () { return pointerY; },
 		pointerDeltaX: function () { var v = deltaX; deltaX = 0; return v; },
 		pointerDeltaY: function () { var v = deltaY; deltaY = 0; return v; },
+		wheelX: function () { var v = wheelX; wheelX = 0; return v; },
+		wheelY: function () { var v = wheelY; wheelY = 0; return v; },
 		pointerLocked: function () { return document.pointerLockElement === canvas ? 1 : 0; },
 		setPointerLock: function (state) {
 			wantsPointerLock = !!state;

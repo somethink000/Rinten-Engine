@@ -15,6 +15,10 @@ internal static class WebPage
 	internal static Func<float> PointerY;
 	internal static Func<float> PointerDeltaX;
 	internal static Func<float> PointerDeltaY;
+
+	//The wheel since last asked, in notches up and right
+	internal static Func<float> WheelX;
+	internal static Func<float> WheelY;
 	internal static Func<int> PointerLocked;
 	internal static Action<int> SetPointerLock;
 

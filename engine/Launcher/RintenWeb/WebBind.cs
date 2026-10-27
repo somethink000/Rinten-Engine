@@ -15,6 +15,8 @@ static class WebBind
 		WebPage.PointerY = Native.PointerY;
 		WebPage.PointerDeltaX = Native.PointerDeltaX;
 		WebPage.PointerDeltaY = Native.PointerDeltaY;
+		WebPage.WheelX = Native.WheelX;
+		WebPage.WheelY = Native.WheelY;
 		WebPage.PointerLocked = Native.PointerLocked;
 		WebPage.SetPointerLock = Native.SetPointerLock;
 		WebPage.Fullscreen = Native.Fullscreen;

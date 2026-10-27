@@ -168,6 +168,11 @@ internal static unsafe partial class CoreInput
 
 		webPointer = at;
 
+		//After the pointer, so a turn of the wheel lands where it is now
+		var wheelX = WebPage.WheelX?.Invoke() ?? 0;
+		var wheelY = WebPage.WheelY?.Invoke() ?? 0;
+		if ( wheelX != 0 || wheelY != 0 ) Engine.InputRouter.OnMouseWheel( wheelX, wheelY, 0 );
+
 		//Last frame's presses first, and their buttons are not let go this frame - see PumpWebButton.
 		var turned = webPending;
 		webPending = 0;

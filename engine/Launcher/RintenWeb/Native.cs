@@ -34,6 +34,12 @@ static partial class Native
 	[JSImport( "globalThis.RintenNative.pointerDeltaY" )]
 	internal static partial float PointerDeltaY();
 
+	[JSImport( "globalThis.RintenNative.wheelX" )]
+	internal static partial float WheelX();
+
+	[JSImport( "globalThis.RintenNative.wheelY" )]
+	internal static partial float WheelY();
+
 	[JSImport( "globalThis.RintenNative.pointerLocked" )]
 	internal static partial int PointerLocked();
 

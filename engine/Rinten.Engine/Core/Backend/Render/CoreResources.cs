@@ -500,7 +500,8 @@ internal static class CoreResources
 		var (named, told) = FeatureInputs( core );
 		var values = CoreSceneRenderer.FeatureValues( named, told, ( what, field ) => Has( core, what, field ) );
 
-		return values.TryGetValue( name, out var value ) ? value : 0;
+		//Null for a shader with no features, as the terrain's
+		return values is not null && values.TryGetValue( name, out var value ) ? value : 0;
 	}
 
 	/// <summary>Alpha cutoff of a live material (AlphaCutoff from its file), defaulting to 0.5 when unset</summary>

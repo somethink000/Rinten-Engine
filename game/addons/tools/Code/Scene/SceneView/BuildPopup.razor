@@ -153,7 +153,8 @@
 		}
 		catch ( Exception e )
 		{
-			Log.Warning( $"baked lighting: the bake failed - {e.Message}" );
+			//With where: a message alone says nothing about which part of the bake fell over
+			Log.Warning( e, $"baked lighting: the bake failed - {e.Message}" );
 		}
 		finally
 		{

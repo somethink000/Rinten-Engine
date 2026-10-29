@@ -128,12 +128,7 @@ public partial class Model
 
 		var go = root.Children.FirstOrDefault( x => x.Name == thisBone.Name && !x.Flags.Contains( GameObjectFlags.Attachment ) );
 
-		if ( go is null )
-		{
-			go = scene.CreateObject( true );
-			go.Parent = root;
-			go.Name = thisBone.Name;
-		}
+		go ??= new GameObject( root, true, thisBone.Name );
 
 		//Only ever added, never taken away: where a renderer has already made these
 		//and marked them, something else reusing them must not unmark them behind it.

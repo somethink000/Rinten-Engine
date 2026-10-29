@@ -40,7 +40,7 @@ public sealed class Synthesizer : IDisposable
 	{
 		Builder = new();
 		SpeechSynthesizer = new();
-		// Weak: VoiceSynthesis stores this handler and its worker thread roots it, so capturing this would block our finalizer forever
+		//Weak: VoiceSynthesis keeps this handler and its worker thread roots it, so a strong one blocks our finalizer
 		var weakSelf = new WeakReference<Synthesizer>( this );
 		SpeechSynthesizer.VisemeReached += ( object obj, VisemeReachedEventArgs e ) =>
 		{

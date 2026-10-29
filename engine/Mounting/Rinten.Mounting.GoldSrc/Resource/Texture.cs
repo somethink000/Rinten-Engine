@@ -39,8 +39,8 @@ class WadTextureLoader( Wad wad, string lumpName ) : ResourceLoader<GameMount>
 		var length = width * height;
 		var data = br.ReadBytes( length );
 
-		// Only masked textures ({name) treat palette index 255 as transparent,
-		// black it out so the key colour doesn't bleed into the edges
+		//Only masked textures ({name) treat palette index 255 as transparent,
+		//black it out so the key colour doesn't bleed into the edges
 		var masked = lumpName.StartsWith( '{' );
 		if ( masked )
 		{

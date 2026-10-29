@@ -84,8 +84,8 @@ public sealed partial class PlayerController : Component
 	void InputJump()
 	{
 		if ( !IsOnGround && (CoyoteTime <= 0 || TimeSinceGrounded > CoyoteTime) ) return;
-		if ( !Input.Pressed( "Jump" ) ) return; // not pressing jump
-		if ( timeSinceJump < 0.5f ) return; // don't jump too often
+		if ( !Input.Pressed( "Jump" ) ) return; //Not pressing jump
+		if ( timeSinceJump < 0.5f ) return; //Don't jump too often
 		if ( JumpSpeed <= 0 ) return;
 
 		timeSinceJump = 0;

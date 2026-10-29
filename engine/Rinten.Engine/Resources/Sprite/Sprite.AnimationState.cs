@@ -68,7 +68,7 @@ public partial class Sprite
 			if ( !float.IsFinite( frameRate ) || !float.IsFinite( TimeSinceLastFrame ) )
 				return false;
 
-			// Use double precision so adding two finite float times cannot overflow.
+			//Use double precision so adding two finite float times cannot overflow.
 			double elapsed = (double)TimeSinceLastFrame + deltaTime;
 			bool advanced = false;
 			while ( elapsed >= frameRate )

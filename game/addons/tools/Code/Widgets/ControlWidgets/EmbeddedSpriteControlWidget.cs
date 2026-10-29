@@ -130,7 +130,7 @@ public class EmbeddedSpriteControlWidget : EmbeddedResourceControlWidget
 			}
 			if ( asset.TryLoadResource<Sprite>( out var sprite ) )
 			{
-				// Embed a copy, the asset's instance is shared with everything else that references it
+				//Embed a copy, the asset's instance is shared with everything else that references it
 				PropertyStartEdit();
 				CreateEmbeddedFromFile( SerializedProperty, sprite );
 				PropertyFinishEdit();
@@ -201,7 +201,7 @@ public class EmbeddedSpriteControlWidget : EmbeddedResourceControlWidget
 		}
 	}
 
-	/// <summary>A new sprite marked as embedded, so it's deep copied on clone and saved inline</summary>
+	//A new sprite marked as embedded, so it's deep copied on clone and saved inline
 	static Sprite CreateEmbeddedSprite()
 	{
 		return new Sprite { EmbeddedResource = new() { ResourceCompiler = "embed" } };

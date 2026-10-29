@@ -4,9 +4,7 @@ namespace Rinten;
 
 internal partial class BytePack
 {
-	/// <summary>
-	/// A packer that can write and read its value type without boxing it.
-	/// </summary>
+	//A packer that can write and read its value type without boxing it.
 	internal interface IValuePacker<T>
 	{
 		void Write( ref ByteStream bs, T value );

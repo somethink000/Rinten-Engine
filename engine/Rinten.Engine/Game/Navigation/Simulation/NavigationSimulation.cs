@@ -476,7 +476,7 @@ internal sealed class SimulationAgent
 			WallRevision = -1;
 			RestingPosition = null;
 			if ( Link is not null ) return;
-			// Moving along an existing route only needs its start repaired.
+			//Moving along an existing route only needs its start repaired.
 			if ( HasRoute && Target.HasValue && Path.Count > 0 && !NeedsPath ) { NeedsRepair = true; return; }
 			HasRoute = false; Path.Clear(); NeedsPath = Target.HasValue;
 		}

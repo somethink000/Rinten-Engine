@@ -16,7 +16,7 @@ public partial class GameTransform
 		_worldCached = default;
 		_worldInterpCached = default;
 
-		// Most child bones have no listeners, skip the callback setup for them
+		//Most child bones have no listeners, skip the callback setup for them
 		if ( OnTransformChanged is not null || OnTransformChangedInternal is not null )
 		{
 			InsideChangeCallback = useTargetLocal;

@@ -28,7 +28,7 @@ internal static class LogBuffer
 
 	static void OnLog( LogEvent e )
 	{
-		//The ring holds 2000 events from editor start: it must not own what they logged, or a logged component keeps its closed scene alive
+		//2000 events from editor start: holding what they logged would keep a logged component's closed scene alive
 		e = e.WithWeakArguments();
 		e.Exception = null;
 		lock ( sync )

@@ -271,7 +271,7 @@ public abstract class Joint : Component, Component.ExecuteInEditor
 			body2 = _worldBody;
 		}
 
-		// Both ends on the same body (e.g. two children of one prop) - nothing to constrain
+		//Both ends on the same body (e.g. two children of one prop) - nothing to constrain
 		if ( body1 == body2 )
 			return;
 

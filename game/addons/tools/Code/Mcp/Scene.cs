@@ -395,8 +395,8 @@ public static partial class SceneTools
 		if ( newParent is not null && newParent.Scene != go.Scene )
 			throw new Exception( $"'{newParent.Name}' is in another open scene - objects can't be parented across scenes" );
 
-		// Name, enabled, parent and transform are all the object's own properties - All would make an
-		// edit inside a prefab instance snapshot the whole instance, before and after
+		//Name, enabled, parent and transform are all the object's own properties - All would make an
+		//edit inside a prefab instance snapshot the whole instance, before and after
 		using ( session.UndoScope( "Edit GameObject" ).WithGameObjectChanges( go, GameObjectUndoFlags.Properties ).Push() )
 		{
 			if ( !string.IsNullOrWhiteSpace( name ) )
@@ -833,7 +833,7 @@ public static partial class SceneTools
 		return SceneEditorSession.All.OrderBy( x => x != SceneEditorSession.Active );
 	}
 
-	/// <summary>A component from either its own id, or its game object's id plus a type name.</summary>
+	//A component from either its own id, or its game object's id plus a type name.
 	private static Component ResolveComponent( string id, string type )
 	{
 		if ( !Guid.TryParse( id, out var guid ) )

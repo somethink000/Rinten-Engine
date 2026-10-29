@@ -282,7 +282,7 @@ public abstract class BaseVirtualPanel : Panel
 		PositionPanel( i, panel );
 	}
 
-	// Re-render existing cells when the Item template has been set again, like a normal razor child would be.
+	//Re-render existing cells when the Item template has been set again, like a normal razor child would be.
 	private void RefreshCellContent()
 	{
 		if ( !_itemChanged ) return;

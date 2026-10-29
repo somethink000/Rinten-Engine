@@ -1849,10 +1849,7 @@ namespace Rinten.UI
 			};
 		}
 
-		/// <summary>
-		/// Parses a transform-origin or perspective-origin position. Like CSS, keywords pick their own
-		/// axis, so "bottom left" and "left bottom" are the same point. A single length still sets both axes.
-		/// </summary>
+		//A transform-origin or perspective-origin position; keywords pick their own axis, so "bottom left" = "left bottom"
 		static bool TryParseOrigin( string value, out Length x, out Length y )
 		{
 			var center = new Length { Unit = LengthUnit.Center };
@@ -1873,7 +1870,7 @@ namespace Rinten.UI
 				return true;
 			}
 
-			// "left right" or "top bottom" isn't a position
+			//"left right" or "top bottom" isn't a position
 			if ( axisA != OriginAxis.None && axisA == axisB )
 				return false;
 

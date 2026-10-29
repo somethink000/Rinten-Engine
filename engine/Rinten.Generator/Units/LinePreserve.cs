@@ -23,8 +23,8 @@ namespace Rinten.Generator
 			var lineNm = SyntaxFactory.Literal( $"{lineSpan.StartLinePosition.Line + 1}", lineSpan.StartLinePosition.Line + 1 );
 			var file = SyntaxFactory.Literal( $"{tree.FilePath}" );
 
-			// "\r#line 12 "file"\r\n", built with its whitespace in place - NormalizeWhitespace on every
-			// statement was a good part of the generator's time
+			//"\r#line 12 "file"\r\n", built with its whitespace in place - NormalizeWhitespace on every
+			//statement was a good part of the generator's time
 			var line = SyntaxFactory.LineDirectiveTrivia(
 				SyntaxFactory.Token( SyntaxFactory.TriviaList( SyntaxFactory.CarriageReturn ), SyntaxKind.HashToken, SyntaxFactory.TriviaList() ),
 				SyntaxFactory.Token( SyntaxFactory.TriviaList(), SyntaxKind.LineKeyword, SyntaxFactory.TriviaList( SyntaxFactory.Space ) ),

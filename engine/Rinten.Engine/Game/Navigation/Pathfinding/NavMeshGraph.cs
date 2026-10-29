@@ -43,7 +43,7 @@ internal class NavMeshGraph
 	private readonly SortedSet<int> freeTiles = new();
 	private readonly Dictionary<(int X, int Y), List<MeshTile>> tileLocations = new();
 
-	// Polygons in different islands can never reach each other, keyed by allowed areas.
+	//Polygons in different islands can never reach each other, keyed by allowed areas.
 	private readonly object islandGate = new();
 	private volatile bool islandsDirty = true;
 	private readonly Dictionary<uint, IslandMap> islandMaps = new();
@@ -99,7 +99,7 @@ internal class NavMeshGraph
 	{
 		var parent = new int[islandPolyCount];
 		for ( int i = 0; i < parent.Length; i++ ) parent[i] = i;
-		// Union-find over links in both directions so one-way connections join islands.
+		//Union-find over links in both directions so one-way connections join islands.
 		foreach ( var tile in _tiles )
 		{
 			if ( tile.data is null ) continue;

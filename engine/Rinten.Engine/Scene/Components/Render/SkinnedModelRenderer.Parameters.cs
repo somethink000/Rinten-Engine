@@ -79,7 +79,7 @@ public sealed partial class SkinnedModelRenderer
 		Set( GetLookWeightParameter( name ), weight );
 	}
 
-	// Keep generated names with the renderer, so custom names don't accumulate in a global cache.
+	//Keep generated names with the renderer, so custom names don't accumulate in a global cache.
 	Dictionary<string, string> _lookWeightParameters;
 	Dictionary<string, (string Enabled, string Position, string Rotation)> _ikParameters;
 
@@ -94,7 +94,7 @@ public sealed partial class SkinnedModelRenderer
 
 	(string Enabled, string Position, string Rotation) GetIkParameters( string name )
 	{
-		// Interpolation treated null as an empty name before these strings were cached.
+		//Interpolation treated null as an empty name before these strings were cached.
 		name ??= "";
 		_ikParameters ??= new( StringComparer.Ordinal );
 		if ( !_ikParameters.TryGetValue( name, out var parameters ) )

@@ -190,7 +190,7 @@ public sealed class TypeDescription : ISourceLineProvider
 			}
 		}
 
-		// Ignore compiler generated properties, such as a record's EqualityContract
+		//Ignore compiler generated properties, such as a record's EqualityContract
 		if ( member is PropertyInfo propa && propa.HasAttribute( typeof( CompilerGeneratedAttribute ) ) )
 			return false;
 

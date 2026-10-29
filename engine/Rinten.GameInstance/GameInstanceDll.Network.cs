@@ -276,8 +276,8 @@ internal partial class GameInstanceDll
 	internal static void AddNetworkFile( BaseFileSystem source, BaseFileSystem mounted, string filename,
 		SmallNetworkFiles smallFiles, LargeNetworkFiles largeFiles )
 	{
-		// Native formats always go large. Only check that the candidate exists in the source;
-		// its size and checksum must come from the mount that actually serves client requests.
+		//Native formats always go large. Only check that the candidate exists in the source;
+		//its size and checksum must come from the mount that actually serves client requests.
 		if ( ShouldUseLargeDownload( filename, 0 ) )
 		{
 			if ( !source.FileExists( filename ) ) return;

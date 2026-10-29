@@ -349,7 +349,7 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 	//Adjust joint points for body scaling.
 	private void UpdateJointScale()
 	{
-		// Runs every fixed update for every ragdoll - only touch the native joints when a scale actually changed
+		//Runs every fixed update for every ragdoll - only touch the native joints when a scale actually changed
 		if ( _appliedJointScales is null || _appliedJointScales.Length != Joints.Count * 2 )
 		{
 			_appliedJointScales = new float[Joints.Count * 2];
@@ -362,7 +362,7 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 			if ( !joint.Component.IsValid() )
 				continue;
 
-			// A re-created native joint starts from unscaled anchors again
+			//A re-created native joint starts from unscaled anchors again
 			if ( joint.Component.NativeJoint != _appliedJoints[i] )
 			{
 				_appliedJoints[i] = joint.Component.NativeJoint;
@@ -393,7 +393,7 @@ public sealed partial class ModelPhysics : Component, IScenePhysicsEvents, IHasM
 	float[] _appliedJointScales;
 	PhysicsJoint[] _appliedJoints;
 
-	/// <summary>Put all bodies to sleep.</summary>
+	//Put all bodies to sleep.
 	private void Sleep()
 	{
 		foreach ( var body in Bodies )

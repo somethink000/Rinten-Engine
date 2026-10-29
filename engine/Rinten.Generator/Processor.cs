@@ -43,10 +43,7 @@ public class Processor
 
 	public List<Diagnostic> Diagnostics = new List<Diagnostic>();
 
-	/// <summary>
-	/// Set when the caller throws <see cref="Diagnostics"/> away, so work that could only produce
-	/// a diagnostic is skipped. The generated code is the same either way.
-	/// </summary>
+	/// <summary>Set when the caller discards diagnostics: work that could only produce one is skipped.</summary>
 	public bool IgnoreDiagnostics { get; set; }
 
 	public bool ILHotloadSupported { get; set; }

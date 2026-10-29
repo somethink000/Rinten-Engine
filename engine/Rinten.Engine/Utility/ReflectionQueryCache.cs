@@ -20,9 +20,7 @@ internal static class ReflectionQueryCache
 
 	public record SyncVarPropertyAndAttribute( PropertyInfo Property, SyncAttribute Attribute )
 	{
-		/// <summary>
-		/// Hash of the declaring type and property name, used to build network slots.
-		/// </summary>
+		/// <summary>Hash of the declaring type and property name, used to build network slots.</summary>
 		public int NameHash { get; init; }
 
 		public string DebugName { get; init; }

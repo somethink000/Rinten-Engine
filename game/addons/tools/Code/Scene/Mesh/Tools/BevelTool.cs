@@ -228,7 +228,7 @@ public partial class BevelTool( BevelEdges[] edges ) : EditorTool
 			}
 			catch ( Exception e )
 			{
-				// Bad topology can make BevelEdges throw, show the original mesh so the tool stays usable
+				//Bad topology can make BevelEdges throw, show the original mesh so the tool stays usable
 				component.Mesh = edgeGroup.Mesh;
 				_newEdges.Remove( component );
 				Log.Warning( e, $"Bevel failed: {e.Message}" );

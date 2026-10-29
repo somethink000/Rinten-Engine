@@ -78,9 +78,7 @@ internal partial class BytePack
 
 	public object Deserialize( ref ByteStream data ) => Deserialize( ref data, 0 );
 
-	/// <summary>
-	/// Deserialize a value of a known type. Plain value types are read without boxing them.
-	/// </summary>
+	/// <summary>Deserialize a value of a known type. Plain value types are read without boxing them.</summary>
 	public T Deserialize<T>( ref ByteStream data )
 	{
 		if ( typeof( T ).IsValueType )
@@ -145,7 +143,7 @@ internal partial class BytePack
 
 	void Serialize<T>( ref ByteStream bs, T obj )
 	{
-		// Ahead of the null check, which boxes value types in unoptimized code
+		//Ahead of the null check, which boxes value types in unoptimized code
 		if ( typeof( T ).IsValueType && types.TryGetValue( typeof( T ), out var typed ) && typed is IValuePacker<T> writer )
 		{
 			typed.WriteTypeIdentifier( ref bs, typeof( T ) );

@@ -60,7 +60,7 @@ internal class LargeNetworkFiles
 			return false;
 		}
 
-		// Redirect filesystems can return null for an unmapped path.
+		//Redirect filesystems can return null for an unmapped path.
 		if ( stream is null ) return false;
 		using ( stream )
 		{

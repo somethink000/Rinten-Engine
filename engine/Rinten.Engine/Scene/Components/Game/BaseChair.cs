@@ -284,7 +284,7 @@ public partial class BaseChair : Component, Component.IPressable, Component.IDam
 		if ( !damage.Tags.Has( "explosion" ) )
 			return;
 
-		// forward the damage to the player
+		//Forward the damage to the player
 		GetOccupant()?.GetComponent<IDamageable>()?.OnDamage( damage );
 	}
 }

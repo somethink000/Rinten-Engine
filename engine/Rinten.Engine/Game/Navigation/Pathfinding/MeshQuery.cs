@@ -128,7 +128,7 @@ internal class MeshQuery
 		return FinishPathSearch( path );
 	}
 
-	// Bounded search from start that rejoins the corridor instead of replanning it.
+	//Bounded search from start that rejoins the corridor instead of replanning it.
 	internal bool RepairPath( long start, Vector3 startPosition, Vector3 target, TraversalFilter filter, List<long> corridor, int iterations )
 	{
 		if ( corridor.Count == 0 || BeginPathSearch( start, corridor[^1], startPosition, target, filter ).Failed() ) return false;
@@ -383,7 +383,7 @@ internal class MeshQuery
 			bool covered = center.x - extent <= min.x && center.y - extent <= min.y && center.z - extent <= min.z
 				&& center.x + extent >= max.x && center.y + extent >= max.y && center.z + extent >= max.z;
 			if ( query.NearestRef() == 0 && !covered ) continue;
-			// A box hit can still be farther than a polygon just outside the box corner.
+			//A box hit can still be farther than a polygon just outside the box corner.
 			if ( query.NearestRef() != 0 && !covered ) QueryPolygons( center, extent * 1.75f, filter, query );
 			nearestPt = query.NearestPt();
 			return query.NearestRef();

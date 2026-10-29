@@ -48,7 +48,7 @@ internal sealed class PathSearch
 		if ( !mesh.IsValidPolyRef( startPolygon ) || !mesh.IsValidPolyRef( targetPolygon )
 			|| !Geometry.IsFinite( start ) || !Geometry.IsFinite( target ) ) return status;
 		this.filter = filter;
-		// Searching for a target on another island would exhaust the start's island.
+		//Searching for a target on another island would exhaust the start's island.
 		var islands = mesh.GetIslands( filter );
 		int island = islands.Of( startPolygon );
 		retargeted = island != islands.Of( targetPolygon );
@@ -87,7 +87,7 @@ internal sealed class PathSearch
 				//Different entry sides into a tile need distinct search nodes.
 				var next = nodes.GetNode( reference, link.side == 0xff ? 0 : link.side >> 1 );
 				var position = next.pos;
-				// Like Detour, a node's portal position is fixed by its first visit.
+				//Like Detour, a node's portal position is fixed by its first visit.
 				if ( next.flags == 0 )
 				{
 					var edgeStatus = reference == targetPolygon
@@ -130,14 +130,14 @@ internal sealed class PathSearch
 		return closest.id == targetPolygon && !retargeted ? Status.Success : Status.Success | Status.Partial;
 	}
 
-	// Replaces the corridor up to the furthest polygon the search reached, like Detour's partial finalize.
+	//Replaces the corridor up to the furthest polygon the search reached, like Detour's partial finalize.
 	internal bool FinishJoin( List<long> scratch, List<long> corridor )
 	{
 		if ( status.Failed() ) return false;
 		for ( int k = corridor.Count - 1; k >= 0; k-- )
 		{
 			var node = nodes.Find( corridor[k] );
-			// Joining at the start node would leave the corridor unchanged.
+			//Joining at the start node would leave the corridor unchanged.
 			if ( node is null || node.pidx == 0 ) continue;
 			scratch.Clear();
 			for ( int remaining = nodes.GetNodeCount(); node is not null && remaining > 0; remaining-- )
@@ -194,7 +194,7 @@ internal class SearchNodePool
 {
 	private SearchNode[] _nodes;
 	private int[] _next;
-	private int[] _first; // power of two, grown with the node count to keep chains short
+	private int[] _first; //Power of two, grown with the node count to keep chains short
 	private int _nodeCount;
 
 	public SearchNodePool()

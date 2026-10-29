@@ -46,7 +46,7 @@ public partial class GameObject
 
 		internal bool BreakPrefabInstances { get; set; }
 
-		/// <summary>Capture shallow undo state while preserving existing prefab ownership on restore.</summary>
+		//Capture shallow undo state while preserving existing prefab ownership on restore.
 		internal bool SerializeForUndo { get; set; }
 
 		//Don't serialize gameObject children.
@@ -383,8 +383,8 @@ public partial class GameObject
 			JsonUpgrader.Upgrade( serializedVersion, node, GetType() );
 		}
 
-		// Error describes the result of loading this object (e.g. a missing prefab stub), start clean.
-		// The missing prefab path below sets it again if the source still can't be loaded.
+		//Error describes the result of loading this object (e.g. a missing prefab stub), start clean.
+		//The missing prefab path below sets it again if the source still can't be loaded.
 		Flags &= ~GameObjectFlags.Error;
 
 		if ( node[JsonKeys.EditorSkipPrefabBreakOnRefresh] is null )
@@ -766,7 +766,7 @@ public partial class GameObject
 
 		if ( options.IsRefreshing )
 		{
-			// Editor snapshots omit generated bone/attachment identity, which survives an in-place refresh.
+			//Editor snapshots omit generated bone/attachment identity, which survives an in-place refresh.
 			if ( !options.IsNetworkRefresh )
 			{
 				inFlags |= Flags & (GameObjectFlags.Bone | GameObjectFlags.Attachment);

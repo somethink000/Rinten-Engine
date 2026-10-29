@@ -39,7 +39,7 @@ public class BaseFileSystem
 	internal bool PendingDispose = false;
 	internal bool TraceChanges = false;
 
-	// Zio's finalizer does no cleanup for sub/readonly/physical filesystems, it only throws on the finalizer thread if a Dispose failed part way
+	//Zio's finalizer cleans nothing up for these filesystems; it only throws on the finalizer thread after a failed Dispose
 	internal static void SuppressZioFinalizer( Zio.IFileSystem fs ) => GC.SuppressFinalize( fs );
 
 	internal virtual void Dispose()

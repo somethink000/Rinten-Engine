@@ -138,7 +138,7 @@ public sealed class HullCollider : Collider
 			box.Mins *= world.Scale;
 			box.Maxs *= world.Scale;
 
-			// The shape rotates about the box's center, so the center's offset from our origin needs rotating too
+			//The shape rotates about the box's center, so the center's offset from our origin needs rotating too
 			var offset = local.Position + local.Rotation * box.Center - box.Center;
 			box.Mins += offset;
 			box.Maxs += offset;
@@ -174,7 +174,7 @@ public sealed class HullCollider : Collider
 			box.Mins *= scale;
 			box.Maxs *= scale;
 
-			// The shape rotates about the box's center, so the center's offset from our origin needs rotating too
+			//The shape rotates about the box's center, so the center's offset from our origin needs rotating too
 			var offset = local.Position + local.Rotation * box.Center - box.Center;
 			box.Mins += offset;
 			box.Maxs += offset;

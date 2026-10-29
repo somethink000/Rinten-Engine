@@ -45,7 +45,7 @@ internal class SmallNetworkFiles
 		return true;
 	}
 
-	/// <summary>Add contents already read from an open file, without resolving its path again.</summary>
+	//Add contents already read from an open file, without resolving its path again.
 	internal void AddFile( string fileName, byte[] contents )
 	{
 		var normalizedFileName = NormalizeFileName( fileName );

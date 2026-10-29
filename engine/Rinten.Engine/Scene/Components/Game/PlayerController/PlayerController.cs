@@ -211,7 +211,7 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 	void UpdateGroundVelocity()
 	{
-		if ( GroundObject is null || Body.PhysicsBody is not { IsValid: true } body )
+		if ( GroundObject is null || Body.PhysicsBody is not { } body || !body.IsValid() )
 		{
 			GroundVelocity = 0;
 			return;
@@ -233,6 +233,7 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 	{
 		_canCoyoteJump = false;
 		Mode?.OnJump();
+		var jumpBoost = CalculateJumpBoost( velocity );
 		PreventGrounding( 0.2f );
 
 		var currentVel = Body.Velocity;
@@ -252,18 +253,19 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 	{
 		if ( !EnableJumpBoost || JumpBoost <= 0 || RunSpeed <= 0 ) return Vector3.Zero;
 		if ( !IsOnGround || IsDucking || Mode is not MoveModeWalk ) return Vector3.Zero;
-		if ( jumpVelocity.y <= 0 ) return Vector3.Zero;
+		if ( jumpVelocity.Dot( UpDirection ) <= 0 ) return Vector3.Zero;
 
-		var wish = WishVelocity.WithY( 0 );
+		var wish = WithoutVertical( WishVelocity );
 		if ( wish.Length < RunSpeed * 0.95f ) return Vector3.Zero;
 
-		//Sprint speed relative to the ground, so riding a moving platform doesn't change eligibility
+		//Sprint speed along the slope, relative to the ground: uphill running and moving platforms don't change eligibility
 		var direction = wish.Normal;
-		var relativeVelocity = (Body.Velocity - GroundVelocity).WithY( 0 );
-		if ( relativeVelocity.Dot( direction ) < RunSpeed * 0.95f ) return Vector3.Zero;
+		var groundDirection = (direction - GroundNormal * direction.Dot( GroundNormal )).Normal;
+		var relativeVelocity = Body.Velocity - GroundVelocity;
+		if ( relativeVelocity.Dot( groundDirection ) < RunSpeed * 0.95f ) return Vector3.Zero;
 
 		var boostSpeed = RunSpeed * JumpBoost;
-		var remainingSpeed = RunSpeed + boostSpeed - relativeVelocity.Length;
+		var remainingSpeed = RunSpeed + boostSpeed - WithoutVertical( relativeVelocity ).Length;
 		return direction * MathF.Max( 0, MathF.Min( boostSpeed, remainingSpeed ) );
 	}
 

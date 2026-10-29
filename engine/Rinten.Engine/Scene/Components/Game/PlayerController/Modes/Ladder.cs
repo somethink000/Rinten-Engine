@@ -120,6 +120,7 @@ public partial class MoveModeLadder : MoveMode
 		Vector3 foot = wt.Position;
 
 		GameObject ladderObject = default;
+		Collider ladderCollider = default;
 
 		foreach ( var touch in Controller.Body.Touching )
 		{

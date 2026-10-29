@@ -126,32 +126,32 @@ partial class FaceTool
 			switch ( _activePanel )
 			{
 				case "scale":
-					AddButton( grid, "Scale X Up", "chevron_right", null, () => DoScaleX( true ) );
-					AddButton( grid, "Scale X Down", "chevron_left", null, () => DoScaleX( false ) );
-					AddButton( grid, "Scale Y Up", "expand_less", null, () => DoScaleY( true ) );
-					AddButton( grid, "Scale Y Down", "expand_more", null, () => DoScaleY( false ) );
+					AddButton( grid, "Scale X Up", "chevron_right", "mesh.texture-scale-x-up", ScaleXUp );
+					AddButton( grid, "Scale X Down", "chevron_left", "mesh.texture-scale-x-down", ScaleXDown );
+					AddButton( grid, "Scale Y Up", "expand_less", "mesh.texture-scale-y-up", ScaleYUp );
+					AddButton( grid, "Scale Y Down", "expand_more", "mesh.texture-scale-y-down", ScaleYDown );
 					break;
 
 				case "shift":
-					AddButton( grid, "Shift Left", "arrow_back", null, () => DoShiftX( true ) );
-					AddButton( grid, "Shift Right", "arrow_forward", null, () => DoShiftX( false ) );
-					AddButton( grid, "Shift Up", "arrow_upward", null, () => DoShiftY( true ) );
-					AddButton( grid, "Shift Down", "arrow_downward", null, () => DoShiftY( false ) );
+					AddButton( grid, "Shift Left", "arrow_back", "mesh.texture-shift-left", ShiftLeft );
+					AddButton( grid, "Shift Right", "arrow_forward", "mesh.texture-shift-right", ShiftRight );
+					AddButton( grid, "Shift Up", "arrow_upward", "mesh.texture-shift-up", ShiftUp );
+					AddButton( grid, "Shift Down", "arrow_downward", "mesh.texture-shift-down", ShiftDown );
 					break;
 
 				case "fit":
-					AddButton( grid, "Fit Both", "fit_screen", null, () => DoFit( TextureFit.x, TextureFit.y ) );
-					AddButton( grid, "Fit X", "swap_horiz", null, () => DoFit( TextureFit.x, -1 ) );
-					AddButton( grid, "Fit Y", "swap_vert", null, () => DoFit( -1, TextureFit.y ) );
+					AddButton( grid, "Fit Both", "fit_screen", "mesh.texture-fit-both", FitBoth );
+					AddButton( grid, "Fit X", "swap_horiz", "mesh.texture-fit-x", FitX );
+					AddButton( grid, "Fit Y", "swap_vert", "mesh.texture-fit-y", FitY );
 					AddSettings( grid, sheet => sheet.AddPropertyRow( _textureTarget.GetProperty( nameof( TextureFit ) ) ) );
 					break;
 
 				case "justify":
-					AddButton( grid, "Left", "align_horizontal_left", null, () => DoJustify( PolygonMesh.TextureJustification.Left ) );
-					AddButton( grid, "Right", "align_horizontal_right", null, () => DoJustify( PolygonMesh.TextureJustification.Right ) );
-					AddButton( grid, "Top", "vertical_align_top", null, () => DoJustify( PolygonMesh.TextureJustification.Top ) );
-					AddButton( grid, "Bottom", "vertical_align_bottom", null, () => DoJustify( PolygonMesh.TextureJustification.Bottom ) );
-					AddButton( grid, "Center", "filter_center_focus", null, () => DoJustify( PolygonMesh.TextureJustification.Center ) );
+					AddButton( grid, "Left", "align_horizontal_left", "mesh.texture-justify-left", JustifyLeft );
+					AddButton( grid, "Right", "align_horizontal_right", "mesh.texture-justify-right", JustifyRight );
+					AddButton( grid, "Top", "vertical_align_top", "mesh.texture-justify-top", JustifyTop );
+					AddButton( grid, "Bottom", "vertical_align_bottom", "mesh.texture-justify-bottom", JustifyBottom );
+					AddButton( grid, "Center", "filter_center_focus", "mesh.texture-justify-center", JustifyCenter );
 					AddSettings( grid, sheet => sheet.AddPropertyRow( _textureTarget.GetProperty( nameof( TextureTreatAsOne ) ) ) );
 					break;
 
@@ -169,11 +169,11 @@ partial class FaceTool
 					break;
 
 				default:
-					AddButton( grid, "Align to Grid", "grid_on", null, AlignToGrid );
-					AddButton( grid, "Align to Face", "texture", null, AlignToFace );
-					AddButton( grid, "Align to View", "visibility", null, AlignToView );
-					AddButton( grid, "Rotate CW", "rotate_right", null, () => DoRotate( true ) );
-					AddButton( grid, "Rotate CCW", "rotate_left", null, () => DoRotate( false ) );
+					AddButton( grid, "Align to Grid", "grid_on", "mesh.texture-align-grid", AlignToGrid );
+					AddButton( grid, "Align to Face", "texture", "mesh.texture-align-face", AlignToFace );
+					AddButton( grid, "Align to View", "visibility", "mesh.texture-align-view", AlignToView );
+					AddButton( grid, "Rotate CW", "rotate_right", "mesh.texture-rotate-clockwise", RotateClockwise );
+					AddButton( grid, "Rotate CCW", "rotate_left", "mesh.texture-rotate-counterclockwise", RotateCounterclockwise );
 					break;
 			}
 		}
@@ -303,6 +303,7 @@ partial class FaceTool
 			_meshTool.CurrentTool = tool;
 		}
 
+		[Shortcut( "mesh.texture-align-grid", "CTRL+SHIFT+T", typeof( SceneViewPanel ) )]
 		private void AlignToGrid()
 		{
 			using var scope = SceneEditorSession.Scope();
@@ -318,6 +319,7 @@ partial class FaceTool
 			}
 		}
 
+		[Shortcut( "mesh.texture-align-face", "CTRL+SHIFT+F", typeof( SceneViewPanel ) )]
 		private void AlignToFace()
 		{
 			using var scope = SceneEditorSession.Scope();
@@ -333,6 +335,7 @@ partial class FaceTool
 			}
 		}
 
+		[Shortcut( "mesh.texture-align-view", "V", typeof( SceneViewPanel ) )]
 		private void AlignToView()
 		{
 			var sceneView = SceneViewPanel.Current?.LastSelectedViewport;
@@ -359,6 +362,60 @@ partial class FaceTool
 				}
 			}
 		}
+
+		[Shortcut( "mesh.texture-rotate-clockwise", "ALT+S", typeof( SceneViewPanel ) )]
+		void RotateClockwise() => DoRotate( true );
+
+		[Shortcut( "mesh.texture-rotate-counterclockwise", "ALT+Q", typeof( SceneViewPanel ) )]
+		void RotateCounterclockwise() => DoRotate( false );
+
+		[Shortcut( "mesh.texture-scale-x-up", "", typeof( SceneViewPanel ) )]
+		void ScaleXUp() => DoScaleX( true );
+
+		[Shortcut( "mesh.texture-scale-x-down", "", typeof( SceneViewPanel ) )]
+		void ScaleXDown() => DoScaleX( false );
+
+		[Shortcut( "mesh.texture-scale-y-up", "", typeof( SceneViewPanel ) )]
+		void ScaleYUp() => DoScaleY( true );
+
+		[Shortcut( "mesh.texture-scale-y-down", "", typeof( SceneViewPanel ) )]
+		void ScaleYDown() => DoScaleY( false );
+
+		[Shortcut( "mesh.texture-shift-left", "", typeof( SceneViewPanel ) )]
+		void ShiftLeft() => DoShiftX( true );
+
+		[Shortcut( "mesh.texture-shift-right", "", typeof( SceneViewPanel ) )]
+		void ShiftRight() => DoShiftX( false );
+
+		[Shortcut( "mesh.texture-shift-up", "", typeof( SceneViewPanel ) )]
+		void ShiftUp() => DoShiftY( true );
+
+		[Shortcut( "mesh.texture-shift-down", "", typeof( SceneViewPanel ) )]
+		void ShiftDown() => DoShiftY( false );
+
+		[Shortcut( "mesh.texture-fit-both", "CTRL+SHIFT+KP_DEL", typeof( SceneViewPanel ) )]
+		void FitBoth() => DoFit( TextureFit.x, TextureFit.y );
+
+		[Shortcut( "mesh.texture-fit-x", "", typeof( SceneViewPanel ) )]
+		void FitX() => DoFit( TextureFit.x, -1 );
+
+		[Shortcut( "mesh.texture-fit-y", "", typeof( SceneViewPanel ) )]
+		void FitY() => DoFit( -1, TextureFit.y );
+
+		[Shortcut( "mesh.texture-justify-left", "CTRL+SHIFT+KP_4", typeof( SceneViewPanel ) )]
+		void JustifyLeft() => DoJustify( PolygonMesh.TextureJustification.Left );
+
+		[Shortcut( "mesh.texture-justify-top", "CTRL+SHIFT+KP_8", typeof( SceneViewPanel ) )]
+		void JustifyTop() => DoJustify( PolygonMesh.TextureJustification.Top );
+
+		[Shortcut( "mesh.texture-justify-center", "CTRL+SHIFT+KP_5", typeof( SceneViewPanel ) )]
+		void JustifyCenter() => DoJustify( PolygonMesh.TextureJustification.Center );
+
+		[Shortcut( "mesh.texture-justify-bottom", "CTRL+SHIFT+KP_2", typeof( SceneViewPanel ) )]
+		void JustifyBottom() => DoJustify( PolygonMesh.TextureJustification.Bottom );
+
+		[Shortcut( "mesh.texture-justify-right", "CTRL+SHIFT+KP_6", typeof( SceneViewPanel ) )]
+		void JustifyRight() => DoJustify( PolygonMesh.TextureJustification.Right );
 
 		private void DoRotate( bool clockwise )
 		{

@@ -183,21 +183,24 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 		UpdateBody();
 
 		if ( IsProxy )
+		{
+			_stepGrounded = false;
 			return;
+		}
 
 		Mode.AddVelocity();
+		BeginStep();
 		Mode.PrePhysicsStep();
 	}
 
 	void IScenePhysicsEvents.PostPhysicsStep()
 	{
-		Velocity = Body.Velocity - GroundVelocity;
 		UpdateGroundVelocity();
-
-		RestoreStep();
 
 		Mode?.PostPhysicsStep();
 		CategorizeGround();
+		UpdateGroundVelocity();
+		Velocity = Body.Velocity - GroundVelocity;
 
 		ChooseBestMoveMode();
 	}
@@ -206,7 +209,7 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 	void UpdateGroundVelocity()
 	{
-		if ( GroundObject is null )
+		if ( GroundObject is null || Body.PhysicsBody is not { IsValid: true } body )
 		{
 			GroundVelocity = 0;
 			return;
@@ -214,22 +217,19 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 		if ( GroundComponent is Collider collider )
 		{
-			GroundVelocity = collider.GetVelocityAtPoint( WorldPosition );
+			GroundVelocity = collider.GetVelocityAtPoint( body.Position );
 		}
 
 		if ( GroundComponent is Rigidbody rigidbody )
 		{
-			var mass1 = BodyMass;
-			var mass2 = rigidbody.Mass;
-			var massFactor = mass2 / (mass1 + mass2);
-			GroundVelocity = rigidbody.GetVelocityAtPoint( WorldPosition ) * massFactor;
+			GroundVelocity = rigidbody.GetVelocityAtPoint( body.Position );
 		}
 	}
 
 	/// <summary>Adds velocity in a special way. First we subtract any opposite velocity (ie, falling) then we add the velocity, but we clamp it to that direction. This means that if you jump when you're running up a platform, you don't get extra jump power.</summary>
 	public void Jump( Vector3 velocity )
 	{
-		var jumpBoost = CalculateJumpBoost( velocity );
+		Mode?.OnJump();
 		PreventGrounding( 0.2f );
 
 		var currentVel = Body.Velocity;

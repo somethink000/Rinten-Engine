@@ -2,8 +2,8 @@
 
 public sealed partial class PlayerController : Component
 {
-	//Metres: half an inch upstream
-	const float _groundedFeetLift = 0.0127f;
+	//Metres: an inch upstream
+	const float _groundedFeetLift = 0.0254f;
 
 	/// <summary>Make sure the body and our components are created</summary>
 	void EnsureComponentsCreated()
@@ -85,6 +85,8 @@ public sealed partial class PlayerController : Component
 		Body.Locking = locking;
 
 		Body.MassOverride = BodyMass;
+		Body.EnhancedCcd = false;
+		Body.PhysicsBody?.AutoSleep = false;
 
 		//When trying to move, we move the mass center up to the waist so the player
 		//can "step" over smaller shit When not moving we drop it to the foot position.
@@ -97,7 +99,10 @@ public sealed partial class PlayerController : Component
 		//
 		// Small lips are absorbed by Reground, and larger "steps" by TryStep.
 		//
-		var feetLift = IsOnGround && !GroundIsDynamic && !Body.Gravity ? _groundedFeetLift : 0.0f;
+		// Keep the feet outside Box3D's speculative mesh contacts while ground probes maintain support.
+		var feetLift = IsOnGround && !GroundIsDynamic && !Body.Gravity
+			? MathF.Min( _groundedFeetLift / MathF.Abs( WorldTransform.UniformScale ), feetLength * 0.5f )
+			: 0.0f;
 		var feetBoxLength = feetLength - feetLift;
 		//Up is y: as wide as the body on both horizontal axes, as tall as the part of the character it covers
 		FeetCollider.Scale = new Vector3( BodyRadius, feetBoxLength, BodyRadius );

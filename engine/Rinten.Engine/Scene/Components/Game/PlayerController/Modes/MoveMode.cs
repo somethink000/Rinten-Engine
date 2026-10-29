@@ -31,9 +31,9 @@ public abstract partial class MoveMode : Component
 
 		//Disable gravity while standing still on ground (below 2.5 cm/s) so we don't slide down slopes
 		if ( !Controller.IsOnGround ) wantsGravity = true;
-		if ( Controller.Velocity.Length > 0.025f ) wantsGravity = true;
-		if ( Controller.GroundVelocity.Length > 0.025f ) wantsGravity = true;
-		if ( Controller.GroundIsDynamic ) wantsGravity = true;
+		if ( Controller.WithoutVertical( Controller.Velocity ).Length > 0.0254f ) wantsGravity = true;
+		if ( Controller.GroundVelocity.Length > 0.0254f ) wantsGravity = true;
+		if ( Controller.GroundUsesContactFriction ) wantsGravity = true;
 
 		body.Gravity = wantsGravity;
 
@@ -97,7 +97,12 @@ public abstract partial class MoveMode : Component
 
 	}
 
-	//If we're approaching a step, step up if possible
+	/// <summary>Called before a jump is applied, allowing the mode to release its attachment.</summary>
+	public virtual void OnJump()
+	{
+	}
+
+	/// <summary>If we're approaching a step, step up if possible</summary>
 	protected void TrySteppingUp( float maxDistance )
 	{
 		Controller.TryStep( maxDistance );

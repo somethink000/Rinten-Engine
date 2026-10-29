@@ -23,6 +23,9 @@ public partial class MoveModeLadder : MoveMode
 	/// <summary>When climbing, this is the rotation of the wall/ladder you're climbing, where Forward is the direction to look at the ladder, and Up is the direction to climb.</summary>
 	public Rotation ClimbingRotation { get; set; }
 
+	Collider climbingCollider;
+	bool waitingToLeaveLadders;
+
 
 	public MoveModeLadder()
 	{
@@ -53,6 +56,13 @@ public partial class MoveModeLadder : MoveMode
 	{
 		Controller.IsClimbing = false;
 		Controller.Body.Velocity = Controller.Body.Velocity.ClampLength( Controller.RunSpeed );
+	}
+
+	public override void OnJump()
+	{
+		waitingToLeaveLadders = true;
+		ClimbingObject = default;
+		climbingCollider = default;
 	}
 
 	public override void PostPhysicsStep()
@@ -97,6 +107,14 @@ public partial class MoveModeLadder : MoveMode
 		if ( Controller?.Body == null )
 			return;
 
+		if ( waitingToLeaveLadders )
+		{
+			if ( Controller.Body.Touching.Any( x => x.Tags.HasAny( ClimbableTags ) ) )
+				return;
+
+			waitingToLeaveLadders = false;
+		}
+
 		var wt = WorldTransform;
 		Vector3 head = wt.PointToWorld( new Vector3( 0, Controller.CurrentHeight, 0 ) );
 		Vector3 foot = wt.Position;
@@ -112,8 +130,14 @@ public partial class MoveModeLadder : MoveMode
 			if ( ClimbingObject == touch.GameObject )
 			{
 				ladderObject = touch.GameObject;
+				ladderCollider = touch;
+				if ( climbingCollider == touch )
+					break;
 				continue;
 			}
+
+			if ( ladderObject.IsValid() )
+				continue;
 
 			//Don't start climbing this ladder if it's below us, and we're not already climbing it
 
@@ -125,11 +149,11 @@ public partial class MoveModeLadder : MoveMode
 				continue;
 
 			ladderObject = touch.GameObject;
-			break;
+			ladderCollider = touch;
 
 		}
 
-		if ( ladderObject == ClimbingObject )
+		if ( ladderObject == ClimbingObject && ladderCollider == climbingCollider )
 			return;
 
 		ClimbingObject = ladderObject;
@@ -151,9 +175,7 @@ public partial class MoveModeLadder : MoveMode
 
 	public override Vector3 UpdateMove( Rotation eyes, Vector3 input )
 	{
-		//Up the ladder for forward, which is -Z of the move (see Vector3.Forward). It read .x - forward in the basis
-		//before Y was up, strafing in this one - so a ladder was climbed with the side keys and not at all with forward.
-		var wishVelocity = new Vector3( 0, -Input.AnalogMove.z, 0 );
+		var wishVelocity = ClimbingRotation.Up * input.x;
 		if ( eyes.Pitch() > 50f )
 		{
 			wishVelocity *= -1f;

@@ -53,7 +53,7 @@ public sealed partial class PlayerController : Component
 		float radiusScale = 1.0f;
 		var tr = TraceBody( currentPosition + Vector3.Up * 0.025f, currentPosition + Vector3.Down * stepSize, radiusScale, 0.5f );
 
-		while ( tr.StartedSolid )
+		while ( tr.StartedSolid || (tr.Hit && !Mode.IsStandableSurface( tr )) )
 		{
 			radiusScale = radiusScale - 0.1f;
 			if ( radiusScale < 0.7f )
@@ -67,7 +67,7 @@ public sealed partial class PlayerController : Component
 			return;
 		}
 
-		if ( tr.Hit )
+		if ( tr.Hit && Mode.IsStandableSurface( tr ) )
 		{
 			var targetPosition = tr.EndPosition + Vector3.Up * 0.00025f;
 			var delta = currentPosition - targetPosition;

@@ -119,7 +119,7 @@ public sealed partial class PlayerController : Component
 
 			//didn't step up enough to bother - returning here avoids getting stuck on corners
 			//when there's a ceiling above (due to RestoreStep preventing moving forward)
-			if ( result.EndPosition.y.AlmostEqual( Body.WorldPosition.y, 0.0004f ) )
+			if ( (result.EndPosition - Body.WorldPosition).Dot( up ) <= _skin )
 				return;
 
 			_didstep = true;

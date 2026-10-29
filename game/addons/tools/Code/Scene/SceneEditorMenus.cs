@@ -329,10 +329,8 @@ public static class SceneEditorMenus
 					SceneUtility.MakeIdGuidsUnique( prefabInstanceJson, gameObject.Id );
 					gameObject.Clear();
 					var originalTransform = gameObject.WorldTransform;
-					var originalName = gameObject.Name;
 					gameObject.Deserialize( prefabInstanceJson );
 					gameObject.WorldTransform = originalTransform;
-					gameObject.Name = originalName;
 				}
 			}
 		};

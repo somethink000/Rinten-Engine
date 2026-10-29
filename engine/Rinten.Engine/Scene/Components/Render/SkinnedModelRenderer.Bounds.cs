@@ -29,7 +29,7 @@ partial class SkinnedModelRenderer
 		if ( SceneModel.IsValid() && SceneModel.Animation.WorldBounds is { } bounds )
 		{
 			if ( Usable( bounds ) )
-				return bounds;
+				return DeformationVolumes > 0 && Model is not null ? bounds.AddBBox( Deformed( Model.RenderBounds ).Transform( WorldTransform ) ) : bounds;
 
 			WarnAboutBounds( "world", bounds );
 		}
@@ -47,7 +47,7 @@ partial class SkinnedModelRenderer
 		if ( SceneModel.IsValid() && SceneModel.Animation.LocalBounds is { } bounds )
 		{
 			if ( Usable( bounds ) )
-				return bounds;
+				return DeformationVolumes > 0 && Model is not null ? bounds.AddBBox( Deformed( Model.RenderBounds ) ) : bounds;
 
 			WarnAboutBounds( "local", bounds );
 		}

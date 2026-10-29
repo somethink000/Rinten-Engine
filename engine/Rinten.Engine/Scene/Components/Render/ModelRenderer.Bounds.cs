@@ -19,7 +19,7 @@ partial class ModelRenderer
 		if ( Model is null )
 			return ModelOrError?.RenderBounds ?? BBox.FromPositionAndSize( Vector3.Zero, 0.4064f );
 
-		return Model.RenderBounds;
+		return Deformed( Model.RenderBounds );
 	}
 
 	//Where the cull sphere is, and how big, from when it last moved.

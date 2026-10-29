@@ -190,6 +190,10 @@ public sealed class TypeDescription : ISourceLineProvider
 			}
 		}
 
+		// Ignore compiler generated properties, such as a record's EqualityContract
+		if ( member is PropertyInfo propa && propa.HasAttribute( typeof( CompilerGeneratedAttribute ) ) )
+			return false;
+
 		if ( member is MethodInfo methodInfo )
 		{
 			//Skip finalizers; the name is a literal so type registration doesn't pull in Roslyn

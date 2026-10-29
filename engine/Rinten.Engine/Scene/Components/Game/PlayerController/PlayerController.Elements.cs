@@ -43,7 +43,10 @@ public sealed partial class PlayerController : Component
 	void UpdateBody()
 	{
 		var feetHeight = CurrentHeight * 0.5f;
-		var radius = (BodyRadius * MathF.Sqrt( 2 )) / 2;
+		var radius = BodyRadius * 0.5f;
+		var up = UpDirection;
+		var localUp = Rotation.FromYaw( -WorldRotation.Yaw() ) * up;
+		var localUpAbs = localUp.Abs();
 
 		//If we're not on the ground, we have slippy as fuck feet
 		var feetFriction = 0.0f;
@@ -72,10 +75,12 @@ public sealed partial class PlayerController : Component
 		BodyCollider.Start = Vector3.Up * (CurrentHeight - radius);
 		BodyCollider.End = Vector3.Up * MathF.Max( BodyCollider.Start.y - (feetHeight - radius), radius + 0.025f );
 		BodyCollider.Friction = 0.0f;
+		BodyCollider.Elasticity = 0.0f;
 		BodyCollider.Enabled = BodyCollider.End.y < BodyCollider.Start.y;
 
 		var feetLength = BodyCollider.Enabled ? feetHeight : CurrentHeight;
 		FeetCollider.Friction = feetFriction;
+		FeetCollider.Elasticity = 0.0f;
 		FeetCollider.Enabled = true;
 
 		var locking = Body.Locking;

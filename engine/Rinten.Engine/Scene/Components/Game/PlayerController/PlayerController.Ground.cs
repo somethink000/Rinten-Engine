@@ -8,7 +8,7 @@ public sealed partial class PlayerController : Component
 	/// <summary>The collider component we're standing on. Null if we're standing nothing</summary>
 	public Component GroundComponent { get; set; }
 
-	/// <summary>If we're stnding on a surface this is it</summary>
+	/// <summary>The surface we're standing on.</summary>
 	public Surface GroundSurface { get; set; }
 
 	/// <summary>The friction property of the ground we're standing on.</summary>
@@ -22,6 +22,8 @@ public sealed partial class PlayerController : Component
 
 	TimeUntil _timeUntilAllowedGround = 0;
 	PhysicsShape _groundShape;
+	bool _canCoyoteJump;
+	internal bool CanCoyoteJump => _canCoyoteJump && CoyoteTime > 0 && TimeSinceGrounded <= CoyoteTime;
 
 	// Moving surfaces need native contact forces rather than static-ground walking.
 	internal bool GroundUsesContactFriction
@@ -69,14 +71,23 @@ public sealed partial class PlayerController : Component
 
 		var from = WorldPosition;
 		var drop = stepSize * MathF.Abs( WorldTransform.UniformScale );
-		if ( !TryFindGround( from, 0.05f, drop, out var ground, out var landing ) )
+		var preciseDrop = !Scene.Is2D && _groundShape.IsValid() && _groundShape.IsHullShape;
+		if ( preciseDrop )
+		{
+			//Refinement rays must not snap through a steep hull to the floor behind it.
+			var upward = TraceMovement( from, from + UpDirection * 0.05f, 0 );
+			var top = upward.StartedSolid ? from : upward.EndPosition;
+			var support = TraceMovement( top, from - UpDirection * drop, 0, includeGroundClearance: true );
+			if ( support.Hit && (support.StartedSolid ? support.Shape != _groundShape : !Mode.IsStandableSurface( support )) ) return;
+		}
+		if ( !TryFindGround( from, 0.05f, drop, out var ground, out var landing, preciseDrop: preciseDrop ) )
 			return;
 
 		if ( ground.Body?.BodyType == PhysicsBodyType.Dynamic )
 			return;
 
 		var height = (landing - from).Dot( UpDirection );
-		if ( height > _groundedFeetLift + _skin || height < -drop - _skin )
+		if ( height > _groundedFeetLift + _skin * 2 || height < -drop - _skin )
 			return;
 
 		var downward = TraceMovement( from, landing, _stepClearance );
@@ -90,7 +101,6 @@ public sealed partial class PlayerController : Component
 	void CategorizeGround()
 	{
 		var up = UpDirection;
-		var groundVel = GroundVelocity.Dot( up );
 
 		if ( !Mode.AllowGrounding )
 		{
@@ -99,28 +109,70 @@ public sealed partial class PlayerController : Component
 			return;
 		}
 
-		//ground is pushing us crazy, stop being grounded. Six and a third metres a second, which is faster than the run speed just below.
-		if ( groundVel > 6.35f )
+		var relative = Body.Velocity - GroundVelocity;
+		var movingUpRapidly = relative.Dot( up ) > Movement.MovementMath.NonJumpVelocity;
+		if ( IsOnGround )
 		{
-			PreventGrounding( 0.3f );
+			// Slope following is not a jump; explicit jumps already clear ground.
+			if ( !GroundUsesContactFriction && Mode is Movement.MoveModeWalk walk && walk.IsStaticGroundMove ) movingUpRapidly = false;
+			else movingUpRapidly &= relative.Dot( GroundNormal ) > Movement.MovementMath.NonJumpVelocity;
+		}
+		if ( _timeUntilAllowedGround > 0 || movingUpRapidly )
+		{
 			UpdateGroundFromTraceResult( default );
 			return;
 		}
 
-		if ( _timeUntilAllowedGround > 0 || groundVel > 7.6f )
-		{
-			UpdateGroundFromTraceResult( default );
-			return;
-		}
+		var scale = MathF.Abs( WorldTransform.UniformScale );
+		var preciseGround = !IsOnGround || (!Scene.Is2D && !GroundUsesContactFriction && _groundShape.IsValid() && _groundShape.IsHullShape);
+		if ( !TryFindGround( WorldPosition, 0.1f * scale, 0.05f * scale, out var ground, out _, requireContact: !IsOnGround, preciseDrop: preciseGround ) )
+			ground = FindGroundSupport( up, scale, preciseGround );
+		UpdateGroundFromTraceResult( ground );
+	}
 
-		if ( TryFindGround( WorldPosition, 0.1f, 0.05f, out var tr, out _ ) )
+	SceneTraceResult FindGroundSupport( Vector3 up, float scale, bool preciseGround )
+	{
+		var hull = BodyBox( 1, 0.5f );
+		SceneTraceResult Probe( BBox bounds ) => Scene.Trace.Box( bounds, WorldPosition + up * (0.1f * scale), WorldPosition - up * (0.05f * scale) )
+			.IgnoreGameObjectHierarchy( GameObject ).WithCollisionRules( Tags ).UseHitPosition().Run();
+
+		var supportHull = new BBox( hull.Mins * scale, hull.Maxs * scale );
+		var support = Probe( supportHull );
+		if ( IsGroundSupport( support, supportHull, up, scale, preciseGround ) ) return support;
+
+		// Probe quadrants when a steep face masks walkable ground.
+		for ( int quadrant = 0; quadrant < 4; quadrant++ )
 		{
-			UpdateGroundFromTraceResult( tr );
+			var mins = hull.Mins * scale;
+			var maxs = hull.Maxs * scale;
+			if ( (quadrant & 1) == 0 ) maxs.x = 0; else mins.x = 0;
+			//Up is y, so the other horizontal axis is z in 3D and the depth axis in 2D alike
+			var secondAxis = 2;
+			if ( (quadrant & 2) == 0 ) maxs[secondAxis] = 0; else mins[secondAxis] = 0;
+			supportHull = new BBox( mins, maxs );
+			support = Probe( supportHull );
+			if ( IsGroundSupport( support, supportHull, up, scale, preciseGround ) ) return support;
 		}
-		else
+		return default;
+	}
+
+	bool IsGroundSupport( SceneTraceResult hit, BBox hull, Vector3 up, float scale, bool preciseGround )
+	{
+		if ( !hit.Hit || !Mode.IsStandableSurface( hit ) ) return false;
+		if ( preciseGround && !hit.StartedSolid && hit.Body?.BodyType == PhysicsBodyType.Static && hit.Shape.IsValid() && hit.Shape.IsHullShape )
 		{
-			UpdateGroundFromTraceResult( default );
+			// Use the surface plane, not the sweep's separation-biased endpoint.
+			var normal = hit.Normal;
+			var footprint = normal.x * (normal.x >= 0 ? hull.Mins.x : hull.Maxs.x)
+				+ normal.y * (normal.y >= 0 ? hull.Mins.y : hull.Maxs.y)
+				+ normal.z * (normal.z >= 0 ? hull.Mins.z : hull.Maxs.z);
+			if ( (WorldPosition - hit.HitPosition).Dot( normal ) + footprint >= 0.0508f * scale * normal.Dot( up ) ) return false;
 		}
+		if ( !hit.StartedSolid ) return true;
+
+		// Retain embedded support only with native contact.
+		return IsOnGround && _groundShape.IsValid()
+			&& hit.Body == _groundShape.Body && Body.PhysicsBody.IsTouching( hit.Body, false );
 	}
 
 	void UpdateGroundFromTraceResult( SceneTraceResult tr )
@@ -138,6 +190,7 @@ public sealed partial class PlayerController : Component
 
 		if ( GroundObject is not null )
 		{
+			_canCoyoteJump = true;
 			TimeSinceGrounded = 0;
 			_groundTransform = GroundObject.WorldTransform;
 			var friction = _groundShape.IsValid() ? _groundShape.Friction : -1;

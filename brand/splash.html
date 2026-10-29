@@ -1,0 +1,45 @@
+<!-- The engine's splash picture, game/addons/base/Assets/splash/splash.png. Redraw it with:
+     google-chrome --headless=new --hide-scrollbars --window-size=2560,1440 --virtual-time-budget=8000 --screenshot=splash.png brand/splash.html -->
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Yuji+Syuku&family=Inter:wght@500;800&display=swap">
+<style>
+/* Sizes are px on a 1920 x 1080 canvas: 1px = 1/19.2 vw */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0b0c; }
+.kanji, .rotor, .made-with { position: absolute; left: 50%; transform: translateX( -50% ); }
+.rotor { width: 67.708vw; height: 67.708vw; top: 50%; transform: translate( -50%, -50% ); color: #fff; opacity: 0.07; }
+.rotor svg { width: 100%; height: 100%; display: block; }
+.kanji { top: 50%; transform: translate( -50%, -50% ); font: 18.75vw "Yuji Syuku", serif; letter-spacing: 2.083vw; line-height: 1; white-space: nowrap; color: #8db53e; }
+.made-with { bottom: 3.33vw; font: 500 0.885vw Inter, sans-serif; letter-spacing: 0.36vw; text-transform: uppercase; color: #8a8580; }
+.made-with b { font-weight: 800; margin-left: 0.52vw; color: #fff; }
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<mask id="rotor-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+			<rect width="200" height="200" fill="#fff"/>
+			<path d="M100 16.67A233.33 233.33 0 0 1 186.6 166.67A233.33 233.33 0 0 1 13.4 166.67A233.33 233.33 0 0 1 100 16.67Z" fill="none" stroke="#000" stroke-width="3.38" transform="translate(100 116.67) scale(0.888) translate(-100 -116.67)"/>
+			<circle cx="100" cy="116.67" r="50" fill="none" stroke="#000" stroke-width="4"/>
+			<rect x="95.5" y="10.67" width="9" height="32" rx="4.5" fill="#000"/>
+			<rect x="95.5" y="10.67" width="9" height="32" rx="4.5" fill="#000" transform="rotate(120 100 116.67)"/>
+			<rect x="95.5" y="10.67" width="9" height="32" rx="4.5" fill="#000" transform="rotate(240 100 116.67)"/>
+			<circle cx="100" cy="116.67" r="30" fill="#000"/>
+			<g fill="#fff" id="teeth"></g>
+		</mask>
+		<symbol id="rotor" viewBox="0 0 200 200">
+			<path mask="url(#rotor-mask)" fill="currentColor" d="M100 16.67A233.33 233.33 0 0 1 186.6 166.67A233.33 233.33 0 0 1 13.4 166.67A233.33 233.33 0 0 1 100 16.67Z"/>
+		</symbol>
+	</defs>
+</svg>
+<div class="rotor"><svg viewBox="0 0 200 200"><use href="#rotor"/></svg></div>
+<div class="kanji">輪転</div>
+<div class="made-with">made with <b>Rinten</b></div>
+<script>
+//The rotor's 14 phasing-gear teeth, put back into the bore
+const teeth = document.getElementById( "teeth" );
+for ( let i = 0; i < 14; i++ ) {
+	const r = document.createElementNS( "http://www.w3.org/2000/svg", "rect" );
+	r.setAttribute( "x", "95.5" ); r.setAttribute( "y", "86.67" ); r.setAttribute( "width", "9" ); r.setAttribute( "height", "5" );
+	r.setAttribute( "transform", `rotate(${( i * 360 / 14 ).toFixed( 2 )} 100 116.67)` );
+	teeth.appendChild( r );
+}
+</script>

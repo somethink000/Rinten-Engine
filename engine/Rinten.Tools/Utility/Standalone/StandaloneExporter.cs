@@ -68,6 +68,8 @@ public partial class StandaloneExporter
 			//The Build page's tick, or -exportdebug on a command line that wants one build for debugging without changing what the project saves.
 			ExportDebug = config.GetMetaOrDefault( "Build.Debug", false )
 				|| Rinten.Utility.CommandLine.HasSwitch( "-exportdebug" ),
+			LoadingScreen = config.GetMetaOrDefault( "Build.LoadingScreen", LoadingScreenKind.Engine ),
+			StartupImage = config.GetMetaOrDefault<string>( "Build.SplashPicture", null ),
 			BuildDate = DateTime.Now,
 		} );
 	}
@@ -286,6 +288,7 @@ public partial class StandaloneExporter
 
 			IsVRProject = controlSettings.IsVROnly,
 			Debug = _exportConfig.ExportDebug,
+			Splash = SplashInBuild() is { } splash ? "/" + splash : null,
 		};
 	}
 
@@ -376,6 +379,9 @@ public partial class StandaloneExporter
 		//what the folder is called and Linux is not going to guess; see EngineFileSystem, which mounts it by the same name.
 		QueueFrom( GetCoreFiles( engineDir ) );
 		QueueFrom( BaseContent( engineDir ).SelectMany( ShippedAs ) );
+
+		if ( OwnSplash() is { } own )
+			QueueCopy( own, Path.Combine( baseDir, "addons", "base", "Assets", SplashInBuild() ), BuildStep.CopyCoreAssets );
 
 		//Fetch code resources (resource manifest stuff from native)
 		{

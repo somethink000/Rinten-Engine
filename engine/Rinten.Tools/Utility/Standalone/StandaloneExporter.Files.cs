@@ -253,6 +253,32 @@ partial class StandaloneExporter
 	//is drawn holding - see XrControllerModels. A few megabytes, and a page downloads everything a build ships.
 	private static readonly string[] BaseVrOnly = [ "models/vr" ];
 
+	//The engine's splash picture under the base content - see EngineSplash
+	private const string EngineSplashPicture = "splash/splash.png";
+
+	//The game's own startup picture on disk, or null where the export shows the engine's or none
+	private string OwnSplash()
+	{
+		if ( _exportConfig.LoadingScreen != LoadingScreenKind.Own || string.IsNullOrWhiteSpace( _exportConfig.StartupImage ) ) return null;
+
+		var path = Path.IsPathRooted( _exportConfig.StartupImage )
+			? _exportConfig.StartupImage
+			: Path.Combine( _exportConfig.Project.GetAssetsPath(), _exportConfig.StartupImage );
+
+		if ( File.Exists( path ) ) return path;
+
+		Logger.Warning( $"the startup picture {path} is not there - the build starts on black" );
+		return null;
+	}
+
+	//Where the build's startup picture sits under the base content, or null for none; beside the engine's, which is mounted from the first frame
+	private string SplashInBuild()
+	{
+		if ( _exportConfig.LoadingScreen == LoadingScreenKind.Engine ) return EngineSplashPicture;
+
+		return OwnSplash() is { } own ? "splash/own" + Path.GetExtension( own ).ToLowerInvariant() : null;
+	}
+
 	//All base addon content except the editor's, since games reference it by path
 	private IEnumerable<string> BaseContent( string engineDir )
 	{
@@ -269,6 +295,7 @@ partial class StandaloneExporter
 
 			if ( BaseEditorOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) ) continue;
 			if ( !headset && BaseVrOnly.Any( x => relative.StartsWith( x + "/", StringComparison.OrdinalIgnoreCase ) ) ) continue;
+			if ( _exportConfig.LoadingScreen != LoadingScreenKind.Engine && relative.Equals( EngineSplashPicture, StringComparison.OrdinalIgnoreCase ) ) continue;
 			if ( unnamed.Contains( Path.GetFullPath( file ) ) ) continue;
 
 			//Dot folders and files are the editor's own bookkeeping - caches, thumbnails.

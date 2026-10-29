@@ -600,6 +600,9 @@ internal static class EngineLoop
 		using ( _menuRender.Start() )
 			IMenuDll.Current?.OnRender();
 
+		//Over everything else, while an exported game is starting
+		Splash.EngineSplash.Draw();
+
 		//Everything that was going to draw has drawn. Our renderer holds one frame open across all
 		//of them - the game and the menu are one picture - so this is where it goes on the screen.
 		using ( Diagnostics.Performance.Scope( "Present" ) )

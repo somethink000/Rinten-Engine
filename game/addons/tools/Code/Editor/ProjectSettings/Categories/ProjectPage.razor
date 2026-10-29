@@ -99,6 +99,22 @@
 					<label>Export debug - the game may show its frame rate and its log</label>
 				</div>
 
+				<div class="loading-screen">
+					<label class="sub-title">Loading Screen</label>
+
+					<div class="choice @(loadingScreen == LoadingScreenKind.Engine ? "on" : null)" onclick="@(() => SetLoadingScreen( LoadingScreenKind.Engine ))">
+						<label class="material-icon">@(loadingScreen == LoadingScreenKind.Engine ? "radio_button_checked" : "radio_button_unchecked")</label>
+						<label>Engine splash - the Rinten logo while the game loads</label>
+					</div>
+
+					<div class="choice @(loadingScreen == LoadingScreenKind.Own ? "on" : null)" onclick="@(() => SetLoadingScreen( LoadingScreenKind.Own ))">
+						<label class="material-icon">@(loadingScreen == LoadingScreenKind.Own ? "radio_button_checked" : "radio_button_unchecked")</label>
+						<label>Own picture - black until the game draws where none is set</label>
+					</div>
+
+					<div class="picture @(loadingScreen == LoadingScreenKind.Own ? null : "hidden")" @ref="pictureHost"></div>
+				</div>
+
 				<div @ref="folderHost"></div>
 
 				<div class="settings-button-row">
@@ -135,6 +151,7 @@
 
 	Panel identityHost;
 	Panel folderHost;
+	Panel pictureHost;
 
 	//The ids of the platforms that are ticked, in the order ExportPlatform.All has them.
 	readonly HashSet<string> platforms = new();
@@ -165,6 +182,10 @@
 
 	//See ExportConfig.ExportDebug.
 	bool exportDebug;
+
+	//See ExportConfig.LoadingScreen.
+	LoadingScreenKind loadingScreen;
+
 	string executableName;
 	string status;
 	bool statusIsWarning;
@@ -175,6 +196,10 @@
 	//Where the builds go. Each platform gets its own folder inside this one, so building for a second does not write over the first.
 	[Title( "Build Folder" ), FolderPath]
 	public string BuildFolder { get; set; }
+
+	//See ExportConfig.StartupImage.
+	[Title( "Picture" ), FilePath( "png,jpg", AllowExternal = true )]
+	public string SplashPicture { get; set; }
 
 	string BuildLabel => platforms.Count switch
 	{
@@ -205,6 +230,10 @@
 		var sheet = folderHost.AddChild<Editor.Inspectors.ControlSheet>();
 		sheet.Target = new List<SerializedProperty> { so.GetProperty( nameof( BuildFolder ) ) };
 		sheet.Rebuild();
+
+		var picture = pictureHost.AddChild<Editor.Inspectors.ControlSheet>();
+		picture.Target = new List<SerializedProperty> { so.GetProperty( nameof( SplashPicture ) ) };
+		picture.Rebuild();
 		ListenForChanges( so );
 
 		Redraw();
@@ -230,10 +259,12 @@
 
 		//Beside the project rather than in a folder nobody can find.
 		BuildFolder = config.GetMetaOrDefault( "Build.Folder", Path.Combine( project.GetRootPath(), "Builds" ) );
+		SplashPicture = config.GetMetaOrDefault<string>( "Build.SplashPicture", null );
 
 		executableName = config.GetMetaOrDefault( "Build.ExecutableName", project.Package?.Ident ?? config.Ident ?? "game" );
 		createZip = config.GetMetaOrDefault( "Build.Zip", true );
 		exportDebug = config.GetMetaOrDefault( "Build.Debug", false );
+		loadingScreen = config.GetMetaOrDefault( "Build.LoadingScreen", LoadingScreenKind.Engine );
 		orientation = config.GetMetaOrDefault( "Build.Orientation", "landscape" );
 		if ( !Orientations.Contains( orientation ) ) orientation = "landscape";
 		microphone = config.GetMetaOrDefault( "Build.Microphone", false );
@@ -245,8 +276,10 @@
 
 		config.SetMeta( "Build.Platforms", string.Join( ",", ExportPlatform.Offered.Where( x => platforms.Contains( x.Id ) ).Select( x => x.Id ) ) );
 		config.SetMeta( "Build.Folder", BuildFolder );
+		config.SetMeta( "Build.SplashPicture", SplashPicture );
 		config.SetMeta( "Build.Zip", createZip );
 		config.SetMeta( "Build.Debug", exportDebug );
+		config.SetMeta( "Build.LoadingScreen", loadingScreen );
 		config.SetMeta( "Build.Orientation", orientation );
 		config.SetMeta( "Build.Microphone", microphone );
 	}
@@ -328,6 +361,12 @@
 	void ToggleDebug()
 	{
 		exportDebug = !exportDebug;
+		Changed();
+	}
+
+	void SetLoadingScreen( LoadingScreenKind kind )
+	{
+		loadingScreen = kind;
 		Changed();
 	}
 
@@ -480,6 +519,8 @@
 					ExecutableName = executableName,
 					CreateZip = createZip,
 					ExportDebug = exportDebug,
+					LoadingScreen = loadingScreen,
+					StartupImage = SplashPicture,
 					TargetDir = TargetDir( platform ),
 					BuildDate = date,
 				};

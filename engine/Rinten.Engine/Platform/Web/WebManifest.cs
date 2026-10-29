@@ -35,6 +35,9 @@ public class WebManifest
 
 	/// <summary>Exported for the one making it - see Application.IsDebugBuild.</summary>
 	public bool Debug { get; set; }
+
+	/// <summary>The picture shown while the game starts, as a path in the engine's content; empty shows none.</summary>
+	public string Splash { get; set; }
 }
 
 /// <summary>The names a web build agrees on, written by the export and read by the page.</summary>

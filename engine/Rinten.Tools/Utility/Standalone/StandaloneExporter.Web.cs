@@ -203,6 +203,9 @@ partial class StandaloneExporter
 			content.Add( relative );
 		}
 
+		if ( OwnSplash() is { } own && WriteContent( target, SplashInBuild(), own, null ) )
+			content.Add( SplashInBuild() );
+
 		var core = Path.Combine( engineDir, "core" );
 
 		foreach ( var file in GetCoreFiles( engineDir ) )
@@ -612,6 +615,7 @@ partial class StandaloneExporter
 
 			//See ExportConfig.ExportDebug.
 			Debug = _exportConfig.ExportDebug,
+			Splash = SplashInBuild() is { } splash ? "/" + splash : null,
 		};
 
 		if ( string.IsNullOrWhiteSpace( manifest.StartScene ) )

@@ -97,6 +97,9 @@
 !/game/addons/base/Assets/materials/error.png
 !/game/addons/base/Assets/materials/skybox/suburban_soccer_park_1k.exr
 
+# The engine's splash picture (EngineSplash); brand/splash.html draws it
+!/game/addons/base/Assets/splash/splash.png
+
 # VR controller models (XrControllerModels); compiled forms are local
 !/game/addons/base/Assets/models/vr/controllers/**
 /game/addons/base/Assets/models/vr/controllers/**/*_c

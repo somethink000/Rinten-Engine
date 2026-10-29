@@ -20,6 +20,7 @@ public static class Standalone
 
 		_buildDate = Manifest.BuildDate;
 		Application.DebugExport = Manifest.Debug;
+		Splash.EngineSplash.Picture = Manifest.Splash;
 	}
 
 	private static DateTime _buildDate = DateTime.UnixEpoch;

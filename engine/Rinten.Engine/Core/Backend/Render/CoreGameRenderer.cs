@@ -89,6 +89,33 @@ internal static class CoreGameRenderer
 		return true;
 	}
 
+	//Draws a panel tree over this tick's frame, opening one on black where nothing drew yet - see EngineSplash
+	internal static bool DrawOver( Rinten.UI.RootPanel root )
+	{
+		if ( Application.IsEditor || Window is null ) return false;
+
+		if ( !CoreNative.Available || !CoreRenderDevice.Initialize() ) return false;
+
+		var (width, height) = WindowSize();
+
+		if ( width <= 0 || height <= 0 ) return false;
+
+		if ( !Attach( width, height ) ) return false;
+
+		if ( CoreHeadset.HasSession && !Rinten.VR.VRSystem.MirrorToScreen ) return false;
+
+		if ( !framing )
+		{
+			if ( !CoreRenderDevice.BeginFrame( swapchain, Color.Black ) ) return false;
+
+			framing = true;
+		}
+
+		CoreSceneDrawer.DrawUi( root, width, height );
+
+		return true;
+	}
+
 	//Puts this tick's frame on the screen, if anything drew into one. Called at the end of the tick's drawing, after every scene that
 	//wanted into it has had its turn. Nothing to do where nobody drew - a tick with no scene presents nothing rather than a blank window.
 	internal static void Present()

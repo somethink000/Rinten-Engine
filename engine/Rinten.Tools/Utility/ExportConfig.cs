@@ -6,7 +6,7 @@ public class ExportConfig
 {
 	public Project Project { get; set; }
 
-	/// <summary>Assemblies can reference asset packages. This is a list of packages that the compiled code references.</summary>
+	/// <summary>Asset packages the compiled code references.</summary>
 	public HashSet<string> CodePackages = new();
 
 	/// <summary>If the compile process created any assemblies</summary>
@@ -16,7 +16,7 @@ public class ExportConfig
 	[Title( "Export Directory" ), FolderPath]
 	public string TargetDir { get; set; }
 
-	//The machine the editor is running on unless somebody says otherwise. An export is a folder of files rather than a compile, so a build for another desktop can be made from here - what changes is which native libraries go in it and what the program is called.
+	//Defaults to the editor's machine; another desktop changes only the native libraries and the program's name
 	/// <summary>Which platform the build is for.</summary>
 	[Title( "Platform" )]
 	public ExportPlatform Platform { get; set; } = ExportPlatform.Host;
@@ -26,22 +26,36 @@ public class ExportConfig
 	public string ExecutableName { get; set; }
 
 	/// <summary>The icon for the target .exe</summary>
-	[Title( "Executable Icon" )] //can't make this a .ico picker yet, we should really just convert from png ourselves though
+	[Title( "Executable Icon" )]
 	public string TargetIcon { get; set; }
 
-	/// <summary>The splash screen to use</summary>
-	[Title( "Startup Image" ), ResourceType( "tex" )] //should make this png
+	/// <summary>The game's own picture for the startup, with LoadingScreen Own; empty is black.</summary>
+	[Title( "Startup Image" ), FilePath( "png,jpg", AllowExternal = true )]
 	public string StartupImage { get; set; }
 
-	//What an upload to itch.io is: one archive with index.html at its root. Only the web export writes one - a desktop build is a folder people unpack and run, and zipping it here would save nobody a step.
+	//Web only: an itch.io upload is one archive with index.html at its root
 	/// <summary>Whether to zip the finished build beside itself.</summary>
 	[Title( "Zip For Upload" )]
 	public bool CreateZip { get; set; } = true;
 
-	/// <summary>A build for the one making the game rather than for its players: it says so in its manifest, and the game can ask - see Application.IsDebugBuild - and show what it shows its developer, a frame rate or the log. Off, the same game ships without them.</summary>
+	/// <summary>A build for the game's developer; the game can ask through Application.IsDebugBuild.</summary>
 	[Title( "Export Debug" )]
 	public bool ExportDebug { get; set; }
 
+	/// <summary>What the game shows while it starts: the engine's splash or its own picture.</summary>
+	[Title( "Loading Screen" )]
+	public LoadingScreenKind LoadingScreen { get; set; }
+
 	/// <summary>Game's build date</summary>
 	public DateTime BuildDate { get; set; } = DateTime.Now;
+}
+
+/// <summary>What an exported game shows while it starts.</summary>
+public enum LoadingScreenKind
+{
+	/// <summary>The engine's splash picture.</summary>
+	Engine,
+
+	/// <summary>The game's own picture, or black until the game draws where it has none.</summary>
+	Own,
 }

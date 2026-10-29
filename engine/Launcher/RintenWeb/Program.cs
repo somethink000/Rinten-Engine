@@ -77,6 +77,8 @@ public static partial class Program
 
 			//Exported for the one making it - see Application.IsDebugBuild.
 			Application.DebugExport = game.Debug;
+			//A page the editor did not export is the core's dev build: nothing to introduce
+			Rinten.Splash.EngineSplash.Picture = string.IsNullOrWhiteSpace( game.Ident ) ? null : game.Splash;
 
 			//Whether to look for a headset. index.html settled this before the graphics context was made - it had to, a
 			//context that draws to one says so when it is created - so this reads its answer rather than working it out again.

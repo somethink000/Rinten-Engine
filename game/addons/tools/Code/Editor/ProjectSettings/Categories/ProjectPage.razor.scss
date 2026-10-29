@@ -121,6 +121,44 @@
 		}
 	}
 
+	//What an export shows while it starts
+	.loading-screen
+	{
+		flex-direction: column;
+		flex-shrink: 0;
+		gap: 6px;
+
+		> .sub-title
+		{
+			font-size: 12px;
+			font-weight: 600;
+			color: rgba( $text, 0.8 );
+		}
+
+		> .choice
+		{
+			flex-direction: row;
+			align-items: center;
+			gap: 8px;
+			font-size: 12px;
+			pointer-events: all;
+			cursor: pointer;
+			color: rgba( $text, 0.6 );
+
+			&:hover, &.on { color: $text; }
+			&.on > .material-icon { color: $accent; }
+
+			> .material-icon { font-size: 18px; }
+		}
+
+		> .picture
+		{
+			padding-left: 26px;
+
+			&.hidden { display: none; }
+		}
+	}
+
 	.settings-button-row
 	{
 		flex-direction: row;

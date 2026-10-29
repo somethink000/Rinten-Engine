@@ -21,10 +21,13 @@ internal class LocalFileSystem : BaseFileSystem
 
 		var rootPath = Physical.ConvertPathFromInternal( rootFolder );
 		system = new Zio.FileSystems.SubFileSystem( Physical, rootPath );
+		SuppressZioFinalizer( Physical );
+		SuppressZioFinalizer( system );
 
 		if ( makereadonly )
 		{
 			system = new Zio.FileSystems.ReadOnlyFileSystem( system );
+			SuppressZioFinalizer( system );
 		}
 	}
 

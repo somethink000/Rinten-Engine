@@ -376,7 +376,8 @@ internal class MeshQuery
 	{
 		Vector3 min = islands.Min, max = islands.Max;
 		var query = _findNearestPolyQuery ??= new FindNearestPolyQuery( this, center );
-		for ( float extent = 128; ; extent *= 2 )
+		//Metres: 128 inches upstream
+		for ( float extent = 3.25f; ; extent *= 2 )
 		{
 			query.Init( this, center, islands, island );
 			QueryPolygons( center, extent, filter, query );

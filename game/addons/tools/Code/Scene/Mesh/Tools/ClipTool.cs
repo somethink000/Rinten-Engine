@@ -109,7 +109,8 @@ public partial class ClipTool : EditorTool
 	static Vector3 SnapToPlaneGrid( Vector3 point, Vector3 planeNormal )
 	{
 		var plane = new Plane( point, planeNormal );
-		plane.Distance = MathF.Floor( plane.Distance / 0.01f + 0.5f ) * 0.01f;
+		//Metres: the plane held to a hundredth of an inch, as upstream does in inches
+		plane.Distance = MathF.Floor( plane.Distance / 0.000254f + 0.5f ) * 0.000254f;
 
 		var spacing = Gizmo.Settings.GridSpacing;
 		if ( Gizmo.Settings.SnapToGrid == Gizmo.IsCtrlPressed || spacing == 0.0f )
@@ -136,9 +137,9 @@ public partial class ClipTool : EditorTool
 				var start = min;
 				start[firstAxis] = (corner & 2) == 0 ? min[firstAxis] : max[firstAxis];
 				start[secondAxis] = (corner & 1) == 0 ? min[secondAxis] : max[secondAxis];
-				start[axis] -= 1;
+				start[axis] -= 0.0254f;
 
-				var length = max[axis] - min[axis] + 2;
+				var length = max[axis] - min[axis] + 0.0508f;
 				var denominator = plane.Normal[axis] * length;
 				if ( denominator == 0.0f )
 					continue;

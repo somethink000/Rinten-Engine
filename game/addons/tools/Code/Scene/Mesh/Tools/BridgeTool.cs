@@ -514,7 +514,7 @@ public partial class BridgeTool( MeshEdge[] edges = null, MeshFace[] faces = nul
 
 		var toTarget = (targetPos - basePos).Normal;
 		var plane = new Plane( basePos, originalNormal );
-		var normal = plane.GetDistance( targetPos ) <= -0.01f ? -originalNormal : originalNormal;
+		var normal = plane.GetDistance( targetPos ) <= -0.000254f ? -originalNormal : originalNormal;
 
 		outNormal = normal;
 

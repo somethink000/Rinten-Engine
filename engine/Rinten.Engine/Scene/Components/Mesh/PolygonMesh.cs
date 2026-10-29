@@ -2445,7 +2445,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		var plane = new Plane( basePosition, normal );
 
-		if ( plane.GetDistance( targetPosition ) <= -0.01f )
+		if ( plane.GetDistance( targetPosition ) <= -0.000254f )
 		{
 			normal = -normal;
 		}

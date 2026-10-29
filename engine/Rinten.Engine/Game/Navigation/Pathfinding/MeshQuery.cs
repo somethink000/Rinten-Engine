@@ -30,6 +30,7 @@ internal class MeshQuery
 	private bool PassFilter( long reference, TraversalFilter filter ) => _nav.GetTileAndPolyByRef( reference, out _, out var polygon ).Succeeded() && filter.Allows( polygon.area );
 	protected readonly NavMeshGraph _nav; //< Pointer to navmesh data.
 	private PathSearch search;
+	private readonly List<long> _repairScratch = new();
 
 	protected readonly SearchNodePool _nodePool; //< Pointer to node pool.
 	protected readonly SearchQueue _openList; //< Pointer to open list queue.
@@ -125,6 +126,14 @@ internal class MeshQuery
 		while ( status.InProgress() ) status = AdvancePathSearch( 256 );
 		if ( status.Failed() ) { path.Clear(); return status; }
 		return FinishPathSearch( path );
+	}
+
+	// Bounded search from start that rejoins the corridor instead of replanning it.
+	internal bool RepairPath( long start, Vector3 startPosition, Vector3 target, TraversalFilter filter, List<long> corridor, int iterations )
+	{
+		if ( corridor.Count == 0 || BeginPathSearch( start, corridor[^1], startPosition, target, filter ).Failed() ) return false;
+		search.Advance( iterations );
+		return search.FinishJoin( _repairScratch, corridor );
 	}
 
 	public MeshQuery( NavMeshGraph nav )

@@ -130,6 +130,29 @@ internal sealed class PathSearch
 		return closest.id == targetPolygon && !retargeted ? Status.Success : Status.Success | Status.Partial;
 	}
 
+	// Replaces the corridor up to the furthest polygon the search reached, like Detour's partial finalize.
+	internal bool FinishJoin( List<long> scratch, List<long> corridor )
+	{
+		if ( status.Failed() ) return false;
+		for ( int k = corridor.Count - 1; k >= 0; k-- )
+		{
+			var node = nodes.Find( corridor[k] );
+			// Joining at the start node would leave the corridor unchanged.
+			if ( node is null || node.pidx == 0 ) continue;
+			scratch.Clear();
+			for ( int remaining = nodes.GetNodeCount(); node is not null && remaining > 0; remaining-- )
+			{
+				scratch.Add( node.id );
+				node = nodes.GetNodeAtIdx( node.pidx );
+			}
+			if ( node is not null ) return false;
+			scratch.Reverse();
+			corridor.RemoveRange( 0, k + 1 );
+			corridor.InsertRange( 0, scratch );
+			return true;
+		}
+		return false;
+	}
 }
 
 [SkipHotload]
@@ -202,6 +225,13 @@ internal class SearchNodePool
 	public int GetNodeCount()
 	{
 		return _nodeCount;
+	}
+
+	public SearchNode Find( long id )
+	{
+		for ( int i = _first[HashRef( id )]; i != -1; i = _next[i] )
+			if ( _nodes[i].id == id ) return _nodes[i];
+		return null;
 	}
 
 	public SearchNode GetNode( long id, int state )

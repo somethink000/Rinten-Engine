@@ -1,5 +1,6 @@
 ﻿using Rinten.Internal;
 using Rinten.Network;
+using System.IO;
 using System.Threading;
 
 namespace Rinten;
@@ -42,16 +43,35 @@ internal class LargeNetworkFiles
 		}
 	}
 
-	/// <summary>Add a file to be networked.</summary>
-	public bool AddFile( string fileName )
+	/// <summary>Add a file from the mounted filesystem used to serve download requests.</summary>
+	public bool AddFile( BaseFileSystem mounted, string fileName )
 	{
-		if ( !EngineFileSystem.Mounted.FileExists( fileName ) )
+		Stream stream;
+		try
+		{
+			stream = mounted.OpenRead( fileName );
+		}
+		catch ( FileNotFoundException )
+		{
 			return false;
+		}
+		catch ( DirectoryNotFoundException )
+		{
+			return false;
+		}
 
-		var crc = EngineFileSystem.Mounted.GetCrc( fileName );
-		var size = EngineFileSystem.Mounted.FileSize( fileName );
-		var normalizedFileName = NormalizeFileName( fileName );
-		StringTable.Set( normalizedFileName, new LargeFileInfo( size, crc ) );
+		// Redirect filesystems can return null for an unmapped path.
+		if ( stream is null ) return false;
+		using ( stream )
+		{
+			var size = stream.Length;
+			var crc = Rinten.Utility.Crc64.FromStream( stream );
+			var normalizedFileName = NormalizeFileName( fileName );
+			StringTable.Set( normalizedFileName, new LargeFileInfo( size, crc ) );
+
+			if ( AssetDownloadCache.DebugNetworkFiles )
+				Log.Info( $"Adding LARGE File {fileName} ({size.FormatBytes()})" );
+		}
 
 		return true;
 	}

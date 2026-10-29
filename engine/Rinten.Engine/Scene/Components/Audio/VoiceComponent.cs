@@ -52,11 +52,19 @@ public class Voice : Component
 	public RealTimeSince LastPlayed { get; private set; }
 
 	/// <summary>Laughter score for the current audio frame, between 0 and 1</summary>
-	public float LaughterScore => sound.IsValid() ? sound.LipSync.LaughterScore : 0;
+	public float LaughterScore
+	{
+		get
+		{
+			lipSyncRequested = 0;
+			return sound.IsValid() ? sound.LipSync.LaughterScore : 0;
+		}
+	}
 
 	private bool recording = false;
 	private SoundStream soundStream;
 	private SoundHandle sound;
+	private RealTimeSince lipSyncRequested = float.MaxValue;
 
 	private MixerHandle targetMixer;
 
@@ -115,8 +123,14 @@ public class Voice : Component
 		}
 	}
 
-	/// <summary>A list of 15 lipsync viseme weights. Requires <see cref="LipSync"/> to be enabled.</summary>
-	public IReadOnlyList<float> Visemes => sound.IsValid() ? sound.LipSync.Visemes : Array.Empty<float>();
+	public IReadOnlyList<float> Visemes
+	{
+		get
+		{
+			lipSyncRequested = 0;
+			return sound.IsValid() ? sound.LipSync.Visemes : Array.Empty<float>();
+		}
+	}
 
 	internal override void OnEnabledInternal()
 	{
@@ -188,6 +202,8 @@ public class Voice : Component
 		sound.Volume = Volume;
 		sound.Loopback = !IsProxy && !Loopback;
 
+		//Lipsync analysis is expensive: only while something reads it; per frame so a late Renderer or toggle counts
+		sound.LipSync.Enabled = LipSync && (Renderer.IsValid() || lipSyncRequested < 1.0f);
 		if ( WorldspacePlayback )
 		{
 			sound.Position = WorldPosition;
@@ -329,7 +345,6 @@ public class Voice : Component
 				sound.TargetMixer = TargetMixer;
 				sound.Distance = Distance;
 				sound.Falloff = Falloff;
-				sound.LipSync.Enabled = LipSync && Renderer.IsValid();
 				sound.IsVoice = true;
 			}
 

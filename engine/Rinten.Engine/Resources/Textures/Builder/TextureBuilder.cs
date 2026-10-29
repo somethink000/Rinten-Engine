@@ -259,7 +259,7 @@ namespace Rinten
 		{
 			fixed ( byte* dataPtr = data )
 			{
-				return Texture.Create( string.IsNullOrEmpty( name ) ? "unnamed" : name, anonymous, this, data.IsEmpty ? IntPtr.Zero : (IntPtr)dataPtr, data.Length );
+				return Texture.Create( name, anonymous, this, data.IsEmpty ? IntPtr.Zero : (IntPtr)dataPtr, data.Length );
 			}
 		}
 	}

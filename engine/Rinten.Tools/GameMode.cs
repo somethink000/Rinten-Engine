@@ -35,6 +35,9 @@ public static class GameMode
 
 		surface.TakeFocus();
 
+		//Screen otherwise refreshes only in SimulateUI, after the first OnStart and OnUpdate have run
+		Screen.UpdateFromEngine();
+
 		//Straight into the game, because that is what pressing play is for. Escape is the way back out, and clicking the view the way back in.
 		TakeInput();
 	}

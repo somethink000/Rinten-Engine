@@ -29,7 +29,7 @@ public partial class Texture
 		//engine has. The compiled name is a .vtex_c; ours is a .tex.
 		filepath = filepath.Replace( ".vtex_c", ".tex" );
 
-		if ( Rinten.Mounting.Directory.TryLoad( filepath, ResourceType.Texture, out object model ) && model is Texture m )
+		if ( Rinten.Mounting.Directory.TryLoad( filepath, out object model ) && model is Texture m )
 			return m;
 
 		//Normalise separators and leading slash but keep case; Linux paths are case-sensitive

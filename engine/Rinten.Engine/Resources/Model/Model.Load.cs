@@ -20,7 +20,7 @@ public partial class Model
 		if ( IsOurs( filename ) )
 			return FromCoreCached( filename ) ?? Missing( filename );
 
-		if ( Rinten.Mounting.Directory.TryLoad( filename, ResourceType.Model, out object model ) && model is Model m )
+		if ( Rinten.Mounting.Directory.TryLoad( filename, out object model ) && model is Model m )
 			return m;
 
 		if ( Game.Resources.TryGet<Model>( filename, out var resource ) )
@@ -243,7 +243,7 @@ public partial class Model
 		if ( IsOurs( filename ) )
 			return FromCoreCached( filename ) ?? Missing( filename );
 
-		if ( await Rinten.Mounting.Directory.TryLoadAsync( filename, ResourceType.Model ) is Model m )
+		if ( await Rinten.Mounting.Directory.TryLoadAsync( filename ) is Model m )
 			return m;
 
 		if ( Game.Resources.TryGet<Model>( filename, out var resource ) )

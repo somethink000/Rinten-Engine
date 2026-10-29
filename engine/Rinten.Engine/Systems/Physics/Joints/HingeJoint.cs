@@ -36,6 +36,14 @@ public partial class HingeJoint : PhysicsJoint
 
 	public float Speed => Axis.Dot( Body2.AngularVelocity - Body1.AngularVelocity );
 
+	//The range in degrees, and the limit forced on or off; null leaves it on whenever the range is not empty
+	internal void ConfigureLimits( Vector2 limits, bool? enabled )
+	{
+		MinAngle = limits.x;
+		MaxAngle = limits.y;
+		if ( enabled is bool state ) backend.SetRangeLimitEnabled( state );
+	}
+
 	/// <summary>Hinge friction.</summary>
 	public float Friction
 	{

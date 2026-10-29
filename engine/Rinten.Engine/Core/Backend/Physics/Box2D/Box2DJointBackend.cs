@@ -281,6 +281,35 @@ internal sealed unsafe class Box2DJointBackend : IPhysicsJointBackend
 		b2RevoluteJoint_EnableSpring( id, false );
 	}
 
+	public void SetRangeLimitEnabled( bool enabled )
+	{
+		if ( !IsValid ) return;
+
+		if ( Type == b2JointType.b2_revoluteJoint ) b2RevoluteJoint_EnableLimit( id, enabled );
+		else if ( Type == b2JointType.b2_prismaticJoint ) b2PrismaticJoint_EnableLimit( id, enabled );
+	}
+
+	public void SetLinearMotor( float velocity, float maxForce )
+	{
+		if ( !IsValid || Type != b2JointType.b2_prismaticJoint ) return;
+
+		b2PrismaticJoint_EnableSpring( id, false );
+		b2PrismaticJoint_SetMotorSpeed( id, velocity );
+		b2PrismaticJoint_SetMaxMotorForce( id, maxForce );
+		b2PrismaticJoint_EnableMotor( id, true );
+	}
+
+	public void SetTargetTranslation( float position, float hertz, float damping )
+	{
+		if ( !IsValid || Type != b2JointType.b2_prismaticJoint ) return;
+
+		b2PrismaticJoint_EnableMotor( id, false );
+		b2PrismaticJoint_SetTargetTranslation( id, position );
+		b2PrismaticJoint_SetSpringHertz( id, hertz );
+		b2PrismaticJoint_SetSpringDampingRatio( id, damping );
+		b2PrismaticJoint_EnableSpring( id, hertz > 0.0f );
+	}
+
 	/// <summary>Resistance to turning or sliding: a motor that wants no speed.</summary>
 	public void SetFriction( float f )
 	{

@@ -30,6 +30,15 @@ internal interface IPhysicsJointBackend
 	void SetMaxForce( float f );
 	float GetMaxForce();
 	void SetFriction( float f );
+
+	//A hinge's or slider's range limit on or off, whatever its range
+	void SetRangeLimitEnabled( bool enabled );
+
+	//A slider driven at a speed with at most this force, its spring off
+	void SetLinearMotor( float velocity, float maxForce );
+
+	//A slider's spring pulling it to this offset along its axis, its motor off
+	void SetTargetTranslation( float position, float hertz, float damping );
 	void SetLimit( string name, Vector3 limit );
 	void SetLimitEnabled( string name, bool state );
 	float GetAngle();

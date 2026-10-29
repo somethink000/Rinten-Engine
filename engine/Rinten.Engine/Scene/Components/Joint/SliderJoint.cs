@@ -8,6 +8,26 @@
 [EditorHandle( "materials/gizmo/slider.png" )]
 public sealed class SliderJoint : Joint
 {
+	public enum MotorMode
+	{
+		Disabled,
+		TargetPosition,
+		TargetVelocity
+	}
+
+	/// <summary>Explicit limit state. Null keeps the limit on whenever the length range is not empty.</summary>
+	[Property, Group( "Limit" )]
+	public bool? LimitEnabled
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyLimits();
+		}
+	}
+
 	/// <summary>Maximum length it should be allowed to go</summary>
 	[Property]
 	public float MaxLength
@@ -15,13 +35,9 @@ public sealed class SliderJoint : Joint
 		get;
 		set
 		{
+			if ( field == value ) return;
 			field = value;
-
-			if ( _joint.IsValid() )
-			{
-				_joint.MaxLength = value;
-				_joint.WakeBodies();
-			}
+			ApplyLimits();
 		}
 	}
 
@@ -32,30 +48,101 @@ public sealed class SliderJoint : Joint
 		get;
 		set
 		{
+			if ( field == value ) return;
 			field = value;
-
-			if ( _joint.IsValid() )
-			{
-				_joint.MinLength = value;
-				_joint.WakeBodies();
-			}
+			ApplyLimits();
 		}
 	}
 
 	/// <summary>Slider friction</summary>
-	[Property]
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.Disabled )]
 	public float Friction
 	{
 		get;
 		set
 		{
+			if ( field == value ) return;
 			field = value;
+			ApplyMotor();
+		}
+	}
 
-			if ( _joint.IsValid() )
-			{
-				_joint.Friction = value;
-				_joint.WakeBodies();
-			}
+	/// <summary>Chooses friction, a position spring, or a velocity motor.</summary>
+	[Property, Group( "Motor" )]
+	public MotorMode Motor
+	{
+		get;
+		set
+		{
+			if ( !Enum.IsDefined( value ) ) throw new ArgumentOutOfRangeException( nameof( value ) );
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
+		}
+	}
+
+	/// <summary>Target offset along the slider axis, in metres.</summary>
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.TargetPosition )]
+	public float TargetPosition
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
+		}
+	}
+
+	/// <summary>Position spring frequency in hertz.</summary>
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.TargetPosition )]
+	public float Frequency
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
+		}
+	} = 1;
+
+	/// <summary>Position spring damping ratio.</summary>
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.TargetPosition )]
+	public float DampingRatio
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
+		}
+	} = 1;
+
+	/// <summary>Target speed along the slider axis, in metres a second.</summary>
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
+	public float TargetVelocity
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
+		}
+	}
+
+	/// <summary>Maximum force the velocity motor may apply, in newtons.</summary>
+	[Property, Group( "Motor" ), ShowIf( nameof( Motor ), MotorMode.TargetVelocity )]
+	public float MaxForce
+	{
+		get;
+		set
+		{
+			if ( field == value ) return;
+			field = value;
+			ApplyMotor();
 		}
 	}
 
@@ -69,10 +156,39 @@ public sealed class SliderJoint : Joint
 		point2.LocalTransform = localFrame2;
 
 		_joint = PhysicsJoint.CreateSlider( point1, point2, MinLength, MaxLength );
-		_joint.Friction = Friction;
+		ApplyLimits();
+		ApplyMotor();
 
 		_joint.WakeBodies();
 
 		return _joint;
+	}
+
+	void ApplyLimits()
+	{
+		if ( !_joint.IsValid() ) return;
+		_joint.ConfigureLimits( new Vector2( MinLength, MaxLength ), LimitEnabled );
+		_joint.WakeBodies();
+	}
+
+	void ApplyMotor()
+	{
+		if ( !_joint.IsValid() ) return;
+
+		switch ( Motor )
+		{
+			case MotorMode.Disabled:
+				_joint.SetTargetPosition( 0, 0, 0 );
+				_joint.Friction = Friction;
+				break;
+			case MotorMode.TargetPosition:
+				_joint.SetTargetPosition( TargetPosition, Frequency, DampingRatio );
+				break;
+			case MotorMode.TargetVelocity:
+				_joint.SetLinearMotor( TargetVelocity, MaxForce );
+				break;
+		}
+
+		_joint.WakeBodies();
 	}
 }

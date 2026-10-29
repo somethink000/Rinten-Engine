@@ -44,7 +44,9 @@ public partial class GameObject
 		//nested prefabs are flagged, so they can get converted to a full prefab instance in the prefab.
 		internal bool SerializeForPrefabInstanceToPrefabUpdate { get; set; }
 
-		//Capture shallow undo state while preserving existing prefab ownership on restore.
+		internal bool BreakPrefabInstances { get; set; }
+
+		/// <summary>Capture shallow undo state while preserving existing prefab ownership on restore.</summary>
 		internal bool SerializeForUndo { get; set; }
 
 		//Don't serialize gameObject children.
@@ -123,7 +125,7 @@ public partial class GameObject
 
 		if ( !options.ShouldSave( this ) ) return null;
 
-		if ( IsOutermostPrefabInstanceRoot && !options.SerializePrefabForDiff && !(options.SerializeForUndo && options.IgnoreChildren) && !options.SingleNetworkObject && !options.SceneForNetwork )
+		if ( IsOutermostPrefabInstanceRoot && !options.BreakPrefabInstances && !options.SerializePrefabForDiff && !(options.SerializeForUndo && options.IgnoreChildren) && !options.SingleNetworkObject && !options.SceneForNetwork )
 		{
 			return SerializePrefabInstance();
 		}
@@ -183,7 +185,7 @@ public partial class GameObject
 		{
 			json[JsonKeys.EditorSkipPrefabBreakOnRefresh] = true;
 		}
-		else if ( (!options.SceneForNetwork && !options.SingleNetworkObject)
+		else if ( (!options.SceneForNetwork && !options.SingleNetworkObject && !options.BreakPrefabInstances)
 				&& (IsNestedPrefabInstanceRoot || (IsOutermostPrefabInstanceRoot && options.SerializePrefabForDiff)) )
 		{
 			//For prefab updates all existing nested roots keep their instance data, regardless of depth. Marking them as nested source instead would

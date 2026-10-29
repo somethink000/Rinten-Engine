@@ -231,6 +231,13 @@ namespace Rinten
 			if ( _config.m_nFlags.Contains( RuntimeTextureSpecificationFlags.TSPEC_CUBE_TEXTURE ) )
 				faces *= 6;
 
+			//An array's depth is its slice count: each slice keeps its own mips, where a volume's depth would halve with them
+			if ( _config.m_nFlags.Contains( RuntimeTextureSpecificationFlags.TSPEC_TEXTURE_ARRAY ) )
+			{
+				faces *= depth;
+				depth = 1;
+			}
+
 			var mips = (_config.m_nNumMipLevels <= 0) ? 1 : _config.m_nNumMipLevels;
 			var memoryRequiredWithMips = ImageFormatSize.Total( _config.m_nWidth, _config.m_nHeight, depth, mips, _config.m_nImageFormat ) * faces;
 
@@ -248,7 +255,7 @@ namespace Rinten
 
 			//HERE'S WHERE WE SANITY CHECK EVERYTHING TO PREVENT FUCKUPS
 
-			var memoryRequired = ImageFormatSize.Total( _config.m_nWidth, _config.m_nHeight, _config.m_nDepth, 1, _config.m_nImageFormat ) * faces;
+			var memoryRequired = ImageFormatSize.Total( _config.m_nWidth, _config.m_nHeight, depth, 1, _config.m_nImageFormat ) * faces;
 			if ( dataLength != memoryRequired && dataLength != memoryRequiredWithMips )
 				throw new Exception( $"{dataLength} is wrong for this texture! {memoryRequired:n0} bytes are required (or {memoryRequiredWithMips:n0} with mips)! You sent {dataLength:n0} bytes!" );
 

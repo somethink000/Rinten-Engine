@@ -4,8 +4,11 @@
 [Icon( "hiking" ), Group( "Movement" ), Title( "MoveMode - Ladder" )]
 public partial class MoveModeLadder : MoveMode
 {
+	/// <summary>
+	/// Movement selection priority. Defaults above swimming so ladders can be climbed out of water.
+	/// </summary>
 	[Property]
-	public int Priority { get; set; } = 5;
+	public int Priority { get; set; } = 15;
 
 	[Property, Range( 0, 2 )]
 	public float Speed { get; set; } = 1;

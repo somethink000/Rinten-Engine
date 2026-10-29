@@ -1087,6 +1087,8 @@ internal sealed partial class Mesh
 				{
 					return false;
 				}
+
+				CopyFaceVertexData( pEdge, pEdge.OppositeEdge );
 			}
 			else if ( pVerticesB[iVertex].Edge != HalfEdgeHandle.Invalid )
 			{

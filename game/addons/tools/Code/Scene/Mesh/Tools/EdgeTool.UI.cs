@@ -580,10 +580,12 @@ partial class EdgeTool
 					var compA = groups[0].Key;
 					var compB = groups[1].Key;
 
-					var meshA = compA.Mesh;
+					var meshA = new PolygonMesh();
+					meshA.Transform = compA.Mesh.Transform;
+					meshA.MergeMesh( compA.Mesh, Transform.Zero, out _, out var remapEdgesA, out _ );
 					var meshB = compB.Mesh;
 
-					var edgesA = groups[0].Select( e => e.Handle ).ToList();
+					var edgesA = groups[0].Select( e => remapEdgesA[e.Handle] ).ToList();
 					var edgesB = groups[1].Select( e => e.Handle ).ToList();
 
 					var transform = compA.WorldTransform.ToLocal( compB.WorldTransform );
@@ -592,9 +594,14 @@ partial class EdgeTool
 					for ( int i = 0; i < edgesB.Count; i++ )
 						edgesB[i] = remapEdges[edgesB[i]];
 
-					compB.DestroyGameObject();
+					if ( !meshA.BridgeEdges( edgesA, edgesB ) )
+					{
+						Log.Warning( "Bridge Edges failed: select two matching open edge lists or loops." );
+						return;
+					}
 
-					meshA.BridgeEdges( edgesA, edgesB );
+					compA.Mesh = meshA;
+					compB.DestroyGameObject();
 				}
 				else
 				{

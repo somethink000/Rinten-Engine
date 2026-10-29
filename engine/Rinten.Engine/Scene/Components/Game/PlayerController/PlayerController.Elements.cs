@@ -2,7 +2,10 @@
 
 public sealed partial class PlayerController : Component
 {
-	//Make sure the body and our components are created
+	//Metres: half an inch upstream
+	const float _groundedFeetLift = 0.0127f;
+
+	/// <summary>Make sure the body and our components are created</summary>
 	void EnsureComponentsCreated()
 	{
 		if ( !ColliderObject.IsValid() )
@@ -71,10 +74,7 @@ public sealed partial class PlayerController : Component
 		BodyCollider.Friction = 0.0f;
 		BodyCollider.Enabled = BodyCollider.End.y < BodyCollider.Start.y;
 
-		//Up is y: the box is as wide as the body on both horizontal axes and as tall as the part of the
-		//character it covers. It said z, which laid the feet on their side and left the centre below the floor.
-		FeetCollider.Scale = new Vector3( BodyRadius, BodyCollider.Enabled ? feetHeight : CurrentHeight, BodyRadius );
-		FeetCollider.Center = new Vector3( 0, FeetCollider.Scale.y * 0.5f, 0 );
+		var feetLength = BodyCollider.Enabled ? feetHeight : CurrentHeight;
 		FeetCollider.Friction = feetFriction;
 		FeetCollider.Enabled = true;
 
@@ -93,5 +93,14 @@ public sealed partial class PlayerController : Component
 		Body.OverrideMassCenter = true;
 
 		Mode?.UpdateRigidBody( Body );
+
+		//
+		// Small lips are absorbed by Reground, and larger "steps" by TryStep.
+		//
+		var feetLift = IsOnGround && !GroundIsDynamic && !Body.Gravity ? _groundedFeetLift : 0.0f;
+		var feetBoxLength = feetLength - feetLift;
+		//Up is y: as wide as the body on both horizontal axes, as tall as the part of the character it covers
+		FeetCollider.Scale = new Vector3( BodyRadius, feetBoxLength, BodyRadius );
+		FeetCollider.Center = new Vector3( 0, feetLift + feetBoxLength * 0.5f, 0 );
 	}
 }

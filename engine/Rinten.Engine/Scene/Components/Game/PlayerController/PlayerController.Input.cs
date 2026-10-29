@@ -18,6 +18,13 @@ public sealed partial class PlayerController : Component
 	/// <summary>Amount of seconds it takes to get from your current speed to your requuested speed, if lower</summary>
 	[Property, Feature( "Input" )] public float DeaccelerationTime { get; set; } = 0;
 
+	/// <summary>Adds forward momentum when jumping from the ground at full sprint speed</summary>
+	[Property, Feature( "Input" ), ToggleGroup( "EnableJumpBoost", Label = "Jump Boost" )]
+	public bool EnableJumpBoost { get; set; }
+
+	/// <summary>Extra momentum added when sprint jumping (as a fraction of RunSpeed)</summary>
+	public float JumpBoost { get; set; } = 0.1f;
+
 	/// <summary>The button that the player will press to use to run</summary>
 	[Property, Feature( "Input" ), InputAction, Category( "Running" )] public string AltMoveButton { get; set; } = "run";
 

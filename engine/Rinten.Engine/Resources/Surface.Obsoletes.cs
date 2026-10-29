@@ -39,42 +39,6 @@ public partial class Surface
 	public ImpactEffectData ImpactEffects { get; set; }
 
 	[Obsolete]
-	public struct ScrapeEffectData
-	{
-		/// <summary>Similar to friction but only affects whether a scrape is rough or smooth.</summary>
-		[DefaultValue( 0.25f )]
-		public float RoughnessFactor { get; set; }
-
-		/// <summary>Surface roughness greater than this results in rough scrapes.</summary>
-		[DefaultValue( 0.5f )]
-		public float RoughThreshold { get; set; }
-
-		//Spawn one of these particle effects during a smooth scrape.
-		[Obsolete]
-		[ResourceType( "fx" )] public List<string> SmoothParticles { get; set; }
-
-		//Spawn one of these particle effects during a rough scrape.
-		[Obsolete]
-		[ResourceType( "fx" )] public List<string> RoughParticles { get; set; }
-
-		//Use one of these particles during a smooth scrape.
-		[ResourceType( "decal" )] public List<string> SmoothDecal { get; set; }
-
-		//Use one of these particles during a rough scrape.
-		[ResourceType( "decal" )] public List<string> RoughDecal { get; set; }
-
-		public ScrapeEffectData()
-		{
-			RoughnessFactor = 0.25f;
-			RoughThreshold = 0.5f;
-		}
-	}
-
-	/// <summary>Scrape effects of this surface material.</summary>
-	[Obsolete, Hide, EditorBrowsable( EditorBrowsableState.Never )]
-	public ScrapeEffectData ScrapeEffects { get; set; }
-
-	[Obsolete]
 	public struct OldSoundData
 	{
 		//Left footstep sound.

@@ -2,7 +2,7 @@
 
 /// <summary>This system exists to collect pending collision sounds and filter them into a unique set, to avoid unnesssary sounds playing, when they're going to be making the same sound anyway.</summary>
 [Expose]
-public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem>, ISceneCollisionEvents
+public sealed partial class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem>, ISceneCollisionEvents
 {
 	record struct PendingSound( Surface Surface, Vector3 Position, float Speed, bool Networked );
 
@@ -11,6 +11,12 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 	public CollisionSoundSystem( Scene scene ) : base( scene )
 	{
 		Listen( Stage.FinishUpdate, 100, ProcessQueue, "CollisionSoundSystem Queue" );
+	}
+
+	public override void Dispose()
+	{
+		DisposeFriction();
+		base.Dispose();
 	}
 
 	/// <summary>Register this physics collision with the sound system</summary>
@@ -41,7 +47,8 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 		if ( !shape.IsValid() ) return;
 		if ( !shape.Body.IsValid() ) return;
 		if ( !shape.Body.EnableCollisionSounds ) return;
-		if ( speed < 100.0f ) return;
+		//Metres a second: upstream's 100 inches; at 100 here no impact was ever heard
+		if ( speed < 2.54f ) return;
 		if ( surface is null ) return;
 
 		//If we have more than 4, remove any that are slower/less significant
@@ -71,6 +78,8 @@ public sealed class CollisionSoundSystem : GameObjectSystem<CollisionSoundSystem
 	//Create the pending sounds
 	void ProcessQueue()
 	{
+		UpdateFriction();
+
 		using var _ = PerformanceStats.Timings.Audio.Scope();
 
 		if ( lastRan < 0.05f ) return;

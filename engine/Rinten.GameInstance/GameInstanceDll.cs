@@ -602,7 +602,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 				_ = playerStats.Refresh();
 			}
 
-			await Task.Delay( 10 );
+			await Task.Yield();
 			LoadingScreen.Title ??= "Loading..";
 		}
 
@@ -625,7 +625,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 			if ( !Application.IsDedicatedServer && !Application.IsStandalone )
 			{
-				await Task.Delay( 10 );
+				await Task.Yield();
 			}
 
 			if ( !await newInstance.LoadAsync( AssemblyEnroller, ct ) )
@@ -641,9 +641,9 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			if ( ct.IsCancellationRequested )
 				return;
 
-			await Task.Delay( 10 );
+			await Task.Yield();
 			GC.Collect( GC.MaxGeneration, GCCollectionMode.Optimized, false, false );
-			await Task.Delay( 10 );
+			await Task.Yield();
 
 			if ( Package.TryParseIdent( ident, out var parsed ) )
 			{

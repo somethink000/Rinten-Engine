@@ -381,6 +381,10 @@ public partial class GameObject
 			JsonUpgrader.Upgrade( serializedVersion, node, GetType() );
 		}
 
+		// Error describes the result of loading this object (e.g. a missing prefab stub), start clean.
+		// The missing prefab path below sets it again if the source still can't be loaded.
+		Flags &= ~GameObjectFlags.Error;
+
 		if ( node[JsonKeys.EditorSkipPrefabBreakOnRefresh] is null )
 		{
 			_prefabInstanceData = null;

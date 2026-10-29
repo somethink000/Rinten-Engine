@@ -4,7 +4,7 @@ using System.Text;
 namespace Rinten;
 
 //Raw PCM sound data, kind of like a bitmap but for sounds
-internal class SoundData
+internal partial class SoundData
 {
 	public ushort Format { get; private set; }
 	public ushort Channels { get; private set; }
@@ -26,19 +26,21 @@ internal class SoundData
 		using var reader = new BinaryReader( stream );
 
 		Span<byte> header = stackalloc byte[4];
-		if ( stream.Length < 12 ||
-			reader.Read( header ) != 4 || !header.SequenceEqual( RIFF ) ||
-			reader.ReadInt32() != (stream.Length - 8) ||
-			reader.Read( header ) != 4 || !header.SequenceEqual( WAVE ) )
+		if ( stream.Length < 12 || reader.Read( header ) != 4 || !header.SequenceEqual( RIFF ) )
 		{
 			throw new ArgumentException( "Invalid WAV file format" );
 		}
+		var riffLength = (long)reader.ReadUInt32() + 8;
+		if ( (riffLength != stream.Length && riffLength != stream.Length + 1)
+			|| reader.Read( header ) != 4 || !header.SequenceEqual( WAVE ) )
+			throw new ArgumentException( "Invalid WAV file format" );
 
 		Span<byte> fmtChunk = default;
 		Span<byte> dataChunk = default;
 
 		uint fmtSize = 0;
 		uint dataSize = 0;
+		uint? factSamples = null;
 
 		while ( stream.Position + 8 <= stream.Length )
 		{
@@ -62,11 +64,17 @@ internal class SoundData
 				dataChunk = data.Slice( (int)chunkStart, (int)chunkSize );
 				dataSize = chunkSize;
 			}
+			else if ( header.SequenceEqual( "fact"u8 ) && chunkSize >= 4 )
+			{
+				factSamples = BitConverter.ToUInt32( data[(int)chunkStart..] );
+			}
 
 			stream.Position = chunkStart + chunkSize;
 			if ( chunkSize % 2 != 0 )
 				stream.Position++;
 		}
+		if ( riffLength == stream.Length + 1 && stream.Position != riffLength )
+			throw new ArgumentException( "Invalid WAV file format" );
 
 		if ( fmtChunk.IsEmpty )
 			throw new ArgumentException( "Missing required FMT chunks" );
@@ -75,20 +83,40 @@ internal class SoundData
 			throw new ArgumentException( "Missing required DATA chunks" );
 
 		var channels = BitConverter.ToUInt16( fmtChunk[2..] );
+		var format = BitConverter.ToUInt16( fmtChunk );
+		var sampleRate = BitConverter.ToUInt32( fmtChunk[4..] );
 		var bitsPerSample = BitConverter.ToUInt16( fmtChunk[14..] );
+		if ( channels == 0 || sampleRate == 0 )
+			throw new ArgumentException( "Invalid WAV channels or sample rate" );
+		var (loopStart, loopEnd) = ReadLoop( data );
+		if ( format == 2 )
+		{
+			var decoded = DecodeAdpcm( fmtChunk, dataChunk, factSamples );
+			return new SoundData
+			{
+				Format = 1,
+				Channels = channels,
+				SampleRate = sampleRate,
+				BitsPerSample = 16,
+				SampleCount = decoded.Samples,
+				Duration = decoded.Samples / (float)sampleRate,
+				PCMData = decoded.Data,
+				LoopStart = loopStart,
+				LoopEnd = loopEnd
+			};
+		}
+		if ( bitsPerSample == 0 || bitsPerSample % 8 != 0 )
+			throw new ArgumentException( "Invalid WAV bits per sample" );
 		var bytesPerSample = (uint)bitsPerSample / 8;
 		var sampleSize = bytesPerSample * channels;
 
 		if ( dataSize % sampleSize != 0 )
 			throw new ArgumentException( "Data chunk size is not a multiple of sample size" );
 
-		var format = BitConverter.ToUInt16( fmtChunk );
-		var sampleRate = BitConverter.ToUInt32( fmtChunk[4..] );
 		var sampleCount = dataSize / sampleSize;
 		var duration = sampleRate > 0 ? (float)sampleCount / sampleRate : 0.0f;
 		var pcmData = dataChunk[..(int)dataSize].ToArray();
 
-		var (loopStart, loopEnd) = ReadLoop( data );
 
 		return new SoundData
 		{

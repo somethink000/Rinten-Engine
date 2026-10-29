@@ -89,6 +89,21 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 	/// <summary>Our actual physical velocity minus our ground velocity</summary>
 	public Vector3 Velocity { get; private set; }
 
+	//Up is Vector3.Up, which is y here; the movement modes measure everything against it
+	internal Vector3 UpDirection => Scene.Is2D ? Vector2.Up : Vector3.Up;
+
+	internal Vector3 WithoutVertical( Vector3 value )
+	{
+		var up = UpDirection;
+		return value - up * value.Dot( up );
+	}
+
+	internal Vector3 WithVertical( Vector3 value, float vertical )
+	{
+		var up = UpDirection;
+		return value - up * value.Dot( up ) + up * vertical;
+	}
+
 	/// <summary>The velocity that the ground underneath us is moving</summary>
 	public Vector3 GroundVelocity { get; set; }
 

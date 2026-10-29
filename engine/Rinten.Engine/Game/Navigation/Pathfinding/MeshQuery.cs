@@ -363,6 +363,24 @@ internal class MeshQuery
 		return Status.Success;
 	}
 
+	internal long FindNearestPolyInIsland( Vector3 center, IslandMap islands, int island, TraversalFilter filter, out Vector3 nearestPt )
+	{
+		Vector3 min = islands.Min, max = islands.Max;
+		var query = _findNearestPolyQuery ??= new FindNearestPolyQuery( this, center );
+		for ( float extent = 128; ; extent *= 2 )
+		{
+			query.Init( this, center, islands, island );
+			QueryPolygons( center, extent, filter, query );
+			bool covered = center.x - extent <= min.x && center.y - extent <= min.y && center.z - extent <= min.z
+				&& center.x + extent >= max.x && center.y + extent >= max.y && center.z + extent >= max.z;
+			if ( query.NearestRef() == 0 && !covered ) continue;
+			// A box hit can still be farther than a polygon just outside the box corner.
+			if ( query.NearestRef() != 0 && !covered ) QueryPolygons( center, extent * 1.75f, filter, query );
+			nearestPt = query.NearestPt();
+			return query.NearestRef();
+		}
+	}
+
 	protected void QueryPolygonsInTile( MeshTile tile, Vector3 qmin, Vector3 qmax, TraversalFilter filter, IPolyQuery query )
 	{
 		Span<long> batch = stackalloc long[32];
@@ -1428,16 +1446,20 @@ internal class FindNearestPolyQuery : IPolyQuery
 	private long _nearestRef;
 	private Vector3 _nearestPoint;
 	private bool _overPoly;
+	private IslandMap _islands;
+	private int _island;
 
 	public FindNearestPolyQuery( MeshQuery query, Vector3 center )
 	{
 		Init( query, center );
 	}
 
-	public void Init( MeshQuery query, Vector3 center )
+	public void Init( MeshQuery query, Vector3 center, IslandMap islands = null, int island = 0 )
 	{
 		_query = query;
 		_center = center;
+		_islands = islands;
+		_island = island;
 		_nearestDistanceSqr = float.MaxValue;
 		_nearestRef = 0;
 		_nearestPoint = center;
@@ -1450,6 +1472,7 @@ internal class FindNearestPolyQuery : IPolyQuery
 		{
 			long polyRef = refs[i];
 			float d;
+			if ( _islands is not null && _islands.Of( polyRef ) != _island ) continue;
 
 			//Find nearest polygon amongst the nearby polygons.
 			_query.ClosestPointOnPoly( polyRef, _center, out var closestPtPoly, out var posOverPoly );

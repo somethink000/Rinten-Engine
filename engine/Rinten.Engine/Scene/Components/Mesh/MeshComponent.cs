@@ -74,7 +74,10 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 			field = value;
 
 			if ( Scene.IsEditor )
+			{
+				UpdateSceneObject();
 				return;
+			}
 
 			if ( HideInGame )
 			{
@@ -262,14 +265,11 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	{
 		base.OnTagsChanged();
 
-		if ( _sceneObject.IsValid() )
-		{
-			_sceneObject.Tags.SetFrom( Tags );
-		}
-
-		foreach ( var cell in _cellObjects ?? [] )
-			if ( cell.IsValid() ) cell.Tags.SetFrom( Tags );
+		UpdateSceneObject();
 	}
+
+	//Tag on the editor's drawing of a Hide In Game mesh: it is still drawn there, and the probe captures leave it out
+	internal const string HideInGameTag = "hide_in_game";
 
 	internal override void TransformChanged( GameTransform root )
 	{
@@ -445,6 +445,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		one.Flags.IsEditableMesh = true;
 
 		one.Tags.SetFrom( GameObject.Tags );
+		if ( HideInGame ) one.Tags.Add( HideInGameTag );
 		one.Flags.CastShadows = RenderType == ShadowRenderType.On || RenderType == ShadowRenderType.ShadowsOnly;
 		one.Flags.IsStatic = GameObject.IsStatic;
 	}

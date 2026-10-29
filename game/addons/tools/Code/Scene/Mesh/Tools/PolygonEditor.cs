@@ -82,7 +82,7 @@ public sealed class PolygonEditor( PrimitiveTool tool ) : PrimitiveEditor( tool 
 	void BuildPreview()
 	{
 		var mesh = Build();
-		_previewModel = mesh?.Rebuild();
+		_previewModel = mesh?.Rebuild( MeshComponent.CollisionType.None );
 	}
 
 	public override void OnCreated( MeshComponent component )

@@ -4434,8 +4434,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 		_dirtyHalfEdges.Clear();
 	}
 
-	/// <summary>Triangulate the polygons into a model</summary>
-	public Model Rebuild()
+	/// <summary>Triangulate the polygons into a model, with only the collision asked for.</summary>
+	public Model Rebuild( MeshComponent.CollisionType collision = MeshComponent.CollisionType.Mesh )
 	{
 		var faceCount = Topology.FaceCount;
 		var halfEdgeCount = Topology.HalfEdgeCount;
@@ -4500,12 +4500,13 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		LayLightmap();
 
-		if ( _meshVertices.Count >= 3 && _meshIndices.Count >= 3 )
-		{
+		//One kind, as the component asks: a hull is a body that can move, a mesh can only be stood on
+		if ( collision == MeshComponent.CollisionType.None || _meshVertices.Count < 3 || _meshIndices.Count < 3 )
+			builder.WithoutCollision();
+		else if ( collision == MeshComponent.CollisionType.Hull )
 			builder.AddCollisionHull( _meshVertices );
+		else
 			builder.AddCollisionMesh( _meshVertices, _meshIndices, _meshTriangleMaterials );
-			builder.AddTraceMesh( _meshVertices, _meshIndices );
-		}
 
 		foreach ( var submesh in submeshes.Values )
 		{

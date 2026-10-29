@@ -217,6 +217,90 @@ namespace Rinten
 			return this;
 		}
 
+		private bool HasNamedCollision => boxes.Count + spheres.Count + capsules.Count + hulls.Count + meshShapes.Count > 0;
+
+		//The shapes added by name, as one body of the core model
+		private unsafe void AddNamedCollision( CoreAssets.ModelBuilder builder, string surface )
+		{
+			var identity = stackalloc float[7] { 0, 0, 0, 0, 0, 0, 1 };
+			var body = builder.AddBody( "collision", "", identity, mass, 0.0f, 0.0f, 1.0f );
+			if ( body < 0 ) return;
+
+			var a = stackalloc float[3];
+			var b = stackalloc float[3];
+
+			foreach ( var sphere in spheres )
+			{
+				Put( a, sphere.center );
+				builder.AddSphere( body, surface, a, sphere.radius );
+			}
+
+			foreach ( var capsule in capsules )
+			{
+				Put( a, capsule.center0 );
+				Put( b, capsule.center1 );
+				builder.AddCapsule( body, surface, a, b, capsule.radius );
+			}
+
+			var points = new List<float>();
+
+			foreach ( var box in boxes )
+			{
+				points.Clear();
+
+				for ( var corner = 0; corner < 8; corner++ )
+				{
+					var local = new Vector3(
+						( corner & 1 ) == 0 ? -box.extents.x : box.extents.x,
+						( corner & 2 ) == 0 ? -box.extents.y : box.extents.y,
+						( corner & 4 ) == 0 ? -box.extents.z : box.extents.z );
+
+					Add( points, box.transform.PointToWorld( local ) );
+				}
+
+				AddHull( builder, body, surface, points );
+			}
+
+			foreach ( var hull in hulls )
+			{
+				points.Clear();
+
+				for ( var i = 0; i < hull.numVertex; i++ )
+					Add( points, hull.transform.PointToWorld( vertices[hull.startVertex + i] ) );
+
+				AddHull( builder, body, surface, points );
+			}
+
+			foreach ( var mesh in meshShapes )
+			{
+				points.Clear();
+
+				for ( var i = 0; i < mesh.numVertex; i++ )
+					Add( points, vertices[mesh.startVertex + i] );
+
+				var meshIndices = new uint[mesh.numIndex];
+				for ( var i = 0; i < mesh.numIndex; i++ )
+					meshIndices[i] = (uint)indices[mesh.startIndex + i];
+
+				var span = CollectionsMarshal.AsSpan( points );
+
+				fixed ( float* p = span )
+				fixed ( uint* ix = meshIndices )
+					builder.AddCollisionMesh( body, surface, p, mesh.numVertex, ix, meshIndices.Length );
+			}
+
+			static void Put( float* to, Vector3 v ) { to[0] = v.x; to[1] = v.y; to[2] = v.z; }
+			static void Add( List<float> to, Vector3 v ) { to.Add( v.x ); to.Add( v.y ); to.Add( v.z ); }
+
+			static void AddHull( CoreAssets.ModelBuilder builder, int body, string surface, List<float> points )
+			{
+				var span = CollectionsMarshal.AsSpan( points );
+
+				fixed ( float* p = span )
+					builder.AddHull( body, surface, p, points.Count / 3 );
+			}
+		}
+
 		private readonly List<int> _surfaces = [];
 
 		/// <summary>Adds a surface that can be referenced by collision mesh material indices.</summary>

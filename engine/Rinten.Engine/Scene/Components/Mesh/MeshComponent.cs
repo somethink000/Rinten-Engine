@@ -40,6 +40,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 			field = value;
 
+			//The model carries one kind of collision, so a different kind is a different model
+			RebuildRenderMesh();
 			RebuildImmediately();
 		}
 	} = CollisionType.Mesh;
@@ -352,7 +354,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 		Mesh.Transform = WorldTransform;
 		Mesh.SetSmoothingAngle( SmoothingAngle );
-		Model = Mesh.Rebuild();
+		Model = Mesh.Rebuild( Collision );
 
 		if ( Model is null || Model.MeshCount == 0 )
 		{

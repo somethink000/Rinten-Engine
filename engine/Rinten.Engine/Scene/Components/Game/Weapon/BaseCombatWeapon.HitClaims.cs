@@ -75,8 +75,9 @@ public partial class BaseCombatWeapon
 			if ( pellet.Direction.IsNaN || pellet.Direction.IsInfinity )
 				continue;
 
-			//Normalized so a huge-but-finite claimed direction can't multiply the impulse past any force clamp a validator applies.
-			ApplyBulletDamage( pellet.HitObject, pellet.Origin, pellet.Position, pellet.Direction.Normal, claim.Damage, claim.Force, Attacker, GameObject, pellet.Tags );
+			//Normalized so a huge-but-finite claimed direction can't multiply the impulse past any
+			//Force clamp a validator applies.
+			ApplyBulletDamage( pellet.HitObject, pellet.Origin, pellet.Position, pellet.Direction.Normal, claim.Damage, HitForce( pellet.HitObject, claim.Force ), Attacker, GameObject, pellet.Tags );
 		}
 	}
 

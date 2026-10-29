@@ -9,6 +9,9 @@ public class EyeDropperTool : EditorTool
 	internal static SerializedProperty TargetProperty = null;
 	internal static Action OnBackToLastTool;
 
+	//A menu of the picked object's matching components is up: the tool waits on it
+	static bool MenuOpen;
+
 	string LastSelection;
 
 	public override void OnEnabled()
@@ -60,7 +63,7 @@ public class EyeDropperTool : EditorTool
 	{
 		if ( obj is GameObject gameObject )
 		{
-			ProcessObject( gameObject );
+			if ( ProcessObject( gameObject ) ) return;
 		}
 		else if ( obj is Component component )
 		{
@@ -77,7 +80,9 @@ public class EyeDropperTool : EditorTool
 	{
 		base.OnUpdate();
 
-		if ( !TargetProperty.Parent.Contains( TargetProperty ) )
+		if ( MenuOpen ) return;
+
+		if ( TargetProperty is null || !TargetProperty.Parent.Contains( TargetProperty ) )
 		{
 			BackToLastTool();
 			return;
@@ -94,26 +99,60 @@ public class EyeDropperTool : EditorTool
 		}
 	}
 
-	static void ProcessObject( GameObject obj )
+	//True where the choice went to a menu of several matching components, which puts the tool away itself
+	static bool ProcessObject( GameObject obj )
 	{
-		if ( TargetProperty is null ) return;
-		if ( !obj.IsValid() ) return;
+		if ( TargetProperty is null ) return false;
+		if ( !obj.IsValid() ) return false;
 
-		if ( TargetProperty.PropertyType == typeof( GameObject ) )
+		if ( TargetProperty.PropertyType == typeof( GameObject ) || TargetProperty.PropertyType.IsInstanceOfType( obj ) )
 		{
 			TargetProperty.SetValue( obj );
-			return;
+			return false;
 		}
 
-		if ( TargetProperty.PropertyType.IsInstanceOfType( obj ) )
+		var found = obj.Components.GetAll( TargetProperty.PropertyType, FindMode.EnabledInSelfAndDescendants ).ToList();
+		if ( found.Count == 0 ) found = obj.Components.GetAll( TargetProperty.PropertyType, FindMode.DisabledInSelfAndDescendants ).ToList();
+
+		if ( found.Count > 1 )
 		{
-			TargetProperty.SetValue( obj );
-			return;
+			OpenComponentMenu( obj, found );
+			return true;
 		}
 
-		var comp = obj.Components.Get( TargetProperty.PropertyType, FindMode.EnabledInSelfAndDescendants );
-		comp ??= obj.Components.Get( TargetProperty.PropertyType, FindMode.DisabledInSelfAndDescendants );
-		ProcessComponent( comp );
+		ProcessComponent( found.FirstOrDefault() );
+		return false;
+	}
+
+	//Every matching component on the picked object; the one clicked is taken. The menu does not block, so it
+	//writes to the property it was opened for and puts the tool away when it closes
+	static void OpenComponentMenu( GameObject obj, List<Component> components )
+	{
+		MenuOpen = true;
+		var target = TargetProperty;
+
+		var menu = new Menu();
+		menu.AddHeading( obj.Name );
+
+		foreach ( var component in components )
+		{
+			var type = EditorTypeLibrary.GetType( component.GetType() );
+			var name = type?.Title ?? component.GetType().Name;
+			if ( component.GameObject != obj ) name = $"{name} ({component.GameObject?.Name})";
+
+			menu.AddOption( name, type?.Icon, () =>
+			{
+				if ( component.IsValid() && target.PropertyType.IsInstanceOfType( component ) ) target.SetValue( component );
+			} );
+		}
+
+		menu.AboutToHide += () =>
+		{
+			MenuOpen = false;
+			BackToLastTool();
+		};
+
+		menu.OpenAtCursor();
 	}
 
 	static void ProcessComponent( Component comp )
@@ -148,8 +187,7 @@ public class EyeDropperTool : EditorTool
 	{
 		await Task.Delay( 100 );
 
-		if ( obj.IsValid() )
-			ProcessObject( obj );
+		if ( obj.IsValid() && ProcessObject( obj ) ) return;
 
 		BackToLastTool();
 	}
@@ -177,6 +215,7 @@ public class EyeDropperTool : EditorTool
 		EditorToolManager.SetTool( LastTool );
 		LastTool = null;
 		TargetProperty = null;
+		MenuOpen = false;
 
 		OnBackToLastTool?.Invoke();
 	}

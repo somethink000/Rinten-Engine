@@ -77,10 +77,7 @@ public sealed partial class Decal : Component, Component.ExecuteInEditor, Compon
 	[Property, Range( 0.0f, 0.5f )]
 	public float CoverageRange { get; set; } = 0.07f;
 
-	/// <summary>
-	/// Duration of fade-in transition for this decal when it is spawned, based on height coverage and heightmap texture.
-	/// 0 will make the fade-in instant. You'll need a valid height map texture on the decal for this effect.
-	/// </summary>
+	/// <summary>Seconds the height coverage takes to fade in when spawned; 0 is instant. Needs a decal heightmap.</summary>
 	[Property, Range( 0, 2 )]
 	public float CoverageFadeIn { get; set; } = 0.0f;
 

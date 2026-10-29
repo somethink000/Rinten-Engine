@@ -18,7 +18,7 @@ public sealed partial class PlayerController : Component
 	bool CanStep => _stepGrounded && !IsProxy && Body.IsValid() && IsOnGround
 		&& Mode.AllowGrounding && _timeUntilAllowedGround <= 0;
 
-	/// <summary>Lift onto a reachable step without consuming the horizontal physics movement.</summary>
+	//Lift onto a reachable step without consuming the horizontal physics movement.
 	internal void TryStep( float maxDistance )
 	{
 		if ( maxDistance <= 0 || !CanStep )
@@ -42,7 +42,7 @@ public sealed partial class PlayerController : Component
 		if ( !Scene.Is2D && !GroundUsesContactFriction && forward.Body?.BodyType == PhysicsBodyType.Static
 			&& forward.Shape.IsValid() && forward.Shape.IsHullShape )
 		{
-			// Static hulls use exact reach; moving bodies need contact tolerance.
+			//Static hulls use exact reach; moving bodies need contact tolerance.
 			var reached = TraceMovement( from, from + displacement, 0, includeGroundClearance: true );
 			if ( reached.StartedSolid ) reached = TraceMovement( from, from + displacement, 0 );
 			if ( !reached.Hit || reached.StartedSolid ) return;
@@ -85,9 +85,9 @@ public sealed partial class PlayerController : Component
 				if ( !TryFindGround( retreat, 0.1f, 0.05f, out var support, out _ ) )
 					return false;
 
-				// Motion along a tilted support plane is not a step, even across different hulls.
+				//Motion along a tilted support plane is not a step, even across different hulls.
 				var stepRise = (landingGround.HitPosition - support.HitPosition).Dot( support.Normal ) / support.Normal.Dot( up );
-				// Compare surface points, allowing for their world-space floating-point precision.
+				//Compare surface points, allowing for their world-space floating-point precision.
 				var planeScale = MathF.Max( landingGround.HitPosition.Length, support.HitPosition.Length );
 				var planeTolerance = 4 * (MathF.BitIncrement( planeScale ) - planeScale);
 				if ( stepRise <= planeTolerance || stepRise > maxDistance + _skin )
@@ -126,8 +126,8 @@ public sealed partial class PlayerController : Component
 		if ( !across.Hit || across.StartedSolid || Mode.IsStandableSurface( across ) )
 			return;
 
-		// The side wall may hide a reachable landing. Change only the query route,
-		// leaving horizontal movement and wall sliding to physics.
+		//The side wall may hide a reachable landing. Change only the query route,
+		//leaving horizontal movement and wall sliding to physics.
 		var wallNormal = WithoutVertical( across.Normal ).Normal;
 		var intoWall = displacement.Dot( wallNormal );
 		if ( intoWall >= 0 )
@@ -151,12 +151,12 @@ public sealed partial class PlayerController : Component
 
 	bool IsPhysicalSupportHit( SceneTraceResult hit )
 	{
-		// Walkable moving slopes must support the player's weight through native contacts.
+		//Walkable moving slopes must support the player's weight through native contacts.
 		if ( Mode.IsStandableSurface( hit )
 			&& (GroundUsesContactFriction || hit.Body?.BodyType == PhysicsBodyType.Dynamic) )
 			return true;
 
-		// A penetrating contact can make the sweep exit through the support's underside.
+		//A penetrating contact can make the sweep exit through the support's underside.
 		return GroundUsesContactFriction && _groundShape.IsValid()
 			&& hit.Body == _groundShape.Body && hit.Normal.Dot( UpDirection ) < 0;
 	}
@@ -174,7 +174,7 @@ public sealed partial class PlayerController : Component
 		var intoGround = (Body.Velocity - GroundVelocity).Dot( ground.Normal );
 		if ( intoGround < 0 )
 		{
-			// Correct ground penetration vertically without steering along the new surface normal.
+			//Correct ground penetration vertically without steering along the new surface normal.
 			Body.Velocity -= UpDirection * (intoGround / ground.Normal.Dot( UpDirection ));
 		}
 	}

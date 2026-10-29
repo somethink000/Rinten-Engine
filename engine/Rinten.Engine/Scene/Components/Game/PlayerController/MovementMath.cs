@@ -30,12 +30,12 @@ internal static class MovementMath
 	{
 		var addSpeed = MathF.Min( wishSpeed, cap ) - velocity.Dot( direction );
 		if ( addSpeed <= 0 ) return velocity;
-		// Uncapped wish speed and multiplication order preserve reference behavior.
+		//Uncapped wish speed and multiplication order preserve reference behavior.
 		var speed = acceleration * wishSpeed * delta * surfaceFriction;
 		return velocity + direction * MathF.Min( speed, addSpeed );
 	}
 
-	// Keep the operation order of each half-step for reference rounding.
+	//Keep the operation order of each half-step for reference rounding.
 	internal static float StartGravity( float velocity, float gravity, float scale, float delta )
 	{
 		return (float)(velocity - (scale * gravity * 0.5 * delta));

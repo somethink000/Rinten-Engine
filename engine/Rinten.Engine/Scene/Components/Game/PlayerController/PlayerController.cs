@@ -32,7 +32,7 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 	/// <summary>We will apply extra friction when we're on the ground and our desired velocity is lower than our current velocity, so we will slow down.</summary>
 	[Property, Group( "Physics" ), Range( 0, 1 )] public float BrakePower { get; set; } = 1;
 
-	/// <summary>Airborne drag. Zero preserves strafing and surfing momentum.</summary>
+	//Airborne drag. Zero preserves strafing and surfing momentum.
 	[Property, Group( "Physics" ), Range( 0, 1 )] public float AirFriction { get; set; } = 0;
 
 

@@ -118,8 +118,6 @@ public partial class BaseCombatWeapon
 	public static void ImpactEffect( in ShotEffect shot ) => ImpactEffect( shot, Vector3.Zero );
 
 	/// <inheritdoc cref="ImpactEffect(SceneTraceResult)"/>
-	/// <param name="shot">The resolved shot.</param>
-	/// <param name="direction">The direction the shot travelled, for the surface's <see cref="Surface.Splatter"/>. Zero skips it.</param>
 	public static void ImpactEffect( in ShotEffect shot, Vector3 direction )
 	{
 		if ( !shot.Hit )
@@ -152,11 +150,6 @@ public partial class BaseCombatWeapon
 	}
 
 	/// <inheritdoc cref="ImpactPrefab(GameObject, Surface, Vector3, Vector3)"/>
-	/// <param name="hitObject">What was hit.</param>
-	/// <param name="surface">The surface that was hit.</param>
-	/// <param name="position">Where the hit landed.</param>
-	/// <param name="normal">The surface normal at the hit.</param>
-	/// <param name="direction">The direction the hit travelled, for the surface's <see cref="Surface.Splatter"/>. Zero skips it.</param>
 	public static void ImpactPrefab( GameObject hitObject, Surface surface, Vector3 position, Vector3 normal, Vector3 direction )
 	{
 		if ( Application.IsDedicatedServer )
@@ -201,7 +194,7 @@ public partial class BaseCombatWeapon
 		AttachToHit( impact, hitObject, position );
 	}
 
-	/// <summary>Stick an impact to what was hit, and to the nearest bone of a skinned model so it follows animation.</summary>
+	//Stick an impact to what was hit, and to the nearest bone of a skinned model so it follows animation.
 	internal static void AttachToHit( GameObject impact, GameObject hitObject, Vector3 position )
 	{
 		//The hit object can be gone by the time the impact plays - this shot killed it - and the

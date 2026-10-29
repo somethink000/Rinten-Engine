@@ -12,7 +12,7 @@ public partial class MoveModeWalk
 	Vector3 _previousSlideNormal;
 	internal bool IsStaticGroundMove => _physicsStep && !HasPhysicalObstacle( _movementStart, Controller.Body.PhysicsBody.Position );
 
-	// Static sweeps must not replace impulses from movable bodies or conveyors.
+	//Static sweeps must not replace impulses from movable bodies or conveyors.
 	bool HasPhysicalObstacle( Vector3 from, Vector3 to )
 	{
 		var scale = MathF.Abs( Controller.WorldTransform.UniformScale );
@@ -58,7 +58,7 @@ public partial class MoveModeWalk
 		var position = _movementStart;
 		var velocity = Controller.Body.Velocity;
 		var grounded = Controller.IsOnGround;
-		// A steep bank can lift a grounded slide without becoming its support surface.
+		//A steep bank can lift a grounded slide without becoming its support surface.
 		if ( grounded )
 		{
 			var obstruction = Controller.TraceStaticMovement( position, position + velocity * Time.Delta, previousContact, previousNormal, includeGroundClearance: true );
@@ -78,7 +78,7 @@ public partial class MoveModeWalk
 			var hit = Controller.TraceStaticMovement( position, end, previousContact, previousNormal, grounded );
 			if ( IsSteepStaticHull( hit ) )
 			{
-				// Cancel cast tolerance when checking clearance past a convex ramp edge.
+				//Cancel cast tolerance when checking clearance past a convex ramp edge.
 				var inset = Controller.TraceMovement( position, end, 0.0015875f, grounded );
 				if ( !inset.Hit && !inset.StartedSolid && !Controller.TraceMovement( end, end, 0, grounded ).StartedSolid )
 					hit = inset;
@@ -103,7 +103,7 @@ public partial class MoveModeWalk
 			}
 			if ( !hit.Hit ) break;
 
-			// A rounded upper contact must not drive grounded feet into their support.
+			//A rounded upper contact must not drive grounded feet into their support.
 			if ( grounded && hit.Normal.Dot( Controller.UpDirection ) < 0 )
 			{
 				hit.Normal = (hit.Normal - Controller.GroundNormal * hit.Normal.Dot( Controller.GroundNormal )).Normal;
@@ -113,7 +113,7 @@ public partial class MoveModeWalk
 			previousNormal = hit.Normal;
 			lastContact = hit.Normal.Dot( Controller.UpDirection ) > 0 && !IsStandableSurface( hit ) ? hit.Shape : null;
 			lastNormal = hit.Normal;
-			// Verified hull contacts already include separation; extra offsets reorder seam contacts.
+			//Verified hull contacts already include separation; extra offsets reorder seam contacts.
 			if ( !hit.Shape.IsHullShape && (fraction > 0 || MathF.Abs( hit.Normal.Dot( Controller.UpDirection ) ) > 0.001f) )
 				position += hit.Normal * 0.0000254f;
 			remaining -= remaining * fraction;
@@ -169,7 +169,7 @@ public partial class MoveModeWalk
 		if ( !_hasStaticMove ) return;
 		_hasStaticMove = false;
 		var body = Controller.Body;
-		// Physical bodies may have moved into the route during the solve.
+		//Physical bodies may have moved into the route during the solve.
 		if ( HasPhysicalObstacle( _movementStart, body.PhysicsBody.Position )
 			|| HasPhysicalObstacle( _movementStart, _staticMovePosition ) )
 		{
@@ -187,11 +187,11 @@ public partial class MoveModeWalk
 		var body = Controller.Body;
 		var end = body.PhysicsBody.Position;
 		var start = _movementStart;
-		// Correct static penetration without replacing contact impulses.
+		//Correct static penetration without replacing contact impulses.
 		for ( int plane = 0; plane < 4; plane++ )
 		{
 			var hit = Controller.TraceMovement( start, end, 0 );
-			// Verify downward-facing contacts before they can push us into a surf bank.
+			//Verify downward-facing contacts before they can push us into a surf bank.
 			if ( hit.Hit && !hit.StartedSolid && hit.Body?.BodyType == PhysicsBodyType.Static
 				&& hit.Normal.Dot( Controller.UpDirection ) < -0.001f )
 				hit = Controller.TraceStaticMovement( start, end, null, Vector3.Zero );
@@ -201,7 +201,7 @@ public partial class MoveModeWalk
 			if ( penetration <= 0 ) break;
 			end += hit.Normal * penetration;
 			body.WorldPosition = end;
-			// Reach other corner planes on the next cast.
+			//Reach other corner planes on the next cast.
 			start += hit.Normal * 0.00127f;
 		}
 	}
@@ -215,7 +215,7 @@ public partial class MoveModeWalk
 		var hit = Controller.TraceMovement( _movementStart, intended, 0 );
 		if ( !hit.Hit || hit.StartedSolid || hit.Body?.BodyType != PhysicsBodyType.Static
 			|| hit.Normal.Dot( Controller.UpDirection ) > 0.001f ) return;
-		// Native CCD can stop position a tick before velocity.
+		//Native CCD can stop position a tick before velocity.
 		if ( (body.PhysicsBody.Position - hit.EndPosition).Dot( hit.Normal ) <= 0.00127f
 			&& body.Velocity.Dot( hit.Normal ) < 0 )
 			body.Velocity = ClipStaticVelocity( body.Velocity, hit.Normal );

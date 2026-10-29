@@ -147,8 +147,6 @@ public partial class Surface : GameResource
 	}
 
 	/// <summary>Returns a Surface from its name, or null</summary>
-	/// <param name="name">The name of a surface property to look up</param>
-	/// <returns>The surface with given name, or null if such surface property doesn't exist</returns>
 	public static Surface FindByName( string name )
 	{
 		return All.FirstOrDefault( x => x.Value.PhysicsName == name ).Value

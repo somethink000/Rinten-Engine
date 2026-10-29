@@ -4,24 +4,18 @@
 [Icon( "scuba_diving" ), Group( "Movement" ), Title( "MoveMode - Swim" )]
 public partial class MoveModeSwim : MoveMode
 {
-	/// <summary>
-	/// Selection priority while sufficiently submerged. An active exit adds one.
-	/// </summary>
+	/// <summary>Selection priority while sufficiently submerged. An active exit adds one.</summary>
 	[Property]
 	public int Priority { get; set; } = 10;
 
-	/// <summary>
-	/// Submerged fraction required for ordinary swimming.
-	/// </summary>
+	/// <summary>Submerged fraction required for ordinary swimming.</summary>
 	[Property, Range( 0, 1 )]
 	public float SwimLevel { get; set; } = 0.7f;
 
 	/// <summary>Fraction of the character submerged in a water-tagged trigger.</summary>
 	public float WaterLevel { get; private set; }
 
-	/// <summary>
-	/// Disable gravity and apply drag while swimming. Exits use an undamped gravity arc.
-	/// </summary>
+	/// <summary>Disable gravity and apply drag while swimming. Exits use an undamped gravity arc.</summary>
 	public override void UpdateRigidBody( Rigidbody body )
 	{
 		body.Gravity = IsExitingWater;
@@ -29,9 +23,7 @@ public partial class MoveModeSwim : MoveMode
 		body.AngularDamping = 1;
 	}
 
-	/// <summary>
-	/// Keep control until an exit lands, even after the character crosses the waterline.
-	/// </summary>
+	/// <summary>Keep control until an exit lands, even after the character crosses the waterline.</summary>
 	public override int Score( PlayerController controller )
 	{
 		if ( IsExitingWater )
@@ -49,17 +41,13 @@ public partial class MoveModeSwim : MoveMode
 		return WaterLevel > SwimLevel ? Priority : -100;
 	}
 
-	/// <summary>
-	/// Mark the controller as swimming when this mode is selected.
-	/// </summary>
+	/// <summary>Mark the controller as swimming when this mode is selected.</summary>
 	public override void OnModeBegin()
 	{
 		Controller.IsSwimming = true;
 	}
 
-	/// <summary>
-	/// Preserve open-water jumping, without adding another kick after a ledge exit.
-	/// </summary>
+	/// <summary>Preserve open-water jumping, without adding another kick after a ledge exit.</summary>
 	public override void OnModeEnd( MoveMode next )
 	{
 		Controller.IsSwimming = false;
@@ -72,16 +60,14 @@ public partial class MoveModeSwim : MoveMode
 		CancelExit();
 	}
 
-	/// <summary>
-	/// Sample water even when another movement mode is active.
-	/// </summary>
+	/// <summary>Sample water even when another movement mode is active.</summary>
 	protected override void OnFixedUpdate()
 	{
 		UpdateWaterLevel();
 		_retryTime = MathF.Max( 0, _retryTime - Time.Delta );
 
-		// Avoid a second kick from the exit, but allow later surface jumps even
-		// when a failed attempt leaves the swimmer in shallow water.
+		//Avoid a second kick from the exit, but allow later surface jumps even
+		//when a failed attempt leaves the swimmer in shallow water.
 		if ( !IsExitingWater && (WaterLevel > 0.9f || _retryTime <= 0) )
 		{
 			_suppressSurfaceJump = false;
@@ -118,10 +104,7 @@ public partial class MoveModeSwim : MoveMode
 		}
 	}
 
-	/// <summary>
-	/// Rotate directional swimming input before adding Jump along the character's up
-	/// direction, so looking up or down cannot tilt the swim-up button.
-	/// </summary>
+	/// <summary>Turns swim input by the view, then adds Jump along up, so the view cannot tilt it.</summary>
 	public override Vector3 UpdateMove( Rotation eyes, Vector3 input )
 	{
 		input = eyes * input;

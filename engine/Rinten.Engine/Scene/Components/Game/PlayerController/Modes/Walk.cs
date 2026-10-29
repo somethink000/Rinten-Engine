@@ -12,32 +12,32 @@ public partial class MoveModeWalk : MoveMode
 	[Property] public float StepUpHeight { get; set; } = 0.45f;
 	[Property] public float StepDownHeight { get; set; } = 0.45f;
 
-	/// <summary>Allow input-driven acceleration while airborne.</summary>
+	//Allow input-driven acceleration while airborne.
 	[Property, Group( "Air Movement" )] public bool EnableAirStrafing { get; set; } = true;
 
 	[Property, Group( "Air Movement" )] public float AirAcceleration { get; set; } = 10.0f;
 
-	/// <summary>Wish-direction speed cap; turning can still build total speed.</summary>
+	//Wish-direction speed cap; turning can still build total speed.
 	[Property, Group( "Air Movement" )] public float AirSpeedCap { get; set; } = 0.762f;
 
-	/// <summary>Allow immediate repeat jumps and takeoff speeds above RunSpeed.</summary>
+	//Allow immediate repeat jumps and takeoff speeds above RunSpeed.
 	[Property, Group( "Jumping" )] public bool EnableBunnyHopping { get; set; } = true;
 
-	/// <summary>Grounded seconds required when bunny hopping is disabled. Early requests are discarded.</summary>
+	//Grounded seconds required when bunny hopping is disabled. Early requests are discarded.
 	[Property, Group( "Jumping" ), Range( 0, 1 )] public float BunnyHopRecoveryTime { get; set; } = 0.1f;
 
-	/// <summary>Fraction of ground-relative horizontal speed retained by a walking jump.</summary>
+	//Fraction of ground-relative horizontal speed retained by a walking jump.
 	[Property, Group( "Jumping" ), Range( 0, 1 )] public float JumpMomentumRetention { get; set; } = 1;
 
 	[Property, Group( "Ground Movement" )] public float GroundAcceleration { get; set; } = 10;
 
-	/// <summary>Ground friction, scaled by BrakePower.</summary>
+	//Ground friction, scaled by BrakePower.
 	[Property, Group( "Ground Movement" )] public float Friction { get; set; } = 4;
 
-	/// <summary>Minimum speed used to calculate ground friction.</summary>
+	//Minimum speed used to calculate ground friction.
 	[Property, Group( "Ground Movement" )] public float StopSpeed { get; set; } = 2.54f;
 
-	/// <summary>Per-axis velocity limit, not a total speed cap.</summary>
+	//Per-axis velocity limit, not a total speed cap.
 	[Property] public float MaxVelocity { get; set; } = 88.9f;
 
 	protected override bool SmoothInput => false;
@@ -69,7 +69,7 @@ public partial class MoveModeWalk : MoveMode
 			return;
 		}
 
-		// Idle moving surfaces use native friction.
+		//Idle moving surfaces use native friction.
 		var useContactFriction = Controller.GroundUsesContactFriction;
 		if ( useContactFriction && wish.IsNearZeroLength )
 			return;
@@ -86,7 +86,7 @@ public partial class MoveModeWalk : MoveMode
 		var velocity = body.Velocity - Controller.GroundVelocity;
 		var normalVelocity = normal * velocity.Dot( normal );
 		var tangentVelocity = velocity - normalVelocity;
-		// Static slopes preserve horizontal speed; physical supports use tangent speed.
+		//Static slopes preserve horizontal speed; physical supports use tangent speed.
 		velocity = useContactFriction ? tangentVelocity : Controller.WithoutVertical( velocity );
 
 		SurfaceFriction = MovementMath.SurfaceFriction( MathF.Max( Controller.GroundFriction, 0 ) );
@@ -98,7 +98,7 @@ public partial class MoveModeWalk : MoveMode
 
 		if ( useContactFriction )
 		{
-			// Preserve native support impulses.
+			//Preserve native support impulses.
 			velocity += normalVelocity;
 			if ( SurfaceFriction > 0 && body.Gravity )
 			{
@@ -166,11 +166,11 @@ public partial class MoveModeWalk : MoveMode
 		var body = Controller.Body;
 		var up = Controller.UpDirection;
 		var vertical = body.Velocity.Dot( up );
-		// Slow upward motion has reduced air control.
+		//Slow upward motion has reduced air control.
 		SurfaceFriction = Controller.IsOnGround
 			? MovementMath.SurfaceFriction( MathF.Max( Controller.GroundFriction, 0 ) )
 			: vertical > 0 && vertical <= MovementMath.NonJumpVelocity ? 0.25f : 1;
-		// Moving supports already applied native gravity.
+		//Moving supports already applied native gravity.
 		if ( !Controller.IsOnGround && !_nativeGravityStep )
 			body.Velocity = Controller.WithVertical( body.Velocity,
 				MovementMath.FinishGravity( vertical, -Scene.PhysicsWorld.Gravity.Dot( up ), body.GravityScale, Time.Delta ) );
@@ -198,7 +198,7 @@ public partial class MoveModeWalk : MoveMode
 			return;
 		}
 
-		// Split gravity in air; retain native drift on frictionless ground.
+		//Split gravity in air; retain native drift on frictionless ground.
 		body.Gravity = Controller.IsOnGround && Controller.GroundFriction <= 0;
 		Controller.FeetCollider.Friction = 0;
 	}
@@ -207,7 +207,7 @@ public partial class MoveModeWalk : MoveMode
 	{
 		base.PrePhysicsStep();
 
-		// Apply drag once before either solver, so static contact correction cannot undo it.
+		//Apply drag once before either solver, so static contact correction cannot undo it.
 		if ( !Controller.IsOnGround )
 			Controller.Body.Velocity /= 1 + MathF.Max( Controller.AirFriction, 0 ) * Time.Delta;
 

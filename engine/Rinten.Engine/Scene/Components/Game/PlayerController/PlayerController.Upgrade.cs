@@ -6,9 +6,7 @@ public sealed partial class PlayerController
 {
 	public override int ComponentVersion => 1;
 
-	/// <summary>
-	/// Approximate the old contact-friction brake with the new velocity brake.
-	/// </summary>
+	//Approximate the old contact-friction brake with the new velocity brake.
 	[Expose, JsonUpgrader( typeof( PlayerController ), 1 )]
 	static void Upgrader_v1( JsonObject json )
 	{

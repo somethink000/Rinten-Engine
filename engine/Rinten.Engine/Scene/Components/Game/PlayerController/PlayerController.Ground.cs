@@ -25,7 +25,7 @@ public sealed partial class PlayerController : Component
 	bool _canCoyoteJump;
 	internal bool CanCoyoteJump => _canCoyoteJump && CoyoteTime > 0 && TimeSinceGrounded <= CoyoteTime;
 
-	// Moving surfaces need native contact forces rather than static-ground walking.
+	//Moving surfaces need native contact forces rather than static-ground walking.
 	internal bool GroundUsesContactFriction
 	{
 		get
@@ -37,7 +37,7 @@ public sealed partial class PlayerController : Component
 				return false;
 
 			var body = _groundShape.Body;
-			// Keyframe controllers can clear instantaneous velocity before the next physics step.
+			//Keyframe controllers can clear instantaneous velocity before the next physics step.
 			return !_groundShape.SurfaceVelocity.IsNearZeroLength
 				|| (body.BodyType == PhysicsBodyType.Keyframed
 					&& (!GroundVelocity.IsNearZeroLength || !body.Velocity.IsNearZeroLength || !body.AngularVelocity.IsNearZeroLength));
@@ -113,7 +113,7 @@ public sealed partial class PlayerController : Component
 		var movingUpRapidly = relative.Dot( up ) > Movement.MovementMath.NonJumpVelocity;
 		if ( IsOnGround )
 		{
-			// Slope following is not a jump; explicit jumps already clear ground.
+			//Slope following is not a jump; explicit jumps already clear ground.
 			if ( !GroundUsesContactFriction && Mode is Movement.MoveModeWalk walk && walk.IsStaticGroundMove ) movingUpRapidly = false;
 			else movingUpRapidly &= relative.Dot( GroundNormal ) > Movement.MovementMath.NonJumpVelocity;
 		}
@@ -140,7 +140,7 @@ public sealed partial class PlayerController : Component
 		var support = Probe( supportHull );
 		if ( IsGroundSupport( support, supportHull, up, scale, preciseGround ) ) return support;
 
-		// Probe quadrants when a steep face masks walkable ground.
+		//Probe quadrants when a steep face masks walkable ground.
 		for ( int quadrant = 0; quadrant < 4; quadrant++ )
 		{
 			var mins = hull.Mins * scale;
@@ -161,7 +161,7 @@ public sealed partial class PlayerController : Component
 		if ( !hit.Hit || !Mode.IsStandableSurface( hit ) ) return false;
 		if ( preciseGround && !hit.StartedSolid && hit.Body?.BodyType == PhysicsBodyType.Static && hit.Shape.IsValid() && hit.Shape.IsHullShape )
 		{
-			// Use the surface plane, not the sweep's separation-biased endpoint.
+			//Use the surface plane, not the sweep's separation-biased endpoint.
 			var normal = hit.Normal;
 			var footprint = normal.x * (normal.x >= 0 ? hull.Mins.x : hull.Maxs.x)
 				+ normal.y * (normal.y >= 0 ? hull.Mins.y : hull.Maxs.y)
@@ -170,7 +170,7 @@ public sealed partial class PlayerController : Component
 		}
 		if ( !hit.StartedSolid ) return true;
 
-		// Retain embedded support only with native contact.
+		//Retain embedded support only with native contact.
 		return IsOnGround && _groundShape.IsValid()
 			&& hit.Body == _groundShape.Body && Body.PhysicsBody.IsTouching( hit.Body, false );
 	}

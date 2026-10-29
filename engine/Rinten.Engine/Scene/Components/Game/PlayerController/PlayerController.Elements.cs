@@ -5,7 +5,7 @@ public sealed partial class PlayerController : Component
 	//Metres: an inch upstream
 	const float _groundedFeetLift = 0.0254f;
 
-	/// <summary>Make sure the body and our components are created</summary>
+	//Make sure the body and our components are created
 	void EnsureComponentsCreated()
 	{
 		if ( !ColliderObject.IsValid() )
@@ -102,9 +102,9 @@ public sealed partial class PlayerController : Component
 		Mode?.UpdateRigidBody( Body );
 
 		//
-		// Small lips are absorbed by Reground, and larger "steps" by TryStep.
+		//Small lips are absorbed by Reground, and larger "steps" by TryStep.
 		//
-		// Keep the feet outside Box3D's speculative mesh contacts while ground probes maintain support.
+		//Keep the feet outside Box3D's speculative mesh contacts while ground probes maintain support.
 		var feetLift = IsOnGround && !GroundIsDynamic && !Body.Gravity
 			? MathF.Min( _groundedFeetLift / MathF.Abs( WorldTransform.UniformScale ), feetLength * 0.5f )
 			: 0.0f;

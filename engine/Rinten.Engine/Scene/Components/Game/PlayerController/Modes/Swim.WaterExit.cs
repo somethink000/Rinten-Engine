@@ -4,24 +4,16 @@ public partial class MoveModeSwim
 {
 	//Lengths below are metres and speeds metres a second, the inch values upstream converted
 
-	/// <summary>
-	/// Highest bank above the water surface that the character can climb out onto.
-	/// </summary>
+	//Highest bank above the water surface that the character can climb out onto.
 	private const float ExitMaxHeight = 0.81f;
 
-	/// <summary>
-	/// How far ahead of the character hull to search for a bank.
-	/// </summary>
+	//How far ahead of the character hull to search for a bank.
 	private const float ExitReach = 0.61f;
 
-	/// <summary>
-	/// Horizontal speed maintained against the bank until the feet clear its edge.
-	/// </summary>
+	//Horizontal speed maintained against the bank until the feet clear its edge.
 	private const float ExitSpeed = 3.05f;
 
-	/// <summary>
-	/// Whether the controller currently owns an assisted exit, including its dry portion.
-	/// </summary>
+	/// <summary>Whether the controller currently owns an assisted exit, including its dry portion.</summary>
 	public bool IsExitingWater { get; private set; }
 
 	Rigidbody _exitBody;
@@ -34,14 +26,10 @@ public partial class MoveModeSwim
 	bool _launching;
 	bool _suppressSurfaceJump;
 
-	/// <summary>
-	/// Landing is enabled during the exit but not during ordinary swimming.
-	/// </summary>
+	/// <summary>Landing is enabled during the exit but not during ordinary swimming.</summary>
 	public override bool AllowGrounding => IsExitingWater && Controller.Body.Velocity.Dot( Controller.UpDirection ) <= 0;
 
-	/// <summary>
-	/// Preserve the exit trajectory instead of applying ordinary swim acceleration.
-	/// </summary>
+	/// <summary>Preserve the exit trajectory instead of applying ordinary swim acceleration.</summary>
 	public override void AddVelocity()
 	{
 		if ( !IsExitingWater )
@@ -50,10 +38,7 @@ public partial class MoveModeSwim
 		}
 	}
 
-	/// <summary>
-	/// Detect the bank while swimming, then carry the body toward its moving landing.
-	/// Collision response remains entirely in the native physics controller.
-	/// </summary>
+	/// <summary>Finds a bank while swimming and carries the body onto it; collision stays with the physics.</summary>
 	public override void PrePhysicsStep()
 	{
 		if ( IsProxy || !Controller.Body.IsValid() )
@@ -91,8 +76,8 @@ public partial class MoveModeSwim
 		var platformVelocity = platform.IsValid() ? platform.GetVelocityAtPoint( landing ) : Vector3.Zero;
 		var velocity = Controller.Body.Velocity;
 
-		// Ease into the assistance and brake near the landing, preserving the
-		// swimmer's momentum instead of replacing it in a single physics step.
+		//Ease into the assistance and brake near the landing, preserving the
+		//swimmer's momentum instead of replacing it in a single physics step.
 		var target = delta.Normal * MathF.Min( ExitSpeed, delta.Length * 10 ) + Controller.WithoutVertical( platformVelocity );
 		var horizontal = Controller.WithoutVertical( velocity );
 		horizontal += (target - horizontal).ClampLength( 15.24f * Time.Delta );
@@ -100,8 +85,8 @@ public partial class MoveModeSwim
 		var vertical = velocity.Dot( Controller.UpDirection );
 		if ( _launching )
 		{
-			// Recalculate the impulse still needed as we rise. A fixed launch
-			// target would add the ramp's travel on top of the validated apex.
+			//Recalculate the impulse still needed as we rise. A fixed launch
+			//target would add the ramp's travel on top of the validated apex.
 			var gravity = MathF.Max( 0.0254f, -Scene.PhysicsWorld.Gravity.Dot( Controller.UpDirection ) * Controller.Body.GravityScale );
 			var rise = MathF.Max( 0, (landing - WorldPosition).Dot( Controller.UpDirection ) + 0.457f );
 			var launchSpeed = MathF.Sqrt( 2 * gravity * rise );
@@ -116,9 +101,7 @@ public partial class MoveModeSwim
 		Controller.Body.Velocity = Controller.WithVertical( horizontal, vertical );
 	}
 
-	/// <summary>
-	/// Stop assistance when an obstruction prevents the feet from reaching the top.
-	/// </summary>
+	/// <summary>Stop assistance when an obstruction prevents the feet from reaching the top.</summary>
 	public override void PostPhysicsStep()
 	{
 		if ( !IsExitingWater || !_landingObject.IsValid() )
@@ -131,18 +114,14 @@ public partial class MoveModeSwim
 		}
 	}
 
-	/// <summary>
-	/// Use the same slope limit as the character's walking mode for exit landings.
-	/// </summary>
+	/// <summary>Use the same slope limit as the character's walking mode for exit landings.</summary>
 	public override bool IsStandableSurface( in SceneTraceResult result )
 	{
 		var walk = GetComponent<MoveModeWalk>();
 		return result.Normal.Dot( Controller.UpDirection ) >= MathF.Cos( (walk?.GroundAngle ?? 45) * MathF.PI / 180 );
 	}
 
-	/// <summary>
-	/// Cancel any pending exit after a reset, landing, interruption or obstruction.
-	/// </summary>
+	/// <summary>Cancel any pending exit after a reset, landing, interruption or obstruction.</summary>
 	public void CancelExit()
 	{
 		if ( IsExitingWater )
@@ -163,9 +142,7 @@ public partial class MoveModeSwim
 		_landingCollider = null;
 	}
 
-	/// <summary>
-	/// Release transient references if the component is disabled during an exit.
-	/// </summary>
+	/// <summary>Release transient references if the component is disabled during an exit.</summary>
 	protected override void OnDisabled()
 	{
 		CancelExit();
@@ -206,7 +183,7 @@ public partial class MoveModeSwim
 			|| down.EndPosition.Dot( Controller.UpDirection ) > waterHeight + ExitMaxHeight || down.EndPosition.Dot( Controller.UpDirection ) < waterHeight - 0.1016f )
 			return;
 
-		// The arc rises above the landing. Validate that extra headroom as well.
+		//The arc rises above the landing. Validate that extra headroom as well.
 		var apex = Controller.WithVertical( foot, down.EndPosition.Dot( Controller.UpDirection ) + 0.457f );
 		var apexAcross = Controller.WithVertical( across, apex.Dot( Controller.UpDirection ) );
 		var riseTrace = Trace( foot, apex );
@@ -214,7 +191,7 @@ public partial class MoveModeSwim
 		if ( riseTrace.Hit || riseTrace.StartedSolid || arcTrace.Hit || arcTrace.StartedSolid )
 			return;
 
-		// Check the whole route, not just a ray over the bank or a clear eye position.
+		//Check the whole route, not just a ray over the bank or a clear eye position.
 		_landingObject = down.GameObject;
 		_landingCollider = down.Component as Collider;
 		if ( !_landingObject.IsValid() )
@@ -233,10 +210,7 @@ public partial class MoveModeSwim
 		UpdateRigidBody( Controller.Body );
 	}
 
-	/// <summary>
-	/// Sweep both native character shapes. A small skin tolerates the solver's
-	/// resting contact penetration without accepting genuinely obstructed routes.
-	/// </summary>
+	//Sweeps both character shapes; a small skin allows resting penetration but not a blocked route
 	SceneTraceResult Trace( Vector3 from, Vector3 to )
 	{
 		return Controller.TraceMovement( from, to );

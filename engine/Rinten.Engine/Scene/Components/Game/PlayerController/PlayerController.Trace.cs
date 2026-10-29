@@ -7,9 +7,7 @@ public sealed partial class PlayerController : Component
 	//Metres: Source's DIST_EPSILON, a thirty-second of an inch
 	const float _traceSeparation = 0.00079375f;
 
-	/// <summary>
-	/// Return an aabb representing the body
-	/// </summary>
+	/// <summary>Return an aabb representing the body</summary>
 	public BBox BodyBox( float scale = 1.0f, float heightScale = 1.0f )
 	{
 		var radius = BodyRadius * 0.5f * scale;
@@ -46,7 +44,7 @@ public sealed partial class PlayerController : Component
 	internal SceneTraceResult TraceStaticMovement( Vector3 from, Vector3 to, PhysicsShape previousContact, Vector3 previousNormal, bool includeGroundClearance = false )
 	{
 		var result = TraceMovement( from, to, 0, includeGroundClearance );
-		// Perpendicular probes distinguish grazing contacts from actual penetration.
+		//Perpendicular probes distinguish grazing contacts from actual penetration.
 		if ( result.Hit )
 			RefineStaticContact( ref result, from, to, result.Shape, UpDirection, includeGroundClearance, matchNormal: false );
 		RefineStaticContact( ref result, from, to, previousContact, previousNormal, includeGroundClearance, matchNormal: true );
@@ -60,7 +58,7 @@ public sealed partial class PlayerController : Component
 		{
 			if ( hit.Shape != shape || hit.StartedSolid || (matchNormal && hit.Normal.Dot( direction ) < 0.9999f) ) continue;
 			surface = hit;
-			// Reconstruct the contact from its hull face to avoid accumulating sweep error.
+			//Reconstruct the contact from its hull face to avoid accumulating sweep error.
 			var face = Scene.Trace.Ray( hit.HitPosition + hit.Normal * 0.003175f, hit.HitPosition - hit.Normal * 0.003175f )
 				.IgnoreGameObjectHierarchy( GameObject ).WithCollisionRules( Tags ).UseHitPosition().Run();
 			surface.StartPosition -= offset;
@@ -133,9 +131,9 @@ public sealed partial class PlayerController : Component
 		var extents = feet.Scale * feet.WorldScale.Abs() * 0.5f;
 		if ( includeGroundClearance )
 		{
-			// Detect low risers before they enter the raised feet's speculative contacts.
+			//Detect low risers before they enter the raised feet's speculative contacts.
 			var localUp = feet.WorldRotation.Inverse * UpDirection;
-			// Box2D's cast slop still needs a gap above the supporting floor.
+			//Box2D's cast slop still needs a gap above the supporting floor.
 			var floorGap = Scene.Is2D ? _stepClearance * 0.5f : 0;
 			var clearance = MathF.Max( 0, offset.Dot( UpDirection ) - extents.Dot( localUp.Abs() ) - floorGap );
 			offset -= UpDirection * (clearance * 0.5f);
@@ -165,7 +163,7 @@ public sealed partial class PlayerController : Component
 	SceneTraceResult TraceStepMovement( Vector3 from, Vector3 to )
 	{
 		var result = TraceMovement( from, to, includeGroundClearance: true );
-		// Uneven ground can overlap the nominal feet while the raised movement shape is clear.
+		//Uneven ground can overlap the nominal feet while the raised movement shape is clear.
 		return result.StartedSolid || (result.Hit && Mode.IsStandableSurface( result )) ? TraceMovement( from, to ) : result;
 	}
 
@@ -177,7 +175,7 @@ public sealed partial class PlayerController : Component
 		if ( (!Scene.Is2D && !physicsContact) || !obstruction.StartedSolid )
 			return false;
 
-		// Only recover shallow contact penetration while moving into the riser.
+		//Only recover shallow contact penetration while moving into the riser.
 		var retreat = from - direction * (_groundedFeetLift + _skin);
 		var approach = default( SceneTraceResult );
 		if ( physicsContact )
@@ -200,7 +198,7 @@ public sealed partial class PlayerController : Component
 				return true;
 			}
 
-			// Floor penetration must not hide a separate riser in the same compound body.
+			//Floor penetration must not hide a separate riser in the same compound body.
 			if ( !CheckApproach( TraceFeetMovement( retreat, from, _movementSkin, false, out _ ) )
 				|| (BodyCollider.IsValid() && BodyCollider.Enabled && !CheckApproach( TraceUpperMovement( retreat, from, _movementSkin ) )) )
 				return false;
@@ -215,7 +213,7 @@ public sealed partial class PlayerController : Component
 		if ( physicsContact )
 			obstruction = approach;
 
-		// Measure height from the supporting pose, not the solver's floor penetration.
+		//Measure height from the supporting pose, not the solver's floor penetration.
 		if ( !TryFindGround( retreat, 0.1f, 0.05f, out var ground, out var support ) )
 			return false;
 		var supportOffset = (support - from).Dot( UpDirection );
@@ -260,7 +258,7 @@ public sealed partial class PlayerController : Component
 			{
 				if ( hit.StartedSolid || !IsContactShape( hit ) )
 					return false;
-				// A tilted riser's side may permit upward escape before its top is reached.
+				//A tilted riser's side may permit upward escape before its top is reached.
 				if ( !Mode.IsStandableSurface( hit )
 					&& !(physicsContact && hit.Shape == obstruction.Shape
 						&& hit.Normal.Dot( UpDirection ) > 0 && hit.Normal.Dot( direction ) < 0) )
@@ -270,7 +268,7 @@ public sealed partial class PlayerController : Component
 			return true;
 		}
 
-		// The reverse sweep must enter only verified contacts through faces permitting upward escape.
+		//The reverse sweep must enter only verified contacts through faces permitting upward escape.
 		top = from + UpDirection * available;
 		if ( !CheckExit( TraceFeetMovement( top, from, _movementSkin, false, out _ ) )
 			|| (hasUpper && !CheckExit( TraceUpperMovement( top, from, _movementSkin ) ))
@@ -287,16 +285,16 @@ public sealed partial class PlayerController : Component
 		var up = UpDirection;
 		var localUp = feet.WorldRotation.Inverse * up;
 		var extents = feet.Scale * feet.WorldScale.Abs() * 0.5f;
-		// Probe the footprint, not the whole standing hull.
+		//Probe the footprint, not the whole standing hull.
 		var verticalExtent = extents.Dot( localUp.Abs() );
 		extents -= localUp.Abs() * MathF.Max( verticalExtent - 0.0508f, 0 );
 		var center = WithoutVertical( feet.WorldTransform.PointToWorld( feet.Center ) - WorldPosition )
 			+ up * extents.Dot( localUp.Abs() );
-		// Physical landings need actual feet overlap, not the static step planner's lookahead margin.
+		//Physical landings need actual feet overlap, not the static step planner's lookahead margin.
 		var contactInset = MathF.Min( _skin * 2, MathF.Min( extents.x, MathF.Min( extents.y, extents.z ) ) * 0.25f );
 		var supportMargin = Scene.Is2D ? 0 : requireContact ? -contactInset : _stepClearance;
 		var supportExtents = extents + (Vector3.One - localUp.Abs()) * supportMargin;
-		// Pass below the supporting plane rather than ending a maximum-height drop exactly on it.
+		//Pass below the supporting plane rather than ending a maximum-height drop exactly on it.
 		var queryDrop = drop + _skin * 2;
 		SceneTrace GroundTrace( float inset )
 		{
@@ -315,7 +313,7 @@ public sealed partial class PlayerController : Component
 				return false;
 
 			var sweptPosition = hit.EndPosition - center;
-			// A shape cast's edge normal is a separating axis, not necessarily the supporting surface normal.
+			//A shape cast's edge normal is a separating axis, not necessarily the supporting surface normal.
 			if ( confirmSurface && hit.Normal.Dot( up ) < 0.9999f )
 			{
 				var surface = Scene.Trace.Ray( hit.HitPosition + up * _stepClearance, hit.HitPosition - up * _stepClearance )
@@ -336,11 +334,11 @@ public sealed partial class PlayerController : Component
 			var localNormal = feet.WorldRotation.Inverse * hit.Normal;
 			var support = localNormal.Abs().Dot( extents ) - hit.Normal.Dot( center );
 			var height = ((hit.HitPosition - position).Dot( hit.Normal ) + support + _skin) / normalUp;
-			// A tilted triangle's plane may not support the entire footprint. Retain the swept support height.
+			//A tilted triangle's plane may not support the entire footprint. Retain the swept support height.
 			if ( confirmSurface && normalUp < 0.9999f )
 				height = (sweptPosition - position).Dot( up ) + _skin / normalUp;
 
-			// Physical supports need contact tolerance; static landings use strict reach.
+			//Physical supports need contact tolerance; static landings use strict reach.
 			if ( preciseDrop && hit.Body?.BodyType == PhysicsBodyType.Static
 				&& height - _skin / normalUp <= -drop )
 				return false;
@@ -378,7 +376,7 @@ public sealed partial class PlayerController : Component
 			landing = target;
 		}
 
-		// A shape cast can lose a very small overlap at a ledge. Keep the contact footprint supported.
+		//A shape cast can lose a very small overlap at a ledge. Keep the contact footprint supported.
 		var a = WithoutVertical( feet.WorldRotation.Forward * supportExtents.x );
 		var b = WithoutVertical( feet.WorldRotation.Right * supportExtents.y );
 		for ( int i = 0; i < 4; ++i )

@@ -12,10 +12,10 @@ public sealed partial class PlayerController : Component
 	[Property, Feature( "Input" )] public float JumpSpeed { get; set; } = Movement.MovementMath.JumpSpeed;
 	[Property, Feature( "Input" )] public float DuckedHeight { get; set; } = 0.9f;
 
-	/// <summary>Input smoothing for non-walking modes.</summary>
+	//Input smoothing for non-walking modes.
 	[Property, Feature( "Input" )] public float AccelerationTime { get; set; } = 0;
 
-	/// <summary>Deceleration smoothing for non-walking modes.</summary>
+	//Deceleration smoothing for non-walking modes.
 	[Property, Feature( "Input" )] public float DeaccelerationTime { get; set; } = 0;
 
 	/// <summary>Adds forward momentum when jumping from the ground at full sprint speed</summary>
@@ -35,9 +35,7 @@ public sealed partial class PlayerController : Component
 	[Property, Feature( "Input" ), Category( "Jumping" ), Range( 0f, 1f )]
 	public float CoyoteTime { get; set; } = 0;
 
-	/// <summary>
-	/// Keep jumping while the jump button is held, subject to the movement mode's jump limits.
-	/// </summary>
+	/// <summary>Keep jumping while the jump button is held, subject to the movement mode's jump limits.</summary>
 	[Property, Feature( "Input" ), Category( "Jumping" )]
 	public bool HoldToJump { get; set; }
 

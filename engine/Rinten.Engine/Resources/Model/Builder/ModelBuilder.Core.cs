@@ -180,7 +180,7 @@ public sealed partial class ModelBuilder
 			builder.SetRenderBounds( minMax );
 			builder.SetPhysicsBounds( minMax );
 
-			//Shapes asked for by name are the collision; without any, collision from the triangles just added so a brush can be stood on
+			//Named shapes are the collision; without any, the drawn triangles are, so a brush can be stood on
 			var surface = string.IsNullOrWhiteSpace( surfaceProperty ) ? "default" : surfaceProperty;
 
 			if ( HasNamedCollision )

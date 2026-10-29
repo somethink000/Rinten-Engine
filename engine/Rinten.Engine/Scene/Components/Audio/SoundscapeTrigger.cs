@@ -131,7 +131,7 @@ public class SoundscapeTrigger : Component
 		if ( activeEntries.Count == 0 && removalList.Count == 0 )
 			return;
 
-		UpdateEntries( Sound.Listener );
+		UpdateEntries( Scene.GetPrimaryListenerTransform() );
 	}
 
 	protected override void OnDisabled()

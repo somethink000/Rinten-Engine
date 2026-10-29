@@ -474,6 +474,7 @@ public sealed partial class ModelPhysics
 		Bodies.Clear();
 		Joints.Clear();
 		PhysicsGroup = null;
+		_appliedJointScales = null;
 
 		PhysicsWereCreated = false;
 	}

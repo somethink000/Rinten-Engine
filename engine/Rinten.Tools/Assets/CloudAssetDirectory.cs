@@ -1,6 +1,7 @@
 ﻿using LiteDB;
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Editor;
 
@@ -34,6 +35,11 @@ internal class CloudAssetDirectory : IDisposable
 		public long Size { get; set; }
 		public DateTimeOffset CreationDate { get; set; }
 		public DateTimeOffset InstallDate { get; set; }
+
+		//What the disk held when last hashed, apart from the manifest's claim; ticks since LiteDB dates drop sub-ms
+		public string VerifiedCrc { get; set; }
+		public long VerifiedSize { get; set; }
+		public long VerifiedLastWriteUtcTicks { get; set; }
 	}
 
 	/// <summary>Link between a physical file and a package that depends on it. There can be many of these per path, and many per package.</summary>
@@ -369,7 +375,10 @@ internal class CloudAssetDirectory : IDisposable
 			Crc = crc,
 			Size = size,
 			CreationDate = package.Revision.Created,
-			InstallDate = DateTime.UtcNow
+			InstallDate = DateTime.UtcNow,
+			VerifiedCrc = existing?.VerifiedCrc,
+			VerifiedSize = existing?.VerifiedSize ?? 0,
+			VerifiedLastWriteUtcTicks = existing?.VerifiedLastWriteUtcTicks ?? 0
 		};
 
 		db.BeginTrans();
@@ -388,6 +397,48 @@ internal class CloudAssetDirectory : IDisposable
 
 		AddPackageLink( path, package );
 		return true;
+	}
+
+	/// <summary>Whether the file on disk matches a manifest entry, hashing off-thread only when it changed since last verified.</summary>
+	internal async Task<bool> IsFileCurrentAsync( string path, ulong crc, long size, CancellationToken token = default )
+	{
+		token.ThrowIfCancellationRequested();
+		if ( !TryGetFile( path, out var file ) )
+			return false;
+
+		var info = new System.IO.FileInfo( FileSystem.Cloud.GetFullPath( path ) );
+		if ( !info.Exists || info.Length != size )
+			return false;
+
+		var lastWrite = info.LastWriteTimeUtc.Ticks;
+		if ( file.VerifiedCrc is not null && file.VerifiedSize == size && file.VerifiedLastWriteUtcTicks == lastWrite )
+			return Convert.ToUInt64( file.VerifiedCrc, 16 ) == crc;
+
+		var actualCrc = await FileSystem.Cloud.GetCrcAsync( path );
+		token.ThrowIfCancellationRequested();
+
+		//Changed while hashing, or another install replaced the record: don't certify it with this CRC
+		info.Refresh();
+		if ( !info.Exists || info.Length != size || info.LastWriteTimeUtc.Ticks != lastWrite )
+			return false;
+		if ( !TryGetFile( path, out var current ) || !ReferenceEquals( file, current ) )
+			return false;
+
+		file.VerifiedCrc = actualCrc.ToString( "x" );
+		file.VerifiedSize = size;
+		file.VerifiedLastWriteUtcTicks = lastWrite;
+		files.Update( file );
+		return actualCrc == crc;
+	}
+
+	/// <summary>Forgets a file's verification before it is replaced, so a failed download is not trusted.</summary>
+	internal void InvalidateFileVerification( string path )
+	{
+		if ( !TryGetFile( path, out var file ) || file.VerifiedCrc is null )
+			return;
+
+		file.VerifiedCrc = null;
+		files.Update( file );
 	}
 
 	/// <summary>Create an association between an existing file and a package.</summary>

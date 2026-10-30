@@ -17,39 +17,17 @@ public interface IDynamicFloatContext
 	int RandomSeed { get; }
 }
 
-/// <summary>A scalar that can vary per particle and over its life.</summary>
-public interface IParticleFloat
-{
-	/// <summary>Evaluate with a 0-1 life delta and a fixed 0-1 random for the context (e.g. the particle).</summary>
-	float Evaluate( in float delta, in float randomFixed );
-
-	/// <summary>True when <see cref="Evaluate"/> ignores both inputs, so callers can hoist it out of per-particle loops.</summary>
-	bool IsConstant { get; }
-}
-
-/// <summary>A 3D vector that can vary per particle and over its life.</summary>
-public interface IParticleFloat3
-{
-	/// <summary>Evaluate with a 0-1 life delta and a fixed 0-1 random per component.</summary>
-	Vector3 Evaluate( float delta, float a, float b, float c );
-
-	/// <summary>True when <see cref="Evaluate"/> ignores all inputs.</summary>
-	bool IsConstant { get; }
-}
-
 /// <summary>Represents a floating-point value that can change over time with support for various evaluation modes.</summary>
 [Expose]
-public struct ParticleFloat : IJsonConvert, IParticleFloat
+public struct ParticleFloat : IJsonConvert, BytePack.ISerializer
 {
 	public ValueType Type { readonly get; set; }
 	public EvaluationType Evaluation { readonly get; set; }
 
-	float _a;
-	float _b;
+	[JsonInclude]
+	public Vector4 Constants;
 
-	/// <summary>
-	/// Null until a curve is assigned. Immutable, so struct copies may share it.
-	/// </summary>
+	//Null until a curve is assigned; immutable, so struct copies may share it
 	CurvePair _curves;
 
 	sealed class CurvePair
@@ -76,46 +54,36 @@ public struct ParticleFloat : IJsonConvert, IParticleFloat
 		set => _curves = new CurvePair( CurveA, value );
 	}
 
-	/// <summary>
-	/// x = ConstantA, y = ConstantB. z/w are unused and always 0.
-	/// </summary>
-	public Vector4 Constants
-	{
-		readonly get => new Vector4( _a, _b, 0, 0 );
-		set
-		{
-			_a = value.x;
-			_b = value.y;
-		}
-	}
-
+	[JsonIgnore]
 	public float ConstantValue
 	{
-		readonly get => _a;
-		set => _a = value;
+		readonly get => Constants.x;
+		set => Constants.x = value;
 	}
 
+	[JsonIgnore]
 	public float ConstantA
 	{
-		readonly get => _a;
-		set => _a = value;
+		readonly get => Constants.x;
+		set => Constants.x = value;
 	}
 
+	[JsonIgnore]
 	public float ConstantB
 	{
-		readonly get => _b;
-		set => _b = value;
+		readonly get => Constants.y;
+		set => Constants.y = value;
 	}
 
+	[JsonIgnore]
 	public CurveRange CurveRange
 	{
 		readonly get => new CurveRange( CurveA, CurveB );
 		set => _curves = new CurvePair( value.A, value.B );
 	}
 
-	/// <summary>
-	/// True when the value is a single constant, ignoring life delta and randomness.
-	/// </summary>
+	/// <summary>True when the value is a single constant, ignoring life delta and randomness.</summary>
+	[JsonIgnore]
 	public readonly bool IsConstant => Type == ValueType.Constant;
 
 	public static implicit operator ParticleFloat( float v )
@@ -233,6 +201,50 @@ public struct ParticleFloat : IJsonConvert, IParticleFloat
 		return false;
 	}
 
+	static void BytePack.ISerializer.BytePackWrite( object value, ref ByteStream bs )
+	{
+		var particleFloat = (ParticleFloat)value;
+		bs.Write( (int)particleFloat.Type );
+		bs.Write( (int)particleFloat.Evaluation );
+		bs.Write( particleFloat.Constants );
+		WriteCurve( ref bs, particleFloat.CurveA );
+		WriteCurve( ref bs, particleFloat.CurveB );
+	}
+
+	static object BytePack.ISerializer.BytePackRead( ref ByteStream bs, Type targetType )
+	{
+		var value = new ParticleFloat
+		{
+			Type = (ValueType)bs.Read<int>(),
+			Evaluation = (EvaluationType)bs.Read<int>(),
+			Constants = bs.Read<Vector4>()
+		};
+		var a = ReadCurve( ref bs );
+		var b = ReadCurve( ref bs );
+		if ( !a.Frames.IsDefault || !b.Frames.IsDefault || a.TimeRange != default || a.ValueRange != default || b.TimeRange != default || b.ValueRange != default )
+			value._curves = new CurvePair( a, b );
+		return value;
+	}
+
+	static void WriteCurve( ref ByteStream bs, Curve curve )
+	{
+		bs.Write( curve.TimeRange );
+		bs.Write( curve.ValueRange );
+		bs.Write( curve.Frames.IsDefault );
+		if ( !curve.Frames.IsDefault )
+			bs.WriteArray<Curve.Frame>( curve.Frames.AsSpan() );
+	}
+
+	static Curve ReadCurve( ref ByteStream bs )
+	{
+		var curve = default( Curve );
+		curve.TimeRange = bs.Read<Vector2>();
+		curve.ValueRange = bs.Read<Vector2>();
+		if ( !bs.Read<bool>() )
+			curve = curve.WithFrames( bs.ReadArray<Curve.Frame>() );
+		return curve;
+	}
+
 	/// <summary>Reads a ParticleFloat instance from JSON, refactored for modularity.</summary>
 	public static object JsonRead( ref Utf8JsonReader reader, Type typeToConvert )
 	{
@@ -331,7 +343,7 @@ public struct ParticleFloat : IJsonConvert, IParticleFloat
 }
 
 [Expose]
-public struct ParticleVector3 : IParticleFloat3
+public struct ParticleVector3
 {
 	[JsonInclude]
 	public ParticleFloat X;
@@ -376,9 +388,7 @@ public struct ParticleVector3 : IParticleFloat3
 		return X.IsNearlyZero() && Y.IsNearlyZero() && Z.IsNearlyZero();
 	}
 
-	/// <summary>
-	/// True when every component is a constant.
-	/// </summary>
+	/// <summary>True when every component is a constant.</summary>
 	[JsonIgnore]
 	public readonly bool IsConstant => X.IsConstant && Y.IsConstant && Z.IsConstant;
 }

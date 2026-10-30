@@ -12,6 +12,10 @@ public static class Preferences
 	[ConVar( "music_volume", ConVarFlags.Protected, Help = "Music volume", Min = 0.0f, Saved = true )]
 	public static float MusicVolume { get; internal set; } = 1.0f;
 
+	/// <summary>The user's volume for everything on a game's Game mixer, 0 to 1.</summary>
+	[ConVar( "game_volume", ConVarFlags.Protected, Help = "Game volume", Min = 0.0f, Saved = true )]
+	public static float GameVolume { get; internal set; } = 1.0f;
+
 	/// <summary>The user's preferred VOIP volume, as set in the options, clamped between 0 and 1</summary>
 	[ConVar( "voip_volume", ConVarFlags.Protected, Help = "Voice chat volume", Min = 0.0f, Saved = true )]
 	public static float VoipVolume { get; internal set; } = 1.0f;

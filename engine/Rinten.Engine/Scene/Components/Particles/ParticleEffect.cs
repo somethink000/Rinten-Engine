@@ -306,7 +306,8 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	//Skinned models live particles follow, ref-counted so PreStep primes only their snapshots; null until one does
 	Dictionary<SkinnedModelRenderer, int> _boneTargets;
 
-	ConcurrentQueue<Particle> deleteList = new ConcurrentQueue<Particle>();
+	//Main thread only: particles flagged IsDead in the parallel update, released in PostStep
+	List<Particle> _deadParticles;
 
 	/// <summary>Called before the particles are stepped. This allows custom logic to be executed before the simulation advances.</summary>
 	public Action<float> OnPreStep { get; set; }
@@ -364,12 +365,15 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	{
 		LeaveCard();
 
-		foreach ( var p in Particles.ToArray() )
+		//Snapshot so OnParticleDestroyed may terminate other particles while these are released
+		var live = Particles.ToArray();
+		Particles.Clear();
+
+		foreach ( var p in live )
 		{
-			Terminate( p );
+			ReleaseParticle( p );
 		}
 
-		Particles.Clear();
 		DelayedParticles.Clear();
 		_boneTargets?.Clear();
 
@@ -588,7 +592,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 		if ( delta >= 1.0f )
 		{
-			deleteList.Enqueue( p );
+			p.IsDead = true;
 
 			if ( p.hasUpdated )
 			{
@@ -712,9 +716,32 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 	internal void PostStep()
 	{
-		while ( deleteList.TryDequeue( out var delete ) )
+		//Order-preserving compaction: one pass instead of a List.Remove per dead particle
+		int write = 0;
+		for ( int read = 0; read < Particles.Count; read++ )
 		{
-			Terminate( delete );
+			var p = Particles[read];
+			if ( p.IsDead )
+			{
+				(_deadParticles ??= new()).Add( p );
+				continue;
+			}
+
+			Particles[write++] = p;
+		}
+
+		if ( write < Particles.Count )
+			Particles.RemoveRange( write, Particles.Count - write );
+
+		//Released after compacting, so a Terminate() from OnParticleDestroyed sees a consistent list
+		if ( _deadParticles is { Count: > 0 } )
+		{
+			foreach ( var p in _deadParticles )
+			{
+				ReleaseParticle( p );
+			}
+
+			_deadParticles.Clear();
 		}
 
 		//An effect on the card has its bounds from what it handed over - see ParticleGpuRun.Step
@@ -942,7 +969,13 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 	public void Terminate( Particle p )
 	{
-		//Release by reference, not IsValid() - a destroyed renderer is still a valid dictionary key, so the ref-count stays balanced.
+		ReleaseParticle( p );
+		Particles.Remove( p );
+	}
+
+	void ReleaseParticle( Particle p )
+	{
+		//Release by reference, not IsValid(): a destroyed renderer is still a valid key, so the count stays balanced
 		if ( p.AttachTarget is not null )
 			ReleaseBoneTarget( p.AttachTarget );
 
@@ -976,8 +1009,6 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 		{
 			Log.Warning( e );
 		}
-
-		Particles.Remove( p );
 
 		if ( Particle.Pool.Count < 4096 )
 			Particle.Pool.Enqueue( p );

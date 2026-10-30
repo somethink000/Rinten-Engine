@@ -32,8 +32,8 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 	/// <summary>We will apply extra friction when we're on the ground and our desired velocity is lower than our current velocity, so we will slow down.</summary>
 	[Property, Group( "Physics" ), Range( 0, 1 )] public float BrakePower { get; set; } = 1;
 
-	/// <summary>How much friction to add when we're in the air. This will slow you down unless you have a wish velocity.</summary>
-	[Property, Group( "Physics" ), Range( 0, 1 )] public float AirFriction { get; set; } = 0.1f;
+	//Airborne drag. Zero preserves strafing and surfing momentum.
+	[Property, Group( "Physics" ), Range( 0, 1 )] public float AirFriction { get; set; } = 0;
 
 
 	[Property, Group( "Components" ), Title( "Show Rigidbody" )]
@@ -88,6 +88,21 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 	/// <summary>Our actual physical velocity minus our ground velocity</summary>
 	public Vector3 Velocity { get; private set; }
+
+	//Up is Vector3.Up, which is y here; the movement modes measure everything against it
+	internal Vector3 UpDirection => Scene.Is2D ? Vector2.Up : Vector3.Up;
+
+	internal Vector3 WithoutVertical( Vector3 value )
+	{
+		var up = UpDirection;
+		return value - up * value.Dot( up );
+	}
+
+	internal Vector3 WithVertical( Vector3 value, float vertical )
+	{
+		var up = UpDirection;
+		return value - up * value.Dot( up ) + up * vertical;
+	}
 
 	/// <summary>The velocity that the ground underneath us is moving</summary>
 	public Vector3 GroundVelocity { get; set; }
@@ -168,21 +183,26 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 		UpdateBody();
 
 		if ( IsProxy )
+		{
+			_stepGrounded = false;
 			return;
+		}
 
+		if ( Mode is MoveModeWalk walk ) walk.BeginPhysicsStep();
 		Mode.AddVelocity();
+		BeginStep();
 		Mode.PrePhysicsStep();
 	}
 
 	void IScenePhysicsEvents.PostPhysicsStep()
 	{
-		Velocity = Body.Velocity - GroundVelocity;
 		UpdateGroundVelocity();
-
-		RestoreStep();
 
 		Mode?.PostPhysicsStep();
 		CategorizeGround();
+		UpdateGroundVelocity();
+		if ( !IsProxy && Mode is MoveModeWalk walk ) walk.FinishPhysicsStep();
+		Velocity = Body.Velocity - GroundVelocity;
 
 		ChooseBestMoveMode();
 	}
@@ -191,7 +211,7 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 	void UpdateGroundVelocity()
 	{
-		if ( GroundObject is null )
+		if ( GroundObject is null || Body.PhysicsBody is not { } body || !body.IsValid() )
 		{
 			GroundVelocity = 0;
 			return;
@@ -199,26 +219,25 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 		if ( GroundComponent is Collider collider )
 		{
-			GroundVelocity = collider.GetVelocityAtPoint( WorldPosition );
+			GroundVelocity = collider.GetVelocityAtPoint( body.Position );
 		}
 
 		if ( GroundComponent is Rigidbody rigidbody )
 		{
-			var mass1 = BodyMass;
-			var mass2 = rigidbody.Mass;
-			var massFactor = mass2 / (mass1 + mass2);
-			GroundVelocity = rigidbody.GetVelocityAtPoint( WorldPosition ) * massFactor;
+			GroundVelocity = rigidbody.GetVelocityAtPoint( body.Position );
 		}
 	}
 
-	/// <summary>Adds velocity in a special way. First we subtract any opposite velocity (ie, falling) then we add the velocity, but we clamp it to that direction. This means that if you jump when you're running up a platform, you don't get extra jump power.</summary>
+	/// <summary>Explicit directional launch, independent of walking jump limits.</summary>
 	public void Jump( Vector3 velocity )
 	{
+		_canCoyoteJump = false;
+		Mode?.OnJump();
+		var jumpBoost = CalculateJumpBoost( velocity );
 		PreventGrounding( 0.2f );
 
 		var currentVel = Body.Velocity;
 
-		//moving in the opposite direction because this is a jump, we want to counteract that
 		var dot = currentVel.Dot( velocity );
 		if ( dot < 0 )
 		{
@@ -227,7 +246,27 @@ public sealed partial class PlayerController : Component, IScenePhysicsEvents, C
 
 		currentVel = currentVel.AddClamped( velocity, velocity.Length );
 
-		Body.Velocity = currentVel;
+		Body.Velocity = currentVel + jumpBoost;
+	}
+
+	internal Vector3 CalculateJumpBoost( Vector3 jumpVelocity )
+	{
+		if ( !EnableJumpBoost || JumpBoost <= 0 || RunSpeed <= 0 ) return Vector3.Zero;
+		if ( !IsOnGround || IsDucking || Mode is not MoveModeWalk ) return Vector3.Zero;
+		if ( jumpVelocity.Dot( UpDirection ) <= 0 ) return Vector3.Zero;
+
+		var wish = WithoutVertical( WishVelocity );
+		if ( wish.Length < RunSpeed * 0.95f ) return Vector3.Zero;
+
+		//Sprint speed along the slope, relative to the ground: uphill running and moving platforms don't change eligibility
+		var direction = wish.Normal;
+		var groundDirection = (direction - GroundNormal * direction.Dot( GroundNormal )).Normal;
+		var relativeVelocity = Body.Velocity - GroundVelocity;
+		if ( relativeVelocity.Dot( groundDirection ) < RunSpeed * 0.95f ) return Vector3.Zero;
+
+		var boostSpeed = RunSpeed * JumpBoost;
+		var remainingSpeed = RunSpeed + boostSpeed - WithoutVertical( relativeVelocity ).Length;
+		return direction * MathF.Max( 0, MathF.Min( boostSpeed, remainingSpeed ) );
 	}
 
 	void UpdateEyeTransform()

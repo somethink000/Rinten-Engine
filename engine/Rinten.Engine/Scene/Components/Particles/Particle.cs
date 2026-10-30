@@ -87,6 +87,11 @@ public partial class Particle : IDynamicFloatContext
 	public int RandomSeed;
 	internal bool hasUpdated;
 
+	//Set by the parallel update when the particle reached the end of its life; swept in PostStep
+	internal bool IsDead;
+	internal bool IsReleased;
+	internal uint Generation;
+
 	[System.Obsolete]
 	public float Random01;
 
@@ -192,6 +197,9 @@ public partial class Particle : IDynamicFloatContext
 		p._data?.Clear();
 		p._controllers?.Clear();
 		p.hasUpdated = false;
+		p.IsDead = false;
+		p.IsReleased = false;
+		p.Generation++;
 		p.AttachBoneIndex = -1;
 		p.AttachTarget = null;
 

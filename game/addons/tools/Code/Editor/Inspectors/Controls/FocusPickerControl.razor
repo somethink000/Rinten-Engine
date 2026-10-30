@@ -1,0 +1,32 @@
+@using System
+@using Rinten.UI
+
+@namespace Editor.Inspectors
+
+@attribute [CustomEditor( typeof( float ), WithAllAttributes = [typeof( Rinten.Rendering.FocusPickerAttribute )] )]
+@attribute [StyleSheet( "FocusPickerControl.razor.scss" )]
+
+@inherits BaseControl
+
+<root>
+	<div class="row @( Picking ? "active" : null )">
+		<NumberControl Property="@Property" Icon="horizontal_distribute" />
+		<ToolbarButton Icon="my_location" ToolTip="Click a point in the scene to focus on" Disabled="@IsReadOnly" OnPressed="@StartPicking" />
+	</div>
+</root>
+
+@code
+{
+	public override bool SupportsMultiEdit => true;
+
+	bool Picking => FocusPickTool.TargetProperty == Property;
+
+	protected override int BuildHash() => HashCode.Combine( base.BuildHash(), Picking );
+
+	void StartPicking()
+	{
+		if ( Property is null || IsReadOnly ) return;
+		Property.Parent?.NoteStartEdit( Property );
+		FocusPickTool.Begin( Property, () => Property.Parent?.NoteFinishEdit( Property ) );
+	}
+}

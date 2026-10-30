@@ -15,8 +15,10 @@ public partial class Terrain
 	[Property, Group( "Relief" ), Range( 0.0f, 200.0f )]
 	public float ReliefDistance { get; set; } = 40.0f;
 
-	//Full frame and an unturned terrain only: the ring's corners are placed by its scale and position alone
+	//Full frame and an unturned terrain only: the ring's corners are placed by its scale and position alone.
+	//Not under mat_clusters, where the ring is no cluster and would cover the ones the view is for
 	private bool Relieved => !Application.IsHeadless && CoreNative.Available && !CoreRenderDevice.PortableFrame
+		&& Rendering.Wireframe.Clusters <= 0
 		&& ReliefDistance > 0.0f && MathF.Abs( WorldRotation.w ) > 0.99999f
 		&& Storage is { } storage && storage.Materials.Any( Displaces );
 

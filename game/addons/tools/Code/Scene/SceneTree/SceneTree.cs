@@ -144,10 +144,13 @@ public partial class SceneTreeWidget : PanelWidget
 
 	public void OnInspect( EditorUtility.OnInspectArgs args )
 	{
-		foreach ( var item in SceneEditorSession.Current?.Selection ?? Enumerable.Empty<object>() )
+		var selection = SceneEditorSession.Current?.Selection;
+		if ( selection is not null && tree.ChosenHere == (selection, selection.GetHashCode()) ) return;
+
+		foreach ( var item in selection ?? Enumerable.Empty<object>() )
 			tree.ExpandPathTo( item );
 
-		var scrollTarget = SceneEditorSession.Current?.Selection.FirstOrDefault();
+		var scrollTarget = selection?.LastOrDefault();
 		if ( scrollTarget is not null )
 			tree.ScrollTo( scrollTarget );
 	}

@@ -137,7 +137,7 @@ public partial class SoundFile : Resource, IValid
 		if ( Loaded.TryGetValue( filename, out var soundFile ) )
 			return soundFile;
 
-		if ( Mounting.Directory.TryLoad( filename, Mounting.ResourceType.Sound, out object sound ) && sound is SoundFile s )
+		if ( Mounting.Directory.TryLoad( filename, out object sound ) && sound is SoundFile s )
 			return s;
 
 		//The core takes the file as the game named it, and a name in the legacy compiled format as the file it was

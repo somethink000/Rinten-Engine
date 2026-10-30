@@ -69,14 +69,29 @@ public sealed partial class ModelPhysics
 	//The model we have already said has no physics to build from.
 	private Model _warnedNoPhysics;
 
+	//Joints name parts by index, and parts can be skipped: which body each part became, -1 for none
+	int[] _partBodyIndex;
+
+	bool TryGetPartBody( int partIndex, out Body body )
+	{
+		body = default;
+		if ( _partBodyIndex is null || partIndex < 0 || partIndex >= _partBodyIndex.Length ) return false;
+
+		var index = _partBodyIndex[partIndex];
+		if ( index < 0 || index >= Bodies.Count ) return false;
+
+		body = Bodies[index];
+		return true;
+	}
 	private void CreateJoints( PhysicsGroupDescription physics, ComponentFlags componentFlags )
 	{
 		var jointFlags = componentFlags;
 
 		foreach ( var jointDesc in physics.Joints )
 		{
-			var body1 = Bodies[jointDesc.Body1];
-			var body2 = Bodies[jointDesc.Body2];
+			//Skip joints to parts that weren't created (e.g. their bone is missing)
+			if ( !TryGetPartBody( jointDesc.Body1, out var body1 ) || !TryGetPartBody( jointDesc.Body2, out var body2 ) )
+				continue;
 
 			//Disabled joints still get a collision filter so adjacent bodies don't fight over shared space
 			if ( !jointDesc.Enabled )
@@ -249,8 +264,13 @@ public sealed partial class ModelPhysics
 		//Part transforms are always identity, so boneless parts share one body centred on their shapes
 		var bonelessCenter = BonelessShapeCenter( physics );
 
+		_partBodyIndex = new int[physics.Parts.Count];
+		Array.Fill( _partBodyIndex, -1 );
+		var partIndex = -1;
+
 		foreach ( var part in physics.Parts )
 		{
+			partIndex++;
 			var go = HostFor( part, bones, boneObjects, world, bonelessCenter, out var boneIndex, out var boneWorld );
 			if ( !go.IsValid() )
 				continue;
@@ -270,6 +290,7 @@ public sealed partial class ModelPhysics
 			body.GameObjectSource = GameObject;
 
 			BodyTransforms.Set( Bodies.Count, boneWorld );
+			_partBodyIndex[partIndex] = Bodies.Count;
 			Bodies.Add( new Body( body, boneIndex, world.ToLocal( boneWorld ) ) );
 
 			//Shapes are authored in the bone's space (or model space, for a boneless part) - moving a boneless body's own origin off to bonelessCenter
@@ -474,6 +495,7 @@ public sealed partial class ModelPhysics
 		Bodies.Clear();
 		Joints.Clear();
 		PhysicsGroup = null;
+		_appliedJointScales = null;
 
 		PhysicsWereCreated = false;
 	}

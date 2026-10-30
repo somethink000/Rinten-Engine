@@ -18,7 +18,7 @@ public partial class PrefabFile : GameResource
 		if ( existing is not null )
 			return existing;
 
-		if ( Mounting.Directory.TryLoad( path, Mounting.ResourceType.PrefabFile, out var mounted ) && mounted is PrefabFile pf )
+		if ( Mounting.Directory.TryLoad( path, out var mounted ) && mounted is PrefabFile pf )
 			return pf;
 
 		return ReadFromContent( path );

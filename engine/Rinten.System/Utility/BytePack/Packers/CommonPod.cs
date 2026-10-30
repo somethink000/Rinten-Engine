@@ -2,8 +2,7 @@
 
 internal partial class BytePack
 {
-	/// <summary>Plain old data types. It's faster to have these as identifier types than have them each being a TypeLibrary lookup dynamic type, so anything quite common should be included here.</summary>
-	public class PodPacker<T> : Packer where T : unmanaged
+	public class PodPacker<T> : Packer, IValuePacker<T> where T : unmanaged
 	{
 		private Identifier header;
 
@@ -20,10 +19,17 @@ internal partial class BytePack
 			bs.Write<T>( (T)obj );
 		}
 
+		void IValuePacker<T>.Write( ref ByteStream bs, T value )
+		{
+			bs.Write( value );
+		}
+
 		public override object Read( ref ByteStream data, int depth )
 		{
 			return data.Read<T>();
 		}
+
+		T IValuePacker<T>.Read( ref ByteStream bs ) => bs.Read<T>();
 	}
 
 

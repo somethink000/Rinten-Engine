@@ -610,6 +610,11 @@ public partial class GameObject : IJsonConvert, IComponentLister, BytePack.ISeri
 				? x.LocalBounds.Transform( c.WorldTransform )
 				: x.LocalBounds;
 
+			//Unbounded contributors (procedural meshes without Bounds report ±float.MaxValue) would make the result NaN
+			var size = bounds.Size;
+			if ( !float.IsFinite( size.x ) || !float.IsFinite( size.y ) || !float.IsFinite( size.z ) )
+				return;
+
 			result = result.HasValue
 				? result.Value.AddBBox( bounds )
 				: bounds;

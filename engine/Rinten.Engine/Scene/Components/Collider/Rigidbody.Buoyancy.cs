@@ -2,6 +2,8 @@ namespace Rinten;
 
 partial class Rigidbody
 {
+	internal bool SuppressBuoyancy { get; set; }
+
 	/// <summary>Applies buoyancy and drag to the rigidbody relative to a plane to simulate things floating in water.</summary>
 	public void ApplyBuoyancy( Plane plane, float dt )
 	{
@@ -11,7 +13,7 @@ partial class Rigidbody
 	/// <summary>Applies buoyancy and drag to the rigidbody relative to a plane to simulate things floating in water.</summary>
 	public void ApplyBuoyancy( Plane plane, float fluidDensity, float linearDrag, float angularDrag, Vector3 fluidVelocity, float dt )
 	{
-		if ( !PhysicsBody.IsValid() ) return;
+		if ( SuppressBuoyancy || !PhysicsBody.IsValid() ) return;
 
 		var gravity = Scene.PhysicsWorld.Gravity;
 

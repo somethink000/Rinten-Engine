@@ -275,7 +275,18 @@ internal static class CoreEnvmap
 
 			if ( !CoreRenderDevice.BeginViewFrame( view, Color.Black ) ) return false;
 
-			Drawer.Draw( scene, camera, view, at.Size, at.Size );
+			//Hide In Game meshes are drawn in the editor only, and a reflection is of the game
+			var hadTag = camera.RenderExcludeTags.Has( MeshComponent.HideInGameTag );
+			camera.RenderExcludeTags.Add( MeshComponent.HideInGameTag );
+
+			try
+			{
+				Drawer.Draw( scene, camera, view, at.Size, at.Size );
+			}
+			finally
+			{
+				if ( !hadTag ) camera.RenderExcludeTags.Remove( MeshComponent.HideInGameTag );
+			}
 
 			capturedAt = RealTime.Now;
 

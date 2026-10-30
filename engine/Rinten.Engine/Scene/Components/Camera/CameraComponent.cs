@@ -350,6 +350,8 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 	}
 
 	/// <summary>Update a SceneCamera with the settings from this component</summary>
+	Action<Stage, SceneCamera> executeCommandListsHook;
+
 	public void UpdateSceneCamera( SceneCamera camera, bool includeTags = true )
 	{
 		if ( Scene is null )
@@ -408,8 +410,8 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 			camera.VolumetricFog.BakedIndirectTexture = Scene.Get<VolumetricFogController>()?.BakedFogTexture;
 		}
 
-		//Child camera executes command lists from this camera
-		camera.OnRenderStageHook = ExecuteCommandLists;
+		//Child camera executes command lists from this camera; the delegate is made once, as this runs every frame
+		camera.OnRenderStageHook = executeCommandListsHook ??= ExecuteCommandLists;
 	}
 
 	//Update the SceneCamera UI with the settings from this component

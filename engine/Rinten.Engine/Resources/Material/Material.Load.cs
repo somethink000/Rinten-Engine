@@ -14,7 +14,7 @@ public partial class Material
 		if ( filename.StartsWith( '/' ) || filename.StartsWith( '\\' ) )
 			filename = filename[1..];
 
-		if ( !string.IsNullOrWhiteSpace( filename ) && Directory.TryLoad( filename, ResourceType.Material, out object model ) && model is Material m )
+		if ( !string.IsNullOrWhiteSpace( filename ) && Directory.TryLoad( filename, out object model ) && model is Material m )
 			return m;
 
 		return FromFile( filename ) ?? Ported( filename );
@@ -31,7 +31,7 @@ public partial class Material
 
 		var ours = System.IO.Path.ChangeExtension( theirs, ".mat" ).Replace( '\\', '/' );
 
-		if ( Directory.TryLoad( ours, ResourceType.Material, out object loaded ) && loaded is Material m )
+		if ( Directory.TryLoad( ours, out object loaded ) && loaded is Material m )
 			return m;
 
 		return FromFile( ours );
@@ -501,7 +501,7 @@ public partial class Material
 	{
 		ThreadSafe.AssertIsMainThread();
 
-		if ( !string.IsNullOrWhiteSpace( filename ) && await Directory.TryLoadAsync( filename, ResourceType.Material ) is Material m )
+		if ( !string.IsNullOrWhiteSpace( filename ) && await Directory.TryLoadAsync( filename ) is Material m )
 			return m;
 
 		using var manifest = AsyncResourceLoader.Load( filename );

@@ -6,6 +6,7 @@
 #include "mesh_tables.slang"
 #include "vertex_frame.slang"
 #include "skin_blend.slang"
+#include "mesh_deform.slang"
 
 
 [[vk::binding(0,0)]] StructuredBuffer<Instance> g_instances;
@@ -21,6 +22,9 @@
 
 //Where each vertex stood before this posing, a float3 a vertex from g_wasAt - what the velocity pass moves it from
 [[vk::binding(6,0)]] RWStructuredBuffer<float> g_was;
+
+//Its ModelDeformer volumes, then for a rigid one an anchor a bone - see mesh_deform.slang and CoreSceneTables.Deformations
+[[vk::binding(7,0)]] StructuredBuffer<float4> g_deform;
 
 [[vk::push_constant]]
 cbuffer SkinPush
@@ -40,6 +44,12 @@ cbuffer SkinPush
 	//Whether it has a skeleton - see above. And whether its range holds a pose to keep in g_was first
 	uint g_skinned;
 	uint g_keepWas;
+
+	//Where its volumes start in g_deform and how many; where its anchors start, nought for none
+	uint g_deformAt;
+	uint g_deformCount;
+	uint g_anchorsAt;
+	uint g_pad;
 };
 
 static const uint ShapeSumBytes = 24;
@@ -89,6 +99,20 @@ void main( uint3 id : SV_DispatchThreadID )
 		}
 	}
 
+	bool rigid = g_anchorsAt != 0 && g_skinned != 0;
+
+	if ( g_deformCount > 0 && !rigid )
+	{
+		if ( !moved )
+		{
+			normal = VertexFrameNormal( frame );
+			tangent = VertexFrameTangent( frame );
+		}
+
+		DeformApply( g_deform, g_deformAt, g_deformCount, position, normal, tangent );
+		moved = true;
+	}
+
 	if ( g_skinned != 0 )
 	{
 		uint packedLinks = g_skin.Load( source * 8 );
@@ -98,6 +122,8 @@ void main( uint3 id : SV_DispatchThreadID )
 
 		uint palette = instance.posedPad.x;
 		uint bones = max( instance.posedPad.y, 1u );
+
+		if ( g_deformCount > 0 && rigid ) position = DeformRigid( g_deform, g_deformAt, g_deformCount, g_anchorsAt, bones, links, weights, position );
 
 		//Linked bones only: a slot with no weight often names bone 255.
 		float4x4 first = g_palettes[palette + min( links.x, bones - 1 )];

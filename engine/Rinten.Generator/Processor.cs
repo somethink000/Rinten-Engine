@@ -42,6 +42,10 @@ public class Processor
 	public SourceProductionContext? Context { get; set; }
 
 	public List<Diagnostic> Diagnostics = new List<Diagnostic>();
+
+	/// <summary>Set when the caller discards diagnostics: work that could only produce one is skipped.</summary>
+	public bool IgnoreDiagnostics { get; set; }
+
 	public bool ILHotloadSupported { get; set; }
 
 	/// <summary>A function that will take a package name and return the path to the asset</summary>

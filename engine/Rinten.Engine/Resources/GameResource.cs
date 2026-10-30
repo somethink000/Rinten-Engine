@@ -141,6 +141,18 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		if ( !type.IsAssignableTo( typeof( GameResource ) ) )
 			return default;
 
+		if ( Mounting.MountUtility.IsMountPath( path ) )
+		{
+			if ( !Mounting.Directory.TryLoad( path, out var mounted ) )
+				return null;
+
+			if ( mounted is GameResource resource && resource.GetType().IsAssignableTo( type ) )
+				return resource;
+
+			Log.Warning( $"Mounted resource '{path}' is not a '{type.FullName}'." );
+			return null;
+		}
+
 		obj = System.Activator.CreateInstance( type ) as GameResource;
 
 		if ( obj is null )
@@ -186,13 +198,36 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		Game.Resources.Register( this );
 	}
 
-	//Loads a game resource from given file.
-	internal static T Load<T>( string filename ) where T : GameResource
+	Mounting.ResourceLoader _mountLoader;
+	GlobalContext _mountContext;
+
+	internal void RegisterMounted( Mounting.ResourceLoader loader )
 	{
+		Register( loader.Path );
+		_mountLoader = loader;
+		_mountContext = GlobalContext.Current;
+		loader.ShutdownActions += OnMountShutdown;
+	}
+
+	void OnMountShutdown()
+	{
+		using var scope = new GlobalContext.GlobalContextScope( _mountContext );
+		DestroyInternal();
+	}
+
+	/// <summary>Loads a game resource by path, including mount:// paths.</summary>
+	public static T Load<T>( string filename ) where T : GameResource
+	{
+		if ( string.IsNullOrWhiteSpace( filename ) )
+			return null;
+
 		if ( ResourceLibrary.TryGet<T>( filename, out var resource ) )
 		{
 			return resource;
 		}
+
+		if ( Mounting.MountUtility.IsMountPath( filename ) )
+			return GetPromise( typeof( T ), filename ) as T;
 
 		return null;
 	}
@@ -488,6 +523,13 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		catch ( Exception ex )
 		{
 			Log.Warning( ex, $"{ex.GetType().Name} when destroying {ResourcePath}" );
+		}
+		finally
+		{
+			if ( _mountLoader is not null )
+				_mountLoader.ShutdownActions -= OnMountShutdown;
+			_mountLoader = null;
+			_mountContext = null;
 		}
 	}
 }

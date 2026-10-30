@@ -60,6 +60,21 @@ partial class Scene
 		}
 	}
 
+	//The first valid listener, else the scene's own
+	internal Transform GetPrimaryListenerTransform()
+	{
+		if ( Listeners is { Count: > 0 } )
+		{
+			foreach ( var listener in Listeners )
+			{
+				if ( listener.IsValid() )
+					return listener.Transform;
+			}
+		}
+
+		return Listener?.Transform ?? global::Transform.Zero;
+	}
+
 	//Find the closest sound listener at this point.
 	internal Audio.Listener FindClosestListener( Vector3 point )
 	{

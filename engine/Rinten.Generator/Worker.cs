@@ -161,11 +161,8 @@ namespace Rinten.Generator
 		public override SyntaxNode VisitInvocationExpression( InvocationExpressionSyntax node )
 		{
 			var location = node.GetLocation();
-			var symbolInfo = Model.GetSymbolInfo( node.Expression );
+			var symlist = NeedsInvokedSymbols( node ) ? GetInvokedSymbols( node ) : ImmutableArray<ISymbol>.Empty;
 			node = base.VisitInvocationExpression( node ) as InvocationExpressionSyntax;
-
-			var symlist = symbolInfo.CandidateSymbols;
-			if ( symbolInfo.Symbol is not null ) symlist = ImmutableArray.Create( symbolInfo.Symbol );
 
 			CloudAssetProvider.VisitInvocation( ref node, location, symlist, this );
 			StringTokenUpgrader.VisitInvocation( ref node, location, symlist, this );
@@ -173,6 +170,31 @@ namespace Rinten.Generator
 			return node;
 		}
 
+		//Binding every call is most of the generator's time; without a literal argument the symbol only feeds a diagnostic
+		bool NeedsInvokedSymbols( InvocationExpressionSyntax node )
+		{
+			if ( !Processor.IgnoreDiagnostics ) return true;
+
+			foreach ( var argument in node.ArgumentList.Arguments )
+			{
+				if ( argument.Expression is LiteralExpressionSyntax ) return true;
+			}
+
+			return false;
+		}
+
+		//The method an invocation calls, or the candidates if it didn't bind; asking about the method group
+		//makes Roslyn collect every extension method in scope on each call
+		ImmutableArray<ISymbol> GetInvokedSymbols( InvocationExpressionSyntax node )
+		{
+			if ( Model.GetSymbolInfo( node ).Symbol is IMethodSymbol { MethodKind: not MethodKind.DelegateInvoke } method )
+				return ImmutableArray.Create<ISymbol>( method );
+
+			var symbolInfo = Model.GetSymbolInfo( node.Expression );
+			if ( symbolInfo.Symbol is not null ) return ImmutableArray.Create( symbolInfo.Symbol );
+
+			return symbolInfo.CandidateSymbols;
+		}
 		public override SyntaxNode VisitMemberAccessExpression( MemberAccessExpressionSyntax node )
 		{
 			var visited = base.VisitMemberAccessExpression( node ) as ExpressionSyntax;

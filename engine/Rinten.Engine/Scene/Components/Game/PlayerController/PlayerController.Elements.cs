@@ -2,6 +2,9 @@
 
 public sealed partial class PlayerController : Component
 {
+	//Metres: an inch upstream
+	const float _groundedFeetLift = 0.0254f;
+
 	//Make sure the body and our components are created
 	void EnsureComponentsCreated()
 	{
@@ -40,7 +43,10 @@ public sealed partial class PlayerController : Component
 	void UpdateBody()
 	{
 		var feetHeight = CurrentHeight * 0.5f;
-		var radius = (BodyRadius * MathF.Sqrt( 2 )) / 2;
+		var radius = BodyRadius * 0.5f;
+		var up = UpDirection;
+		var localUp = Rotation.FromYaw( -WorldRotation.Yaw() ) * up;
+		var localUpAbs = localUp.Abs();
 
 		//If we're not on the ground, we have slippy as fuck feet
 		var feetFriction = 0.0f;
@@ -69,13 +75,12 @@ public sealed partial class PlayerController : Component
 		BodyCollider.Start = Vector3.Up * (CurrentHeight - radius);
 		BodyCollider.End = Vector3.Up * MathF.Max( BodyCollider.Start.y - (feetHeight - radius), radius + 0.025f );
 		BodyCollider.Friction = 0.0f;
+		BodyCollider.Elasticity = 0.0f;
 		BodyCollider.Enabled = BodyCollider.End.y < BodyCollider.Start.y;
 
-		//Up is y: the box is as wide as the body on both horizontal axes and as tall as the part of the
-		//character it covers. It said z, which laid the feet on their side and left the centre below the floor.
-		FeetCollider.Scale = new Vector3( BodyRadius, BodyCollider.Enabled ? feetHeight : CurrentHeight, BodyRadius );
-		FeetCollider.Center = new Vector3( 0, FeetCollider.Scale.y * 0.5f, 0 );
+		var feetLength = BodyCollider.Enabled ? feetHeight : CurrentHeight;
 		FeetCollider.Friction = feetFriction;
+		FeetCollider.Elasticity = 0.0f;
 		FeetCollider.Enabled = true;
 
 		var locking = Body.Locking;
@@ -85,6 +90,8 @@ public sealed partial class PlayerController : Component
 		Body.Locking = locking;
 
 		Body.MassOverride = BodyMass;
+		Body.EnhancedCcd = false;
+		Body.PhysicsBody?.AutoSleep = false;
 
 		//When trying to move, we move the mass center up to the waist so the player
 		//can "step" over smaller shit When not moving we drop it to the foot position.
@@ -93,5 +100,17 @@ public sealed partial class PlayerController : Component
 		Body.OverrideMassCenter = true;
 
 		Mode?.UpdateRigidBody( Body );
+
+		//
+		//Small lips are absorbed by Reground, and larger "steps" by TryStep.
+		//
+		//Keep the feet outside Box3D's speculative mesh contacts while ground probes maintain support.
+		var feetLift = IsOnGround && !GroundIsDynamic && !Body.Gravity
+			? MathF.Min( _groundedFeetLift / MathF.Abs( WorldTransform.UniformScale ), feetLength * 0.5f )
+			: 0.0f;
+		var feetBoxLength = feetLength - feetLift;
+		//Up is y: as wide as the body on both horizontal axes, as tall as the part of the character it covers
+		FeetCollider.Scale = new Vector3( BodyRadius, feetBoxLength, BodyRadius );
+		FeetCollider.Center = new Vector3( 0, feetLift + feetBoxLength * 0.5f, 0 );
 	}
 }

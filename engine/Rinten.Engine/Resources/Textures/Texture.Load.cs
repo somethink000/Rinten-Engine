@@ -29,7 +29,7 @@ public partial class Texture
 		//engine has. The compiled name is a .vtex_c; ours is a .tex.
 		filepath = filepath.Replace( ".vtex_c", ".tex" );
 
-		if ( Rinten.Mounting.Directory.TryLoad( filepath, ResourceType.Texture, out object model ) && model is Texture m )
+		if ( Rinten.Mounting.Directory.TryLoad( filepath, out object model ) && model is Texture m )
 			return m;
 
 		//Normalise separators and leading slash but keep case; Linux paths are case-sensitive
@@ -91,7 +91,7 @@ public partial class Texture
 		{
 			//SVGs can have query parameters appended to them, find the ones that match and reload with the same parameters
 			var svgPath = filepath.TrimStart( '/' );
-			foreach ( var svgTarget in Game.Resources.FindWeakByPathPrefix<Texture>( svgPath ) )
+			foreach ( var svgTarget in Game.Resources.FindWeakByPathPrefix<Texture>( svgPath ).ToArray() )
 			{
 				svgTarget.TryReload( filesystem, svgTarget.ResourcePath );
 			}

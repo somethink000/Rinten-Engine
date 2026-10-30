@@ -162,6 +162,10 @@ public sealed partial class Clothing : GameResource
 	[Category( "Clothing Setup" )]
 	public BodyGroups HideBody { get; set; }
 
+	/// <summary>Moves with the body's model deformers without being reshaped, as earrings or a sword.</summary>
+	[Category( "Clothing Setup" )]
+	public bool RigidDeformation { get; set; }
+
 	[Category( "User Customization" )]
 	public bool AllowTintSelect { get; set; }
 

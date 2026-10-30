@@ -487,6 +487,9 @@ internal sealed class BakeScene
 		foreach ( var built in scene.GetAllComponents<MeshComponent>() )
 		{
 			if ( !built.IsValid() || !built.Enabled || !built.Active || !built.GameObject.IsStatic || !Saved( built ) ) continue;
+
+			//Not there in the game, so it neither stops nor takes light
+			if ( built.HideInGame ) continue;
 			if ( built.Model is not { } model || !model.IsValid() ) continue;
 
 			var first = corners.Count / 3;

@@ -20,13 +20,19 @@ public partial class Texture
 		var config = builder._config.GetWithFixes();
 
 		//Without their render device there is nowhere to put a texture but memory, which is where one built out of pixels came from anyway.
-		var made = CoreTexture.Create( config, name );
+		var made = CoreTexture.Create( config, string.IsNullOrEmpty( name ) ? "unnamed" : name );
 
 		if ( data != IntPtr.Zero && dataSize > 0 )
 			made.Write( new ReadOnlySpan<byte>( (void*)data, dataSize ) );
 		else
 			made.Clear( builder._initialColor ?? Color.Transparent );
 
-		return new Texture( made );
+		var result = new Texture( made );
+
+		//Named, it can be found by that name like a texture loaded from disk
+		if ( !string.IsNullOrWhiteSpace( name ) )
+			result.RegisterWeakResourceId( name );
+
+		return result;
 	}
 }

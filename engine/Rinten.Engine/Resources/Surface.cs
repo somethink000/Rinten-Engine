@@ -20,7 +20,9 @@ public partial class Surface : GameResource
 	[JsonIgnore]
 	public int Index { get; internal set; }
 
-	/// <summary>Filepath of the base surface. Use <see cref="SetBaseSurface">SetBaseSurface</see> and <see cref="GetBaseSurface">GetBaseSurface</see>.</summary>
+	//Use the full mount path to avoid native surface name collisions between games.
+	internal string PhysicsName => Mounting.MountUtility.IsMountPath( ResourcePath ) ? ResourcePath : ResourceName;
+
 	[ResourceType( "surface" ), Description( "Fallback surface for empty fields on this surface." )]
 	public string BaseSurface { get; set; }
 
@@ -96,7 +98,7 @@ public partial class Surface : GameResource
 		//a surface again by index; we keep it ourselves.
 		if ( !reload )
 		{
-			NameHash = Hash( ResourceName ?? string.Empty );
+			NameHash = Hash( PhysicsName ?? string.Empty );
 
 			//The first surface loaded is index nought, which is what everything that asks for "the default one" gets handed.
 			Index = All.Count == 0 ? 0 : nextIndex++;
@@ -147,7 +149,8 @@ public partial class Surface : GameResource
 	/// <summary>Returns a Surface from its name, or null</summary>
 	public static Surface FindByName( string name )
 	{
-		return All.FirstOrDefault( x => x.Value.ResourceName == name ).Value;
+		return All.FirstOrDefault( x => x.Value.PhysicsName == name ).Value
+			?? (Mounting.MountUtility.IsMountPath( name ) ? GameResource.Load<Surface>( name ) : null);
 	}
 
 	protected override Bitmap CreateAssetTypeIcon( int width, int height )

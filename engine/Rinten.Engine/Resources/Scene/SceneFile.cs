@@ -16,7 +16,7 @@ public partial class SceneFile : GameResource
 		if ( existing is not null )
 			return existing;
 
-		if ( Mounting.Directory.TryLoad( path, Mounting.ResourceType.Scene, out var mounted ) && mounted is SceneFile sf )
+		if ( Mounting.Directory.TryLoad( path, out var mounted ) && mounted is SceneFile sf )
 			return sf;
 
 		return null;

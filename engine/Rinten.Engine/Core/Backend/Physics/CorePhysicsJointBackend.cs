@@ -126,6 +126,9 @@ internal sealed unsafe class CorePhysicsJointBackend : IPhysicsJointBackend
 
 	/// <summary>Resistance to being moved. Box3D has no friction on a joint, so the core makes one out of a motor with no target speed: it fights motion up to the given torque and drives nothing.</summary>
 	public void SetFriction( float f ) => CorePhysics.JointSetFriction( joint, f );
+	public void SetRangeLimitEnabled( bool enabled ) => CorePhysics.JointEnableRangeLimit( joint, enabled );
+	public void SetLinearMotor( float velocity, float maxForce ) => CorePhysics.JointSetLinearMotor( joint, velocity, maxForce );
+	public void SetTargetTranslation( float position, float hertz, float damping ) => CorePhysics.JointSetTargetTranslation( joint, position, hertz, damping );
 
 	/// <summary>A ball socket's swing (cone) and twist limits.</summary>
 	public void SetLimit( string name, Vector3 limit )

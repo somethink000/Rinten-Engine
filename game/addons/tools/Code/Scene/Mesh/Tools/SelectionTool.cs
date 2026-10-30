@@ -1255,7 +1255,8 @@ public abstract class SelectionTool<T>( MeshTool tool ) : SelectionTool( tool ) 
 
 			if ( component.GameObject.Tags.Has( "hidden" ) ) continue;
 
-			var worldBounds = component.GetWorldBounds();
+			var transform = component.Transform.World;
+			var worldBounds = mesh.CalculateBounds( transform );
 			var meshScreenBounds = GetScreenRectFromBounds( worldBounds );
 
 			if ( !lassoBounds.IsInside( meshScreenBounds ) )
@@ -1265,8 +1266,6 @@ public abstract class SelectionTool<T>( MeshTool tool ) : SelectionTool( tool ) 
 
 				continue;
 			}
-
-			var transform = component.Transform.World;
 
 			if ( typeof( T ) == typeof( MeshVertex ) )
 			{

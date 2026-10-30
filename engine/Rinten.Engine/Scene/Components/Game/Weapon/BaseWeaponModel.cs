@@ -98,7 +98,12 @@ public partial class BaseWeaponModel : Component
 		DoEjectBrass();
 	}
 
-	/// <summary>Called when the weapon starts reloading. Base sets the "b_reload" animation parameter. Override to extend (incremental animations, timed reload sounds).</summary>
+	/// <summary>Called when the weapon attacks, but has no ammo.</summary>
+	public virtual void OnDryFire()
+	{
+		Renderer?.Set( "b_attack_dry", true );
+	}
+
 	public virtual void OnReloadStart()
 	{
 		Renderer?.Set( "b_reload", true );

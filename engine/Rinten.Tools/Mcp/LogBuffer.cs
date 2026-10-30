@@ -28,6 +28,9 @@ internal static class LogBuffer
 
 	static void OnLog( LogEvent e )
 	{
+		//2000 events from editor start: holding what they logged would keep a logged component's closed scene alive
+		e = e.WithWeakArguments();
+		e.Exception = null;
 		lock ( sync )
 		{
 			events.Enqueue( new Entry( ++last, e ) );

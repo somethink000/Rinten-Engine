@@ -232,9 +232,10 @@ public sealed class TextRenderer : Renderer, Component.ExecuteInEditor
 	{
 		if ( !_so.IsValid() ) return;
 
-		var rotation = Billboard == BillboardMode.None ? WorldRotation : Rotation.Identity;
+		var world = Transform.InterpolatedWorld;
+		var rotation = Billboard == BillboardMode.None ? world.Rotation : Rotation.Identity;
 
-		_so.Transform = new Transform( WorldPosition, rotation, WorldScale * Scale );
+		_so.Transform = new Transform( world.Position, rotation, world.Scale * Scale );
 		_so.CalculateBounds();
 	}
 
@@ -387,6 +388,7 @@ public sealed class TextRenderer : Renderer, Component.ExecuteInEditor
 		public TextSceneObject( SceneWorld world ) : base( world )
 		{
 			RenderLayer = SceneRenderLayer.Default;
+			Flags.IsTranslucent = true;
 		}
 
 		public void CalculateBounds()

@@ -848,8 +848,8 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 			gameObject.PreserveFromHostSyncMembers( gameObjectJson );
 		}
 
-		using ( var _ = CallbackBatch.Batch() )
 		using ( BlobDataSerializer.LoadFromMemory( message.BlobData ) )
+		using ( var _ = CallbackBatch.Batch() )
 		{
 			gameObject?.Deserialize( gameObjectJson, new GameObject.DeserializeOptions
 			{
@@ -927,8 +927,8 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 			component.PreserveFromHostSyncMembers( componentJson );
 		}
 
-		using ( CallbackBatch.Batch() )
 		using ( BlobDataSerializer.LoadFromMemory( message.BlobData ) )
+		using ( CallbackBatch.Batch() )
 		{
 			component?.DeserializeInternal( componentJson, true );
 			component?.PostDeserialize();
@@ -1042,8 +1042,8 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 
 		var go = new GameObject();
 
-		using ( CallbackBatch.Batch() )
 		using ( BlobDataSerializer.LoadFromMemory( message.BlobData ) )
+		using ( CallbackBatch.Batch() )
 		{
 			go.Deserialize( JsonNode.Parse( message.JsonData ).AsObject(), networkDeserializeOptionsCreate );
 			go.NetworkSpawnRemote( message );

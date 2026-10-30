@@ -177,12 +177,14 @@ void CutOut( V2P i, bool front )
 #endif
 
 #ifdef VIEW
-//A colour a number, far apart for numbers next to each other.
+//A colour a number: hues a golden turn apart, so clusters built next to each other never look alike,
+//and three bands of brightness so the hues that come round again still differ
 float3 Hued( uint n )
 {
-	uint h = ( n * 2654435761u ) ^ ( n >> 15 );
-	float3 c = float3( ( h & 255u ), ( ( h >> 8 ) & 255u ), ( ( h >> 16 ) & 255u ) ) / 255.0;
-	return ( c * 0.75 ) + 0.15;
+	float hue = frac( float( n ) * 0.61803399 );
+	float3 rgb = saturate( abs( frac( hue + float3( 0.0, 2.0 / 3.0, 1.0 / 3.0 ) ) * 6.0 - 3.0 ) - 1.0 );
+	float value = 1.0 - ( float( ( n * 2654435761u ) >> 30 ) * 0.15 );
+	return lerp( float3( 1.0, 1.0, 1.0 ), rgb, 0.85 ) * value;
 }
 
 struct ViewOut
@@ -212,8 +214,8 @@ ViewOut MainPs( V2P i, uint primitive : SV_PrimitiveID )
 		colour = Hued( i.instance + 1 );
 	}
 
-	//The triangle, kept faintly, so the pieces do not read as flat paint.
-	float shade = 0.75 + ( ( primitive % 7u ) * 0.05 );
+	//The triangle, kept faintly, so the shape still reads without hiding where a cluster ends
+	float shade = 0.9 + ( ( primitive % 3u ) * 0.05 );
 
 	ViewOut o;
 	o.colour = float4( colour * shade, 1.0 );

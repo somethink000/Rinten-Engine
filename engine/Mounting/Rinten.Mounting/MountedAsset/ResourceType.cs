@@ -13,5 +13,6 @@ public enum ResourceType
 	Material,
 
 	/// <summary>Should return a PrefabFile</summary>
-	PrefabFile
+	PrefabFile,
+	GameResource
 }

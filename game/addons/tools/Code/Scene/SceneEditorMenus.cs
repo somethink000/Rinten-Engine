@@ -329,10 +329,8 @@ public static class SceneEditorMenus
 					SceneUtility.MakeIdGuidsUnique( prefabInstanceJson, gameObject.Id );
 					gameObject.Clear();
 					var originalTransform = gameObject.WorldTransform;
-					var originalName = gameObject.Name;
 					gameObject.Deserialize( prefabInstanceJson );
 					gameObject.WorldTransform = originalTransform;
-					gameObject.Name = originalName;
 				}
 			}
 		};
@@ -353,7 +351,7 @@ public static class SceneEditorMenus
 			return;
 
 		using ( SceneEditorSession.Current.UndoScope( "Hide Selected Object(s)" )
-			.WithGameObjectChanges( gos, GameObjectUndoFlags.All )
+			.WithGameObjectChanges( gos, GameObjectUndoFlags.Properties )
 			.Push() )
 		{
 			foreach ( var go in gos )
@@ -377,7 +375,7 @@ public static class SceneEditorMenus
 			return;
 
 		using ( SceneEditorSession.Current.UndoScope( "Unhide All Object(s)" )
-			.WithGameObjectChanges( hiddenObjects, GameObjectUndoFlags.All )
+			.WithGameObjectChanges( hiddenObjects, GameObjectUndoFlags.Properties )
 			.Push() )
 		{
 			foreach ( var go in hiddenObjects ) go.Tags.Remove( "hidden" );
@@ -395,7 +393,7 @@ public static class SceneEditorMenus
 			return;
 
 		using ( SceneEditorSession.Current.UndoScope( "Toggle Visibility" )
-			.WithGameObjectChanges( gos, GameObjectUndoFlags.All )
+			.WithGameObjectChanges( gos, GameObjectUndoFlags.Properties )
 			.Push() )
 		{
 			var anyVisible = gos.Any( x => !x.Tags.Has( "hidden" ) );
@@ -434,7 +432,7 @@ public static class SceneEditorMenus
 			return;
 
 		using ( SceneEditorSession.Current.UndoScope( "Isolate Selection" )
-			.WithGameObjectChanges( changedObjects, GameObjectUndoFlags.All )
+			.WithGameObjectChanges( changedObjects, GameObjectUndoFlags.Properties )
 			.Push() )
 		{
 			foreach ( var go in changedObjects )

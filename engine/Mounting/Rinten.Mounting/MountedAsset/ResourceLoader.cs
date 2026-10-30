@@ -15,6 +15,9 @@ public abstract class ResourceLoader
 	/// <summary>The type of resource this file can provide.</summary>
 	public ResourceType Type { get; private set; }
 
+	internal bool IsShutdown { get; private set; }
+	internal event Action ShutdownActions;
+
 	static Dictionary<ResourceType, string> extensions = new()
 	{
 		{ ResourceType.Model, ".vmdl" },
@@ -49,6 +52,7 @@ public abstract class ResourceLoader
 	internal void InitializeInternal( ResourceType type, string path, BaseGameMount mount )
 	{
 		_mount = mount;
+		IsShutdown = false;
 
 		//Standardize the path into a mount path
 		path = path.Replace( '\\', '/' ).Trim( '/' );
@@ -82,6 +86,7 @@ public abstract class ResourceLoader
 
 		_lock.Enter();
 
+		object result = _cachedResult;
 		if ( _cachedResult is not null && (_cachedResult is not IValid v || v.IsValid) )
 		{
 			_lock.Exit();
@@ -96,7 +101,9 @@ public abstract class ResourceLoader
 			{
 				await _loadTask;
 
-				_cachedResult = _loadTask.Result;
+				result = _loadTask.Result;
+				if ( Type != ResourceType.GameResource )
+					_cachedResult = result;
 			}
 		}
 		catch ( System.Exception e )
@@ -110,7 +117,7 @@ public abstract class ResourceLoader
 
 		_loadTask = default;
 
-		return _cachedResult;
+		return result;
 	}
 
 	//Should be implemented to load a specific type
@@ -127,7 +134,17 @@ public abstract class ResourceLoader
 
 	internal void ShutdownInternal()
 	{
-		Shutdown();
+		IsShutdown = true;
+		try
+		{
+			Shutdown();
+		}
+		finally
+		{
+			var actions = ShutdownActions;
+			ShutdownActions = null;
+			actions?.Invoke();
+		}
 	}
 
 	protected virtual void Shutdown()

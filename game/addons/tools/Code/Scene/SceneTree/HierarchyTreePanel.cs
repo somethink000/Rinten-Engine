@@ -272,7 +272,11 @@ public class HierarchyTreePanel : TreePanel<object>
 			session.Selection.Add( item );
 
 		lastSelectionHash = session.Selection.GetHashCode();
+		ChosenHere = (session.Selection, lastSelectionHash);
 	}
+
+	//The selection as a click in the tree last left it: those rows are in view already, so inspecting it scrolls nowhere
+	internal (object Selection, int Hash) ChosenHere;
 
 	protected override void OnRenamed( object node, string text, object[] selection )
 		=> HierarchyNodeBridge.ApplyRename( node, text, selection );

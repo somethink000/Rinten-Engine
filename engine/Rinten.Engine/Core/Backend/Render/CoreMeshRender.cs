@@ -101,8 +101,8 @@ internal sealed class CoreMeshRender
 	private static bool pipelinesTried;
 	//The pass that poses a whole model - see shaders/engine/mesh_skin.slang.
 	private static ulong skinPipeline;
-	private readonly ulong[] skinBound = new ulong[7];
-	private readonly byte[] skinPush = new byte[32];
+	private readonly ulong[] skinBound = new ulong[8];
+	private readonly byte[] skinPush = new byte[48];
 
 	//The pass that adds one blend shape into an instance's sums - see shaders/engine/mesh_shapes.slang.
 	private static ulong shapesPipeline;
@@ -767,9 +767,9 @@ internal sealed class CoreMeshRender
 		return true;
 	}
 
-	//SkinPush in mesh_skin.slang, eight words.
+	//SkinPush in mesh_skin.slang, twelve words.
 	private ReadOnlySpan<byte> SkinPush( uint index, uint first, uint count, uint sumsAt, uint shaped, uint skinned,
-		uint wasAt, uint keepWas )
+		uint wasAt, uint keepWas, uint deformAt, uint deformCount, uint anchorsAt )
 	{
 		var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>( skinPush.AsSpan() );
 		words[0] = index;
@@ -780,6 +780,9 @@ internal sealed class CoreMeshRender
 		words[5] = shaped;
 		words[6] = skinned;
 		words[7] = keepWas;
+		words[8] = deformAt;
+		words[9] = deformCount;
+		words[10] = anchorsAt;
 		return skinPush;
 	}
 
@@ -808,6 +811,7 @@ internal sealed class CoreMeshRender
 		skinBound[4] = CoreSceneTables.Palettes.Buffer != 0 ? CoreSceneTables.Palettes.Buffer : stand;
 		skinBound[5] = CoreSceneTables.ShapeSums.Buffer != 0 ? CoreSceneTables.ShapeSums.Buffer : stand;
 		skinBound[6] = CoreSceneTables.Was.Buffer != 0 ? CoreSceneTables.Was.Buffer : stand;
+		skinBound[7] = CoreSceneTables.Deformations.Buffer != 0 ? CoreSceneTables.Deformations.Buffer : stand;
 
 		foreach ( var one in skinBound ) if ( one == 0 ) return;
 
@@ -839,6 +843,7 @@ internal sealed class CoreMeshRender
 			var shaped = entry.ShapesAt >= 0 && Shape( entry, mesh );
 			CoreRenderDevice.ZoneEnd();
 			var skinned = entry.PaletteAt >= 0 && mesh.Skin != 0;
+			var deformed = entry.DeformAt >= 0 && entry.DeformVolumes > 0 && CoreSceneTables.Deformations.Buffer != 0;
 
 			//The range holds a pose of this one's only where it was posed into before
 			var keepWas = entry.WasAt >= 0 && CoreSceneTables.Was.Buffer != 0 && entry.SkinnedAt == entry.PosedAt;
@@ -847,7 +852,9 @@ internal sealed class CoreMeshRender
 				( mesh.PoolVertexCount + 127 ) / 128, 1, 1,
 				SkinPush( (uint)slot, (uint)mesh.PoolVertexAt, (uint)mesh.PoolVertexCount,
 					shaped ? (uint)entry.ShapesAt : 0u, shaped ? 1u : 0u, skinned ? 1u : 0u,
-					keepWas ? (uint)entry.WasAt : 0u, keepWas ? 1u : 0u ) );
+					keepWas ? (uint)entry.WasAt : 0u, keepWas ? 1u : 0u,
+					deformed ? (uint)entry.DeformAt : 0u, deformed ? (uint)entry.DeformVolumes : 0u,
+					deformed && entry.DeformAnchors > 0 ? (uint)( entry.DeformAt + entry.DeformVolumes * ModelDeformer.Words ) : 0u ) );
 
 			entry.PoseMovedTurn = keepWas && entry.SkinnedHash != entry.PoseHash ? EngineLoop.LoopFrames : -1;
 

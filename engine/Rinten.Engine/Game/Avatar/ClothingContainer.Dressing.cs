@@ -104,6 +104,7 @@ public partial class ClothingContainer
 			var r = go.Components.Create<SkinnedModelRenderer>();
 			r.Model = model;
 			r.BoneMergeTarget = body;
+			r.RigidDeformation = c.RigidDeformation;
 
 			//TODO - we should expose the render attributes, somehow, in a way accessible to editor inspector and serialization!
 			r.Attributes.Set( "skin_age", Age );

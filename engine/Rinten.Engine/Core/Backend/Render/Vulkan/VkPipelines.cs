@@ -170,6 +170,23 @@ internal static unsafe partial class VkPipelines
 	//What the next pipeline is, set by whoever asks for it; see Labelling.
 	[System.ThreadStatic] internal static string Label;
 
+	//Whether a SPIR-V module can throw a pixel away: OpKill, OpTerminateInvocation or OpDemoteToHelperInvocation anywhere in it
+	private static bool Discards( byte* spirv, int size )
+	{
+		if ( spirv is null || size < 20 ) return false;
+		var words = (uint*)spirv;
+		var count = size / 4;
+		for ( var at = 5; at < count; )
+		{
+			var word = words[at];
+			var op = word & 0xFFFF;
+			if ( op is 252 or 4416 or 5380 ) return true;
+			var length = (int)(word >> 16);
+			at += Math.Max( length, 1 );
+		}
+		return false;
+	}
+
 	//Graphics pipeline from two SPIR-V modules; specialize is a bitmask of constants, or -1 for defaults
 	internal static ulong Create(
 		byte* vertexSpirv, int vertexSize, string vertexEntry,
@@ -587,8 +604,11 @@ internal static unsafe partial class VkPipelines
 					colourFormats[1] = formats.Colour1;
 
 					//A device that foveates takes its rate from the map - see VkFovea - where the pipeline tests the depth: the world, not what is drawn over it.
+					//Not a surface that cuts itself out: a coarse fragment discards for all the pixels it covers or none, while the depth pre-pass
+					//cut each pixel by itself - pixels it kept and the coarse fragment dropped are never shaded and stay black, specks that come and
+					//go with the map over grass and leaves.
 					var rateState = default( PipelineFragmentShadingRateStateCreateInfoKHR );
-					if ( VkFovea.Kind == VkFovea.Kinds.ShadingRate ) VkFovea.RateState( &rateState, followsMap: depthTest != 0 );
+					if ( VkFovea.Kind == VkFovea.Kinds.ShadingRate ) VkFovea.RateState( &rateState, followsMap: depthTest != 0 && !Discards( pixelSpirv, pixelSize ) );
 
 					var rendering = new PipelineRenderingCreateInfo
 					{

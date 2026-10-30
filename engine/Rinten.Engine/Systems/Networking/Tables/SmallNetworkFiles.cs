@@ -40,10 +40,16 @@ internal class SmallNetworkFiles
 		if ( !fs.FileExists( fileName ) )
 			return false;
 
-		var normalizedFileName = NormalizeFileName( fileName );
-		StringTable.Set( normalizedFileName, contents );
+		AddFile( fileName, contents );
 
 		return true;
+	}
+
+	//Add contents already read from an open file, without resolving its path again.
+	internal void AddFile( string fileName, byte[] contents )
+	{
+		var normalizedFileName = NormalizeFileName( fileName );
+		StringTable.Set( normalizedFileName, contents );
 	}
 
 	/// <summary>Remove a networked file.</summary>

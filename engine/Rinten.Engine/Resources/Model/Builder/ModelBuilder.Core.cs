@@ -180,9 +180,13 @@ public sealed partial class ModelBuilder
 			builder.SetRenderBounds( minMax );
 			builder.SetPhysicsBounds( minMax );
 
-			//Collision from the triangles that were just added, so a brush a tool made can be stood on. Kind 1 is the mesh itself rather than a hull around it.
-			if ( collides )
-				builder.CollisionFromMesh( 1, string.IsNullOrWhiteSpace( surfaceProperty ) ? "default" : surfaceProperty, mass );
+			//Named shapes are the collision; without any, the drawn triangles are, so a brush can be stood on
+			var surface = string.IsNullOrWhiteSpace( surfaceProperty ) ? "default" : surfaceProperty;
+
+			if ( HasNamedCollision )
+				AddNamedCollision( builder, surface );
+			else if ( collides )
+				builder.CollisionFromMesh( 1, surface, mass );
 
 			kept = true;
 			return builder;

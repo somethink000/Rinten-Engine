@@ -1,0 +1,22 @@
+FocusPickerControl.control
+{
+	> .row
+	{
+		flex-direction: row;
+		align-items: center;
+		flex-grow: 1;
+		min-width: 0;
+		gap: $vertical-gap;
+
+		> NumberControl
+		{
+			flex-grow: 1;
+		}
+
+		&.active
+		{
+			outline: 1px dashed rgba( $accent, 0.6 );
+			border-radius: $control-radius;
+		}
+	}
+}

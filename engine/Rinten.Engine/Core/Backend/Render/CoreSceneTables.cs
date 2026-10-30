@@ -172,6 +172,12 @@ internal sealed class CoreSceneTables
 		public long SkinnedAt = -1;
 		public int SkinnedGeneration = -1;
 
+		/// <summary>Its ModelDeformer stack and rigid anchors, a range of Deformations; -1 for none.</summary>
+		public long DeformAt = -1;
+		public int DeformCount;
+		public int DeformVolumes;
+		public int DeformAnchors;
+
 		/// <summary>Its positions as posed before the last posing, a PosedCount range of Was; -1 for none.</summary>
 		public long WasAt = -1;
 
@@ -230,6 +236,10 @@ internal sealed class CoreSceneTables
 			SkinnedGeneration = -1;
 			WasAt = -1;
 			PoseMovedTurn = -1;
+			DeformAt = -1;
+			DeformCount = 0;
+			DeformVolumes = 0;
+			DeformAnchors = 0;
 		}
 	}
 
@@ -252,6 +262,12 @@ internal sealed class CoreSceneTables
 	//What every shaped instance's blend shapes add to each of its vertices - a float3 of position and one of
 	//normal a vertex, a range each. Written by mesh_shapes.slang, read by the pose pass beside the palettes.
 	internal static readonly CoreGeometryPool.Pool ShapeSums = new( 24, 1 << 16 );
+
+	//Every deformed instance's ModelDeformer volumes, then its rigid anchors - a float4 each, written each frame it is posed
+	internal static readonly CoreGeometryPool.Pool Deformations = new( 16, 1 << 10 );
+
+	//This frame's stacks, waiting to go into that pool.
+	private readonly List<(long At, System.Numerics.Vector4[] Words, int Count)> deformQueue = new();
 
 	//Every posed instance's positions before its last posing, a float3 a vertex - what the velocity pass moves them from
 	internal static readonly CoreGeometryPool.Pool Was = new( 12, 1 << 16 );
@@ -1407,8 +1423,11 @@ internal sealed class CoreSceneTables
 		var bonesPose = animating && entry.Renderer is SkinnedModelRenderer;
 		var shapesPose = entry.Morphed && mesh.ShapeDeltas != 0 && mesh.ShapeRuns is not null;
 
+		//A ModelDeformer reshapes it in the same pass, skeleton or not
+		var deformPose = entry.Renderer is { DeformationVolumes: > 0 };
+
 		var canPose = Rinten.Rendering.DrawSettings.Clusters
-			&& ( bonesPose || shapesPose ) && mesh.ClusterCount > 0 && mesh.MeshSlot >= 0 && !ownAttributes
+			&& ( bonesPose || shapesPose || deformPose ) && mesh.ClusterCount > 0 && mesh.MeshSlot >= 0 && !ownAttributes
 			&& mesh.PoolVertexCount > 0 && mesh.Bones.Length <= MostBones;
 
 		var posedNow = canPose && EnsurePosed( entry, mesh, bonesPose, shapesPose );
@@ -1897,6 +1916,9 @@ internal sealed class CoreSceneTables
 		if ( entry.PaletteAt >= 0 && entry.PaletteAt + entry.PaletteCount <= Palettes.Used ) Palettes.Give( entry.PaletteAt, entry.PaletteCount );
 		if ( entry.ShapesAt >= 0 && entry.ShapesAt + entry.ShapesCount <= ShapeSums.Used ) ShapeSums.Give( entry.ShapesAt, entry.ShapesCount );
 		if ( entry.WasAt >= 0 && entry.WasAt + entry.PosedCount <= Was.Used ) Was.Give( entry.WasAt, entry.PosedCount );
+		if ( entry.DeformAt >= 0 && entry.DeformAt + entry.DeformCount <= Deformations.Used ) Deformations.Give( entry.DeformAt, entry.DeformCount );
+		entry.DeformAt = -1;
+		entry.DeformCount = entry.DeformVolumes = entry.DeformAnchors = 0;
 		entry.PosedAt = -1;
 		entry.WasAt = -1;
 		entry.PoseHash = 0;
@@ -1945,9 +1967,41 @@ internal sealed class CoreSceneTables
 		return hash == 0 ? 1ul : hash;
 	}
 
+	//Its ModelDeformer stack into the pool for the skin pass, and a hash of it for the pose: nought where it has none
+	private ulong Deform( Entry entry )
+	{
+		var renderer = entry.Renderer;
+		var volumes = renderer is null ? 0 : renderer.DeformationVolumes;
+		var anchors = volumes > 0 && entry.PaletteAt >= 0 && renderer is SkinnedModelRenderer skinned
+			? skinned.DeformationAnchors( entry.Mesh.Bones ) : [];
+		var count = ( volumes * ModelDeformer.Words ) + anchors.Length;
+
+		if ( entry.DeformAt >= 0 && entry.DeformAt + entry.DeformCount > Deformations.Used ) entry.DeformAt = -1;
+
+		if ( entry.DeformAt >= 0 && entry.DeformCount != count )
+		{
+			Deformations.Give( entry.DeformAt, entry.DeformCount );
+			entry.DeformAt = -1;
+		}
+
+		if ( count > 0 && entry.DeformAt < 0 ) entry.DeformAt = Deformations.Take( count );
+
+		entry.DeformCount = entry.DeformAt >= 0 ? count : 0;
+		entry.DeformVolumes = entry.DeformAt >= 0 ? volumes : 0;
+		entry.DeformAnchors = entry.DeformAt >= 0 ? anchors.Length : 0;
+		if ( entry.DeformCount == 0 ) return 0;
+
+		var stack = renderer.DeformationWords;
+		deformQueue.Add( ( entry.DeformAt, stack, volumes * ModelDeformer.Words ) );
+		if ( anchors.Length > 0 ) deformQueue.Add( ( entry.DeformAt + ( volumes * ModelDeformer.Words ), anchors, anchors.Length ) );
+
+		return PoseHashOf( MemoryMarshal.Cast<System.Numerics.Vector4, ulong>( stack.AsSpan( 0, volumes * ModelDeformer.Words ) ) );
+	}
+
 	private void PoseAll()
 	{
 		paletteQueue.Clear();
+		deformQueue.Clear();
 		AnyPosed = false;
 		Posed = 0;
 		PosedAtRest = 0;
@@ -1996,6 +2050,8 @@ internal sealed class CoreSceneTables
 
 				hash = ( hash * 1099511628211ul ) ^ shaped;
 			}
+
+			hash = ( hash * 1099511628211ul ) ^ Deform( entry );
 
 			PosedSphere( i );
 			AnyPosed = true;
@@ -2126,6 +2182,14 @@ internal sealed class CoreSceneTables
 		}
 
 		paletteQueue.Clear();
+
+		foreach ( var (at, stack, count) in deformQueue )
+		{
+			if ( Deformations.Buffer == 0 ) break;
+			CoreRenderDevice.FrameWrite( Deformations.Buffer, at * 16, MemoryMarshal.AsBytes( stack.AsSpan( 0, count ) ) );
+		}
+
+		deformQueue.Clear();
 
 
 		var words = MaterialsAt + Math.Max( 1, instanceMaterialsUsed );

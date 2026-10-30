@@ -76,7 +76,31 @@ public sealed partial class SkinnedModelRenderer
 	{
 		var delta = eyeDirectionWorld * WorldRotation.Inverse;
 		Set( name, delta );
-		Set( $"{name}_weight", weight );
+		Set( GetLookWeightParameter( name ), weight );
+	}
+
+	//Keep generated names with the renderer, so custom names don't accumulate in a global cache.
+	Dictionary<string, string> _lookWeightParameters;
+	Dictionary<string, (string Enabled, string Position, string Rotation)> _ikParameters;
+
+	string GetLookWeightParameter( string name )
+	{
+		_lookWeightParameters ??= new( StringComparer.Ordinal );
+		if ( !_lookWeightParameters.TryGetValue( name, out var parameter ) )
+			_lookWeightParameters[name] = parameter = $"{name}_weight";
+
+		return parameter;
+	}
+
+	(string Enabled, string Position, string Rotation) GetIkParameters( string name )
+	{
+		//Interpolation treated null as an empty name before these strings were cached.
+		name ??= "";
+		_ikParameters ??= new( StringComparer.Ordinal );
+		if ( !_ikParameters.TryGetValue( name, out var parameters ) )
+			_ikParameters[name] = parameters = ($"ik.{name}.enabled", $"ik.{name}.position", $"ik.{name}.rotation");
+
+		return parameters;
 	}
 
 	/// <summary>Sets an IK parameter. This sets 3 variables that should be set in the animgraph: 1. ik.{name}.enabled 2. ik.{name}.position 3. ik.{name}.rotation</summary>
@@ -85,15 +109,16 @@ public sealed partial class SkinnedModelRenderer
 		//convert local to model
 		tx = WorldTransform.ToLocal( tx );
 
-		Set( $"ik.{name}.enabled", true );
-		Set( $"ik.{name}.position", tx.Position );
-		Set( $"ik.{name}.rotation", tx.Rotation );
+		var parameters = GetIkParameters( name );
+		Set( parameters.Enabled, true );
+		Set( parameters.Position, tx.Position );
+		Set( parameters.Rotation, tx.Rotation );
 	}
 
 	/// <summary>This sets ik.{name}.enabled to false.</summary>
 	public void ClearIk( string name )
 	{
-		Set( $"ik.{name}.enabled", false );
+		Set( GetIkParameters( name ).Enabled, false );
 	}
 
 	ParameterAccessor _parameters;

@@ -538,6 +538,38 @@ internal static unsafe partial class CorePhysics
 		}
 	}
 
+	public static void JointEnableRangeLimit( ulong joint, bool enabled )
+	{
+		if ( !ResolveJoint( joint, out var id ) ) return;
+
+		switch ( b3Joint_GetType( id ) )
+		{
+			case b3JointType.b3_revoluteJoint: b3RevoluteJoint_EnableLimit( id, enabled ); break;
+			case b3JointType.b3_prismaticJoint: b3PrismaticJoint_EnableLimit( id, enabled ); break;
+		}
+	}
+
+	public static void JointSetLinearMotor( ulong joint, float speed, float maxForce )
+	{
+		if ( !ResolveJoint( joint, out var id ) || b3Joint_GetType( id ) != b3JointType.b3_prismaticJoint ) return;
+
+		b3PrismaticJoint_EnableSpring( id, false );
+		b3PrismaticJoint_SetMotorSpeed( id, speed );
+		b3PrismaticJoint_SetMaxMotorForce( id, maxForce );
+		b3PrismaticJoint_EnableMotor( id, true );
+	}
+
+	public static void JointSetTargetTranslation( ulong joint, float target, float hertz, float damping )
+	{
+		if ( !ResolveJoint( joint, out var id ) || b3Joint_GetType( id ) != b3JointType.b3_prismaticJoint ) return;
+
+		b3PrismaticJoint_EnableMotor( id, false );
+		b3PrismaticJoint_SetTargetTranslation( id, target );
+		b3PrismaticJoint_SetSpringHertz( id, hertz );
+		b3PrismaticJoint_SetSpringDampingRatio( id, damping );
+		b3PrismaticJoint_EnableSpring( id, hertz > 0.0f );
+	}
+
 	public static void JointSetFriction( ulong joint, float friction )
 	{
 		if ( !ResolveJoint( joint, out var id ) ) return;

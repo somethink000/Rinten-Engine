@@ -33,7 +33,7 @@ sealed class SceneSoundscapeSystem : GameObjectSystem<SceneSoundscapeSystem>
 		timeSinceUpdate = 0;
 
 		//Find the closest soundscape, sphere and box take priority over point.
-		var best = Closest( Sound.Listener.Position );
+		var best = Closest( Scene.GetPrimaryListenerTransform().Position );
 
 		if ( best == active )
 			return;

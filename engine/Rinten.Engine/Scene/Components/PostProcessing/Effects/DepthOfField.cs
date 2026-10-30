@@ -24,7 +24,7 @@ public sealed class DepthOfField : BasePostProcess<DepthOfField>
 
 	//Two hundred was the number this arrived with, from an engine that measured in inches - five metres, and nothing at all in one that measures in metres, where two hundred is further than most rooms are deep and nothing would ever be out of focus.
 	/// <summary>How far away from the camera to focus, in metres.</summary>
-	[Range( 0.1f, 1000 )]
+	[Range( 0.1f, 1000 ), FocusPicker]
 	[Property, Group( "Focus" ), Icon( "horizontal_distribute" )]
 	public float FocalDistance { get; set; } = 5.0f;
 

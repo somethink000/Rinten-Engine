@@ -121,7 +121,7 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 		//Shift stands the block on the surface under the pointer. The snap is done in that frame, and still leaves alone the axis the surface faces along.
 		var rotation = Gizmo.IsShiftPressed ? RotationFromNormal( tr.Normal ) : Rotation.Identity;
 
-		tr.EndPosition = rotation * GridSnap( rotation.Inverse * tr.EndPosition, rotation.Inverse * tr.Normal );
+		tr.EndPosition = rotation * SnapToSurface( rotation.Inverse * tr.EndPosition, rotation.Inverse * tr.Normal );
 
 		if ( Gizmo.WasLeftMousePressed )
 		{
@@ -273,6 +273,21 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 		var x = n.x >= n.y && n.x >= n.z;
 		var y = !x && n.y >= n.z;
 		return Gizmo.Snap( point, new Vector3( x ? 0 : 1, y ? 0 : 1, x || y ? 1 : 0 ) );
+	}
+
+	//Grid snap across the surface, then slid along the dominant axis back onto the surface's plane
+	static Vector3 SnapToSurface( Vector3 point, Vector3 normal )
+	{
+		normal = normal.Normal;
+		var snapped = GridSnap( point, normal );
+
+		var n = normal.Abs();
+		var axis = n.x >= n.y && n.x >= n.z ? new Vector3( 1, 0, 0 ) : n.y >= n.z ? new Vector3( 0, 1, 0 ) : new Vector3( 0, 0, 1 );
+		var denom = normal.Dot( axis );
+		if ( denom.AlmostEqual( 0.0f ) ) return snapped;
+
+		var t = normal.Dot( point - snapped ) / denom;
+		return snapped + axis * t;
 	}
 
 	//Build a frame whose up axis is the given surface normal, keeping the other two axes as close to the world axes as possible.

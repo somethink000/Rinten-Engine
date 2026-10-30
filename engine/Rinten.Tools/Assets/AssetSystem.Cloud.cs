@@ -266,9 +266,16 @@ public static partial class AssetSystem
 		if ( !CloudDirectory.AddFile( entry.Path, entry.Crc, entry.Size, package ) )
 			return; //unwanted - newer revision already registered
 
-		//File exists - we should probably check crcs and shit
-		if ( FileSystem.Cloud.FileExists( entry.Path ) && FileSystem.Cloud.FileSize( entry.Path ) == entry.Size )
+		//Same size isn't enough: a republished compiled file with a bumped resource version is the old one's size
+		var crc = Convert.ToUInt64( entry.Crc, 16 );
+		if ( await CloudDirectory.IsFileCurrentAsync( entry.Path, crc, entry.Size, token ) )
 			return;
+
+		//Hashing yields to other installs; a newer package may have claimed this path meanwhile
+		if ( !CloudDirectory.AddFile( entry.Path, entry.Crc, entry.Size, package ) )
+			return;
+
+		CloudDirectory.InvalidateFileVerification( entry.Path );
 
 		var targetFile = FileSystem.Cloud.GetFullPath( entry.Path );
 		var targetPath = System.IO.Path.GetDirectoryName( entry.Path );
@@ -288,6 +295,8 @@ public static partial class AssetSystem
 			var url = $"{entry.Url}";
 			await Rinten.Utility.Web.DownloadFile( url, targetFile, token );
 		}
+
+		if ( !await CloudDirectory.IsFileCurrentAsync( entry.Path, crc, entry.Size, token ) )
+			Log.Warning( $"[{package.FullIdent}] downloaded cloud file doesn't match its manifest: {entry.Path}" );
 	}
 }
-

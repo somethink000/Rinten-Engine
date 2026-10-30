@@ -32,19 +32,19 @@ public partial class TypeLibrary
 	/// <summary>Deserialize this from bytes. If the type is unknown, T can be an object.</summary>
 	public T FromBytes<T>( byte[] data )
 	{
-		return (T)bytePack.Deserialize( data );
+		return bytePack.Deserialize<T>( data );
 	}
 
 	/// <summary>Deserialize this from bytes. If the type is unknown, T can be an object.</summary>
 	public T FromBytes<T>( ReadOnlySpan<byte> data )
 	{
-		return (T)bytePack.Deserialize( data );
+		return bytePack.Deserialize<T>( data );
 	}
 
 	/// <summary>Deserialize this from bytes. If the type is unknown, T can be an object.</summary>
 	public T FromBytes<T>( ref ByteStream bs )
 	{
-		return (T)bytePack.Deserialize( ref bs );
+		return bytePack.Deserialize<T>( ref bs );
 	}
 
 	private BytePack.Packer TryCreatePackerFor( Type type )
@@ -102,7 +102,7 @@ public partial class TypeLibrary
 	}
 }
 
-file class ValuePacker<T> : Packer where T : unmanaged
+file class ValuePacker<T> : Packer, IValuePacker<T> where T : unmanaged
 {
 	public override Type TargetType => typeof( T );
 	internal override Identifier Header => Identifier.Runtime;
@@ -126,10 +126,17 @@ file class ValuePacker<T> : Packer where T : unmanaged
 		bs.Write( (T)obj );
 	}
 
+	void IValuePacker<T>.Write( ref ByteStream bs, T value )
+	{
+		bs.Write( value );
+	}
+
 	public override object Read( ref ByteStream bs, int depth )
 	{
 		return bs.Read<T>();
 	}
+
+	T IValuePacker<T>.Read( ref ByteStream bs ) => bs.Read<T>();
 }
 
 //A packer that handles serialization and deserialization for implementations of ISerializer.

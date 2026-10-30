@@ -266,8 +266,8 @@ public static partial class AssetSystem
 		if ( !CloudDirectory.AddFile( entry.Path, entry.Crc, entry.Size, package ) )
 			return; //unwanted - newer revision already registered
 
-		//File exists - we should probably check crcs and shit
-		if ( FileSystem.Cloud.FileExists( entry.Path ) && FileSystem.Cloud.FileSize( entry.Path ) == entry.Size )
+		//Same size isn't enough: a republished compiled file with a bumped resource version is the old one's size
+		if ( FileSystem.Cloud.FileExists( entry.Path ) && FileSystem.Cloud.FileSize( entry.Path ) == entry.Size && CloudFileCrc( entry.Path ) == Convert.ToUInt64( entry.Crc, 16 ) )
 			return;
 
 		var targetFile = FileSystem.Cloud.GetFullPath( entry.Path );
@@ -288,6 +288,12 @@ public static partial class AssetSystem
 			var url = $"{entry.Url}";
 			await Rinten.Utility.Web.DownloadFile( url, targetFile, token );
 		}
+	}
+
+	static ulong CloudFileCrc( string path )
+	{
+		using var stream = FileSystem.Cloud.OpenRead( path );
+		return Rinten.Utility.Crc64.FromStream( stream );
 	}
 }
 

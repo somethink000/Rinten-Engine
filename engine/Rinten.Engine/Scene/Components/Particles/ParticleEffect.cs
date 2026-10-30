@@ -303,9 +303,8 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 	Transform lastTransform;
 
-	//The skinned models our live particles are following, ref-counted so PreStep knows exactly which snapshots to prime and when nobody needs them anymore.
-	//Empty == nothing follows a bone == zero cost. The bone transforms live on each renderer's shared snapshot; particles hold their own handle + index.
-	readonly Dictionary<SkinnedModelRenderer, int> _boneTargets = new();
+	//Skinned models live particles follow, ref-counted so PreStep primes only their snapshots; null until one does
+	Dictionary<SkinnedModelRenderer, int> _boneTargets;
 
 	ConcurrentQueue<Particle> deleteList = new ConcurrentQueue<Particle>();
 
@@ -326,7 +325,8 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 	Color ITintable.Color { get => Tint; set => Tint = value; }
 
-	List<GameObject> _spawnedGameObjects = new();
+	//Editor-only follower/collision prefabs to clean up in Clear(); null until the first one spawns
+	List<GameObject> _spawnedGameObjects;
 
 	public enum SimulationSpace
 	{
@@ -371,14 +371,17 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 		Particles.Clear();
 		DelayedParticles.Clear();
-		_boneTargets.Clear();
+		_boneTargets?.Clear();
 
-		foreach ( var go in _spawnedGameObjects )
+		if ( _spawnedGameObjects is not null )
 		{
-			if ( !go.IsValid() ) continue;
-			go.Destroy();
+			foreach ( var go in _spawnedGameObjects )
+			{
+				if ( !go.IsValid() ) continue;
+				go.Destroy();
+			}
+			_spawnedGameObjects.Clear();
 		}
-		_spawnedGameObjects.Clear();
 	}
 
 	public void ResetEmitters()
@@ -498,7 +501,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 			var hitTime = Time.Now - p.HitTime;
 
-			var collided = p.MoveWithCollision( bounce, friction, bumpiness, push, die, timeScale, radius, _trace, DeferredParticleForces );
+			var collided = p.MoveWithCollision( bounce, friction, bumpiness, push, die, timeScale, radius, _trace, push != 0 ? LazyInitializer.EnsureInitialized( ref _deferredForces ) : null );
 
 			if ( collided && hitTime > 0.3f && UsePrefabFeature && CollisionPrefabChance.Evaluate( delta, Random.Shared.Float( 0, 1 ) ) > Random.Shared.Float( 0, 1 ) )
 			{
@@ -519,7 +522,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 					}
 
 					//Queue the collision prefabs to spawn on the main thread
-					ParticleCollisionPrefabs.Add( new( prefabSource, position, angle ) );
+					LazyInitializer.EnsureInitialized( ref _collisionPrefabs ).Add( new( prefabSource, position, angle ) );
 				}
 			}
 		}
@@ -757,15 +760,19 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	}
 
 	readonly record struct ParticleCollisionPrefab( GameObject prefabSource, Vector3 position, Rotation rotation );
-	ConcurrentBag<ParticleCollisionPrefab> ParticleCollisionPrefabs = [];
+	//Filled from the parallel update; created on first use so idle effects carry no bags
+	ConcurrentBag<ParticleCollisionPrefab> _collisionPrefabs;
 
 	internal readonly record struct DeferredParticleForce( PhysicsBody body, Vector3 position, Vector3 force );
-	ConcurrentBag<DeferredParticleForce> DeferredParticleForces = [];
+	ConcurrentBag<DeferredParticleForce> _deferredForces;
 
 	internal void SpawnDeferredParticleCollisionPrefabs()
 	{
-		//No IsEmpty guard: it freezes the bag and measured slower than walking an empty one
-		foreach ( var collision in ParticleCollisionPrefabs )
+		//Null check only: IsEmpty freezes the bag and measured slower than walking an empty one
+		if ( _collisionPrefabs is null )
+			return;
+
+		foreach ( var collision in _collisionPrefabs )
 		{
 			if ( !collision.prefabSource.IsValid() )
 				continue;
@@ -775,17 +782,19 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 			if ( Scene.IsEditor )
 			{
-				_spawnedGameObjects.Add( go );
+				(_spawnedGameObjects ??= new()).Add( go );
 			}
 		}
 
-		ParticleCollisionPrefabs.Clear();
+		_collisionPrefabs.Clear();
 	}
 
 	internal void ApplyDeferredParticleForces()
 	{
-		//No IsEmpty guard - see SpawnDeferredParticleCollisionPrefabs.
-		foreach ( var force in DeferredParticleForces )
+		if ( _deferredForces is null )
+			return;
+
+		foreach ( var force in _deferredForces )
 		{
 			if ( force.body is not null && force.body.IsValid() )
 			{
@@ -793,18 +802,19 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 			}
 		}
 
-		DeferredParticleForces.Clear();
+		_deferredForces.Clear();
 	}
 
 	void AddBoneTarget( SkinnedModelRenderer target )
 	{
+		_boneTargets ??= new();
 		_boneTargets.TryGetValue( target, out var count );
 		_boneTargets[target] = count + 1;
 	}
 
 	void ReleaseBoneTarget( SkinnedModelRenderer target )
 	{
-		if ( !_boneTargets.TryGetValue( target, out var count ) )
+		if ( _boneTargets is null || !_boneTargets.TryGetValue( target, out var count ) )
 			return;
 
 		if ( count <= 1 )
@@ -817,6 +827,9 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 	//particle update can read them lock-free. Runs serially in PreStep; does nothing when nothing is following a bone.
 	void PrimeBoneTargets()
 	{
+		if ( _boneTargets is null )
+			return;
+
 		foreach ( var target in _boneTargets.Keys )
 		{
 			target.EnsureBoneSnapshot();
@@ -900,7 +913,7 @@ public sealed partial class ParticleEffect : Component, Component.ExecuteInEdito
 
 				if ( Scene.IsEditor )
 				{
-					_spawnedGameObjects.Add( p.Follower );
+					(_spawnedGameObjects ??= new()).Add( p.Follower );
 				}
 			}
 		}

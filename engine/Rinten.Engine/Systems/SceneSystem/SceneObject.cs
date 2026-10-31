@@ -66,7 +66,12 @@ public partial class SceneObject : IHandle
 	{
 		Version++;
 		World?.Touch();
+
+		if ( RayChunk >= 0 ) World?.RayMoved( RayChunk );
 	}
+
+	//Its chunk in the world's picking index - see SceneWorld.RayCandidates
+	internal int RayChunk = -1;
 
 	/// <summary>The scene world this object belongs to.</summary>
 	public SceneWorld World { get; internal set; }
@@ -281,7 +286,12 @@ public partial class SceneObject : IHandle
 	public BBox Bounds
 	{
 		get => GetSafeBounds();
-		set => _bounds = value;
+		set
+		{
+			_bounds = value;
+
+			if ( RayChunk >= 0 ) World?.RayMoved( RayChunk );
+		}
 	}
 
 	//Whether bounds were explicitly known, not a zero-size or infinite fallback; culling needs real ones

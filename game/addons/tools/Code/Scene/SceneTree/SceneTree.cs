@@ -106,12 +106,12 @@ public partial class SceneTreeWidget : PanelWidget
 
 	void RestoreSelection( SceneEditorSession session )
 	{
-		var selection = session.Selection.Select( x => x as GameObject ).ToList();
+		var selection = session.Selection.OfType<GameObject>().Where( x => x.IsValid() ).Select( x => x.Id ).ToHashSet();
 		session.Selection.Clear();
 
 		foreach ( var go in session.Scene.GetAllObjects( false ) )
 		{
-			if ( selection.FirstOrDefault( x => x.IsValid() && x.Id == go.Id ).IsValid() )
+			if ( selection.Contains( go.Id ) )
 				session.Selection.Add( go );
 		}
 	}

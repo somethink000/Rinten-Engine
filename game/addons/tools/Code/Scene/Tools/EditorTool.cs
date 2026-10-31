@@ -334,6 +334,9 @@ public class EditorTool : IDisposable
 	protected bool IsBoxSelecting { get; private set; }
 	protected bool IsLassoSelecting { get; private set; }
 
+	/// <summary>A box or lasso is out: the selection changes every frame until it is let go, and what is costly to build from it waits.</summary>
+	public bool IsDragSelecting => IsBoxSelecting || IsLassoSelecting;
+
 	private void UpdateBoxSelection()
 	{
 		if ( !Gizmo.IsLeftMouseDown && !Gizmo.WasLeftMouseReleased )

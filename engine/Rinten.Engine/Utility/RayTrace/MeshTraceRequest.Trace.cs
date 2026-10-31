@@ -13,19 +13,15 @@ partial struct MeshTraceRequest
 
 		if ( targetModel.IsValid() ) return TargetModelHit();
 
-		var objects = targetWorld?.ObjectsNow();
-		if ( objects is not { Length: > 0 } ) return best;
+		if ( targetWorld is null ) return best;
 
-		var count = objects.Length;
-		var near = Near( objects, count );
+		var candidates = TakeCandidates();
 
 		try
 		{
-			for ( var i = 0; i < count; i++ )
+			foreach ( var found in candidates )
 			{
-				var found = objects[i];
-
-				if ( !near[i] || !Passes( found ) ) continue;
+				if ( !MayMeet( found ) || !Passes( found ) ) continue;
 				if ( !TryHit( found, out var hit ) ) continue;
 				if ( hit.Fraction >= bestFraction ) continue;
 
@@ -35,7 +31,7 @@ partial struct MeshTraceRequest
 		}
 		finally
 		{
-			System.Buffers.ArrayPool<bool>.Shared.Return( near );
+			GiveCandidates( candidates );
 		}
 
 		return best;
@@ -53,19 +49,15 @@ partial struct MeshTraceRequest
 			return single.Hit ? new[] { single } : System.Array.Empty<Result>();
 		}
 
-		var objects = targetWorld?.ObjectsNow();
-		if ( objects is not { Length: > 0 } ) return System.Array.Empty<Result>();
+		if ( targetWorld is null ) return System.Array.Empty<Result>();
 
-		var count = objects.Length;
-		var near = Near( objects, count );
+		var candidates = TakeCandidates();
 
 		try
 		{
-			for ( var i = 0; i < count; i++ )
+			foreach ( var found in candidates )
 			{
-				var found = objects[i];
-
-				if ( !near[i] || !Passes( found ) ) continue;
+				if ( !MayMeet( found ) || !Passes( found ) ) continue;
 				if ( !TryHit( found, out var hit ) ) continue;
 
 				hits ??= new List<Result>();
@@ -74,7 +66,7 @@ partial struct MeshTraceRequest
 		}
 		finally
 		{
-			System.Buffers.ArrayPool<bool>.Shared.Return( near );
+			GiveCandidates( candidates );
 		}
 
 		if ( hits is null ) return System.Array.Empty<Result>();
@@ -114,20 +106,25 @@ partial struct MeshTraceRequest
 		return hit;
 	}
 
-	//Which objects the segment may meet - drawn, tagged right, box crossed - asked of each on every thread; the filter and
-	//the shape (whose tree a model builds on first ask) stay on this one. Pooled: the caller hands it back
-	private readonly bool[] Near( SceneObject[] objects, int count )
+	//One spare per thread, taken while in use: a filter may run a trace of its own
+	[System.ThreadStatic] private static List<SceneObject> spareCandidates;
+
+	//What the world's index says the segment may meet; the caller hands the list back
+	private readonly List<SceneObject> TakeCandidates()
 	{
-		var near = System.Buffers.ArrayPool<bool>.Shared.Rent( count );
+		var candidates = spareCandidates ?? new List<SceneObject>();
+		spareCandidates = null;
 
-		//One thread per NearPerThread objects: a box test takes nanoseconds, waking every worker for a few dozen cost more
-		Rinten.Jobs.JobSystem.For( count, (Request: this, Objects: objects, Near: near ),
-			static ( s, i ) => s.Near[i] = s.Request.MayMeet( s.Objects[i] ), most: 1 + ( count / NearPerThread ) );
+		targetWorld.RayCandidates( request.start, request.end - request.start, candidates );
 
-		return near;
+		return candidates;
 	}
 
-	private const int NearPerThread = 1024;
+	private static void GiveCandidates( List<SceneObject> candidates )
+	{
+		candidates.Clear();
+		spareCandidates = candidates;
+	}
 
 	private readonly bool MayMeet( SceneObject found )
 	{
@@ -415,7 +412,7 @@ partial struct MeshTraceRequest
 	}
 
 	//The slab test, against the same segment, for what has no triangles to offer.
-	private static bool TraceBounds( BBox bounds, Vector3 start, Vector3 delta,
+	internal static bool TraceBounds( BBox bounds, Vector3 start, Vector3 delta,
 		out float fraction, out Vector3 normal )
 	{
 		fraction = 0;

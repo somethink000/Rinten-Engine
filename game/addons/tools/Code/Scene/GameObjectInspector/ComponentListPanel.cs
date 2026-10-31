@@ -152,9 +152,17 @@ public class ComponentListPanel : Panel
 	{
 		base.Tick();
 		if ( !IsValid ) return;
+
+		//Walks every target's components: at a rate over several, which only delays a change made elsewhere
+		if ( serializedObject?.IsMultipleTargets == true && sinceComponentHash < ComponentHashSeconds ) return;
+		sinceComponentHash = 0;
+
 		var hash = BuildComponentHash();
 		if ( hash != contentHash ) { contentHash = hash; Rebuild(); }
 	}
+
+	const float ComponentHashSeconds = 0.25f;
+	RealTimeSince sinceComponentHash;
 
 	int BuildComponentHash()
 	{

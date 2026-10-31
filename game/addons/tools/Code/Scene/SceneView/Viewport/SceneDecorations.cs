@@ -43,34 +43,74 @@ internal sealed class SceneDecorations
 	//The tag the viewport's hover trace passes over, as the array WithoutTags takes - made once, not every frame.
 	static readonly string[] HiddenTag = { "hidden" };
 
-	//A selected object's model renderers, gathered here each frame - see DrawSelection.
+	//Which selected renderers get a box: a walk of every descendant, so worked out at a rate rather than each frame
 	readonly List<ModelRenderer> selectedRenderers = new();
+	readonly List<(ModelRenderer Renderer, float Apparent)> boxedRenderers = new();
+	const float BoxedRenderersSeconds = 0.1f;
+	int boxedRenderersHash;
+	RealTimeSince boxedRenderersFound;
+
+	//A big selection boxes only what looks largest: past this the boxes are noise, and cost a frame
+	const int MostBoxes = 256;
 
 	public void DrawSelection( SceneEditorSession session )
 	{
 		if ( session is null ) return;
 		if ( !Gizmo.Settings.Selection ) return;
 
-		//Walked rather than OfType and SelectMany: three iterators, a closure and a list for every selected object, every frame.
+		var hash = session.Selection.GetHashCode();
+
+		if ( hash != boxedRenderersHash || boxedRenderersFound >= BoxedRenderersSeconds )
+		{
+			boxedRenderersHash = hash;
+			boxedRenderersFound = 0;
+			FindBoxedRenderers( session );
+		}
+
+		//Each box's transform is read here, so a dragged selection's boxes keep up
+		foreach ( var (modelRenderer, _) in boxedRenderers )
+		{
+			if ( !modelRenderer.IsValid() || modelRenderer.Model == null )
+				continue;
+
+			using ( Gizmo.ObjectScope( modelRenderer.GameObject, default ) )
+			{
+				Gizmo.Transform = modelRenderer.GameObject.WorldTransform;
+				Gizmo.Draw.Color = Gizmo.Colors.Selected;
+				Gizmo.Draw.LineBBox( modelRenderer.Model.Bounds );
+			}
+		}
+	}
+
+	void FindBoxedRenderers( SceneEditorSession session )
+	{
+		selectedRenderers.Clear();
+		boxedRenderers.Clear();
+
 		foreach ( var selected in session.Selection )
 		{
-			if ( selected is not GameObject go ) continue;
+			if ( selected is GameObject go )
+				go.Components.GetAll( FindMode.InSelf | FindMode.Enabled | FindMode.InDescendants, selectedRenderers );
+		}
 
-			selectedRenderers.Clear();
-			go.Components.GetAll( FindMode.InSelf | FindMode.Enabled | FindMode.InDescendants, selectedRenderers );
+		var frustum = Gizmo.Camera.GetFrustum( new Rect( 0, 0, Gizmo.Camera.Size.x, Gizmo.Camera.Size.y ) );
+		var eye = Gizmo.Camera.Position;
 
-			foreach ( var modelRenderer in selectedRenderers )
-			{
-				if ( modelRenderer.Model == null )
-					continue;
+		foreach ( var modelRenderer in selectedRenderers )
+		{
+			if ( modelRenderer.Model == null )
+				continue;
 
-				using ( Gizmo.ObjectScope( modelRenderer.GameObject, default ) )
-				{
-					Gizmo.Transform = modelRenderer.GameObject.WorldTransform;
-					Gizmo.Draw.Color = Gizmo.Colors.Selected;
-					Gizmo.Draw.LineBBox( modelRenderer.Model.Bounds );
-				}
-			}
+			var world = modelRenderer.Model.Bounds.Transform( modelRenderer.GameObject.WorldTransform );
+
+			if ( frustum.IsInside( world, true ) )
+				boxedRenderers.Add( (modelRenderer, world.Size.Length / Math.Max( world.Center.Distance( eye ), 0.01f )) );
+		}
+
+		if ( boxedRenderers.Count > MostBoxes )
+		{
+			boxedRenderers.Sort( static ( a, b ) => b.Apparent.CompareTo( a.Apparent ) );
+			boxedRenderers.RemoveRange( MostBoxes, boxedRenderers.Count - MostBoxes );
 		}
 
 		selectedRenderers.Clear();

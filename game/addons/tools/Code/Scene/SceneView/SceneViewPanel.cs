@@ -96,7 +96,7 @@ public partial class SceneViewPanel : EditorPanel, IViewportSource, IShortcutFal
 		bool isActive = TabSession == SceneEditorSession.Active;
 
 		//Update inspector with current selection, if changed
-		if ( isActive && selectionHash != session.Selection.GetHashCode() )
+		if ( isActive && selectionHash != session.Selection.GetHashCode() && !( ( Tools?.CurrentSubTool ?? Tools?.CurrentTool )?.IsDragSelecting ?? false ) )
 		{
 			//todo - multiselect
 			EditorUtility.InspectorObject = session.Selection.ToArray();

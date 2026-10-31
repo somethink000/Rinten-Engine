@@ -41,6 +41,9 @@ public class HierarchyTreePanel : TreePanel<object>
 		}
 	}
 
+	//A search watches the whole scene, however few rows it found
+	protected override bool RevisionIsCostly => base.RevisionIsCostly || !string.IsNullOrEmpty( Host?.SearchQuery );
+
 	protected override IEnumerable<object> Roots
 	{
 		get
@@ -62,13 +65,35 @@ public class HierarchyTreePanel : TreePanel<object>
 		}
 	}
 
-	//What Roots would yield, answered without the iterator: nothing without a scene, what the search finds while searching, and otherwise the scene itself.
-	protected override bool HasRoots()
-	{
-		var scene = SceneEditorSession.Current?.Scene;
-		if ( scene is null ) return false;
+	//Asked every frame, so never runs the search: a search that finds nothing is an empty row list, which the sync handles
+	protected override bool HasRoots() => SceneEditorSession.Current?.Scene is not null;
 
-		return string.IsNullOrEmpty( Host?.SearchQuery ) || Search( scene, Host.SearchQuery ).Any();
+	//Up through the parents: a selection of thousands asks this of each, every frame of a box drag
+	protected override bool TryBuildPath( object target, List<object> path )
+	{
+		if ( !string.IsNullOrEmpty( Host?.SearchQuery ) ) return base.TryBuildPath( target, path );
+
+		var scene = SceneEditorSession.Current?.Scene;
+
+		for ( var at = target as GameObject; at is not null; at = at.Parent )
+		{
+			if ( at is Scene )
+			{
+				if ( at != scene ) break;
+
+				path.Add( at );
+				path.Reverse();
+
+				return true;
+			}
+
+			if ( !at.ShouldShowInHierarchy() ) break;
+
+			path.Add( at );
+		}
+
+		path.Clear();
+		return false;
 	}
 
 	protected override IEnumerable<object> GetChildren( object node )

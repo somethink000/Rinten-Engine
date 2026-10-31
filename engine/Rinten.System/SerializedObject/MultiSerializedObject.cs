@@ -150,6 +150,8 @@ class MultiSerializedProperty : SerializedProperty
 	{
 		NotePreChange();
 
+		differentKnown = false;
+
 		foreach ( var prop in properties )
 		{
 			prop.SetValue( value );
@@ -192,7 +194,35 @@ class MultiSerializedProperty : SerializedProperty
 
 	public override bool IsMultipleValues => properties.Count > 1;
 
-	public override bool IsMultipleDifferentValues => properties.Select( x => x.GetValue<object>() ).Distinct().Count() > 1;
+	public override bool IsMultipleDifferentValues
+	{
+		get
+		{
+			//Asked every frame by every control: over a big selection of equal values that is a full walk each time
+			if ( differentKnown && properties.Count >= ManyTargets && sinceDifferent < DifferentSeconds ) return different;
+
+			different = FindDifferent();
+			differentKnown = true;
+			sinceDifferent = 0;
+
+			return different;
+		}
+	}
+
+	private const int ManyTargets = 64;
+	private const float DifferentSeconds = 0.25f;
+	private bool different, differentKnown;
+	private RealTimeSince sinceDifferent;
+
+	private bool FindDifferent()
+	{
+		var first = properties[0].GetValue<object>();
+
+		for ( var i = 1; i < properties.Count; i++ )
+			if ( !Equals( first, properties[i].GetValue<object>() ) ) return true;
+
+		return false;
+	}
 
 	public override IEnumerable<SerializedProperty> MultipleProperties => properties;
 

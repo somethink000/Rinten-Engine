@@ -49,6 +49,9 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	//Backing list for Selected.
 	private readonly List<T> selected = [];
 
+	//The same, by reference: every row asks every frame, and a big selection is thousands
+	private readonly HashSet<T> selectedSet = new( ReferenceEqualityComparer.Instance );
+
 	//Flattened visible rows from the last structure pass.
 	private readonly List<(T Node, int Depth, TreeItemInfo Info, ulong Lines, bool Last)> desiredRows = [];
 
@@ -88,6 +91,36 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	//Drag event while hovering this tree.
 	private Widget.DragEvent currentDrag;
 
+	//Trees longer than this keep panels only for the rows near the view; all rows are the same height from here on
+	const int WindowedFrom = 256;
+	const int WindowOverscan = 32;
+	const int WindowMargin = 8;
+
+	//A long tree re-reads its model at this rate: Revision walks every open row
+	const float CostlyRevisionSeconds = 0.1f;
+
+	//Whether Revision walks more than the short list of rows a frame can afford
+	protected virtual bool RevisionIsCostly => Windowed;
+
+	//Stand in for the rows above and below the window
+	private Panel spacerAbove, spacerBelow;
+
+	//Rows in desiredRows that have panels, end exclusive
+	private int windowFirst, windowEnd;
+
+	//Screen pixels from one row's top to the next, averaged over the window; nought until it is laid out
+	private float rowPitch, rowGap, rowPitchScale;
+
+	//The row panels of the window, in order
+	private readonly List<TreeRowPanel<T>> windowRows = [];
+
+	private RealTimeSince sinceRevision;
+
+	//A node asked to be scrolled to whose row the next row sync may be what makes
+	private T scrollTarget;
+
+	private bool Windowed => desiredRows.Count > WindowedFrom;
+
 	/// <summary>Creates the tree body panel.</summary>
 	public TreePanel()
 	{
@@ -101,6 +134,8 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 		base.Tick();
 		SyncStructure();
 		SyncRowsIfNeeded();
+		SyncWindow();
+		ScrollToTarget();
 
 		if ( renameNode is not null && renameHost is null )
 			ShowRename();
@@ -113,19 +148,8 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	public void Select( IEnumerable<T> items, bool skipEvents = false ) => ApplySelection( items, skipEvents: skipEvents );
 
 	/// <summary>Returns whether the node is in the current selection.</summary>
-	public bool IsSelected( T node ) => IndexOfSelected( node ) >= 0;
+	public bool IsSelected( T node ) => selectedSet.Contains( node );
 
-	//Where the node sits in the selection, by reference, or -1. A loop, not Any with a lambda: the lambda captured the node, so every row
-	//asking every frame was a closure and a delegate - the largest allocator in the editor's idle frame, three hundred samples of its trace.
-	private int IndexOfSelected( T node )
-	{
-		for ( var i = 0; i < selected.Count; i++ )
-		{
-			if ( ReferenceEquals( selected[i], node ) ) return i;
-		}
-
-		return -1;
-	}
 
 	/// <summary>Starts inline rename for the node, or the current selection.</summary>
 	public virtual void BeginRename( T node = default )
@@ -263,6 +287,15 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	/// <summary>Scrolls a node's row that far above the top, as far as there is room. False until the row is laid out.</summary>
 	public bool ScrollToRow( Func<T, bool> match, float into )
 	{
+		if ( Windowed )
+		{
+			var index = desiredRows.FindIndex( x => match( x.Node ) );
+			if ( index < 0 || rowPitch <= 0 ) return false;
+
+			body.ScrollOffset = new Vector2( 0, Math.Max( 0f, ( index * rowPitch ) + into ) );
+			return true;
+		}
+
 		var row = Rows.FirstOrDefault( x => match( x.Node ) );
 		if ( row is null || row.Box.Rect.Height <= 0 ) return false;
 
@@ -274,10 +307,38 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	float RowTop( Panel row ) => row.Box.Rect.Top - body.Box.Rect.Top + body.ScrollOffset.y;
 
 	/// <summary>Scrolls the body so the node's row is in view.</summary>
-	public void ScrollTo( T node )
+	public void ScrollTo( T node ) => scrollTarget = node;
+
+	//After the row sync: callers open the path to the node and ask in one breath, before its row exists
+	private void ScrollToTarget()
 	{
-		var row = body.Children.OfType<TreeRowPanel<T>>().FirstOrDefault( x => ReferenceEquals( x.Node, node ) );
-		row?.ScrollIntoView();
+		if ( scrollTarget is null || lastStructureVersion != structureVersion ) return;
+
+		if ( !Windowed )
+		{
+			var row = Rows.FirstOrDefault( x => ReferenceEquals( x.Node, scrollTarget ) );
+
+			//A row made this tick has no place to scroll to until it is laid out
+			if ( row is not null && row.Box.Rect.Height <= 0 ) return;
+
+			scrollTarget = null;
+			row?.ScrollIntoView();
+			return;
+		}
+
+		if ( rowPitch <= 0 ) return;
+
+		var index = desiredRows.FindIndex( x => ReferenceEquals( x.Node, scrollTarget ) );
+		scrollTarget = null;
+		if ( index < 0 ) return;
+
+		var top = index * rowPitch;
+		var height = body.Box.Rect.Height;
+
+		if ( top < body.ScrollOffset.y || top + rowPitch > body.ScrollOffset.y + height )
+			body.ScrollOffset = new Vector2( 0, Math.Max( 0f, top - ( height * 0.5f ) ) );
+
+		SyncWindow();
 	}
 
 	//Handles a left click on a row.
@@ -561,6 +622,9 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 			return;
 		}
 
+		if ( seededOpen && RevisionIsCostly && sinceRevision < CostlyRevisionSeconds ) return;
+		sinceRevision = 0;
+
 		var revision = Revision;
 		if ( !seededOpen )
 		{
@@ -617,7 +681,7 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	//Selects all visible rows between the anchor and the clicked node.
 	private void SelectRange( T node )
 	{
-		var flat = body.Children.OfType<TreeRowPanel<T>>().Select( x => x.Node ).ToList();
+		var flat = desiredRows.Select( x => x.Node ).ToList();
 		var indexB = flat.FindIndex( x => ReferenceEquals( x, node ) );
 		if ( indexB < 0 ) return;
 
@@ -649,6 +713,8 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 
 		selected.Clear();
 		selected.AddRange( next );
+		selectedSet.Clear();
+		selectedSet.UnionWith( next );
 		Selected = selected;
 
 		if ( !skipEvents )
@@ -660,7 +726,7 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	//Returns all nodes that should be renamed together with the node.
 	private T[] GetRenameSelection( T node )
 	{
-		if ( SelectionMode == TreeSelectionMode.Multi && IndexOfSelected( node ) >= 0 )
+		if ( SelectionMode == TreeSelectionMode.Multi && IsSelected( node ) )
 			return selected.ToArray();
 
 		return [node];
@@ -692,8 +758,9 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 			yield return item;
 	}
 
-	//Builds the path from a root to the target node.
-	private bool TryBuildPath( T target, List<T> path )
+	//Fills the path from a root to the target node, or says there is none. A model that knows its parents should
+	//answer from them: this default searches the whole tree, for every node asked about
+	protected virtual bool TryBuildPath( T target, List<T> path )
 	{
 		foreach ( var root in Roots )
 		{
@@ -795,6 +862,8 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 	private void ClearRows()
 	{
 		body.DeleteChildren( true );
+		spacerAbove = spacerBelow = null;
+		windowRows.Clear();
 		desiredRows.Clear();
 		ClearRename();
 		Bump();
@@ -814,14 +883,96 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 		for ( var i = 0; i < roots.Count; i++ )
 			CollectVisibleRows( roots[i], 0, 0, i == roots.Count - 1 );
 
+		BuildWindow();
+
+		if ( renameNode is not null )
+			ShowRename();
+	}
+
+	//Which rows the view needs, without overscan
+	private (int First, int End) RowsInView()
+	{
+		var scroll = Math.Max( 0f, body.ScrollOffset.y );
+
+		return ( (int)( scroll / rowPitch ), (int)MathF.Ceiling( ( scroll + body.Box.Rect.Height ) / rowPitch ) );
+	}
+
+	//Moves the window when the scroll nears its edge, or when the row height is first known or changes
+	private void SyncWindow()
+	{
+		if ( !Windowed ) return;
+
+		if ( ( rowPitch <= 0 || rowPitchScale != ScaleToScreen ) && MeasurePitch() )
+		{
+			BuildWindow();
+			return;
+		}
+
+		if ( rowPitch <= 0 ) return;
+
+		var (first, end) = RowsInView();
+
+		if ( ( windowFirst > 0 && first - WindowMargin < windowFirst ) ||
+			( windowEnd < desiredRows.Count && end + WindowMargin > windowEnd ) )
+			BuildWindow();
+	}
+
+	//Across the whole window, as one pair of rows is off by the pixel rounding, which adds up over thousands
+	private bool MeasurePitch()
+	{
+		if ( windowRows.Count < 2 ) return false;
+
+		var first = windowRows[0];
+		var last = windowRows[^1];
+		var middle = windowRows[windowRows.Count / 2];
+
+		//A row made since the last layout has no place yet
+		if ( !first.IsValid() || !last.IsValid() || first.Box.Rect.Height <= 0 || last.Box.Rect.Height <= 0 ) return false;
+
+		var pitch = ( last.Box.Rect.Top - first.Box.Rect.Top ) / ( windowRows.Count - 1 );
+		if ( pitch <= 0 ) return false;
+
+		rowPitch = pitch;
+		rowGap = Math.Max( 0f, pitch - middle.Box.Rect.Height );
+		rowPitchScale = ScaleToScreen;
+
+		return true;
+	}
+
+	//Makes the panels match the window: every row in a short tree, those near the view in a long one
+	private void BuildWindow()
+	{
+		windowFirst = 0;
+		windowEnd = desiredRows.Count;
+
+		if ( Windowed )
+		{
+			var (first, end) = rowPitch > 0 ? RowsInView() : (0, 0);
+
+			windowFirst = Math.Clamp( first - WindowOverscan, 0, desiredRows.Count );
+			windowEnd = Math.Clamp( end + WindowOverscan, windowFirst, desiredRows.Count );
+
+			//A row being renamed keeps its panel, wherever the view goes
+			if ( renameNode is not null )
+			{
+				var renaming = desiredRows.FindIndex( x => ReferenceEquals( x.Node, renameNode ) );
+
+				if ( renaming >= 0 )
+				{
+					windowFirst = Math.Min( windowFirst, renaming );
+					windowEnd = Math.Max( windowEnd, renaming + 1 );
+				}
+			}
+		}
+
 		var existing = body.Children.OfType<TreeRowPanel<T>>().ToList();
 		var byNode = new Dictionary<T, TreeRowPanel<T>>( existing.Count );
 		foreach ( var row in existing )
 			byNode[row.Node] = row;
 
-		var next = new List<TreeRowPanel<T>>( desiredRows.Count );
+		var next = new List<TreeRowPanel<T>>( windowEnd - windowFirst );
 
-		for ( var i = 0; i < desiredRows.Count; i++ )
+		for ( var i = windowFirst; i < windowEnd; i++ )
 		{
 			var (node, depth, info, lines, last) = desiredRows[i];
 
@@ -849,14 +1000,42 @@ public abstract class TreePanel<T> : EditorPanel, IEditorDropTarget where T : cl
 				body.AddChild( row );
 		}
 
+		windowRows.Clear();
+		windowRows.AddRange( next );
+
+		var above = SizeSpacer( ref spacerAbove, windowFirst );
+		SizeSpacer( ref spacerBelow, desiredRows.Count - windowEnd );
+
+		var at = above is null ? 0 : 1;
+
+		if ( above is not null && above.SiblingIndex != 0 )
+			body.SetChildIndex( above, 0 );
+
 		for ( var i = 0; i < next.Count; i++ )
 		{
-			if ( next[i].SiblingIndex != i )
-				body.SetChildIndex( next[i], i );
+			if ( next[i].SiblingIndex != i + at )
+				body.SetChildIndex( next[i], i + at );
 		}
 
-		if ( renameNode is not null )
-			ShowRename();
+		if ( spacerBelow is not null && spacerBelow.SiblingIndex != at + next.Count )
+			body.SetChildIndex( spacerBelow, at + next.Count );
+	}
+
+	//Sizes a spacer to that many rows, less the gap the body lays beside it; gone when there are none
+	private Panel SizeSpacer( ref Panel spacer, int rows )
+	{
+		if ( rows <= 0 || rowPitch <= 0 )
+		{
+			spacer?.Delete( immediate: true );
+			spacer = null;
+			return null;
+		}
+
+		spacer ??= body.AddChild<Panel>( "spacer" );
+
+		spacer.Style.Height = Length.Pixels( ( ( rows * rowPitch ) - rowGap ) * ScaleFromScreen );
+
+		return spacer;
 	}
 
 	//Appends visible rows for the node and its open descendants.

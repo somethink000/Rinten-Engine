@@ -73,7 +73,8 @@ public sealed partial class ToolSidebarPanel : EditorPanel
 	protected override int BuildHash()
 	{
 		var tool = CurrentTool;
-		var selection = ( tool?.RebuildSidebarOnSelectionChange ?? false ) ? tool.Selection?.GetHashCode() ?? 0 : 0;
+		var rebuilds = tool?.RebuildSidebarOnSelectionChange ?? false;
+		var selection = !rebuilds ? 0 : tool.IsDragSelecting ? selectionHash : tool.Selection?.GetHashCode() ?? 0;
 
 		//And the workspace: inside mapping the dock builds the panels that carry the tool's keys and this builds none, so a view that did
 		//not build again on the way out kept pressing keys through the dock's panels, built for whatever was selected when mapping was left.

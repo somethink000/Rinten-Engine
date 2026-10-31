@@ -31,6 +31,7 @@
 
 
 	private SerializedObject transformObject;
+	private SerializedObject transformBoundTo;
 	private Guid gameObjectId;
 
 	public GameObjectInspectorPanel( SerializedObject so ) : base( so )
@@ -48,6 +49,10 @@
 
 	void UpdateTransformBinding()
 	{
+		//Once per selection: over many targets this makes an object of every target's properties
+		if ( ReferenceEquals( transformBoundTo, SerializedObject ) ) return;
+		transformBoundTo = SerializedObject;
+
 		gameObjectId = SerializedObject?.Targets.OfType<GameObject>().Select( x => x.Id ).FirstOrDefault() ?? Guid.Empty;
 
 		var prop = SerializedObject?.GetProperty( nameof( GameObject.Transform ) );

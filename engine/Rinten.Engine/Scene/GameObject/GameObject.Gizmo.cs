@@ -318,10 +318,13 @@ public partial class GameObject
 
 	//Which of them the pointer's ray may reach this frame, worked out on the job system's threads.
 	private bool[] leafCatches = [];
+	private bool leafCatchesKnown;
+	private readonly List<int> leafDue = new();
+	private Ray leafCatchesRay;
+	private RealTimeSince leafCatchesAsked;
+	private const float LeafCatchesReaskSeconds = 0.1f;
 
-	//The leaves that only lay click targets, walked from the scene rather than under their parents, and only those the pointer's
-	//ray can reach or that are pressed or selected: fourteen thousand models walked a frame for a hitbox each were most of the
-	//editor's frame, where a cached sphere each says in a few nanoseconds that the pointer is nowhere near
+	//Leaves that only lay click targets, walked from the scene: only those the ray can reach, or all while something is pressed
 	private void DrawCatchers()
 	{
 		if ( Scene is not { } scene ) return;
@@ -334,30 +337,45 @@ public partial class GameObject
 
 			foreach ( var go in GetAllObjects( false ) )
 				if ( go != this && go.SubtreeDrawsGizmos() && go.LeafCatcher ) leafCatchers.Add( go );
+
+			leafCatchesKnown = false;
 		}
 
 		var everything = Gizmo.Pressed.Any;
-		var selection = Gizmo.Active?.Selection is { Count: > 0 } chosen ? chosen : null;
 		var count = leafCatchers.Count;
 
-		//Each its own sphere and nothing shared, so on every thread; drawing and selecting stay on this one
-		if ( !everything )
+		//A still ray keeps its answer; what moves under it catches up on the re-ask
+		if ( !everything && ( !leafCatchesKnown || Gizmo.CurrentRay != leafCatchesRay || leafCatchesAsked >= LeafCatchesReaskSeconds ) )
 		{
 			if ( leafCatches.Length < count ) leafCatches = new bool[count + ( count / 4 )];
 
+			//Each its own sphere and nothing shared, so on every thread; drawing and selecting stay on this one
 			Rinten.Jobs.JobSystem.For( count, (Self: this, Ray: Gizmo.CurrentRay, Depth: Gizmo.RayDepth ),
 				static ( s, i ) => s.Self.leafCatches[i] = s.Self.leafCatchers[i].MayCatch( s.Ray, s.Depth ) );
+
+			leafCatchesKnown = true;
+			leafCatchesRay = Gizmo.CurrentRay;
+			leafCatchesAsked = 0;
+
+			//Only what is due is walked until the next ask: the rest lose their handles here, once
+			leafDue.Clear();
+
+			for ( var i = 0; i < count; i++ )
+			{
+				var go = leafCatchers[i];
+
+				if ( leafCatches[i] ) leafDue.Add( i );
+				else if ( go.HasGizmoHandle ) go.HasGizmoHandle = false;
+			}
+		}
+		else if ( everything )
+		{
+			leafCatchesKnown = false;
 		}
 
-		for ( var i = 0; i < count; i++ )
+		for ( var i = 0; i < ( everything ? count : leafDue.Count ); i++ )
 		{
-			var go = leafCatchers[i];
-
-			if ( !everything && !leafCatches[i] && selection?.Contains( go ) != true )
-			{
-				if ( go.HasGizmoHandle ) go.HasGizmoHandle = false;
-				continue;
-			}
+			var go = leafCatchers[everything ? i : leafDue[i]];
 
 			if ( !go.IsValid() || !go.Active || go.Hidden() ) continue;
 

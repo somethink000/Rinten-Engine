@@ -28,7 +28,8 @@ internal static partial class JobSystem
 	private static Entry[] queue = new Entry[256];
 	private static int head, tail, queued;
 
-	private static readonly SemaphoreSlim wake = new( 0 );
+	//A plain monitor: SemaphoreSlim spins and yields on every wait, which cost far more than the loops themselves
+	private static readonly object parked = new();
 	private static Thread[] workers = [];
 	private static int asleep;
 
@@ -74,8 +75,10 @@ internal static partial class JobSystem
 			}
 		}
 
-		var sleeping = Volatile.Read( ref asleep );
-		if ( sleeping > 0 ) wake.Release( Math.Min( sleeping, helpers ) );
+		lock ( parked )
+		{
+			for ( var i = Math.Min( asleep, helpers ); i > 0; i-- ) Monitor.Pulse( parked );
+		}
 	}
 
 	private static bool TryTake( out Entry entry )
@@ -138,12 +141,14 @@ internal static partial class JobSystem
 				continue;
 			}
 
-			Interlocked.Increment( ref asleep );
+			//Looked at again under the lock Post pulses under, so a piece posted in between is not left until the next one.
+			lock ( parked )
+			{
+				asleep++;
+				if ( Volatile.Read( ref queued ) == 0 ) Monitor.Wait( parked );
+				asleep--;
+			}
 
-			//Looked at again once counted as asleep, so a piece posted in between is not left until the next one.
-			if ( Volatile.Read( ref queued ) == 0 ) wake.Wait( 50 );
-
-			Interlocked.Decrement( ref asleep );
 			spin.Reset();
 		}
 	}

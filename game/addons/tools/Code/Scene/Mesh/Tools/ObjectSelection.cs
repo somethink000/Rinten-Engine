@@ -566,10 +566,12 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 
 		if ( IsBoxSelecting ) return;
 
+		//A drag taken over without a final call leaves its lists behind
+		_dragListsMade = false;
+
 		if ( !IsAllowedToSelect ) return;
 
-		//The nearest hit that belongs to an object, rather than the nearest hit of any kind: a scene draws
-		//plenty that nobody owns, and stopping at one of those left whatever was behind it unhoverable.
+		//The nearest hit that belongs to an object: a scene draws plenty nobody owns, which would hide what is behind it
 		var tr = default( SceneTraceResult );
 
 		foreach ( var hit in MeshTrace.RunAll() )
@@ -593,15 +595,42 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			Gizmo.Hitbox.DepthBias = 1;
 			Gizmo.Hitbox.TrySetHovered( tr.Distance );
 
-			//What a hovered mesh looks like is the mesh's own now - see MeshComponent.DrawGizmos, which lays the target a click
-			//lands on and draws the box around it. This drew a second one over the top of that, pulsing, in this one mode.
+			//MeshComponent.DrawGizmos draws the hovered look and lays the click target
 		}
 	}
 
 	protected override void OnBoxSelect( Frustum frustum, Rect screenRect, bool isFinal )
 	{
-		var selection = new HashSet<GameObject>();
-		var previous = new HashSet<GameObject>();
+		if ( !_dragListsMade ) MakeDragLists();
+
+		_dragInside.Clear();
+		_dragOutside.Clear();
+		_dragOutside.AddRange( _dragNever );
+
+		//Partial, otherwise you'd have to fit a whole block in the box to select it
+		foreach ( var (go, bounds) in _dragOffered )
+		{
+			if ( frustum.IsInside( bounds, true ) ) _dragInside.Add( go );
+			else _dragOutside.Add( go );
+		}
+
+		ApplyDragSelection( _dragInside, _dragOutside );
+
+		if ( isFinal ) _dragListsMade = false;
+	}
+
+	//What a box can take and what it never can, worked out once a drag: nothing moves while the button is held
+	readonly List<(GameObject Go, BBox Bounds)> _dragOffered = [];
+	readonly List<GameObject> _dragNever = [];
+	readonly List<GameObject> _dragInside = [];
+	readonly List<GameObject> _dragOutside = [];
+	bool _dragListsMade;
+
+	void MakeDragLists()
+	{
+		_dragListsMade = true;
+		_dragOffered.Clear();
+		_dragNever.Clear();
 
 		foreach ( var go in Scene.GetAllObjects( true ) )
 		{
@@ -611,7 +640,7 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			//What a click cannot reach, a drag over it must not pick up either.
 			if ( !CanDragSelect( go ) )
 			{
-				previous.Add( go );
+				_dragNever.Add( go );
 				continue;
 			}
 
@@ -622,26 +651,32 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			//in this walk too and stand for themselves; taking the parent as well took all of them.
 			if ( bounds.Size.AlmostEqual( 0.0f ) && !go.HasGizmoHandle )
 			{
-				previous.Add( go );
+				_dragNever.Add( go );
 				continue;
 			}
 
-			//Partial, otherwise you'd have to fit a whole block in the box to select it
-			if ( frustum.IsInside( bounds, true ) )
-				selection.Add( go );
-			else
-				previous.Add( go );
+			_dragOffered.Add( (go, bounds) );
 		}
-
-		ApplyDragSelection( selection, previous );
 	}
+
+	const float BoundsSeconds = 0.1f;
+	BBox _bounds;
+	GameObject[] _boundsFor;
+	RealTimeSince _boundsCounted;
 
 	private void DrawBounds()
 	{
 		using ( Gizmo.Scope( "Bounds" ) )
 		{
-			var box = CalculateSelectionBounds();
-			DimensionDisplay.DrawBounds( box );
+			//Walks every selected descendant: at a rate, unless what is selected is being dragged
+			if ( _startPoints.Count > 0 || _boundsFor != _objects || _boundsCounted >= BoundsSeconds )
+			{
+				_bounds = CalculateSelectionBounds();
+				_boundsFor = _objects;
+				_boundsCounted = 0;
+			}
+
+			DimensionDisplay.DrawBounds( _bounds );
 		}
 	}
 

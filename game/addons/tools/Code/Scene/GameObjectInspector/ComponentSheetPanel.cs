@@ -137,17 +137,42 @@ public class ComponentSheetPanel : Panel, IEditorDropTarget
 		HashCode hc = new();
 		if ( targetObject is not null )
 		{
-			hc.Add( targetObject.TypeName );
-			hc.Add( GetPropertySchemaHash( targetObject ) );
-			foreach ( var target in targetObject.Targets )
-				hc.Add( target );
+			hc.Add( TargetsHash() );
+		}
+		else
+		{
+			hc.Add( ShowAdvanced );
 		}
 
 		hc.Add( hotloadEpoch );
 		hc.Add( ViewMode );
-		hc.Add( ShowAdvanced );
 		foreach ( var c in hideShowConditions ) hc.Add( c() );
 		return hc.ToHashCode();
+	}
+
+	const float TargetsHashSeconds = 0.25f;
+	int targetsHash;
+	SerializedObject targetsHashOf;
+	RealTimeSince sinceTargetsHash;
+
+	//Walks every target: at a rate over several, which only delays a change made elsewhere
+	int TargetsHash()
+	{
+		if ( ReferenceEquals( targetsHashOf, targetObject ) && targetObject.IsMultipleTargets && sinceTargetsHash < TargetsHashSeconds )
+			return targetsHash;
+
+		targetsHashOf = targetObject;
+		sinceTargetsHash = 0;
+
+		HashCode hc = new();
+		hc.Add( targetObject.TypeName );
+		hc.Add( GetPropertySchemaHash( targetObject ) );
+		hc.Add( ShowAdvanced );
+
+		foreach ( var target in targetObject.Targets )
+			hc.Add( target );
+
+		return targetsHash = hc.ToHashCode();
 	}
 
 	internal static int GetPropertySchemaHash( SerializedObject so )
@@ -155,8 +180,17 @@ public class ComponentSheetPanel : Panel, IEditorDropTarget
 		if ( so is null ) return 0;
 
 		HashCode hc = new();
+		Type last = null;
+
+		//A type once per run of it: a big selection is thousands of the same one
 		foreach ( var target in so.Targets )
+		{
+			var type = target?.GetType();
+			if ( type == last ) continue;
+
+			last = type;
 			hc.Add( GetTargetSchemaHash( target ) );
+		}
 
 		return hc.ToHashCode();
 	}

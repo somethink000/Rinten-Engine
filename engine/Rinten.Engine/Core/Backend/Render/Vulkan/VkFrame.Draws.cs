@@ -882,6 +882,7 @@ internal static unsafe partial class VkFrame
 			var hasDepth = false;
 
 			var extent = p.Extent;
+			var samples = 1u;
 
 			//Where the pass lands. Only the depth may be drawn somewhere other than the top-left of its own picture - see Swapchain.DepthOnScreen.
 			var depthArea = new Rect2D( default, extent );
@@ -915,6 +916,16 @@ internal static unsafe partial class VkFrame
 
 				hasDepth = true;
 				colourCount = 0;
+
+				samples = TargetSamplesFor( p );
+
+				if ( samples > 1 )
+				{
+					KeepAttached( frame.Commands, p.WorldSampledDepthImage, ref p.WorldSampledDepthLayout,
+						ImageLayout.DepthAttachmentOptimal, ImageAspectFlags.DepthBit );
+
+					ResolveDepthInto( ref depth, p );
+				}
 			}
 			else if ( target == VkDevice.TargetScene )
 			{
@@ -943,11 +954,37 @@ internal static unsafe partial class VkFrame
 
 				hasDepth = true;
 				p.SceneDrawn = true;
+
+				samples = TargetSamplesFor( p );
+
+				if ( samples > 1 )
+				{
+					MoveTo( frame.Commands, p.WorldSampledColourImage, ref p.WorldSampledColourLayout,
+						ImageLayout.ColorAttachmentOptimal, ImageAspectFlags.ColorBit );
+
+					KeepAttached( frame.Commands, p.WorldSampledNormalImage, ref p.WorldSampledNormalLayout,
+						ImageLayout.ColorAttachmentOptimal, ImageAspectFlags.ColorBit );
+
+					KeepAttached( frame.Commands, p.WorldSampledDepthImage, ref p.WorldSampledDepthLayout,
+						ImageLayout.DepthAttachmentOptimal, ImageAspectFlags.DepthBit );
+
+					colour[0].ImageView = p.WorldSampledColourView;
+					colour[1].ImageView = p.WorldSampledNormalView;
+
+					//An average of unit normals is short but still points the right way; readers normalise
+					colour[1].ResolveMode = ResolveModeFlags.AverageBit;
+					colour[1].ResolveImageView = p.NormalView;
+					colour[1].ResolveImageLayout = ImageLayout.ColorAttachmentOptimal;
+
+					ResolveDepthInto( ref depth, p );
+				}
 			}
 			else if ( target == VkDevice.TargetSceneColour )
 			{
 				//The world's own picture, its colour alone. Everything a full-screen pass needs and nothing it would leave undefined.
 				if ( p.SceneImage.Handle == 0 ) return 0;
+
+				if ( !resolvingWorld ) p.WorldResolvedIsNewer = true;
 
 				MoveTo( frame.Commands, p.SceneImage, ref p.SceneLayout,
 					ImageLayout.ColorAttachmentOptimal, ImageAspectFlags.ColorBit );
@@ -1126,8 +1163,67 @@ internal static unsafe partial class VkFrame
 			Current.TargetPass = true;
 			Current.Target = target;
 			Current.TargetExtent = extent;
+			Current.TargetSamples = samples;
 
 			return 1;
+		}
+	}
+
+	//Samples this frame's next world pass takes: one once a stage wrote the resolved picture, which is then the truth
+	private static uint TargetSamplesFor( VkSwapchain.Pictures p )
+	{
+		var samples = WorldSamples;
+
+		return samples > 1 && p.Layers == 1 && !p.WorldResolvedIsNewer && VkSwapchain.EnsureWorldSampled( p, samples )
+			? samples
+			: 1u;
+	}
+
+	//Sample zero: the pyramid, AO and effects need a real surface's depth, not an average of two; no min/max cost
+	private static void ResolveDepthInto( ref RenderingAttachmentInfo depth, VkSwapchain.Pictures p )
+	{
+		depth.ResolveMode = ResolveModeFlags.SampleZeroBit;
+		depth.ResolveImageView = depth.ImageView;
+		depth.ResolveImageLayout = ImageLayout.DepthAttachmentOptimal;
+		depth.ImageView = p.WorldSampledDepthView;
+	}
+
+	//An attachment kept between passes stays in its layout, so MoveTo would skip the barrier the next pass needs
+	private static void KeepAttached( CommandBuffer commands, VkImage image, ref ImageLayout layout, ImageLayout wanted, ImageAspectFlags aspect )
+	{
+		if ( layout != wanted )
+		{
+			MoveTo( commands, image, ref layout, wanted, aspect );
+			return;
+		}
+
+		Transition( commands, image, wanted, wanted,
+			PipelineStageFlags2.AllGraphicsBit, AccessFlags2.MemoryWriteBit,
+			PipelineStageFlags2.AllGraphicsBit, AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit, aspect );
+	}
+
+	/// <summary>Whether the world's multisampled colour was just closed and has to reach its picture.</summary>
+	internal static bool WorldAwaitsResolve;
+
+	private static bool resolvingWorld;
+
+	//Opens the world's picture for the resolve; the handle of the samples and their count, nought where it would not open
+	internal static (ulong Handle, int Samples) WorldResolveBegin()
+	{
+		lock ( VkDevice.renderLock )
+		{
+			WorldAwaitsResolve = false;
+
+			var p = Pics;
+
+			MoveTo( CurrentFrame.Commands, p.WorldSampledColourImage, ref p.WorldSampledColourLayout,
+				ImageLayout.ShaderReadOnlyOptimal, ImageAspectFlags.ColorBit );
+
+			resolvingWorld = true;
+			var began = TargetBegin( VkDevice.TargetSceneColour, 0.0f, 0.0f, 0.0f, 0.0f, 2 );
+			resolvingWorld = false;
+
+			return began != 0 ? (p.WorldSampledHandle, (int)p.WorldSamples) : (0ul, 0);
 		}
 	}
 
@@ -1142,6 +1238,9 @@ internal static unsafe partial class VkFrame
 
 			VkDevice.dialect.EndRendering( frame.Commands );
 			Current.TargetPass = false;
+
+			if ( Current.Target == VkDevice.TargetScene && Current.TargetSamples > 1 ) WorldAwaitsResolve = true;
+			Current.TargetSamples = 1;
 
 			//What was written becomes readable, because the whole point of drawing into a picture rather than the screen is that something reads it next.
 			if ( Current.Target == VkDevice.TargetShadow )

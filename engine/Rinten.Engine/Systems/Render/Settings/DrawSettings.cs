@@ -56,14 +56,9 @@ internal static partial class DrawSettings
 		Help = "Radiance below which a lamp is dropped (0 trusts the authored radius)." )]
 	internal static float LightCutoff { get; set; } = 0.001f;
 
-	//FXAA runs in compose (the portable frame's finish off a page), so it forces the world drawn aside (~0.2 ms)
-	/// <summary>Whether the edges of the finished picture are softened.</summary>
-	[ConVar( "r_fxaa", ConVarFlags.Saved, Help = "Soften the edges of the finished picture (0 off)." )]
-	internal static bool Fxaa { get; set; } = true;
-
-	/// <summary>MSAA sample count (0 is none); the web's and the portable frame read it, the full frame smooths temporally</summary>
+	/// <summary>MSAA sample count (0 is none); temporal upscalers replace it</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
-		Help = "Samples per pixel (0 off). The web's frame and the portable frame read it; the full frame does not." )]
+		Help = "Samples per pixel (0 off). Ignored under a temporal upscaler, which does its own anti-aliasing." )]
 	internal static int Msaa { get; set; } = 4;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>

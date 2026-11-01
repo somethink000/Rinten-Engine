@@ -647,6 +647,9 @@ internal static unsafe class CoreRenderDevice
 		=> CoreNative.Available && CoreRender.TargetBegin( (int)target,
 			clear.r, clear.g, clear.b, clear.a, clearFirst ? 1 : discard ? 2 : 0 ) != 0;
 
+	/// <summary>Whether the full frame's world is multisampled this frame.</summary>
+	public static bool WorldSampled => CoreNative.Available && !OperatingSystem.IsBrowser() && VkFrame.WorldSamples > 1;
+
 	/// <summary>Ends it, and makes what was drawn readable.</summary>
 	public static void EndTarget()
 	{
@@ -1244,7 +1247,7 @@ internal static unsafe class CoreRenderDevice
 	public const float FarDepth = 0.0f;
 
 	//Max specialization constants per pipeline; ids below CoreResources.FirstShaderFold are the frame's
-	internal const int SpecializationCount = 21;
+	internal const int SpecializationCount = 22;
 
 	public static ulong CreatePipeline( byte[] vertexSpirv, byte[] pixelSpirv,
 		CoreRender.VertexLayoutKind vertexLayout = CoreRender.VertexLayoutKind.None, bool depthTest = false,

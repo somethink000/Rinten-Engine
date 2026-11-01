@@ -9,6 +9,7 @@
 #ifdef ALPHA
 //For the texture LOD bias alone - see CutOut.
 #include "frame_data.slang"
+#include "cut_coverage.slang"
 #endif
 
 
@@ -51,7 +52,7 @@ struct V2P
 	float4 position : SV_Position;
 #ifdef ALPHA
 	nointerpolation uint material : TEXCOORD2;
-	float2 uv : TEXCOORD1;
+	centroid float2 uv : TEXCOORD1;
 #endif
 #ifdef VIEW
 	nointerpolation uint instance : TEXCOORD3;
@@ -161,18 +162,23 @@ void MainMs( uint thread : SV_GroupIndex, uint3 group : SV_GroupID,
 #endif
 
 #ifdef ALPHA
-void CutOut( V2P i, bool front )
+uint CutOut( V2P i, bool front )
 {
 	//Cutout list draws unculled for two-sided leaves; discard back faces of one-sided materials here
 	if ( !front && ( g_materialData[i.material * 4] & MaterialTwoSided ) == 0 ) discard;
 
 	uint slot = g_materialData[( i.material * 4 ) + 1];
 	float cutoff = asfloat( g_materialData[( i.material * 4 ) + 2] );
-	if ( slot == 0 || cutoff <= 0.0 ) return;
+	if ( slot == 0 || cutoff <= 0.0 ) return ~0u;
 	//At the level the material's own cut reads it - see SampleUv in frame.slang, which an upscaler biases sharper.
 	//The shading is tested equal against this depth, so a leaf cut at another level here would leave a rim of holes.
 	float alpha = g_textures[NonUniformResourceIndex( slot )].SampleBias( i.uv, g_frame[0].viewInfo.w ).a;
-	if ( alpha < cutoff ) discard;
+
+	//The same sum as the materials' own cut, whose shading is tested equal against what this keeps
+	uint coverage = CutCoverage( ( alpha - cutoff ) / max( fwidth( alpha ), 0.001 ) + 0.5 );
+	if ( coverage == 0u ) discard;
+
+	return coverage;
 }
 #endif
 
@@ -223,11 +229,16 @@ ViewOut MainPs( V2P i, uint primitive : SV_PrimitiveID )
 	return o;
 }
 #else
+#ifdef ALPHA
+[shader("fragment")]
+uint MainPs( V2P i, bool front : SV_IsFrontFace ) : SV_Coverage
+{
+	return CutOut( i, front );
+}
+#else
 [shader("fragment")]
 void MainPs( V2P i, bool front : SV_IsFrontFace )
 {
-#ifdef ALPHA
-	CutOut( i, front );
-#endif
 }
+#endif
 #endif

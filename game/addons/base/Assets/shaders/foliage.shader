@@ -86,8 +86,8 @@ struct V2F
 	float3 normal : NORMAL;
 	float3 tangent : TANGENT;
 	float bitangentSign : TEXCOORD3;
-	float2 uv : TEXCOORD0;
-	float2 lightmap : TEXCOORD4;
+	centroid float2 uv : TEXCOORD0;
+	centroid float2 lightmap : TEXCOORD4;
 
 	//What this copy's colour is multiplied by - see g_flVariation.
 	float3 variation : TEXCOORD5;
@@ -205,6 +205,8 @@ V2F MainVs( VIn i )
 	return Vertex( i );
 }
 
+#include "cut_coverage.slang"
+
 struct Out
 {
 	float4 colour : SV_Target0;
@@ -213,11 +215,17 @@ struct Out
 	float4 surface : SV_Target1;
 #endif
 
+#ifndef PORTABLE
+	uint coverage : SV_Coverage;
+#endif
+
 };
 
 //The pixel body, run by MainPs for a raster pixel and by MainClusterPs for a cluster's - see cluster_surface.slang
 Out Shade( V2F i, bool front )
 {
+	uint coverage = ~0u;
+
 	float2 uv = i.uv;
 
 	float3 n = normalize( i.normal );
@@ -262,7 +270,11 @@ Out Shade( V2F i, bool front )
 				edge = lerp( edge, opacity >= noise ? 1.0 : 0.0, far );
 			}
 
-			if ( edge < 0.5 ) discard;
+			if ( CutsOwnDepth() )
+			{
+				coverage = CutCoverage( edge );
+				if ( coverage == 0u ) discard;
+			}
 
 			alpha = saturate( edge );
 		}
@@ -273,6 +285,9 @@ Out Shade( V2F i, bool front )
 	//The depth pre-pass has to run the cut above - a leaf that never discarded would write a solid card into the depth
 	//and hide the plant behind it - and has no use for a single thing after it. See CoreShaderFile.Stage.DepthPixel.
 	Out nothing = (Out)0;
+#ifndef PORTABLE
+	nothing.coverage = coverage;
+#endif
 	return nothing;
 #endif
 
@@ -340,6 +355,9 @@ Out Shade( V2F i, bool front )
 	Shaded lit = ShadeSurface( surface );
 
 	Out o;
+#ifndef PORTABLE
+	o.coverage = coverage;
+#endif
 	o.colour = float4( lit.colour, albedo.a );
 
 #ifdef TARGET_SCENE

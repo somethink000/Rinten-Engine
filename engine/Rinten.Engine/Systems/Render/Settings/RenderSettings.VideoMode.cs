@@ -86,7 +86,6 @@ public partial class RenderSettings
 	{
 		get
 		{
-			//None, which is also all this renderer can currently do.
 			var defaultValue = RenderMultisampleType.RENDER_MULTISAMPLE_4X;
 			var value = VideoSettings.Get( "aaquality", defaultValue );
 

@@ -61,12 +61,10 @@ internal sealed class CorePortableGlow
 	/// <summary>Their size, which is the screen's and the world's drawn aside.</summary>
 	internal (int Width, int Height) PassSize => ( passWidth, passHeight );
 
-	/// <summary>Sends the world aside for glow, passes, a finish-only run or soft edges; false where it cannot.</summary>
-	internal bool Open( Settings? wanted, bool passes, bool carry, bool soften, float frameExposure )
+	/// <summary>Sends the world aside for glow, passes, or a finish-only run; false where it cannot.</summary>
+	internal bool Open( Settings? wanted, bool passes, bool carry, float frameExposure )
 	{
-		softening = soften;
-
-		if ( failed || wanted is null && !passes && !carry && !soften ) return false;
+		if ( failed || wanted is null && !passes && !carry ) return false;
 
 		//The picture is the screen's size, which the levels follow
 		world = CoreRenderDevice.WorldAside( true, out var screenWidth, out var screenHeight );
@@ -205,9 +203,6 @@ internal sealed class CorePortableGlow
 		CoreRenderDevice.EndTarget();
 	}
 
-	//Whether the finish or compose runs FXAA over the world - see World in glow.slang
-	private bool softening;
-
 	private void Write( float x, float y, float readX, float readY, float threshold, float falloff, float mode, float share,
 		float curve, float lit )
 	{
@@ -228,7 +223,6 @@ internal sealed class CorePortableGlow
 		floats[12] = exposure;
 		floats[13] = curve;
 		floats[14] = lit;
-		floats[15] = softening ? 1.0f : 0.0f;
 	}
 
 	private static ulong Texture( ulong picture ) => CoreRenderDevice.PictureTexture( picture );

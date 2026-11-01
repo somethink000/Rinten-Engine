@@ -1675,6 +1675,9 @@ internal static unsafe class CoreSceneRenderer
 	//Bakes a pass for a material's far calls (kFarShading, constant 13); not ShadeSpecialize's, as it is the call's
 	internal const int FarShading = 1 << 13;
 
+	//Bakes a pass that decides its own depth (kCutsOwnDepth, constant 21); a cluster pass over the pre-pass goes without
+	internal const int CutsOwnDepth = 1 << 21;
+
 	//World pixel stage specialization bits, taken from what the frame block actually holds
 	//1 probes, 2 debug, 4 light grid, 8 lamp, 16 sky table, 32 fog, 64 occlusion, 128 lights, 256 movers...
 	internal static int ShadeSpecialize()

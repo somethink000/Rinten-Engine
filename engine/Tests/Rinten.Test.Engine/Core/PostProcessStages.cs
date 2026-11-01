@@ -99,13 +99,13 @@ public class PostProcessStagesTests
 		}
 
 		var view = 0ul;
-		var wasAntialias = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAntialias = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
 			File.WriteAllText( written, ShaderSource );
 
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 
 			var model = Model.FromCore( CoreModel.Load( "models/dev/box.vmdl" ) );
 
@@ -212,7 +212,7 @@ public class PostProcessStagesTests
 			AddsRed.Passes = 0;
 			AddsRed.Drawn = 0;
 
-			Rinten.Rendering.DrawSettings.Fxaa = wasAntialias;
+			Rinten.Rendering.DrawSettings.Msaa = wasAntialias;
 
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();

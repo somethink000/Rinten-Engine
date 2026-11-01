@@ -1573,7 +1573,7 @@ internal sealed class CoreMeshRender
 
 			//Only a surface whose depth nothing else writes carries it itself - see the cluster branch of MakePipeline, which is the one reader.
 			Moves = carries,
-			Specialize = specialize,
+			Specialize = carries ? specialize | CoreSceneRenderer.CutsOwnDepth : specialize,
 			Finishes = finishes,
 		} );
 	}

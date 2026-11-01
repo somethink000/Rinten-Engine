@@ -642,6 +642,18 @@ internal static unsafe partial class VkDevice
 				deviceExtensions[extensionCount++] = names.Add( "VK_KHR_depth_stencil_resolve" );
 			}
 		}
+		else if ( dialect.Tier == RenderTier.Full )
+		{
+			//Depth resolves are core here; the world's colour is read per sample, so the sampled limit counts too
+			PhysicalDeviceProperties limits;
+			vk.GetPhysicalDeviceProperties( physicalDevice, &limits );
+
+			var counts = (uint)( limits.Limits.FramebufferColorSampleCounts & limits.Limits.FramebufferDepthSampleCounts &
+				limits.Limits.SampledImageColorSampleCounts );
+
+			for ( var samples = 8u; samples > 1 && mostSamples == 1; samples /= 2 )
+				if ( ( counts & samples ) != 0 ) mostSamples = samples;
+		}
 
 		var info = new DeviceCreateInfo
 		{
@@ -702,7 +714,7 @@ internal static unsafe partial class VkDevice
 		vk.TryGetDeviceExtension( instance, device, out khrSwapchain );
 
 		if ( meshShaders && !vk.TryGetDeviceExtension( instance, device, out extMeshShader ) ) meshShaders = false;
-		if ( mostSamples > 1 && !vk.TryGetDeviceExtension( instance, device, out renderPass2 ) ) mostSamples = 1;
+		if ( dialect.Tier == RenderTier.Portable && mostSamples > 1 && !vk.TryGetDeviceExtension( instance, device, out renderPass2 ) ) mostSamples = 1;
 
 		Queue got;
 		vk.GetDeviceQueue( device, graphicsFamily, 0, &got );

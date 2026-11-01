@@ -424,8 +424,15 @@ internal static unsafe class CoreRender
 
 	internal static void TargetEnd()
 	{
-		if ( web ) BrowserSwapchain.TargetEnd();
-		else VkFrame.TargetEnd();
+		if ( web )
+		{
+			BrowserSwapchain.TargetEnd();
+			return;
+		}
+
+		VkFrame.TargetEnd();
+
+		if ( VkFrame.WorldAwaitsResolve ) CoreWorldResolve.Run();
 	}
 
 	//A drawer's shadow map - see VkTextures.ShadowMapCreate and BrowserSwapchain.ShadowMapCreate.

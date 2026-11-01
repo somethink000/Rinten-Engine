@@ -62,11 +62,11 @@ public class MaterialDefaultsTests
 		}
 
 		var view = 0ul;
-		var wasAntialias = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAntialias = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 
 			var scene = Made( out var box, out var camera, out var eye );
 			if ( scene is null ) return;
@@ -106,7 +106,7 @@ public class MaterialDefaultsTests
 		}
 		finally
 		{
-			Rinten.Rendering.DrawSettings.Fxaa = wasAntialias;
+			Rinten.Rendering.DrawSettings.Msaa = wasAntialias;
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();
 		}
@@ -168,11 +168,11 @@ public class MaterialDefaultsTests
 		}
 
 		var view = 0ul;
-		var wasAntialias = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAntialias = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 
 			var scene = Made( out var box, out var camera, out var eye );
 			if ( scene is null ) return;
@@ -227,7 +227,7 @@ public class MaterialDefaultsTests
 		}
 		finally
 		{
-			Rinten.Rendering.DrawSettings.Fxaa = wasAntialias;
+			Rinten.Rendering.DrawSettings.Msaa = wasAntialias;
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();
 		}

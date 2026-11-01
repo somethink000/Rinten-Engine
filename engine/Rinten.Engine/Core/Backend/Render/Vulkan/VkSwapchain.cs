@@ -97,6 +97,18 @@ internal static unsafe partial class VkSwapchain
 		public Extent2D SampledExtent;
 		public bool SampledReady;
 
+		/// <summary>The full frame's multisampled world: colour read by the resolve, normals and depth resolved in their pass.</summary>
+		public VkImage WorldSampledColourImage, WorldSampledNormalImage, WorldSampledDepthImage;
+		public DeviceMemory WorldSampledColourMemory, WorldSampledNormalMemory, WorldSampledDepthMemory;
+		public ImageView WorldSampledColourView, WorldSampledNormalView, WorldSampledDepthView;
+		public ImageLayout WorldSampledColourLayout, WorldSampledNormalLayout, WorldSampledDepthLayout;
+		public ulong WorldSampledHandle;
+		public uint WorldSamples;
+		public Extent2D WorldSampledExtent;
+
+		/// <summary>Whether something drew into the resolved world this frame, which a later resolve would overwrite.</summary>
+		public bool WorldResolvedIsNewer;
+
 		/// <summary>The depth buffer: written by the world, read by the passes that ask about its shape.</summary>
 		public VkImage DepthImage;
 		public DeviceMemory DepthMemory;
@@ -326,6 +338,9 @@ internal static unsafe partial class VkSwapchain
 		/// <summary>Samples a pixel the world's pass takes this frame - see VkFrame.MainSamples.</summary>
 		public uint MainSamples = 1;
 
+		/// <summary>Samples a pixel the open target pass takes - see VkFrame.TargetSamplesFor.</summary>
+		public uint TargetSamples = 1;
+
 		/// <summary>Whether the world's pass was resumed this frame, and the last - see the depth's store in VkFrame.EnsureMainPass, which keeps the depth only where it may be.</summary>
 		public bool ResumedThisFrame, ResumedLastFrame;
 
@@ -400,6 +415,9 @@ internal static unsafe partial class VkSwapchain
 		get
 		{
 			if ( currentPictures is not null ) return false;
+
+			//The multisampled depth is the world's size and resolves into the world's own
+			if ( VkFrame.WorldSamples > 1 ) return false;
 
 			var one = Current;
 			if ( one is null || !one.DepthOnScreen || one.WorldWanted.Width == 0 ) return false;
@@ -918,6 +936,7 @@ internal static unsafe partial class VkSwapchain
 		DropImage( p.PostImage, p.PostMemory, p.PostView, deferred );
 		DropImage( p.DepthImage, p.DepthMemory, p.DepthView, deferred );
 		DropSampled( p, deferred );
+		DropWorldSampled( p, deferred );
 		DropHandle( p.ScreenDepthHandle, deferred );
 		DropImage( p.ScreenDepthImage, p.ScreenDepthMemory, p.ScreenDepthView, deferred );
 
@@ -963,6 +982,52 @@ internal static unsafe partial class VkSwapchain
 		p.Samples = samples;
 		p.SampledFormat = colour;
 		p.SampledExtent = p.ScreenExtent;
+
+		return true;
+	}
+
+	internal static void DropWorldSampled( Pictures p, bool deferred )
+	{
+		DropHandle( p.WorldSampledHandle, deferred );
+		DropImage( p.WorldSampledColourImage, p.WorldSampledColourMemory, p.WorldSampledColourView, deferred );
+		DropImage( p.WorldSampledNormalImage, p.WorldSampledNormalMemory, p.WorldSampledNormalView, deferred );
+		DropImage( p.WorldSampledDepthImage, p.WorldSampledDepthMemory, p.WorldSampledDepthView, deferred );
+
+		p.WorldSampledHandle = 0;
+		p.WorldSampledColourImage = p.WorldSampledNormalImage = p.WorldSampledDepthImage = default;
+		p.WorldSampledColourMemory = p.WorldSampledNormalMemory = p.WorldSampledDepthMemory = default;
+		p.WorldSampledColourView = p.WorldSampledNormalView = p.WorldSampledDepthView = default;
+		p.WorldSampledColourLayout = p.WorldSampledNormalLayout = p.WorldSampledDepthLayout = ImageLayout.Undefined;
+		p.WorldSamples = 0;
+		p.WorldSampledExtent = default;
+	}
+
+	//Made at the first pass that wants them, so a project running a temporal upscaler never pays for them
+	internal static bool EnsureWorldSampled( Pictures p, uint samples )
+	{
+		if ( p.WorldSamples == samples && p.WorldSampledExtent.Width == p.Extent.Width &&
+			p.WorldSampledExtent.Height == p.Extent.Height && p.WorldSampledColourView.Handle != 0 ) return true;
+
+		DropWorldSampled( p, deferred: true );
+
+		if ( !MakePicture( VkDevice.WorldFormat, p.Extent, 1, ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit,
+				out p.WorldSampledColourImage, out p.WorldSampledColourMemory, out p.WorldSampledColourView, 1, samples ) ||
+			!MakePicture( VkDevice.NormalFormat, p.Extent, 1, ImageUsageFlags.ColorAttachmentBit,
+				out p.WorldSampledNormalImage, out p.WorldSampledNormalMemory, out p.WorldSampledNormalView, 1, samples ) ||
+			!MakePicture( VkDevice.DepthFormat, p.Extent, 1, ImageUsageFlags.DepthStencilAttachmentBit,
+				out p.WorldSampledDepthImage, out p.WorldSampledDepthMemory, out p.WorldSampledDepthView, 1, samples ) )
+		{
+			DropWorldSampled( p, deferred: true );
+			return false;
+		}
+
+		p.WorldSampledHandle = VkTextures.Adopt( p.WorldSampledColourView, VkDevice.pointSampler );
+		p.WorldSamples = samples;
+		p.WorldSampledExtent = p.Extent;
+
+		VkDevice.NameHandle( ObjectType.Image, p.WorldSampledColourImage.Handle, "world picture, multisampled" );
+		VkDevice.NameHandle( ObjectType.Image, p.WorldSampledNormalImage.Handle, "world normals, multisampled" );
+		VkDevice.NameHandle( ObjectType.Image, p.WorldSampledDepthImage.Handle, "world depth, multisampled" );
 
 		return true;
 	}

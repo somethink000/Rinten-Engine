@@ -1,7 +1,7 @@
 //Kept as a file rather than as text inside the engine's C#, so it is compiled the way every other shader
 //is - includes and all - and a project may put its own file of this name in its assets to replace it.
 
-//Composes the frame to screen: point-effect chain (incl. tonemap) around the edge filter
+//Composes the frame to screen through the point-effect chain (incl. tonemap)
 
 #include "postprocess.slang"
 #include "tonemap.slang"
@@ -20,10 +20,7 @@ float2 ChainWhere( float2 uv ) { return uv; }
 //written. Nothing means they are the same size and there is nothing to carry up.
 float2 SourceSize() { return g_vPostSlots[0].xy; }
 
-//Whether the edges are softened - off where nothing was drawn, where the world is carried up, and where a point effect moved where the frame is read.
-bool Softens() { return g_vPostSlots[0].z > 0.5; }
-
-//How far RCAS sharpens what an upscaler gathered (CoreUpscale.RcasStrength), nought none; never with the softening
+//How far RCAS sharpens what an upscaler gathered (CoreUpscale.RcasStrength), nought none
 float Sharpening() { return g_vPostSlots[0].w; }
 
 float Brightest( float3 c ) { return max( c.x, max( c.y, c.z ) ); }
@@ -237,7 +234,7 @@ float3 Upscaled( float2 uv, float2 source )
 
 #endif
 
-//The finished pixel (world plus effects through the curve); the edge filter compares these
+//The finished pixel (world plus effects through the curve)
 float3 Shaded( float2 uv )
 {
 	float2 at = ChainWhere( uv );
@@ -254,69 +251,13 @@ float3 Shaded( float2 uv )
 	return ChainBefore( g_color.SampleLevel( at, 0.0 ).rgb, uv );
 }
 
-float Luma( float3 colour )
-{
-	return dot( colour, float3( 0.299, 0.587, 0.114 ) );
-}
-
-//Corners are shaded fully like the middle; cheaper variants were measured and shifted edges
-
 [shader("fragment")]
 float4 MainPs( PostV2F i ) : SV_Target0
 {
 	//The swapchain is an sRGB format, so the hardware does the last conversion. What leaves here is linear, and that is deliberate.
 	float2 uv = i.uv;
 
-	float3 middle = Sharpening() > 0.0 ? ChainBefore( Sharpened( ChainWhere( uv ) ), uv ) : Shaded( uv );
-	float3 result = middle;
-
-	if ( Softens() )
-	{
-		//And the edges softened, which is the whole of what this engine has for anti-aliasing: there are no multisampled targets, and the setting that says
-		//8x has never meant anything. This is FXAA - find where the brightness turns a corner, work out which way the corner runs, and average along it.
-		float2 texel = g_vFrameSize.zw;
-
-		float nw = Luma( Shaded( uv + ( float2( -1.0, -1.0 ) * texel ) ) );
-		float ne = Luma( Shaded( uv + ( float2(  1.0, -1.0 ) * texel ) ) );
-		float sw = Luma( Shaded( uv + ( float2( -1.0,  1.0 ) * texel ) ) );
-		float se = Luma( Shaded( uv + ( float2(  1.0,  1.0 ) * texel ) ) );
-		float m  = Luma( middle );
-
-		float low = min( m, min( min( nw, ne ), min( sw, se ) ) );
-		float high = max( m, max( max( nw, ne ), max( sw, se ) ) );
-
-		//Flat, or dark enough that the step would not have shown. The second half is what keeps this off the inside of a
-		//shadow, where a small absolute difference is a large relative one and softening it only smears the noise about.
-		float range = high - low;
-
-		if ( range >= max( 1.0 / 24.0, high * 0.125 ) )
-		{
-			//Which way the edge runs: perpendicular to the way the brightness changes fastest, which the four corners give directly.
-			float2 direction;
-			direction.x = -( ( nw + ne ) - ( sw + se ) );
-			direction.y =  ( ( nw + sw ) - ( ne + se ) );
-
-			//A bright edge may step by a lot and a dim one by very little; this keeps the step from running away on either.
-			float reduce = max( ( nw + ne + sw + se ) * 0.25 * 0.125, 1.0 / 128.0 );
-			float scale = 1.0 / ( min( abs( direction.x ), abs( direction.y ) ) + reduce );
-
-			direction = clamp( direction * scale, -8.0, 8.0 ) * texel;
-
-			//Two samples across the edge, and two further out. If the wider pair leaves the range the neighbourhood
-			//had, it has reached past the edge into something else and the narrow pair is used instead.
-			float3 near = 0.5 * (
-				Shaded( uv + ( direction * ( ( 1.0 / 3.0 ) - 0.5 ) ) ) +
-				Shaded( uv + ( direction * ( ( 2.0 / 3.0 ) - 0.5 ) ) ) );
-
-			float3 wide = ( near * 0.5 ) + ( 0.25 * (
-				Shaded( uv + ( direction * -0.5 ) ) +
-				Shaded( uv + ( direction *  0.5 ) ) ) );
-
-			float found = Luma( wide );
-
-			result = found < low || found > high ? near : wide;
-		}
-	}
+	float3 result = Sharpening() > 0.0 ? ChainBefore( Sharpened( ChainWhere( uv ) ), uv ) : Shaded( uv );
 
 	//And what comes after the curve, once, over the finished picture.
 	return float4( ChainAfter( result, i.uv ), 1.0 );

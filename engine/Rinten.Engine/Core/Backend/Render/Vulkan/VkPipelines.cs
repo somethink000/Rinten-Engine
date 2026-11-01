@@ -73,6 +73,8 @@ internal static unsafe partial class VkPipelines
 		pipelines.Clear();
 		recipes.Clear();
 		layered.Clear();
+		modules.Clear();
+		SampledBases = false;
 	}
 
 	//SPIR-V bytes into a module. Copied into words first: Vulkan wants the code
@@ -193,7 +195,7 @@ internal static unsafe partial class VkPipelines
 		byte* pixelSpirv, int pixelSize, string pixelEntry,
 		int vertexLayout, int depthTest, int topology, int blend,
 		int depthWrite, int cullBack, int depthOnly, int target, int rasterFlags,
-		int specialize = -1, int pictureFormat = -1, uint viewMask = 0, uint samples = 1 )
+		int specialize = -1, int pictureFormat = -1, uint viewMask = 0, uint samples = 0 )
 	{
 		lock ( VkDevice.renderLock )
 		{
@@ -202,6 +204,10 @@ internal static unsafe partial class VkPipelines
 				VkDevice.SetText( "there is no device to bake a pipeline on" );
 				return 0;
 			}
+
+			//Nought is the pass this target normally draws in; a Variant names its samples
+			var isBase = samples == 0;
+			if ( isBase ) samples = BaseSamples( target );
 
 			//Baked against the swapchain's format, so the swapchain has to come first. The format belongs to the surface
 			//and survives resizes, so pipelines do not have to be rebuilt with the swapchain - only made after it.
@@ -678,13 +684,20 @@ internal static unsafe partial class VkPipelines
 
 			var handle = pipelines.Add( made );
 
-			if ( viewMask == 0 && samples <= 1 )
+			if ( viewMask == 0 && isBase )
 			{
-				Remember( made.Pipeline, new Recipe(
-					new ReadOnlySpan<byte>( vertexSpirv, vertexSize ).ToArray(), vertexEntry,
-					new ReadOnlySpan<byte>( pixelSpirv, pixelSize ).ToArray(), pixelEntry,
-					vertexLayout, depthTest, topology, blend, depthWrite, cullBack, depthOnly, target, rasterFlags,
-					specialize, pictureFormat ) );
+				if ( Keeps( target ) )
+				{
+					Remember( made.Pipeline, new Recipe(
+						Shared( new ReadOnlySpan<byte>( vertexSpirv, vertexSize ) ), vertexEntry,
+						Shared( new ReadOnlySpan<byte>( pixelSpirv, pixelSize ) ), pixelEntry,
+						vertexLayout, depthTest, topology, blend, depthWrite, cullBack, depthOnly, target, rasterFlags,
+						specialize, pictureFormat, samples ) );
+				}
+
+				//Shadows draw a depth pipeline at one sample and the pre-pass at many: both baked here, off the frame
+				if ( target == VkDevice.TargetDepth && depthTest != (int)CoreRenderDevice.DepthCompare.LightNearerOrSame && VkFrame.WorldSamples > 1 )
+					Variant( made.Pipeline, 0, VkFrame.WorldSamples );
 			}
 
 			//By the handle the managed side bakes it under, which is what the render log prints when a pipeline is made or refused.

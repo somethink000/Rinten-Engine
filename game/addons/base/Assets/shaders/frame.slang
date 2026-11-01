@@ -1769,6 +1769,23 @@ static const int kFogOn = 1;
 static const int kOcclusionOn = 1;
 #endif
 
+//Spec constant: whether this pass decides its own depth, and so has to cut its surface; a pass over a depth
+//the pre-pass wrote takes what that kept, since a sample it cut differently would stay unshaded
+#ifdef SPECIALIZED
+[vk::constant_id( 21 )] const int kCutsOwnDepth = 1;
+#else
+static const int kCutsOwnDepth = 1;
+#endif
+
+bool CutsOwnDepth()
+{
+#ifdef DEPTH_ONLY
+	return true;
+#else
+	return kCutsOwnDepth != 0;
+#endif
+}
+
 //Spec constant: far material calls (past ClusterFarSlice) skip normal and roughness maps; 0 is full
 #ifdef SPECIALIZED
 [vk::constant_id( 13 )] const int kFarShading = 0;

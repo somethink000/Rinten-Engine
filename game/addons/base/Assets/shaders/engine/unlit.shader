@@ -69,7 +69,7 @@ Out Shade( V2F i, bool front )
 	float4 texel = g_color.Sample( i.uv );
 
 	float cutoff = g_material.surface.w;
-	if ( cutoff > 0.0 && texel.a < cutoff ) discard;
+	if ( cutoff > 0.0 && texel.a < cutoff && CutsOwnDepth() ) discard;
 #ifdef DEPTH_ONLY
 	//Depth pre-pass writes no colour; the guard keeps the lit stage out of every depth build
 	Out nothing = (Out)0;

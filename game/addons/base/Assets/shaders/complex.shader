@@ -110,10 +110,10 @@ struct V2F
 	float3 normal : NORMAL;
 	float3 tangent : TANGENT;
 	float bitangentSign : TEXCOORD3;
-	float2 uv : TEXCOORD0;
+	centroid float2 uv : TEXCOORD0;
 
 	//Where this pixel sits in the baked atlas. Zero where the mesh has no chart in it, which is what says there is nothing baked for this draw.
-	float2 lightmap : TEXCOORD4;
+	centroid float2 lightmap : TEXCOORD4;
 
 	//The corner tint, interpolated across the triangle.
 	float4 colour : TEXCOORD5;
@@ -201,6 +201,8 @@ V2F MainVs( VIn i )
 
 //What the world's pass writes: the colour in half floats, and beside it the normal and
 //how mirror-like the surface is, for the passes that come after and never saw it drawn.
+#include "cut_coverage.slang"
+
 struct Out
 {
 	float4 colour : SV_Target0;
@@ -209,12 +211,18 @@ struct Out
 	float4 surface : SV_Target1;
 #endif
 
+#ifndef PORTABLE
+	uint coverage : SV_Coverage;
+#endif
+
 };
 
 //The pixel stage's body, run for a rasterised pixel by MainPs below and for a cluster's by the engine's MainClusterPs - see
 //cluster_surface.slang. Which side of the sheet this pixel is comes in with it, because a triangle does not know which way it will be looked at.
 Out Shade( V2F i, bool front )
 {
+	uint coverage = ~0u;
+
 	float2 uv = i.uv;
 
 	float3 n = normalize( i.normal );
@@ -293,7 +301,7 @@ Out Shade( V2F i, bool front )
 
 		if ( cutoff > 0.0 && !corrected )
 		{
-			if ( texel.a < cutoff ) discard;
+			if ( texel.a < cutoff && CutsOwnDepth() ) discard;
 		}
 #if F_COLOR_MAP
 		else if ( cutoff > 0.0 )
@@ -350,7 +358,11 @@ Out Shade( V2F i, bool front )
 
 			float edge = ( opacity - raised ) / max( slope, 0.001 ) + 0.5;
 
-			if ( edge < 0.5 ) discard;
+			if ( CutsOwnDepth() )
+			{
+				coverage = CutCoverage( edge );
+				if ( coverage == 0u ) discard;
+			}
 
 			alpha = saturate( edge );
 		}
@@ -362,6 +374,9 @@ Out Shade( V2F i, bool front )
 #ifdef DEPTH_ONLY
 	//Depth pre-pass writes no colour; the guard keeps the lit stage out of every depth build
 	Out nothing = (Out)0;
+#ifndef PORTABLE
+	nothing.coverage = coverage;
+#endif
 	return nothing;
 #endif
 	//Draw tint (includes material tint and folded flat colour) times the per-corner vertex tint
@@ -442,6 +457,9 @@ Out Shade( V2F i, bool front )
 	Shaded lit = ShadeSurface( surface );
 
 	Out o;
+#ifndef PORTABLE
+	o.coverage = coverage;
+#endif
 	//albedo.a already includes the tint's alpha; multiplying by it again would square it
 	o.colour = float4( lit.colour, albedo.a );
 

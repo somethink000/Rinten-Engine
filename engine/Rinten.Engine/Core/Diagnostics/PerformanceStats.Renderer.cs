@@ -20,7 +20,7 @@ public static partial class PerformanceStats
 		}
 	}
 
-	/// <summary>How the world's edges are smoothed now: MSAA, the edge filter, a temporal upscaler, or "off".</summary>
+	/// <summary>How the world's edges are smoothed now: MSAA, a temporal upscaler, or "off".</summary>
 	public static string AntiAliasing
 	{
 		get
@@ -28,16 +28,16 @@ public static partial class PerformanceStats
 			if ( OperatingSystem.IsBrowser() )
 				return Rinten.Rendering.DrawSettings.Msaa >= 2 ? "MSAA 4x" : "off";
 
-			//The portable frame has no picture of the world for an upscaler to read; its pass multisampled, or its finish softened
+			//The portable frame has no picture of the world for an upscaler to read
 			if ( CoreRenderDevice.PortableFrame )
-				return VkFrame.LastMainSamples > 1 ? $"MSAA {VkFrame.LastMainSamples}x" : Rinten.Rendering.DrawSettings.Fxaa ? "FXAA" : "off";
+				return VkFrame.LastMainSamples > 1 ? $"MSAA {VkFrame.LastMainSamples}x" : "off";
 
 			return Rinten.Rendering.DrawSettings.Upscaler switch
 			{
 				3 => "FSR3",
 				4 => "DLSS",
 				5 => "TAA",
-				_ => Rinten.Rendering.DrawSettings.Fxaa ? "FXAA" : "off",
+				_ => VkFrame.WorldSamples > 1 ? $"MSAA {VkFrame.WorldSamples}x" : "off",
 			};
 		}
 	}

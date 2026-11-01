@@ -21,7 +21,7 @@ public class DepthOfFieldTests
 
 		var view = 0ul;
 		var wasQuality = DepthOfField.Quality;
-		var wasAa = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAa = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
@@ -33,8 +33,8 @@ public class DepthOfFieldTests
 				return;
 			}
 
-			//The edge filter softens edges too, and the exposure wanders. Both off, so that what differs between the two pictures is the one thing being measured.
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			//Multisampling softens edges too, and the exposure wanders. Both off, so that what differs between the two pictures is the one thing being measured.
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 
 			var scene = new Scene();
 			using var scope = scene.Push();
@@ -116,7 +116,7 @@ public class DepthOfFieldTests
 		finally
 		{
 			DepthOfField.Quality = wasQuality;
-			Rinten.Rendering.DrawSettings.Fxaa = wasAa;
+			Rinten.Rendering.DrawSettings.Msaa = wasAa;
 
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();

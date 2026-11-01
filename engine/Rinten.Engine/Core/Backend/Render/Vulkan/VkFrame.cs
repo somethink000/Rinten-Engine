@@ -463,6 +463,7 @@ internal static unsafe partial class VkFrame
 		p.SceneDrawn = false;
 		p.ScreenDepthFilled = false;
 		p.DepthFilled = false;
+		p.WorldResolvedIsNewer = false;
 		p.SceneLayout = ImageLayout.Undefined;
 		p.NormalLayout = ImageLayout.Undefined;
 		p.VelocityLayout = ImageLayout.Undefined;
@@ -782,6 +783,20 @@ internal static unsafe partial class VkFrame
 		DrawTrace.Phase( DrawTrace.Kind.MainPass, traced );
 	}
 
+	/// <summary>Samples a pixel of the full frame's world; temporal upscalers gather their own, so they take one.</summary>
+	internal static uint WorldSamples
+	{
+		get
+		{
+			if ( VkDevice.Tier != RenderTier.Full || VkDevice.mostSamples <= 1 || CoreXr.Wanted ) return 1;
+
+			var asked = Rinten.Rendering.DrawSettings.Msaa;
+			if ( asked < 2 || Rinten.Rendering.DrawSettings.Upscaler >= 3 ) return 1;
+
+			return Math.Min( 1u << System.Numerics.BitOperations.Log2( (uint)asked ), VkDevice.mostSamples );
+		}
+	}
+
 	/// <summary>Samples the last screen's pass opened took, for the report.</summary>
 	internal static uint LastMainSamples = 1;
 
@@ -920,9 +935,9 @@ internal static unsafe partial class VkFrame
 		//A pass drawing both eyes, or multisampled, uses the pipeline remade for it - see VkPipelines.Variant
 		var main = Current.MainPass && !Current.TargetPass;
 		var mask = main ? ViewMask : 0;
-		var samples = main ? Current.MainSamples : 1;
+		var samples = main ? Current.MainSamples : Current.TargetPass ? Current.TargetSamples : 1u;
 
-		if ( mask != 0 || samples > 1 ) pipeline = VkPipelines.Variant( pipeline, mask, samples );
+		if ( mask != 0 || samples > 1 || VkPipelines.SampledBases ) pipeline = VkPipelines.Variant( pipeline, mask, samples );
 
 		if ( frame.LastPipeline.Handle == pipeline.Handle )
 		{

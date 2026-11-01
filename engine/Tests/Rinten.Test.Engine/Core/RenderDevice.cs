@@ -1525,7 +1525,7 @@ public class RenderDeviceTest
 			CoreSceneRenderer.SetOcclusion( frame, 320, 180 );
 
 			var push = new byte[128];
-			CorePostBlit.ComposePush( push, new Vector2( 320, 180 ), default, false, 0,
+			CorePostBlit.ComposePush( push, new Vector2( 320, 180 ), default, 0,
 				0.05f, 50.0f, 0, 0, 0, 0 );
 
 			var scenePush = CoreSceneRenderer.ScenePush( System.Numerics.Matrix4x4.Identity, Color.White );

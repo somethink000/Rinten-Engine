@@ -966,6 +966,7 @@ internal static class EngineShaders
 
 	internal const string Velocity = "shaders/engine/velocity.slang";
 	internal const string Compose = "shaders/engine/compose.slang";
+	internal const string MsaaResolve = "shaders/engine/msaa_resolve.slang";
 
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";

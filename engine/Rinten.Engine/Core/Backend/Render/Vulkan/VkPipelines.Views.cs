@@ -8,7 +8,7 @@ internal static unsafe partial class VkPipelines
 	private sealed record Recipe(
 		byte[] Vertex, string VertexEntry, byte[] Pixel, string PixelEntry,
 		int VertexLayout, int DepthTest, int Topology, int Blend, int DepthWrite, int CullBack,
-		int DepthOnly, int Target, int RasterFlags, int Specialize, int PictureFormat );
+		int DepthOnly, int Target, int RasterFlags, int Specialize, int PictureFormat, uint Samples );
 
 	//What each pipeline was made of, by the driver's handle.
 	private static readonly Dictionary<ulong, Recipe> recipes = new();
@@ -20,12 +20,44 @@ internal static unsafe partial class VkPipelines
 	private static bool saidUnkept;
 
 	//Whether pipeline recipes are kept: for two-eye pipelines where a headset is wanted (CoreXr.Wanted),
-	//or where the portable frame's pass may be multisampled (VkFrame.MainSamples)
-	internal static bool KeepRecipes => ( VkDevice.multiview && CoreXr.Wanted ) || ( VkDevice.mostSamples > 1 && VkDevice.Tier == RenderTier.Portable );
+	//or wherever a pass may be multisampled (VkFrame.MainSamples, VkFrame.WorldSamples)
+	internal static bool KeepRecipes => ( VkDevice.multiview && CoreXr.Wanted ) || VkDevice.mostSamples > 1;
+
+	/// <summary>Whether a bind has to ask for its variant even at one sample: a base may have been baked at more.</summary>
+	internal static bool SampledBases { get; private set; }
+
+	//The full frame's world passes are the only ones that draw multisampled there, so they are all it keeps
+	private static bool Keeps( int target )
+		=> KeepRecipes && ( VkDevice.Tier == RenderTier.Portable || CoreXr.Wanted || target == VkDevice.TargetScene || target == VkDevice.TargetDepth );
 
 	private static void Remember( Pipeline pipeline, Recipe recipe )
 	{
-		if ( KeepRecipes && pipeline.Handle != 0 ) recipes[pipeline.Handle] = recipe;
+		if ( pipeline.Handle == 0 ) return;
+
+		recipes[pipeline.Handle] = recipe;
+		SampledBases |= recipe.Samples > 1;
+	}
+
+	//The world's pipelines bake at its samples, so its shaders do not compile twice; the depth's are shared with shadows at one
+	private static uint BaseSamples( int target ) => target == VkDevice.TargetScene ? VkFrame.WorldSamples : 1u;
+
+	//One copy of each module: most pipelines differ by their state, and a world's SPIR-V is large
+	private static readonly Dictionary<int, List<byte[]>> modules = new();
+
+	private static byte[] Shared( ReadOnlySpan<byte> spirv )
+	{
+		var hash = new HashCode();
+		hash.AddBytes( spirv );
+		var key = hash.ToHashCode();
+
+		if ( !modules.TryGetValue( key, out var same ) ) modules[key] = same = new List<byte[]>( 1 );
+
+		foreach ( var one in same )
+			if ( one.AsSpan().SequenceEqual( spirv ) ) return one;
+
+		var copy = spirv.ToArray();
+		same.Add( copy );
+		return copy;
 	}
 
 	//A pipeline is going: so do its makings and whatever was made again from them.
@@ -47,11 +79,16 @@ internal static unsafe partial class VkPipelines
 	internal static Pipeline Variant( Pipeline single, uint mask, uint samples )
 	{
 		if ( samples <= 1 ) samples = 1;
-		if ( single.Handle == 0 || ( mask == 0 && samples == 1 ) ) return single;
+		if ( single.Handle == 0 ) return single;
+
+		var known = recipes.TryGetValue( single.Handle, out var recipe );
+
+		//Most binds: already what the pass takes
+		if ( mask == 0 && samples == ( known ? recipe.Samples : 1u ) ) return single;
 
 		if ( layered.TryGetValue( (single.Handle, mask, samples), out var kept ) ) return kept.Made;
 
-		if ( !recipes.TryGetValue( single.Handle, out var recipe ) )
+		if ( !known )
 		{
 			if ( !saidUnkept )
 			{

@@ -22,7 +22,7 @@ public class MotionBlurTests
 		var view = 0ul;
 		var wasQuality = MotionBlur.Quality;
 		var wasFocus = DepthOfField.Quality;
-		var wasAa = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAa = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
@@ -35,7 +35,7 @@ public class MotionBlurTests
 			}
 
 			//Nothing else that softens anything: what differs between the pictures has to be the one thing being measured.
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 			DepthOfField.Quality = 0;
 
 			var scene = new Scene();
@@ -153,7 +153,7 @@ public class MotionBlurTests
 		{
 			MotionBlur.Quality = wasQuality;
 			DepthOfField.Quality = wasFocus;
-			Rinten.Rendering.DrawSettings.Fxaa = wasAa;
+			Rinten.Rendering.DrawSettings.Msaa = wasAa;
 
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();

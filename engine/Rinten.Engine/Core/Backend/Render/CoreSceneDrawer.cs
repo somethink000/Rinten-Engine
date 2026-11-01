@@ -1120,7 +1120,7 @@ internal sealed partial class CoreSceneDrawer
 	private CoreSceneRenderer.PipelineKind Wired( in CoreSceneRenderer.PipelineKind kind )
 	{
 		var wired = wireframe == 0
-			? kind with { Specialize = CoreSceneRenderer.ShadeSpecialize() }
+			? kind with { Specialize = CoreSceneRenderer.ShadeSpecialize() | CoreSceneRenderer.CutsOwnDepth }
 			: kind with { Wireframe = true, Through = wireframe >= 2 && !wantNearWins };
 
 		return StereoPass ? wired with { Stereo = true } : wired;
@@ -1785,7 +1785,7 @@ internal sealed partial class CoreSceneDrawer
 	private readonly CorePortableGlow glow = new();
 	private bool aside;
 
-	//Drawn aside only for its edges to be softened: the world finishes itself, and the finish writes it out as it is
+	//Drawn aside with nothing to add: the world finishes itself, and the finish writes it out as it is
 	private bool asideFinished;
 
 	//Last frame's run for the world's shading: where its surfaces had no build of it, the finish carries it from the next frame
@@ -2241,6 +2241,7 @@ internal sealed partial class CoreSceneDrawer
 		pyramidPipeline = 0;
 		composePipeline = 0;
 		whiteTexture = 0;
+		CoreWorldResolve.Release();
 	}
 
 	/// <summary>Lets go of the materials naming this viewport's pictures, all this drawing owns.</summary>
@@ -2469,11 +2470,8 @@ internal sealed partial class CoreSceneDrawer
 
 		var carry = CoreRenderDevice.PortableFrame && CorePointChain.Refused( lastFoldKey );
 
-		//A page's canvas is multisampled (BrowserSwapchain); elsewhere the portable frame's edges are softened in its finish
-		var asideSoftens = CoreRenderDevice.PortableFrame && Rinten.Rendering.DrawSettings.Fxaa && !OperatingSystem.IsBrowser();
-
 		aside = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
-			glow.Open( camera.PostProcess?.Glow, passes, carry, asideSoftens, exposure );
+			glow.Open( camera.PostProcess?.Glow, passes, carry, exposure );
 
 		//While an export writes down the runs it bakes, the one the portable frame carries beside its passes too
 		if ( CorePointChain.Recording && !CoreRenderDevice.PortableFrame ) FoldChain( camera, passes: true );
@@ -2726,12 +2724,11 @@ internal sealed partial class CoreSceneDrawer
 			( worldSize.x < pixels.Width - 0.5f || worldSize.y < pixels.Height - 0.5f );
 
 		//A temporal upscaler reads the world's picture and hands the compose one of its own - see CoreUpscaler.
-		//It is the anti-aliasing too, and the edge filter over it would only soften what it gathered.
+		//It is the anti-aliasing too, so the world takes one sample under it - see VkFrame.WorldSamples.
 		var upscaling = upscaler.Temporal && !worldEmpty;
 
-		//Not in the portable frame, which has no picture of the world for the filter to read - see RenderTier.
-		var softening = Rinten.Rendering.DrawSettings.Fxaa && !carryingUp && !upscaling && !worldEmpty &&
-			!CoreRenderDevice.PortableFrame;
+		//Multisampled, the world goes through its picture: the resolve weighs its samples in the light the screen will show
+		var sampled = CoreRenderDevice.WorldSampled && !worldEmpty;
 
 		//And whatever a project hung between the depth pre-pass and the window. Every one of these stages
 		//draws into the world's picture or reads it; AfterUI is the only one that happens past all of this.
@@ -2758,7 +2755,7 @@ internal sealed partial class CoreSceneDrawer
 		var fills = !overlayOnly && ( skyShown || backgroundPipeline != 0 );
 
 		//Whether the world's shading carries the point effects instead of the compose (see FoldChain)
-		var folding = foldKey is not null && !aside && !softening && !carryingUp && !stretching && !upscaling && !inspecting &&
+		var folding = foldKey is not null && !aside && !sampled && !carryingUp && !stretching && !upscaling && !inspecting &&
 			( !blending || CoreRenderDevice.PortableFrame ) &&
 			skyShown && !CorePointChain.Refused( foldKey );
 
@@ -2783,7 +2780,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//The portable frame (RenderTier) shades onto the screen, so it has no world picture to read
 		var readsWorld = !CoreRenderDevice.PortableFrame &&
-			( softening || carryingUp || stretching || upscaling || ( staged && !folds ) || inspecting || blending || !fills );
+			( sampled || carryingUp || stretching || upscaling || ( staged && !folds ) || inspecting || blending || !fills );
 
 		//Log when readsWorld flips, since the extra full-screen pass isn't visible in the picture
 		if ( readsWorld != saidReadsWorld || !saidReads )
@@ -2794,7 +2791,7 @@ internal sealed partial class CoreSceneDrawer
 			//Trace: views that come and go would repeat it; chased with the bisect convars
 			Log.Trace( readsWorld
 				? "the world is drawn into a picture of its own: " +
-					( softening ? "edges " : "" ) + ( carryingUp ? "upscale " : "" ) +
+					( sampled ? "edges " : "" ) + ( carryingUp ? "upscale " : "" ) +
 					( upscaling ? $"{upscaler.Kind} " : "" ) +
 					( staged && !folds ? "an effect " : "" ) +
 					( inspecting ? "a debug view " : "" ) + ( blending ? "something translucent " : "" ) +
@@ -2862,7 +2859,8 @@ internal sealed partial class CoreSceneDrawer
 			if ( drawn ) meshRender.Bin( depthPyramid );
 
 			//Movers' depth from their own shaders after the bin (DrawMoverDepth), so their shading pass tests early
-			if ( drawn && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false ) )
+			//Not opened with no movers: each close of a multisampled depth is a resolve
+			if ( drawn && meshRender.AnyMovers() && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false ) )
 			{
 				meshRender.DrawMoverDepth();
 				CoreRenderDevice.EndTarget();
@@ -3122,9 +3120,6 @@ internal sealed partial class CoreSceneDrawer
 				world.x > 1.0f && world.y > 1.0f &&
 				( world.x < pixels.Width - 0.5f || world.y < pixels.Height - 0.5f );
 
-			//Nothing drawn, nothing to soften: one test a frame instead of FXAA finding a flat picture per pixel
-			var soften = Rinten.Rendering.DrawSettings.Fxaa && !carrying && !upscaling && !worldEmpty;
-
 			//Every held point effect and the curve go into the compose, which reads every pixel anyway
 			if ( display )
 				RunStage( camera, Rinten.Rendering.Stage.Tonemapping, CoreRender.TargetKind.Display, near, far,
@@ -3133,11 +3128,7 @@ internal sealed partial class CoreSceneDrawer
 				RunStage( camera, Rinten.Rendering.Stage.Tonemapping, CoreRender.TargetKind.Scene, near, far,
 					settle: !PostInputsReady(), holds: true );
 
-			if ( upscaled != 0 )
-			{
-				carrying = false;
-				soften = false;
-			}
+			if ( upscaled != 0 ) carrying = false;
 
 			composeChain.Clear();
 			CorePostBlit.TakeChain( composeChain );
@@ -3146,9 +3137,6 @@ internal sealed partial class CoreSceneDrawer
 
 			//Anything after the compose? If not, it draws onto the window and the finished pair is never made
 			var after = Hung( camera, Rinten.Rendering.Stage.AfterPostProcess );
-
-			//No edge filter where an effect moved where the frame is read: the blocks of a pixelation are the point.
-			if ( soften && CorePointChain.Moves( CollectionsMarshal.AsSpan( composeChain ) ) ) soften = false;
 
 			var target = after ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
 			var pipeline = CorePointChain.Compose( CollectionsMarshal.AsSpan( composeChain ), split, target, carrying );
@@ -3181,7 +3169,7 @@ internal sealed partial class CoreSceneDrawer
 			var composePush = CorePostBlit.ComposePush( stackalloc byte[128],
 				new Vector2( pixels.Width, pixels.Height ),
 				new Vector2( carrying ? world.x : 0.0f, carrying ? world.y : 0.0f ),
-				soften, numbers, near, far,
+				numbers, near, far,
 				Indexed( composeFrame ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 1 ) ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) ),
@@ -3537,7 +3525,7 @@ internal sealed partial class CoreSceneDrawer
 	}
 
 	//A full-screen post pass out of its source: three vertices out of nothing, no depth.
-	private static ulong BakePost( string file, CoreRender.TargetKind target, string defines = null )
+	internal static ulong BakePost( string file, CoreRender.TargetKind target, string defines = null )
 	{
 		var vs = CoreShaderCache.Pass( file, "MainVs", CoreShaderCompiler.Stage.Vertex, defines );
 		var ps = CoreShaderCache.Pass( file, "MainPs", CoreShaderCompiler.Stage.Pixel, defines );

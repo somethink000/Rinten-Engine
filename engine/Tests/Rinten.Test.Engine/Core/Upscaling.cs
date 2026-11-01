@@ -20,7 +20,7 @@ public class UpscalingTests
 
 		var view = 0ul;
 		var wasUpscaler = Rinten.Rendering.DrawSettings.Upscaler;
-		var wasAa = Rinten.Rendering.DrawSettings.Fxaa;
+		var wasAa = Rinten.Rendering.DrawSettings.Msaa;
 
 		try
 		{
@@ -33,7 +33,7 @@ public class UpscalingTests
 			}
 
 			//Nothing that wanders between draws: the three pictures have to differ by the upscaler and by nothing else.
-			Rinten.Rendering.DrawSettings.Fxaa = false;
+			Rinten.Rendering.DrawSettings.Msaa = 0;
 
 			var scene = new Scene();
 			using var scope = scene.Push();
@@ -128,7 +128,7 @@ public class UpscalingTests
 		finally
 		{
 			Rinten.Rendering.DrawSettings.Upscaler = wasUpscaler;
-			Rinten.Rendering.DrawSettings.Fxaa = wasAa;
+			Rinten.Rendering.DrawSettings.Msaa = wasAa;
 
 			CoreRenderDevice.DestroyView( view );
 			CoreRenderDevice.Shutdown();

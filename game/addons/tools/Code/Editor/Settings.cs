@@ -2,12 +2,33 @@
 
 public static class SettingsMenus
 {
-	/// <summary>Whether the finished picture has its edges softened by the filter.</summary>
-	[Menu( "Editor", "Settings/FXAA" )]
-	public static bool Fxaa
+	//Temporal upscalers (r_upscaling 3-5) replace MSAA while they are on
+	[Menu( "Editor", "Settings/Anti-Aliasing/Off" )]
+	public static bool MsaaOff
 	{
-		get => ConsoleSystem.GetValueInt( "r_fxaa" ) != 0;
-		set => ConsoleSystem.SetValue( "r_fxaa", value ? "1" : "0" );
+		get => ConsoleSystem.GetValueInt( "r_msaa" ) < 2;
+		set => ConsoleSystem.SetValue( "r_msaa", "0" );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 2x" )]
+	public static bool Msaa2x
+	{
+		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 2;
+		set => ConsoleSystem.SetValue( "r_msaa", "2" );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 4x" )]
+	public static bool Msaa4x
+	{
+		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 4;
+		set => ConsoleSystem.SetValue( "r_msaa", "4" );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 8x" )]
+	public static bool Msaa8x
+	{
+		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 8;
+		set => ConsoleSystem.SetValue( "r_msaa", "8" );
 	}
 
 	/// <summary>Whether lighting is traced with hardware rays (r_rt), where the card can.</summary>
@@ -17,8 +38,6 @@ public static class SettingsMenus
 		get => EditorUtility.RenderSettings.RayTracing;
 		set => EditorUtility.RenderSettings.RayTracing = value;
 	}
-
-	//No MSAA entry: no desktop target is multisampled, and r_msaa is read by the web's frame alone
 
 	[Menu( "Editor", "Settings/Frame Rate Limit/10fps" )]
 	public static bool Frame10

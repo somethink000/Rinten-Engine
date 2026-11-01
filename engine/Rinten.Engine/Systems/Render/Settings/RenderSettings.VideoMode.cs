@@ -81,26 +81,19 @@ public partial class RenderSettings
 	private static bool? forced;
 	private static bool forcedRead;
 
-	/// <summary>How much the edges are smoothed.</summary>
+	/// <summary>How much the edges are smoothed, kept in r_msaa.</summary>
 	public MultisampleAmount AntiAliasQuality
 	{
-		get
+		get => Rinten.Rendering.DrawSettings.Msaa switch
 		{
-			var defaultValue = RenderMultisampleType.RENDER_MULTISAMPLE_4X;
-			var value = VideoSettings.Get( "aaquality", defaultValue );
+			>= 16 => MultisampleAmount.Multisample16x,
+			>= 8 => MultisampleAmount.Multisample8x,
+			>= 4 => MultisampleAmount.Multisample4x,
+			>= 2 => MultisampleAmount.Multisample2x,
+			_ => MultisampleAmount.MultisampleNone,
+		};
 
-			if ( !Enum.IsDefined( typeof( RenderMultisampleType ), value ) )
-				value = defaultValue;
-
-			return value.FromEngine();
-		}
-
-		set
-		{
-			VideoSettings.Set( "aaquality", value.ToEngine() );
-
-			Rinten.Rendering.DrawSettings.Msaa = value.SampleCount();
-		}
+		set => Rinten.Rendering.DrawSettings.Msaa = value.SampleCount();
 	}
 
 	internal struct VideoModeSnapshot

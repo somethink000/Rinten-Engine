@@ -29,8 +29,8 @@ public sealed partial class TileMap
 	//Chunks whose cells changed since they were last built.
 	private readonly HashSet<(TileMapLayer Layer, Vector2Int Chunk)> dirty = new();
 
-	//The tile set revision each layer was last built with, to notice a set being edited.
-	private readonly Dictionary<TileMapLayer, (TileSet Set, int Revision)> builtWith = new();
+	//What each layer was last built with: records name the sheet's table slot, which a reloaded picture moves.
+	private readonly Dictionary<TileMapLayer, (TileSet Set, int Revision, int Picture)> builtWith = new();
 
 	//What draws the chunks, one a z-index the map's layers use, so each is drawn in its place among the sprites - see TileMapSceneObject.
 	private readonly Dictionary<int, TileMapSceneObject> sceneObjects = new();
@@ -65,7 +65,7 @@ public sealed partial class TileMap
 		{
 			if ( layer is null ) continue;
 
-			var now = (layer.TileSet, layer.TileSet?.Revision ?? -1);
+			var now = (layer.TileSet, layer.TileSet?.Revision ?? -1, layer.TileSet?.Sheet?.SpriteIndex ?? 0);
 
 			if ( builtWith.TryGetValue( layer, out var was ) && was == now ) continue;
 
@@ -141,9 +141,8 @@ public sealed partial class TileMap
 
 		chunkDrawn ??= drawn[key] = new DrawnChunk();
 
-		//Every layer lies in the map's own plane. Which is on top is decided by the order the chunks are drawn in alone (depth passes when
-		//equal - LessOrEqual), not by standing them apart towards the viewer: a layer stood nearer would hide every sprite of the scene behind
-		//it by depth whatever their Order In Layer, and moving the map's layers would move what it hides.
+		//Layers of a map share exact corners, so their depths tie and drawing order decides. Other maps' and
+		//sprites' corners differ, and a tilted view rounds those depths apart: SetBack decides those ties.
 		BuildTiles( chunkDrawn, set, layer, chunk, transform );
 
 		chunkDrawn.Opaque = layer.Tint.a >= 1.0f;
@@ -187,6 +186,7 @@ public sealed partial class TileMap
 		var half = new Vector2( size.x * 0.5f * transform.Scale.x, size.y * 0.5f * transform.Scale.y );
 		var step = ( set.TileSize.x + set.Spacing.x ) / width;
 		var cutout = SpriteBatchSceneObject.SpriteData.PackFogAndAlphaCutout( 0.0f, AlphaCutoff );
+		var setBack = SetBack( layer.ZIndex );
 
 		//The four ways a tile can be turned, as the angles the record carries - worked out once a chunk rather than once a tile.
 		Span<Vector3> turned = stackalloc Vector3[4];
@@ -204,7 +204,7 @@ public sealed partial class TileMap
 			var info = set.Info( cell.Tile );
 			var region = set.Region( cell.Tile );
 
-			var flags = SpriteBatchSceneObject.SpriteFlags.Pixelated;
+			var flags = SpriteBatchSceneObject.SpriteFlags.Pixelated | SpriteBatchSceneObject.SpriteFlags.SetBack;
 			if ( ( ( cell.Flip & TileFlip.X ) == TileFlip.X ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipX;
 			if ( ( ( cell.Flip & TileFlip.Y ) == TileFlip.Y ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipY;
 
@@ -236,7 +236,7 @@ public sealed partial class TileMap
 				BillboardMode = (uint)SpriteRenderer.BillboardMode.None,
 				FogStrengthCutout = cutout,
 				Offset = new Vector2( 0.5f, 0.5f ),
-				BlendSheetUV = frames > 1 ? new Vector4( frames, info.FramesPerSecond, step, 0.0f ) : default,
+				BlendSheetUV = frames > 1 ? new Vector4( frames, info.FramesPerSecond, step, setBack ) : new Vector4( 0.0f, 0.0f, 0.0f, setBack ),
 			};
 		}
 
@@ -253,6 +253,25 @@ public sealed partial class TileMap
 		}
 
 		into.Bounds = count > 0 ? new BBox( min, max ) : default;
+	}
+
+	private static int mapsMade;
+
+	//Older maps draw first and stand further back, so a tie between maps goes the same way every frame
+	internal readonly int Sequence = mapsMade++;
+
+	//One step is about 30 float ulps of depth, past what rounding moves it; the most is 0.1% of the depth
+	private const float SetBackStep = 2e-6f;
+	private const int MapsApart = 16;
+	private const int OrdersApart = 32;
+
+	//Later in drawing order is less far back; coplanar sprites, not set back, always pass. Past the ranges ties can return
+	private float SetBack( int zIndex )
+	{
+		var order = Math.Clamp( zIndex + OrdersApart / 2, 0, OrdersApart - 1 );
+		var later = order * MapsApart + Sequence % MapsApart;
+
+		return ( OrdersApart * MapsApart - later ) * SetBackStep;
 	}
 
 	//Where a tile's alpha is cut: under it the pixel is not there at all.
@@ -413,6 +432,9 @@ internal sealed class TileMapSceneObject : SceneCustomObject
 		this.map = map;
 		this.zIndex = zIndex;
 		DrawOrder = zIndex;
+
+		//Below every other object of this order, so a sprite stands on the tiles of its order however late they were made
+		DrawTie = int.MinValue + map.Sequence;
 		Flags.CastShadows = false;
 	}
 

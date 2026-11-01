@@ -5355,7 +5355,7 @@ internal sealed partial class CoreSceneDrawer
 			var order = OrderOf( one );
 
 			var at = i;
-			while ( at > 0 && OrderOf( objects[at - 1] ) > order )
+			while ( at > 0 && OrderOf( objects[at - 1] ).CompareTo( order ) > 0 )
 			{
 				objects[at] = objects[at - 1];
 				at--;
@@ -5364,7 +5364,7 @@ internal sealed partial class CoreSceneDrawer
 			objects[at] = one;
 		}
 
-		static int OrderOf( SceneObject of ) => of is SceneCustomObject custom ? custom.DrawOrder : 0;
+		static (int, int) OrderOf( SceneObject of ) => of is SceneCustomObject custom ? (custom.DrawOrder, custom.DrawTie) : (0, 0);
 	}
 
 	//Runs every self-drawing object in a world, frustum-culled only when it has given bounds

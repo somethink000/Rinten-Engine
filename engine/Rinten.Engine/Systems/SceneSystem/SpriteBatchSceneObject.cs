@@ -50,6 +50,9 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		/// <summary>Pixel art: the picture is read as hard-edged texels, see SpriteRenderer.TextureFilter. The shader does it, because a picture here is bound with the one sampler it was made with and there is no table of others to pick from.</summary>
 		Pixelated = 0x20,
+
+		/// <summary>BlendSheetUV.w is how far to set the quad back in depth, as a fraction of its depth; see TileMap.SetBack.</summary>
+		SetBack = 0x40,
 	}
 
 	//GPU Resident representation of a sprite. Four-byte packing, which is how sprite_ps.shader reads it: packed to sixteen, Mono lays a Vector4

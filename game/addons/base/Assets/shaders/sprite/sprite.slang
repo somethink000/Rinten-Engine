@@ -107,6 +107,7 @@ static const int FlagFlipX = 0x2;
 static const int FlagFlipY = 0x4;
 static const int FlagAdditive = 0x10;
 static const int FlagPixelated = 0x20;
+static const int FlagSetBack = 0x40;
 
 struct V2F
 {
@@ -285,6 +286,10 @@ V2F MainVs( uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID )
 
 	V2F o;
 	o.position = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
+
+	//Camera depth is reversed, so towards nought is further away - see TileMap.SetBack
+	if ( ( sprite.RenderFlags & FlagSetBack ) != 0 ) o.position.z *= 1.0 - sprite.SheetW;
+
 	o.world = world;
 	o.normal = forward;
 

@@ -22,6 +22,9 @@ public class SceneCustomObject : SceneObject
 	/// <summary>Draw order among self-drawing objects, lower first; order not depth, so later draws on top</summary>
 	public int DrawOrder { get; set; }
 
+	//Breaks a tie of DrawOrder, lower first; without it a tie falls to the world's set order
+	internal int DrawTie { get; set; }
+
 	internal void RenderInternal()
 	{
 		if ( !this.IsValid() )

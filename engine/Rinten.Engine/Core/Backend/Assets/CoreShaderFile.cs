@@ -15,7 +15,7 @@ internal static partial class CoreShaderFile
 	public const uint Magic = 0x53535345;
 
 	/// <summary>Blob layout version; older or ambiguous versions are refused and rebuilt</summary>
-	public const uint Version = 22;
+	public const uint Version = 23;
 
 
 	/// <summary>Which stage a blob is.</summary>
@@ -82,9 +82,15 @@ internal static partial class CoreShaderFile
 		/// <summary>The cluster pass's corners now and a frame back, and their screen motion, for the velocity picture.</summary>
 		ClusterVelocityVertex = 23,
 		ClusterVelocityPixel = 24,
+
+		/// <summary>Impostor planes shaded per pixel by the real triangle their sheet names - see impostor_surface.slang.</summary>
+		ImpostorVertex = 25,
+		ImpostorPixel = 26,
+		ImpostorScreenPixel = 27,
+		ImpostorDepthPixel = 28,
 	}
 
-	public const int StageCount = 25;
+	public const int StageCount = 29;
 
 	//How many languages a stage is kept in: the full frame's SPIR-V, WGSL, the portable
 	//frame's SPIR-V, GLSL, and the GLSL that draws both of a headset's eyes at once.
@@ -111,13 +117,14 @@ internal static partial class CoreShaderFile
 			or Stage.SkinnedScenePixel or Stage.MorphedSkinnedVertex or Stage.SkinnedScreenPixel;
 		var scene = stage is Stage.ScenePixel or Stage.SkinnedScenePixel;
 		var compute = stage is Stage.Compute;
-		var depth = stage is Stage.DepthPixel or Stage.InstancedDepthPixel or Stage.ClusterDepthPixel;
+		var depth = stage is Stage.DepthPixel or Stage.InstancedDepthPixel or Stage.ClusterDepthPixel
+			or Stage.ImpostorDepthPixel;
 		var cluster = IsCluster( stage );
 		var instanced = IsInstanced( stage );
 
 		//Stages finishing the picture themselves: one 8-bit target, exposure and curve here, as no compose follows
 		var screen = stage is Stage.ClusterScreenPixel or Stage.ScreenPixel or Stage.SkinnedScreenPixel
-			or Stage.InstancedScreenPixel;
+			or Stage.InstancedScreenPixel or Stage.ImpostorScreenPixel;
 
 		var capture = IsSkyCapture( stage );
 
@@ -125,6 +132,7 @@ internal static partial class CoreShaderFile
 
 		return ( skinned ? "#define SKINNED 1\n" : "" ) +
 			( cluster ? "#define CLUSTER 1\n" : "" ) +
+			( IsImpostor( stage ) ? "#define IMPOSTOR 1\n" : "" ) +
 			( instanced ? "#define INSTANCED 1\n" : "" ) +
 			( cluster && !screen && !depth ? "#define TARGET_SCENE 1\n" : "" ) +
 			( screen ? "#define TARGET_SCREEN 1\n" : "" ) +
@@ -146,7 +154,11 @@ internal static partial class CoreShaderFile
 	/// <summary>Whether a stage is one of the cluster pass's.</summary>
 	public static bool IsCluster( Stage stage )
 		=> stage is Stage.ClusterVertex or Stage.ClusterPixel or Stage.ClusterScreenPixel
-			or Stage.ClusterDepthPixel;
+			or Stage.ClusterDepthPixel || IsImpostor( stage );
+
+	/// <summary>Whether a stage is one of the impostor planes' - see impostor_surface.slang.</summary>
+	public static bool IsImpostor( Stage stage )
+		=> stage is Stage.ImpostorVertex or Stage.ImpostorPixel or Stage.ImpostorScreenPixel or Stage.ImpostorDepthPixel;
 
 	/// <summary>Whether a stage is one of the cluster pass's velocity pair.</summary>
 	public static bool IsClusterVelocity( Stage stage )
@@ -240,6 +252,9 @@ internal static partial class CoreShaderFile
 		if ( stage is Stage.ClusterVertex ) return ( "MainClusterVs", CoreShaderCompiler.Stage.Vertex );
 		if ( stage is Stage.ClusterPixel or Stage.ClusterScreenPixel or Stage.ClusterDepthPixel )
 			return ( "MainClusterPs", CoreShaderCompiler.Stage.Pixel );
+
+		if ( stage is Stage.ImpostorVertex ) return ( "MainImpostorVs", CoreShaderCompiler.Stage.Vertex );
+		if ( IsImpostor( stage ) ) return ( "MainImpostorPs", CoreShaderCompiler.Stage.Pixel );
 
 		if ( stage is Stage.ClusterVelocityVertex ) return ( "MainClusterVelocityVs", CoreShaderCompiler.Stage.Vertex );
 		if ( stage is Stage.ClusterVelocityPixel ) return ( "MainClusterVelocityPs", CoreShaderCompiler.Stage.Pixel );
@@ -351,8 +366,11 @@ internal static partial class CoreShaderFile
 			if ( IsCluster( stage ) )
 			{
 				//Without the vertex stage the pass cannot draw, so its pixel stages are not built
+				//The impostor planes' pixel stages wait for their own vertex stage, the rest for the cluster one
+				var first = IsImpostor( stage ) ? Stage.ImpostorVertex : Stage.ClusterVertex;
+
 				compiling[i] = surface
-					? After( stage is Stage.ClusterVertex ? null : compiling[(int)Stage.ClusterVertex],
+					? After( stage == first ? null : compiling[(int)first],
 						() => Build( path, entry, kind, draws + Defines( stage ), format, ClusterSurface, instead, build ) )
 					: none;
 

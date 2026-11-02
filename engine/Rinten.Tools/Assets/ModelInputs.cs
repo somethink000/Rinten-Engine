@@ -17,6 +17,9 @@ internal static class ModelInputs
 	//A line of a record: a few fields of a file, and what they said.
 	private const string FieldsOf = "K";
 
+	//A line of a record: the compiler's build it was made by - see ModelDefinitionCompiler.Build.
+	private const string BuiltBy = "B";
+
 	private static readonly object gate = new();
 
 	//The exports each definition names, by when the definition was written.
@@ -26,7 +29,7 @@ internal static class ModelInputs
 	private static readonly Dictionary<string, (DateTime Written, Record Record)> records = new( StringComparer.Ordinal );
 
 	//What a build read.
-	private sealed record Record( string[] Files, (string Path, string Key)[] Fields );
+	private sealed record Record( string[] Files, (string Path, string Key)[] Fields, int Build );
 
 	/// <summary>Write down what a build of <paramref name="definitionPath"/> read - see ModelDefinitionCompiler.Compile.</summary>
 	public static void Save( string definitionPath, ImportReads.Recording reads )
@@ -35,6 +38,8 @@ internal static class ModelInputs
 
 		var definition = Normal( definitionPath );
 		var text = new StringBuilder();
+
+		text.Append( BuiltBy ).Append( '\t' ).Append( ModelDefinitionCompiler.Build ).Append( '\n' );
 
 		foreach ( var file in reads.Files )
 		{
@@ -94,6 +99,9 @@ internal static class ModelInputs
 
 		//An engine model is built before it ships, and no project has its record: its named exports are the whole check
 		if ( record is null ) return !keeping || !InProject( definition );
+
+		//Built by an older compiler, which made something else of the same files
+		if ( record.Build != ModelDefinitionCompiler.Build ) return false;
 
 		foreach ( var file in record.Files )
 		{
@@ -184,6 +192,7 @@ internal static class ModelInputs
 
 		var files = new List<string>();
 		var fields = new List<(string, string)>();
+		var build = 0;
 
 		try
 		{
@@ -193,6 +202,7 @@ internal static class ModelInputs
 
 				if ( parts.Length == 2 && parts[0] == WholeFile ) files.Add( parts[1] );
 				else if ( parts.Length == 3 && parts[0] == FieldsOf ) fields.Add( (parts[1], parts[2]) );
+				else if ( parts.Length == 2 && parts[0] == BuiltBy && int.TryParse( parts[1], out var by ) ) build = by;
 			}
 		}
 		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
@@ -200,7 +210,7 @@ internal static class ModelInputs
 			return null;
 		}
 
-		var record = new Record( files.ToArray(), fields.ToArray() );
+		var record = new Record( files.ToArray(), fields.ToArray(), build );
 
 		lock ( gate ) records[definition] = (written, record);
 

@@ -10,7 +10,7 @@ internal static unsafe class ModelFormat
 	public const uint Magic = 0x4D535345;
 
 	/// <summary>Bumped whenever the layout below changes in a way an older reader would misread. The reader refuses anything it does not recognise rather than reading garbage into the right-shaped structs.</summary>
-	public const uint Version = 9;
+	public const uint Version = 10;
 
 	/// <summary>The first version that carries clusters; an older file is read and its clusters are cut on load until the editor rebuilds it.</summary>
 	public const uint VersionClusters = 6;
@@ -23,6 +23,9 @@ internal static unsafe class ModelFormat
 
 	/// <summary>The first version whose clusters are a chain's - five float4s, without the two spheres a DAG cut each cluster by. An older file's clusters are not read: it is cut on load, level nought alone, until the editor rebuilds it.</summary>
 	public const uint VersionChains = 9;
+
+	/// <summary>The first version whose impostor can carry its picture of triangles - see <see cref="Header.impostorPicture"/>. An older one is drawn by the impostor's own surface.</summary>
+	public const uint VersionImpostorPicture = 10;
 
 	/// <summary>The oldest version the reader still takes.</summary>
 	public const uint VersionOldest = 5;
@@ -401,6 +404,10 @@ internal static unsafe class ModelFormat
 		public Block impostor;       //Impostor, one
 		public Block impostorColour; //bytes, a texture file
 		public Block impostorShape;  //bytes, a texture file
+
+		//Which triangle of the model each texel of the impostor's sheet shows, and where in it, so its planes are shaded by the model's own surfaces:
+		//a texture file of words - see ModelBuilder.ImpostorPicture. None where the model's cut would not name them, and in a file from before VersionImpostorPicture.
+		public Block impostorPicture; //bytes, a texture file
 	}
 
 	/// <summary>One bit each of what a model says about itself - <see cref="Header.flags"/>.</summary>
@@ -424,6 +431,9 @@ internal static unsafe class ModelFormat
 
 	/// <summary>How long the header was before the impostor.</summary>
 	public static readonly int HeaderSizeBeforeImpostor = (int)Marshal.OffsetOf<Header>( nameof( Header.impostor ) );
+
+	/// <summary>How long the header was before the impostor's picture.</summary>
+	public static readonly int HeaderSizeBeforeImpostorPicture = (int)Marshal.OffsetOf<Header>( nameof( Header.impostorPicture ) );
 
 	public static readonly int HeaderSize = sizeof( Header );
 	public static readonly int VertexSize = sizeof( PackedVertex );

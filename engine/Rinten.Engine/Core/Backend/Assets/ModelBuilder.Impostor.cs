@@ -21,6 +21,9 @@ internal sealed unsafe partial class ModelBuilder
 
 		/// <summary>How rough the surface is - its number, which a map of it averages to from that far away.</summary>
 		public float Roughness = 0.5f;
+
+		/// <summary>Whether its shader multiplies the colour by the mesh's corner colour - see CoreResources.TintsPerVertex.</summary>
+		public bool VertexTint;
 	}
 
 	//Impostor texels across the model's sphere, and the on-screen pixel size where it takes over
@@ -50,17 +53,23 @@ internal sealed unsafe partial class ModelBuilder
 	//Share of self-shading baked into impostor colour, since one plane cannot shadow itself
 	private const float ImpostorShade = 0.5f;
 
-	//Which of the meshes is the impostor's plane, and the error it stands in with - see LinkImpostor.
+	//The first of the meshes that are the impostor's planes - one a material the model wears, in a row - how many, and the error they stand in with - see LinkImpostor.
 	private int impostorMesh = -1;
+	private int impostorMeshes;
 	private float impostorError;
 
-	//What the file carries of it: its grid and sphere, and its two pictures as texture files.
+	//What the file carries of it: its grid and sphere, and its pictures as texture files.
 	private ModelFormat.Impostor impostorInfo;
-	private byte[] impostorColour, impostorShape;
+	private byte[] impostorColour, impostorShape, impostorPicture;
 
-	//Draws the model into the impostor's views and adds the plane it is drawn on, wearing material. Returns whether it did: not
+	//The sheet's triangles at every level, kept until the clusters are cut and they can be named by cluster - see ImpostorPicture.
+	private int[][] impostorPicked;
+	private Vector2[][] impostorPickedWhere;
+	private int impostorSheetWide, impostorSheetTall;
+
+	//Draws the model into the impostor's views and adds the planes it is drawn on, one a material, each wearing it. Returns whether it did: not
 	//for a model with bones or blend shapes, whose shape is not the one it stands in its file, and not for one that came out empty.
-	internal bool MakeImpostor( Look[] looks, string material )
+	internal bool MakeImpostor( Look[] looks )
 	{
 		if ( bones.Count > 0 || morphs.Count > 0 || vertices.Count == 0 || impostorMesh >= 0 ) return false;
 
@@ -151,58 +160,80 @@ internal sealed unsafe partial class ModelBuilder
 
 		if ( impostorColour is null || impostorShape is null ) return false;
 
-		var first = vertices.Count;
-		var firstIndex = indices.Count;
+		impostorPicked = sheet.Picked;
+		impostorPickedWhere = sheet.PickedWhere;
+		impostorSheetWide = sheetWide;
+		impostorSheetTall = sheetTall;
+
 		var spread = 0.0f;
+		foreach ( var face in drawn ) spread = MathF.Max( spread, face.Spread );
 
-		//One one-sided quad per face, placed at the view's median depth; UV1 holds the model's sphere
-		foreach ( var face in drawn )
+		//The meshes it is a picture of, by the material they wear: each material's planes are drawn by its own shader, and keep the texels of its parts alone
+		var parts = new Dictionary<string, uint>( StringComparer.OrdinalIgnoreCase );
+		var count = meshes.Count;
+
+		for ( var m = 0; m < count; m++ )
 		{
-			spread = MathF.Max( spread, face.Spread );
+			if ( ( meshes[m].Flags & ModelFormat.MeshFlags.StandsIn ) != 0 || meshes[m].LevelOf >= 0 || meshes[m].IndexCount < 3 ) continue;
 
-			var at = (uint)( vertices.Count - first );
-			var (x0, y0, _, _) = face.Trim;
-
-			//The outline's corners in order, anticlockwise seen from the face's side - the
-			//face a counterclockwise triangle shows - and a fan of triangles over them.
-			foreach ( var (x, y) in face.Outline )
-			{
-				var across = face.Frame.Left + ( x / (float)face.Wide * face.Frame.Wide );
-				var down = face.Frame.Top - ( y / (float)face.Tall * face.Frame.Tall );
-
-				vertices.Add( new Vertex
-				{
-					Position = ( face.Right * across ) + ( face.Up * down ) + ( face.Toward * face.Plane ),
-					Color = new Color32( 255, 255, 255, 255 ),
-					Normal = face.Toward,
-					Tangent = new Vector4( face.Right, 1 ),
-					TexCoord0 = new Vector4( ( face.SheetX + x - x0 ) / (float)sheetWide, ( face.SheetY + y - y0 ) / (float)sheetTall, 0, 0 ),
-					TexCoord1 = new Vector4( centre, radius ),
-				} );
-			}
-
-			for ( var corner = 2; corner < face.Outline.Count; corner++ )
-			{
-				indices.Add( at );
-				indices.Add( at + (uint)corner - 1 );
-				indices.Add( at + (uint)corner );
-			}
+			var name = meshes[m].Material ?? "";
+			parts[name] = parts.GetValueOrDefault( name ) | PartBit( m );
 		}
 
-		meshes.Add( new MeshEntry
+		impostorMesh = meshes.Count;
+
+		foreach ( var (wearing, mask) in parts )
 		{
-			Name = "impostor",
-			Material = material ?? "",
-			FirstIndex = (uint)firstIndex,
-			IndexCount = (uint)( indices.Count - firstIndex ),
-			FirstVertex = (uint)first,
-			VertexCount = (uint)( vertices.Count - first ),
-			Flags = ModelFormat.MeshFlags.StandsIn,
-		} );
+			var first = vertices.Count;
+			var firstIndex = indices.Count;
+
+			//One one-sided quad per face, placed at the view's median depth; UV1 holds the model's sphere, the colour which parts it shows
+			foreach ( var face in drawn )
+			{
+				var at = (uint)( vertices.Count - first );
+				var (x0, y0, _, _) = face.Trim;
+
+				//The outline's corners in order, anticlockwise seen from the face's side - the
+				//face a counterclockwise triangle shows - and a fan of triangles over them.
+				foreach ( var (x, y) in face.Outline )
+				{
+					var across = face.Frame.Left + ( x / (float)face.Wide * face.Frame.Wide );
+					var down = face.Frame.Top - ( y / (float)face.Tall * face.Frame.Tall );
+
+					vertices.Add( new Vertex
+					{
+						Position = ( face.Right * across ) + ( face.Up * down ) + ( face.Toward * face.Plane ),
+						Color = new Color32( (byte)mask, (byte)( mask >> 8 ), (byte)( mask >> 16 ), (byte)( mask >> 24 ) ),
+						Normal = face.Toward,
+						Tangent = new Vector4( face.Right, 1 ),
+						TexCoord0 = new Vector4( ( face.SheetX + x - x0 ) / (float)sheetWide, ( face.SheetY + y - y0 ) / (float)sheetTall, 0, 0 ),
+						TexCoord1 = new Vector4( centre, radius ),
+					} );
+				}
+
+				for ( var corner = 2; corner < face.Outline.Count; corner++ )
+				{
+					indices.Add( at );
+					indices.Add( at + (uint)corner - 1 );
+					indices.Add( at + (uint)corner );
+				}
+			}
+
+			meshes.Add( new MeshEntry
+			{
+				Name = "impostor",
+				Material = wearing,
+				FirstIndex = (uint)firstIndex,
+				IndexCount = (uint)( indices.Count - firstIndex ),
+				FirstVertex = (uint)first,
+				VertexCount = (uint)( vertices.Count - first ),
+				Flags = ModelFormat.MeshFlags.StandsIn,
+			} );
+		}
 
 		if ( weighted ) PadSkin();
 
-		impostorMesh = meshes.Count - 1;
+		impostorMeshes = meshes.Count - impostorMesh;
 
 		//A texel: at a pixel of error the cut takes the impostor where the model is ImpostorTexels pixels across on the screen.
 		impostorError = texel;
@@ -226,6 +257,9 @@ internal sealed unsafe partial class ModelBuilder
 		return true;
 	}
 
+	//A mesh's bit in a plane's mask of the parts it shows: one a mesh, the last standing for every mesh past it - see impostor_surface.slang.
+	internal static uint PartBit( int mesh ) => 1u << Math.Min( mesh, 31 );
+
 	//value up to a whole number of steps, and never nought.
 	private static int Align( int value, int step ) => Math.Max( step, ( value + step - 1 ) / step * step );
 
@@ -236,6 +270,10 @@ internal sealed unsafe partial class ModelBuilder
 		public readonly int Wide, Tall;
 		public readonly byte[][] Colour = new byte[ImpostorLevels][];
 		public readonly byte[][] Shape = new byte[ImpostorLevels][];
+
+		/// <summary>Each texel's triangle and where in it, at every level - see Raster.Triangle; nought where the model is not.</summary>
+		public readonly int[][] Picked = new int[ImpostorLevels][];
+		public readonly Vector2[][] PickedWhere = new Vector2[ImpostorLevels][];
 
 		public Frame Frame;
 		public Vector3 Toward, Right, Up;
@@ -261,12 +299,14 @@ internal sealed unsafe partial class ModelBuilder
 			{
 				Colour[k] = new byte[( wide >> k ) * ( tall >> k ) * 4];
 				Shape[k] = new byte[( wide >> k ) * ( tall >> k ) * 4];
+				Picked[k] = new int[( wide >> k ) * ( tall >> k )];
+				PickedWhere[k] = new Vector2[( wide >> k ) * ( tall >> k )];
 			}
 		}
 	}
 
-	//Every level of a sheet's two pictures.
-	private readonly record struct SheetLevels( byte[][] Colour, byte[][] Shape );
+	//Every level of a sheet's two pictures, and its triangles.
+	private readonly record struct SheetLevels( byte[][] Colour, byte[][] Shape, int[][] Picked, Vector2[][] PickedWhere );
 
 	//The faces' trimmed rectangles packed into one sheet, as small as they go: in rows, tallest first, for each width a whole number of SheetAligns
 	//from the widest face to all of them side by side - the width that leaves the least sheet. Each face's levels copied into its place at every level.
@@ -324,6 +364,8 @@ internal sealed unsafe partial class ModelBuilder
 
 		var colour = new byte[ImpostorLevels][];
 		var shape = new byte[ImpostorLevels][];
+		var picked = new int[ImpostorLevels][];
+		var pickedWhere = new Vector2[ImpostorLevels][];
 
 		for ( var k = 0; k < ImpostorLevels; k++ )
 		{
@@ -331,6 +373,8 @@ internal sealed unsafe partial class ModelBuilder
 			var tall = sheetTall >> k;
 			colour[k] = new byte[wide * tall * 4];
 			shape[k] = new byte[wide * tall * 4];
+			picked[k] = new int[wide * tall];
+			pickedWhere[k] = new Vector2[wide * tall];
 
 			foreach ( var f in faces )
 			{
@@ -344,11 +388,13 @@ internal sealed unsafe partial class ModelBuilder
 
 					System.Array.Copy( f.Colour[k], from, colour[k], to, ( x1 - x0 ) * 4 );
 					System.Array.Copy( f.Shape[k], from, shape[k], to, ( x1 - x0 ) * 4 );
+					System.Array.Copy( f.Picked[k], from / 4, picked[k], to / 4, x1 - x0 );
+					System.Array.Copy( f.PickedWhere[k], from / 4, pickedWhere[k], to / 4, x1 - x0 );
 				}
 			}
 		}
 
-		return new SheetLevels( colour, shape );
+		return new SheetLevels( colour, shape, picked, pickedWhere );
 	}
 
 	//Each mesh's look with the surface its art says it wears folded in - its colour into the tint, its roughness over the material's.
@@ -423,6 +469,10 @@ internal sealed unsafe partial class ModelBuilder
 		public readonly Color[] Tint;
 		public readonly Vector3[] Facing;
 
+		/// <summary>Which triangle of the model each sample is, one more than its number in the index list - nought for none - and where in it, as the weights of its second and third corners.</summary>
+		public readonly int[] Triangle;
+		public readonly Vector2[] Where;
+
 		public Raster( int wide, int tall )
 		{
 			Wide = wide;
@@ -430,6 +480,8 @@ internal sealed unsafe partial class ModelBuilder
 			Depth = new float[wide * tall];
 			Tint = new Color[wide * tall];
 			Facing = new Vector3[wide * tall];
+			Triangle = new int[wide * tall];
+			Where = new Vector2[wide * tall];
 			System.Array.Fill( Depth, float.MinValue );
 		}
 	}
@@ -508,7 +560,7 @@ internal sealed unsafe partial class ModelBuilder
 				ref readonly var c = ref flat[(int)( mesh.FirstVertex + indices[(int)( mesh.FirstIndex + i + 2 )] )];
 
 				drawn |= Triangle( in a, in b, in c, look, right, up, toward, frame.Left, frame.Wide, frame.Top, frame.Tall,
-					raster.Wide, raster.Tall, raster.Depth, raster.Tint, raster.Facing );
+					raster.Wide, raster.Tall, raster.Depth, raster.Tint, raster.Facing, raster.Triangle, raster.Where, (int)( ( mesh.FirstIndex + i ) / 3 ) );
 			}
 		}
 
@@ -664,6 +716,9 @@ internal sealed unsafe partial class ModelBuilder
 
 				if ( best < 0 ) continue;
 
+				face.Picked[0][here] = raster.Triangle[best];
+				face.PickedWhere[0][here] = raster.Where[best];
+
 				var tint = raster.Tint[best];
 				level.Set( here, new Color( tint.r * shade, tint.g * shade, tint.b * shade, 1.0f ),
 					Model( raster.Facing[best] ).Normal, 1.0f, tint.a );
@@ -721,6 +776,26 @@ internal sealed unsafe partial class ModelBuilder
 			}
 
 			coarse.Write( face.Colour[k], face.Shape[k], toward );
+
+			//And its triangles: the first of the four under each texel that has one, not a mean - a triangle cannot be averaged
+			var finer = k - 1;
+			var finerWide = wide >> finer;
+
+			for ( var y = 0; y < levelTall; y++ )
+			{
+				for ( var x = 0; x < levelWide; x++ )
+				{
+					for ( var d = 0; d < 4; d++ )
+					{
+						var at = ( ( ( y * 2 ) + ( d >> 1 ) ) * finerWide ) + ( x * 2 ) + ( d & 1 );
+						if ( face.Picked[finer][at] == 0 ) continue;
+
+						face.Picked[k][( y * levelWide ) + x] = face.Picked[finer][at];
+						face.PickedWhere[k][( y * levelWide ) + x] = face.PickedWhere[finer][at];
+						break;
+					}
+				}
+			}
 		}
 
 		return true;
@@ -976,7 +1051,8 @@ internal sealed unsafe partial class ModelBuilder
 
 	//One triangle into the samples, nearest wins; whether any sample took it.
 	private static bool Triangle( in Vertex a, in Vertex b, in Vertex c, Look look, Vector3 right, Vector3 up, Vector3 toward,
-		float left, float wide, float topAt, float tall, int across, int down, float[] depth, Color[] tint, Vector3[] facing )
+		float left, float wide, float topAt, float tall, int across, int down, float[] depth, Color[] tint, Vector3[] facing,
+		int[] triangle, Vector2[] where, int number )
 	{
 		//Onto the samples: x across from the left, y down from the top.
 		float Sx( in Vertex v ) => ( v.Position.Dot( right ) - left ) / wide * across;
@@ -1040,6 +1116,16 @@ internal sealed unsafe partial class ModelBuilder
 					colour = new Color( Linear( texel.r ) * colour.r, Linear( texel.g ) * colour.g, Linear( texel.b ) * colour.b, 1.0f );
 				}
 
+				//And the corners' colour, authored in the curve like a picture's, where the shader paints with it
+				if ( look?.VertexTint == true )
+				{
+					var r = ( Linear( a.Color.r ) * wa ) + ( Linear( b.Color.r ) * wb ) + ( Linear( c.Color.r ) * wc );
+					var g = ( Linear( a.Color.g ) * wa ) + ( Linear( b.Color.g ) * wb ) + ( Linear( c.Color.g ) * wc );
+					var bl = ( Linear( a.Color.b ) * wa ) + ( Linear( b.Color.b ) * wb ) + ( Linear( c.Color.b ) * wc );
+
+					colour = new Color( colour.r * r, colour.g * g, colour.b * bl, 1.0f );
+				}
+
 				var normal = ( a.Normal * wa ) + ( b.Normal * wb ) + ( c.Normal * wc );
 				normal = normal.Length > 1e-6f ? normal.Normal : toward;
 
@@ -1047,6 +1133,8 @@ internal sealed unsafe partial class ModelBuilder
 				if ( normal.Dot( toward ) < 0.0f ) normal = -normal;
 
 				depth[at] = z;
+				triangle[at] = number + 1;
+				where[at] = new Vector2( wb, wc );
 
 				//Its fourth number the surface's roughness, which rides with the colour into the mean of a pixel's samples - see DrawView.
 				tint[at] = new Color( colour.r, colour.g, colour.b, look?.Roughness ?? 0.5f );
@@ -1114,6 +1202,128 @@ internal sealed unsafe partial class ModelBuilder
 	}
 
 
+	//Most clusters a model's first level may have for a texel to name one - see ImpostorPicture.
+	internal const int PictureClusters = ( 1 << 13 ) - 1;
+
+	//A word a texel: level-nought cluster + 1 (13 bits), triangle (7), second and third corner weights (6 each); see impostor_surface.slang.
+	//Each plane's corners hold their own cluster's number in TexCoord0.z. None where the cut does not allow it.
+	private void ImpostorPicture( LevelChain.Build built, Span<Vertex> written )
+	{
+		impostorPicture = null;
+		if ( impostorPicked is null || impostorMesh < 0 ) return;
+
+		var clusters = CollectionsMarshal.AsSpan( built.Clusters );
+		var corners = new Dictionary<(uint, uint, uint), (int Cluster, int Triangle, uint A, uint B, uint C)>();
+		var planes = new int[impostorMeshes];
+		System.Array.Fill( planes, -1 );
+
+		for ( var i = 0; i < clusters.Length; i++ )
+		{
+			ref readonly var cluster = ref clusters[i];
+			var part = (int)( cluster.partLevel & 0xFFFFu );
+
+			if ( part >= impostorMesh && part < impostorMesh + impostorMeshes )
+			{
+				//A plane in more clusters than one cannot say which it is with one number
+				if ( planes[part - impostorMesh] >= 0 ) return;
+
+				planes[part - impostorMesh] = i;
+				continue;
+			}
+
+			if ( ( cluster.partLevel >> 16 ) != 0 ) continue;
+			if ( i >= PictureClusters ) return;
+
+			var triangles = (int)( cluster.counts >> 16 );
+
+			for ( var t = 0; t < triangles; t++ )
+			{
+				var from = (int)( ( cluster.triangleOffset + (uint)t ) * 3 );
+				var a = built.Vertices[(int)( cluster.vertexOffset + built.Triangles[from] )];
+				var b = built.Vertices[(int)( cluster.vertexOffset + built.Triangles[from + 1] )];
+				var c = built.Vertices[(int)( cluster.vertexOffset + built.Triangles[from + 2] )];
+
+				corners.TryAdd( Sorted( a, b, c ), (i, t, a, b, c) );
+			}
+		}
+
+		for ( var p = 0; p < impostorMeshes; p++ )
+			if ( planes[p] < 0 ) return;
+
+		var chain = new List<(byte[], int, int)>( ImpostorLevels );
+
+		for ( var k = 0; k < ImpostorLevels; k++ )
+		{
+			var picked = impostorPicked[k];
+			var where = impostorPickedWhere[k];
+			var bytes = new byte[picked.Length * 4];
+
+			for ( var at = 0; at < picked.Length; at++ )
+			{
+				if ( picked[at] == 0 ) continue;
+
+				var number = picked[at] - 1;
+				if ( !Corners( number, out var ca, out var cb, out var cc ) ) continue;
+				if ( !corners.TryGetValue( Sorted( ca, cb, cc ), out var found ) ) continue;
+
+				//The weights by corner, put in the cluster's order of the same three.
+				var weights = ( A: 1.0f - where[at].x - where[at].y, B: where[at].x, C: where[at].y );
+				float Weight( uint vertex ) => vertex == ca ? weights.A : vertex == cb ? weights.B : weights.C;
+
+				var second = (uint)Math.Clamp( MathF.Round( Weight( found.B ) * 63.0f ), 0.0f, 63.0f );
+				var third = (uint)Math.Clamp( MathF.Round( Weight( found.C ) * 63.0f ), 0.0f, 63.0f );
+				var word = ( (uint)( found.Cluster + 1 ) << 19 ) | ( (uint)found.Triangle << 12 ) | ( second << 6 ) | third;
+
+				bytes[( at * 4 ) + 0] = (byte)word;
+				bytes[( at * 4 ) + 1] = (byte)( word >> 8 );
+				bytes[( at * 4 ) + 2] = (byte)( word >> 16 );
+				bytes[( at * 4 ) + 3] = (byte)( word >> 24 );
+			}
+
+			chain.Add( (bytes, impostorSheetWide >> k, impostorSheetTall >> k) );
+		}
+
+		var picture = CoreTextureFile.BuildLevels( chain, srgb: false, compress: false, keepAlpha: true );
+		if ( picture is null ) return;
+
+		for ( var p = 0; p < impostorMeshes; p++ )
+		{
+			var mesh = meshes[impostorMesh + p];
+
+			for ( var v = mesh.FirstVertex; v < mesh.FirstVertex + mesh.VertexCount && v < written.Length; v++ )
+				written[(int)v].TexCoord0.z = planes[p];
+		}
+
+		impostorPicture = picture;
+	}
+
+	//The three corners of a triangle by its number in the index list, as the model numbers its vertices.
+	private bool Corners( int number, out uint a, out uint b, out uint c )
+	{
+		a = b = c = 0;
+		var index = (uint)number * 3;
+
+		foreach ( var mesh in meshes )
+		{
+			if ( index < mesh.FirstIndex || index + 3 > mesh.FirstIndex + mesh.IndexCount ) continue;
+
+			a = mesh.FirstVertex + indices[(int)index];
+			b = mesh.FirstVertex + indices[(int)index + 1];
+			c = mesh.FirstVertex + indices[(int)index + 2];
+			return true;
+		}
+
+		return false;
+	}
+
+	private static (uint, uint, uint) Sorted( uint a, uint b, uint c )
+	{
+		if ( a > b ) (a, b) = (b, a);
+		if ( b > c ) (b, c) = (c, b);
+		if ( a > b ) (a, b) = (b, a);
+		return (a, b, c);
+	}
+
 	//Makes the impostor the top LOD level by error, bounded by the sphere with no cone
 	private void LinkImpostor( LevelChain.Build built )
 	{
@@ -1129,7 +1339,7 @@ internal sealed unsafe partial class ModelBuilder
 			var cluster = clusters[i];
 			var part = cluster.partLevel & 0xFFFFu;
 
-			if ( part == (uint)impostorMesh )
+			if ( part >= (uint)impostorMesh && part < (uint)( impostorMesh + impostorMeshes ) )
 			{
 				cluster.error = impostorError;
 				cluster.parentError = 1e30f;

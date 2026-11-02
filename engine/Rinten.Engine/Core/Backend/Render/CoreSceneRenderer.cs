@@ -65,6 +65,9 @@ internal static unsafe class CoreSceneRenderer
 
 		/// <summary>Metres one unit of its first UVs covers, for texture streaming; nought if unknown.</summary>
 		public float MetresPerUv;
+
+		/// <summary>An impostor plane shaded by its own material: its page's cover and triangle pictures, or nought.</summary>
+		public ulong ImpostorCover, ImpostorPicture;
 	}
 
 	//MeshDraw.MetresPerUv for a range of a model's triangles: the square root of their area
@@ -196,6 +199,9 @@ internal static unsafe class CoreSceneRenderer
 
 		/// <summary>The pass shading the world's clusters over the pre-pass depth - see cluster_main.slang.</summary>
 		public bool Cluster { get; init; }
+
+		/// <summary>A cluster pass over impostor planes, by the surface's own stages - see impostor_surface.slang.</summary>
+		public bool Impostor { get; init; }
 
 
 		/// <summary>frame.slang specialization constant bits (see ShadeSpecialize), or -1 for shader defaults</summary>
@@ -1796,6 +1802,12 @@ internal static unsafe class CoreSceneRenderer
 		if ( kind.DepthOnly )
 			pixel = CoreShaderFile.Stage.DepthPixel;
 
+		if ( kind.Cluster && kind.Impostor )
+			return (CoreShaderFile.Stage.ImpostorVertex,
+				kind.DepthOnly ? CoreShaderFile.Stage.ImpostorDepthPixel
+				: finishes ? CoreShaderFile.Stage.ImpostorScreenPixel
+				: CoreShaderFile.Stage.ImpostorPixel);
+
 		if ( kind.Cluster && kind.Target == CoreRender.TargetKind.Velocity )
 			return (CoreShaderFile.Stage.ClusterVelocityVertex, CoreShaderFile.Stage.ClusterVelocityPixel);
 
@@ -2492,22 +2504,35 @@ internal static unsafe class CoreSceneRenderer
 			//The impostor sheet onto a shared page before the vertices go up (CoreImpostor); a failed one leaves
 			//the model without its impostor
 			var impostorMesh = -1;
+			var impostorMeshes = 0;
 			var impostorMaterial = (string)null;
 
-			if ( CoreImpostor.Place( model, out var placed ) )
+			//Keyed by the sheet's words too, so a model compiled again is laid again
+			var sheetKey = model.HasImpostorPicture
+				? $"{resourcePath}|{Rinten.Hashing.XxHash3.HashToUInt64( model.ImpostorPicture ):x}"
+				: resourcePath;
+
+			if ( CoreImpostor.Place( model, sheetKey, out var placed ) )
 			{
 				impostorMesh = (int)model.Impostor.mesh;
+				impostorMeshes = model.ImpostorMeshes;
 				impostorMaterial = placed.Material;
-				mesh.ImpostorError = model.Impostor.radius * 2.0f / model.Impostor.texels;
+
+				//Shaded by the model's own surfaces only on the cluster path; whole-model draws keep their own meshes
+				mesh.ImpostorError = placed.Picture != 0 ? 0.0f : model.Impostor.radius * 2.0f / model.Impostor.texels;
 
 				var span = stackalloc int[4];
-				model.MeshRange( impostorMesh, span );
 
-				for ( var v = span[2]; v < span[2] + span[3] && v < vertices.Length; v++ )
+				for ( var m = impostorMesh; m < impostorMesh + impostorMeshes; m++ )
 				{
-					ref var corner = ref vertices[v];
-					corner.TexCoord0.x = placed.U + ( corner.TexCoord0.x * placed.Wide );
-					corner.TexCoord0.y = placed.V + ( corner.TexCoord0.y * placed.Tall );
+					model.MeshRange( m, span );
+
+					for ( var v = span[2]; v < span[2] + span[3] && v < vertices.Length; v++ )
+					{
+						ref var corner = ref vertices[v];
+						corner.TexCoord0.x = placed.U + ( corner.TexCoord0.x * placed.Wide );
+						corner.TexCoord0.y = placed.V + ( corner.TexCoord0.y * placed.Tall );
+					}
 				}
 			}
 
@@ -2517,7 +2542,10 @@ internal static unsafe class CoreSceneRenderer
 				range[0] = range[1] = range[2] = range[3] = 0;
 				model.MeshRange( i, range );
 
-				var material = i == impostorMesh ? impostorMaterial : model.MeshMaterial( i );
+				//A plane wears the model's own material where the sheet names its triangles, the page's otherwise
+				var plane = impostorMesh >= 0 && i >= impostorMesh && i < impostorMesh + impostorMeshes;
+				var own = plane && placed.Picture != 0;
+				var material = plane && !own ? impostorMaterial : model.MeshMaterial( i );
 
 				if ( !string.IsNullOrWhiteSpace( material ) )
 					mesh.Materials.Add( material.Replace( '\\', '/' ).TrimStart( '/' ) );
@@ -2588,6 +2616,8 @@ internal static unsafe class CoreSceneRenderer
 					Cutoff = how.AlphaCutoff,
 					StandsIn = model.StandsIn( i ),
 					MetresPerUv = MetresPerUv( vertices, indices, range[0], range[1], range[2] ),
+					ImpostorCover = own ? placed.Cover : 0,
+					ImpostorPicture = own ? placed.Picture : 0,
 				} );
 			}
 

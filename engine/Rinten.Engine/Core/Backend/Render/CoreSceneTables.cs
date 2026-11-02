@@ -2310,6 +2310,13 @@ internal static class CoreMaterialTable
 		/// <summary>Whether it moves its own vertices: not pre-passed, its own pass writes the depth it shades.</summary>
 		public bool Moves;
 
+		/// <summary>An impostor's quads shaded by this surface - see impostor_surface.slang; its picture's slot.</summary>
+		public bool Impostor;
+		public uint PictureSlot;
+
+		/// <summary>The impostor page's triangle picture PictureSlot numbers, looked up again like ColourPicture.</summary>
+		public ulong Picture;
+
 		/// <summary>The pictures it wears - colour, normal, third, emission - for CoreTextureStreaming.</summary>
 		public readonly ulong[] Pictures = new ulong[4];
 
@@ -2325,7 +2332,7 @@ internal static class CoreMaterialTable
 	}
 
 	//Material identity; five fields so ValueTuple has no Rest, whose hashing boxed on every lookup
-	internal readonly record struct Key( ulong Texture, string Shader, string Combo, int Flags, Color Tint );
+	internal readonly record struct Key( ulong Texture, string Shader, string Combo, int Flags, Color Tint, ulong Cover );
 
 	//The switches a key packs, so that it is one number and not four.
 	[Flags]
@@ -2337,6 +2344,7 @@ internal static class CoreMaterialTable
 		Masked = 4,
 		Loose = 8,
 		Moves = 16,
+		Impostor = 32,
 	}
 
 	private static readonly List<Info> materials = new();
@@ -2356,12 +2364,17 @@ internal static class CoreMaterialTable
 	internal static int Index( in CoreSceneRenderer.MeshDraw part, bool shows )
 	{
 		var loose = !shows || !CoreResources.Shades( part.Shader );
-		var moves = CoreSceneRenderer.MovesVertices( part.Shader, part.Combo );
+
+		//An impostor writes its own depth from its quad and is cut by its page's cover, whatever its surface does
+		var impostor = part.ImpostorCover != 0 && part.ImpostorPicture != 0;
+		var moves = impostor || CoreSceneRenderer.MovesVertices( part.Shader, part.Combo );
+		var masked = impostor || part.Masked;
 
 		var drawn = ( part.TwoSided ? Drawn.TwoSided : 0 ) | ( part.Translucent ? Drawn.Translucent : 0 ) |
-			( part.Masked ? Drawn.Masked : 0 ) | ( loose ? Drawn.Loose : 0 ) | ( moves ? Drawn.Moves : 0 );
+			( masked ? Drawn.Masked : 0 ) | ( loose ? Drawn.Loose : 0 ) | ( moves ? Drawn.Moves : 0 ) |
+			( impostor ? Drawn.Impostor : 0 );
 
-		var key = new Key( part.Texture, part.Shader ?? "", part.Combo ?? "", (int)drawn, part.Tint );
+		var key = new Key( part.Texture, part.Shader ?? "", part.Combo ?? "", (int)drawn, part.Tint, impostor ? part.ImpostorCover : 0 );
 
 		if ( byKey.TryGetValue( key, out var found ) )
 		{
@@ -2379,10 +2392,11 @@ internal static class CoreMaterialTable
 			Combo = part.Combo,
 			TwoSided = part.TwoSided,
 			Translucent = part.Translucent,
-			Masked = part.Masked && part.Cutoff > 0.0f,
-			Cutoff = part.Cutoff,
+			Masked = impostor || ( part.Masked && part.Cutoff > 0.0f ),
+			Cutoff = impostor ? 0.5f : part.Cutoff,
 			Loose = loose,
 			Moves = moves,
+			Impostor = impostor,
 			Tint = part.Tint,
 			Path = part.Material,
 			MetresPerUv = part.MetresPerUv,
@@ -2390,7 +2404,14 @@ internal static class CoreMaterialTable
 
 		CoreRender.MaterialParts( part.Texture, info.Pictures );
 
-		if ( info.Masked )
+		if ( impostor )
+		{
+			info.ColourPicture = part.ImpostorCover;
+			info.ColourSlot = CoreRender.TextureIndex( part.ImpostorCover );
+			info.Picture = part.ImpostorPicture;
+			info.PictureSlot = CoreRender.TextureIndex( part.ImpostorPicture );
+		}
+		else if ( info.Masked )
 		{
 			//The live material's own picture first: one made in code has no file - see CoreResources.LiveColour
 			var colour = CoreResources.LiveColour( part.Texture );
@@ -2470,7 +2491,7 @@ internal static class CoreMaterialTable
 			into[i * 4] = one.Flags;
 			into[( i * 4 ) + 1] = one.ColourSlot;
 			into[( i * 4 ) + 2] = BitConverter.SingleToUInt32Bits( one.Cutoff );
-			into[( i * 4 ) + 3] = 0;
+			into[( i * 4 ) + 3] = one.PictureSlot;
 		}
 	}
 
@@ -2483,7 +2504,15 @@ internal static class CoreMaterialTable
 		for ( var i = 0; i < materials.Count; i++ )
 		{
 			var one = i < materials.Count ? materials[i] : null;
-			if ( one is null || one.ColourPicture == 0 ) continue;
+			if ( one is null ) continue;
+
+			if ( one.Picture != 0 && CoreRender.TextureIndex( one.Picture ) is var picture && picture != one.PictureSlot )
+			{
+				one.PictureSlot = picture;
+				changed = true;
+			}
+
+			if ( one.ColourPicture == 0 ) continue;
 
 			var slot = CoreRender.TextureIndex( one.ColourPicture );
 			if ( slot == one.ColourSlot ) continue;

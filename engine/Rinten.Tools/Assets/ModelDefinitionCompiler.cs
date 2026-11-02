@@ -11,6 +11,10 @@ namespace Rinten;
 [ResourceIdentity( "mdl" )]
 internal class ModelDefinitionCompiler : ResourceCompiler
 {
+	//Raised whenever what a definition builds into changes with no change to its files, so models built before are built again -
+	//see ModelInputs.IsCurrent. 2: impostors carry the picture of which triangle each texel shows
+	internal const int Build = 2;
+
 	protected override Task<bool> Compile()
 	{
 		var path = Path.GetFullPath( Context.AbsolutePath );
@@ -774,18 +778,18 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 		if ( !definition.Impostor && definition.Detail != ModelDefinition.DetailMode.ImpostorOnly ) return;
 		if ( definition.Detail == ModelDefinition.DetailMode.None ) return;
 
+		//A picture cannot move: what bones or shapes pose has none, and that is not worth a word on every build
+		if ( builder.BoneCount > 0 || builder.MorphCount > 0 ) return;
+
 		try
 		{
-			var relative = AssetRelative( definitionPath );
-			if ( relative is null ) return;
-
 			var looks = new CoreAssets.ModelBuilder.Look[builder.MeshCount];
 
 			for ( var i = 0; i < looks.Length; i++ )
 				looks[i] = LookOf( definitionPath, builder.MeshMaterial( i ) );
 
-			if ( !builder.MakeImpostor( looks, relative + "#impostor" ) )
-				Log.Warning( $"{definitionPath}: no impostor - the model is posed by bones or shapes, or nothing of it could be drawn" );
+			if ( !builder.MakeImpostor( looks ) )
+				Log.Warning( $"{definitionPath}: no impostor - nothing of the model could be drawn" );
 		}
 		catch ( Exception e )
 		{
@@ -913,6 +917,9 @@ internal class ModelDefinitionCompiler : ResourceCompiler
 
 		if ( root.TryGetProperty( "Roughness", out var roughness ) && roughness.ValueKind == System.Text.Json.JsonValueKind.Number )
 			look.Roughness = Math.Clamp( roughness.GetSingle(), 0.04f, 1.0f );
+
+		look.VertexTint = CoreResources.TintsPerVertex(
+			root.TryGetProperty( "Shader", out var shader ) && shader.ValueKind == System.Text.Json.JsonValueKind.String ? shader.GetString() : null );
 
 		if ( root.TryGetProperty( "Tint", out var tint ) && tint.ValueKind == System.Text.Json.JsonValueKind.String )
 		{

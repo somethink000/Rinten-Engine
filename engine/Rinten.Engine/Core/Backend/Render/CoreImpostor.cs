@@ -17,39 +17,37 @@ internal static class CoreImpostor
 	//RINTEN_IMPOSTOR_LOG: a line a model's impostor as it is placed.
 	private static readonly bool RintenImpostorLog = Environment.GetEnvironmentVariable( "RINTEN_IMPOSTOR_LOG" ) == "1";
 
-	//Where a model's sheet is on its page: the page's material, and the rectangle as a share of the page.
-	internal readonly record struct Placed( string Material, float U, float V, float Wide, float Tall );
+	//Where a model's sheet is on its page: the page's material and pictures, and the rectangle as a share of the page.
+	//Picture is nought where the model has no triangle picture: it is then drawn with the page's material.
+	internal readonly record struct Placed( string Material, float U, float V, float Wide, float Tall, ulong Cover, ulong Picture );
 
 	//One square of the shared pictures, the cells of it given out, and its material.
 	private sealed class Page
 	{
 		public readonly bool[] Taken = new bool[Cells * Cells];
 		public string Name;
-		public ulong ColourHandle, ShapeHandle;
+		public ulong ColourHandle, ShapeHandle, PictureHandle;
 
 		/// <summary>Held here because nothing else holds them: a material found by name is kept only weakly by the index that finds it.</summary>
-		public Texture Colour, Shape;
+		public Texture Colour, Shape, Picture;
 		public Material Material;
 	}
 
 	private static readonly List<Page> pages = new();
 
-	//Where each model's sheet went, by the name its quads wear - a model loaded again is not laid again.
+	//Where each model's sheet went, by the model's path - a model loaded again is not laid again.
 	private static readonly Dictionary<string, Placed> placed = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>The model's sheet onto a page, if it has an impostor and the sheet is one this engine bakes; where it went in <paramref name="where"/>. False where it has none, or it would not go - the model is then drawn without one.</summary>
-	public static bool Place( CoreAssets.ModelFile model, out Placed where )
+	public static bool Place( CoreAssets.ModelFile model, string path, out Placed where )
 	{
 		where = default;
-		if ( model is null || !model.HasImpostor ) return false;
+		if ( model is null || !model.HasImpostor || string.IsNullOrWhiteSpace( path ) ) return false;
 
 		var info = model.Impostor;
 		if ( info.texels != CoreAssets.ModelBuilder.ImpostorTexels ) return false;
 
-		var name = model.MeshMaterial( (int)info.mesh );
-		if ( string.IsNullOrWhiteSpace( name ) ) return false;
-
-		name = name.Replace( '\\', '/' ).TrimStart( '/' );
+		var name = path.Replace( '\\', '/' ).TrimStart( '/' );
 
 		lock ( pages )
 		{
@@ -60,6 +58,13 @@ internal static class CoreImpostor
 
 			if ( !Fits( colour ) || !Fits( shape ) || colour.Width != shape.Width || colour.Height != shape.Height ) return false;
 
+			//The triangle words, read nearest - a model without them is shaded by the page's material
+			var picture = model.HasImpostorPicture ? CoreTextureFile.FromBytes( model.ImpostorPicture.ToArray() ) : null;
+
+			if ( picture is not null && ( picture.Format != CoreTextureFile.TextureFormat.Rgba8 ||
+				picture.MipCount < CoreAssets.ModelBuilder.ImpostorLevels || picture.Width != colour.Width || picture.Height != colour.Height ) )
+				picture = null;
+
 			var wide = colour.Width / Cell;
 			var tall = colour.Height / Cell;
 
@@ -69,12 +74,15 @@ internal static class CoreImpostor
 				!Write( page.ShapeHandle, shape, cellX * Cell, cellY * Cell ) )
 				return false;
 
+			if ( picture is not null && !Write( page.PictureHandle, picture, cellX * Cell, cellY * Cell ) ) picture = null;
+
 			for ( var y = 0; y < tall; y++ )
 				for ( var x = 0; x < wide; x++ )
 					page.Taken[( ( cellY + y ) * Cells ) + cellX + x] = true;
 
 			where = new Placed( page.Name, cellX * Cell / (float)PageSize, cellY * Cell / (float)PageSize,
-				colour.Width / (float)PageSize, colour.Height / (float)PageSize );
+				colour.Width / (float)PageSize, colour.Height / (float)PageSize,
+				page.ColourHandle, picture is not null ? page.PictureHandle : 0 );
 			placed[name] = where;
 
 			//What the cut takes it at and how far off its quads the model is - see ModelFormat.Impostor.spread - for the switch to be weighed by.
@@ -132,7 +140,7 @@ internal static class CoreImpostor
 		return false;
 	}
 
-	//What the pages hold on the device: two block-compressed pictures each, every level.
+	//What the pages hold on the device: two block-compressed pictures and one of words each, every level.
 	internal static long PageBytes
 	{
 		get
@@ -145,7 +153,8 @@ internal static class CoreImpostor
 				one += (long)side * side;
 			}
 
-			return pages.Count * 2 * one;
+			//A byte a texel each block-compressed picture, four the words
+			return pages.Count * 6 * one;
 		}
 	}
 
@@ -157,11 +166,13 @@ internal static class CoreImpostor
 
 		var colourHandle = CoreRenderDevice.CreateTextureBlank( PageSize, PageSize, CoreTextureFile.TextureFormat.Bc3, true, levels );
 		var shapeHandle = CoreRenderDevice.CreateTextureBlank( PageSize, PageSize, CoreTextureFile.TextureFormat.Bc3, false, levels );
+		var pictureHandle = CoreRenderDevice.CreateTextureBlank( PageSize, PageSize, CoreTextureFile.TextureFormat.Rgba8, false, levels );
 
-		if ( colourHandle == 0 || shapeHandle == 0 )
+		if ( colourHandle == 0 || shapeHandle == 0 || pictureHandle == 0 )
 		{
 			CoreRenderDevice.DestroyTexture( colourHandle );
 			CoreRenderDevice.DestroyTexture( shapeHandle );
+			CoreRenderDevice.DestroyTexture( pictureHandle );
 			return null;
 		}
 
@@ -171,13 +182,18 @@ internal static class CoreImpostor
 		var shape = CoreTexture.OnDevice( shapeHandle, PageSize, PageSize, name + ":shape" );
 		shape.DeviceSrgb = false;
 
+		var picture = CoreTexture.OnDevice( pictureHandle, PageSize, PageSize, name + ":picture" );
+		picture.DeviceSrgb = false;
+
 		var page = new Page
 		{
 			Name = name,
 			ColourHandle = colourHandle,
 			ShapeHandle = shapeHandle,
+			PictureHandle = pictureHandle,
 			Colour = new Texture( colour ),
 			Shape = new Texture( shape ),
+			Picture = new Texture( picture ),
 		};
 
 		page.Material = Material.Create( name, Shader, anonymous: false );
@@ -212,8 +228,10 @@ internal static class CoreImpostor
 			var tall = info[( k * 3 ) + 1];
 			var bytes = info[( k * 3 ) + 2];
 
-			//A row of blocks at a time: sixteen bytes a block of four by four.
-			if ( !CoreRenderDevice.WriteTextureLevel( page, k, x >> k, y >> k, wide, tall, pixels.Slice( at, bytes ), ( wide + 3 ) / 4 * 16 ) )
+			//A row of blocks at a time, sixteen bytes a block of four by four, or of texels at four bytes each
+			var pitch = sheet.Format == CoreTextureFile.TextureFormat.Rgba8 ? wide * 4 : ( wide + 3 ) / 4 * 16;
+
+			if ( !CoreRenderDevice.WriteTextureLevel( page, k, x >> k, y >> k, wide, tall, pixels.Slice( at, bytes ), pitch ) )
 				return false;
 
 			at += bytes;

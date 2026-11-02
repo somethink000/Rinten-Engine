@@ -274,6 +274,9 @@ internal sealed unsafe partial class ModelBuilder
 		CollectionsMarshal.AsSpan( vertices ).CopyTo( written );
 		CollectionsMarshal.AsSpan( built.Extra ).CopyTo( written.AsSpan( ownCount ) );
 
+		//The impostor's triangles named by the clusters just cut, and its planes told which cluster each is.
+		ImpostorPicture( built, written );
+
 		var all = written.AsSpan();
 
 		if ( hasRenderBounds )
@@ -479,6 +482,8 @@ internal sealed unsafe partial class ModelBuilder
 			header.impostor = Append( file, new ReadOnlySpan<ModelFormat.Impostor>( ref info ) );
 			header.impostorColour = Append( file, (ReadOnlySpan<byte>)impostorColour );
 			header.impostorShape = Append( file, (ReadOnlySpan<byte>)impostorShape );
+
+			if ( impostorPicture is not null ) header.impostorPicture = Append( file, (ReadOnlySpan<byte>)impostorPicture );
 		}
 
 		header.byteCount = (uint)file.Count;

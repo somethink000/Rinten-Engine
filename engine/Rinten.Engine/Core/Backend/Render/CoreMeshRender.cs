@@ -1318,7 +1318,9 @@ internal sealed class CoreMeshRender
 		bound[4] = CoreClusters.ClusterTriangles.Buffer;
 		bound[5] = vertices;
 		bound[6] = visibleBuffer;
-		bound[7] = paramsBuffer;
+
+		//The material records, for an impostor's cover and triangle pictures - see impostor_surface.slang
+		bound[7] = tables.MaterialBuffer;
 
 		//A posed thing's position and frame, out of its posed range - see LoadClusterCorner in cluster_main.slang
 		bound[8] = CoreGeometryPool.Vertices.Side( CoreGeometryPool.PositionSide );
@@ -1376,6 +1378,7 @@ internal sealed class CoreMeshRender
 					Combo = material.Combo,
 					Target = CoreRender.TargetKind.Depth,
 					Cluster = true,
+					Impostor = material.Impostor,
 					DepthOnly = true,
 
 					//Everything folded out, as it was when nought was the default: a depth pass reads none of the frame's paths.
@@ -1422,7 +1425,7 @@ internal sealed class CoreMeshRender
 
 		for ( var m = 0; m < most; m++ )
 		{
-			if ( CoreMaterialTable.At( m ) is { Loose: false, Translucent: false, Moves: true } ) return true;
+			if ( CoreMaterialTable.At( m ) is { Loose: false, Translucent: false, Moves: true, Impostor: false } ) return true;
 		}
 
 		return false;
@@ -1444,7 +1447,7 @@ internal sealed class CoreMeshRender
 		for ( var m = 0; m < most; m++ )
 		{
 			var material = CoreMaterialTable.At( m );
-			if ( material is null || material.Loose || material.Translucent || !material.Moves ) continue;
+			if ( material is null || material.Loose || material.Translucent || !material.Moves || material.Impostor ) continue;
 
 			if ( !material.AskedToVelocity )
 			{
@@ -1564,6 +1567,8 @@ internal sealed class CoreMeshRender
 				ChainWaiting++;
 
 			//One pass per material; if it will not build, its meshes go back to the classic path next frame
+			if ( material.ShadePipeline == 0 && material.Impostor ) continue;
+
 			if ( material.ShadePipeline == 0 )
 			{
 				CoreResources.CannotShade( material.Shader );
@@ -1602,10 +1607,12 @@ internal sealed class CoreMeshRender
 			Combo = material.Combo,
 			Target = target,
 			Cluster = true,
+			Impostor = material.Impostor,
 
 			//Only a surface whose depth nothing else writes carries it itself - see the cluster branch of MakePipeline, which is the one reader.
 			Moves = carries,
-			Specialize = carries ? specialize | CoreSceneRenderer.CutsOwnDepth : specialize,
+			Specialize = ( carries ? specialize | CoreSceneRenderer.CutsOwnDepth : specialize ) |
+				( material.Impostor ? CoreSceneRenderer.FarShading : 0 ),
 			Finishes = finishes,
 		} );
 	}

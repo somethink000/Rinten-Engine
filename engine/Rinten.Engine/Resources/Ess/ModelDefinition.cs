@@ -81,7 +81,7 @@ public sealed partial class ModelDefinition : GameResource
 	[Property, Title( "Detail Group" ), LodGroupName]
 	public string LodGroup { get; set; } = "";
 
-	/// <summary>Draw as a baked six-sided impostor when far away; for static props, not skinned models.</summary>
+	/// <summary>Draw as a baked six-sided impostor when far away; never for what bones or shapes pose.</summary>
 	[Property]
 	public bool Impostor { get; set; }
 

@@ -120,3 +120,7 @@ float4 MainClusterVelocityPs( VelocityV2F i ) : SV_Target
 	return float4( here - there, i.now.w, 1.0 );
 }
 #endif
+
+#ifdef IMPOSTOR
+#include "impostor_surface.slang"
+#endif

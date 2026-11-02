@@ -92,6 +92,13 @@ internal sealed unsafe class ModelFile : IDisposable
 				ModelFormat.HeaderSize - ModelFormat.HeaderSizeBeforeImpostor ).Clear();
 		}
 
+		//And from before the impostor's picture of triangles: its one block.
+		else if ( header.version < ModelFormat.VersionImpostorPicture )
+		{
+			held.AsSpan( ModelFormat.HeaderSizeBeforeImpostorPicture,
+				ModelFormat.HeaderSize - ModelFormat.HeaderSizeBeforeImpostorPicture ).Clear();
+		}
+
 		//And from before the chains: clusters of another shape, which the reads below must not take for these - cut on load instead.
 		if ( header.version < ModelFormat.VersionChains )
 		{
@@ -111,6 +118,7 @@ internal sealed unsafe class ModelFile : IDisposable
 		if ( !Within( header.impostor, sizeof( ModelFormat.Impostor ) ) ) return null;
 		if ( !Within( header.impostorColour, 1 ) ) return null;
 		if ( !Within( header.impostorShape, 1 ) ) return null;
+		if ( !Within( header.impostorPicture, 1 ) ) return null;
 		if ( !Within( header.bodyParts, sizeof( ModelFormat.BodyPart ) ) ) return null;
 		if ( !Within( header.shapes, sizeof( ModelFormat.Shape ) ) ) return null;
 		if ( !Within( header.collisionPoints, sizeof( float ) ) ) return null;
@@ -311,6 +319,28 @@ internal sealed unsafe class ModelFile : IDisposable
 
 	/// <summary>Its normal and depth, as a compiled texture file.</summary>
 	public ReadOnlySpan<byte> ImpostorShape => ModelFormat.Span<byte>( All, in Header.impostorShape );
+
+	/// <summary>Whether its planes are shaded by the model's own surfaces, through the picture of which triangle each texel shows.</summary>
+	public bool HasImpostorPicture => HasImpostor && Header.impostorPicture.count > 0;
+
+	/// <summary>That picture, as a compiled texture file - see ModelBuilder.ImpostorPicture.</summary>
+	public ReadOnlySpan<byte> ImpostorPicture => ModelFormat.Span<byte>( All, in Header.impostorPicture );
+
+	/// <summary>How many meshes the impostor's planes are, one a material, in a row from Impostor.mesh.</summary>
+	public int ImpostorMeshes
+	{
+		get
+		{
+			if ( !HasImpostor ) return 0;
+
+			var first = (int)Impostor.mesh;
+			var count = 0;
+
+			while ( first + count < MeshCount && StandsIn( first + count ) ) count++;
+
+			return Math.Max( 1, count );
+		}
+	}
 
 	/// <summary>Whether a mesh only ever stands in for the rest - see ModelFormat.MeshFlags.StandsIn.</summary>
 	public bool StandsIn( int mesh )

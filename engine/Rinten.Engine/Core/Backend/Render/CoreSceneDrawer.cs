@@ -759,6 +759,15 @@ internal sealed partial class CoreSceneDrawer
 			!queued.Kind.Translucent && !queued.Kind.Lines && !queued.Kind.Wireframe &&
 			queued.Mesh.Vertices != 0 && queued.Mesh.Indices != 0 && queued.Part.IndexCount > 0;
 
+	//Whether a loose opaque draw writes depth only in the world's pass: one moving its own corners skips the pre-pass
+	private bool LooseMovesDepth()
+	{
+		foreach ( var queued in CollectionsMarshal.AsSpan( opaque ) )
+			if ( queued.Moves && !queued.ShadowOnly ) return true;
+
+		return false;
+	}
+
 	private void SubmitLoose( ReadOnlySpan<System.Numerics.Vector4> planes, bool rigidOnly = false,
 		bool prepass = false )
 	{
@@ -2824,7 +2833,37 @@ internal sealed partial class CoreSceneDrawer
 		//Whether light views drew, after the bin in the depth block; if not, planned bakes were never drawn
 		var lightsDrawn = false;
 
-		if ( !overlayOnly && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth ) )
+		//A multisampled world whose every depth the depth passes write draws them again at one sample for whatever reads depth,
+		//and never resolves the multisampled one, which keeps its compression - see VkFrame.SingleDepthKept
+		var singleDepth = sampled && wantsOffscreen && !overlayOnly && !wantNearWins && prepassSlices == uint.MaxValue &&
+			overlayLayer.Count == 0 && CoreImmediate.Instanced.Length == 0 && CoreImmediate.Blocks.Length == 0 && !LooseMovesDepth();
+
+		CoreRenderDevice.SingleDepthKept = singleDepth;
+
+		//The depth passes are multisampled only where the world's own pass is
+		var flat = !( sampled && wantsOffscreen );
+
+		//The same draws into the one-sample depth, where it is kept apart
+		void Single( ReadOnlySpan<System.Numerics.Vector4> seen, bool clearFirst, bool prepass, bool appeared, bool movers )
+		{
+			if ( !singleDepth || !CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst, single: true ) ) return;
+
+			CoreRenderDevice.ZoneBegin( "single depth" );
+
+			if ( prepass )
+			{
+				if ( drawn ) meshRender.DrawCamera( appeared: false );
+				SubmitLoose( seen, prepass: true );
+			}
+
+			if ( appeared ) meshRender.DrawCamera( appeared: true );
+			if ( movers ) meshRender.DrawMoverDepth();
+
+			CoreRenderDevice.ZoneEnd();
+			CoreRenderDevice.EndTarget();
+		}
+
+		if ( !overlayOnly && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, single: flat ) )
 		{
 			CoreRenderDevice.ZoneBegin( "depth" );
 
@@ -2837,6 +2876,7 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 
 			CoreRenderDevice.EndTarget();
+			Single( planes, clearFirst: true, prepass: true, appeared: false, movers: false );
 
 			//Fold depth, retest set-aside clusters, fold again; only when clusters were drawn and occlusion is on
 			if ( drawn && occluding ) KeepDepth( viewport );
@@ -2845,10 +2885,11 @@ internal sealed partial class CoreSceneDrawer
 			{
 				meshRender.Retest( depthPyramid );
 
-				if ( CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false ) )
+				if ( CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false, single: flat ) )
 				{
 					meshRender.DrawCamera( appeared: true );
 					CoreRenderDevice.EndTarget();
+					Single( planes, clearFirst: false, prepass: false, appeared: true, movers: false );
 				}
 
 				KeepDepth( viewport, ifAppeared: true );
@@ -2859,11 +2900,12 @@ internal sealed partial class CoreSceneDrawer
 			if ( drawn ) meshRender.Bin( depthPyramid );
 
 			//Movers' depth from their own shaders after the bin (DrawMoverDepth), so their shading pass tests early
-			//Not opened with no movers: each close of a multisampled depth is a resolve
-			if ( drawn && meshRender.AnyMovers() && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false ) )
+			//Not opened with no movers: each pass loads and stores the multisampled depth
+			if ( drawn && meshRender.AnyMovers() && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, default, clearFirst: false, single: flat ) )
 			{
 				meshRender.DrawMoverDepth();
 				CoreRenderDevice.EndTarget();
+				Single( planes, clearFirst: false, prepass: false, appeared: false, movers: true );
 			}
 
 			//Bake sun pages and the movers map from the cull's lists, before the materials that read them
@@ -2941,7 +2983,7 @@ internal sealed partial class CoreSceneDrawer
 			if ( laid ) CoreRenderDevice.SetupFrame( frame );
 
 			//Emptied again where the edges arbitrate between themselves - see Wireframe.NearWins.
-			if ( wantNearWins && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth ) )
+			if ( wantNearWins && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Depth, single: flat ) )
 				CoreRenderDevice.EndTarget();
 
 			CoreRenderDevice.ZoneEnd();

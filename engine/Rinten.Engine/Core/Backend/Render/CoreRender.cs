@@ -361,10 +361,10 @@ internal static unsafe class CoreRender
 		=> web ? 0 : VkSwapchain.ViewReadLayered( view, outPixels, capacity );
 
 	//Opens a frame picture for the next draws; the portable frame only has the sky table
-	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear )
+	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear, bool single = false )
 		=> Portable && target != VkDevice.TargetSkyTable ? 0
 			: web ? BrowserSwapchain.TargetBegin( target, r, g, b, a, clear )
-			: VkFrame.TargetBegin( target, r, g, b, a, clear );
+			: VkFrame.TargetBegin( target, r, g, b, a, clear, single );
 
 	//-- the frame's pictures - see VkPictures; the browser's are one level, drawn into without depth --------
 

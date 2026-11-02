@@ -642,10 +642,18 @@ internal static unsafe class CoreRenderDevice
 	//-- the pictures a pass draws into ----------------------------------------
 
 	/// <summary>Begins drawing into an off-screen picture (world, depth, post), before the screen is drawn.</summary>
+	/// <summary>Opens a frame picture; single draws the world's one-sample depth while the world is multisampled.</summary>
 	public static bool BeginTarget( CoreRender.TargetKind target, Color clear = default, bool clearFirst = true,
-		bool discard = false )
+		bool discard = false, bool single = false )
 		=> CoreNative.Available && CoreRender.TargetBegin( (int)target,
-			clear.r, clear.g, clear.b, clear.a, clearFirst ? 1 : discard ? 2 : 0 ) != 0;
+			clear.r, clear.g, clear.b, clear.a, clearFirst ? 1 : discard ? 2 : 0, single ) != 0;
+
+	/// <summary>Whether the frame draws its one-sample depth itself, so the multisampled depth is never resolved.</summary>
+	public static bool SingleDepthKept
+	{
+		get => CoreNative.Available && !OperatingSystem.IsBrowser() && VkFrame.SingleDepthKept;
+		set { if ( CoreNative.Available && !OperatingSystem.IsBrowser() ) VkFrame.SingleDepthKept = value; }
+	}
 
 	/// <summary>Whether the full frame's world is multisampled this frame.</summary>
 	public static bool WorldSampled => CoreNative.Available && !OperatingSystem.IsBrowser() && VkFrame.WorldSamples > 1;

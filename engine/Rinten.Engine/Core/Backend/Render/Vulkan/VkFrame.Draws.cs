@@ -847,7 +847,7 @@ internal static unsafe partial class VkFrame
 		return 1;
 	}
 
-	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear )
+	internal static int TargetBegin( int target, float r, float g, float b, float a, int clear, bool single = false )
 	{
 		lock ( VkDevice.renderLock )
 		{
@@ -917,14 +917,15 @@ internal static unsafe partial class VkFrame
 				hasDepth = true;
 				colourCount = 0;
 
-				samples = TargetSamplesFor( p );
+				samples = single ? 1u : TargetSamplesFor( p );
 
 				if ( samples > 1 )
 				{
 					KeepAttached( frame.Commands, p.WorldSampledDepthImage, ref p.WorldSampledDepthLayout,
 						ImageLayout.DepthAttachmentOptimal, ImageAspectFlags.DepthBit );
 
-					ResolveDepthInto( ref depth, p );
+					if ( SingleDepthKept ) depth.ImageView = p.WorldSampledDepthView;
+					else ResolveDepthInto( ref depth, p );
 				}
 			}
 			else if ( target == VkDevice.TargetScene )
@@ -976,7 +977,8 @@ internal static unsafe partial class VkFrame
 					colour[1].ResolveImageView = p.NormalView;
 					colour[1].ResolveImageLayout = ImageLayout.ColorAttachmentOptimal;
 
-					ResolveDepthInto( ref depth, p );
+					if ( SingleDepthKept ) depth.ImageView = p.WorldSampledDepthView;
+					else ResolveDepthInto( ref depth, p );
 				}
 			}
 			else if ( target == VkDevice.TargetSceneColour )
@@ -1179,6 +1181,10 @@ internal static unsafe partial class VkFrame
 			: 1u;
 	}
 
+	//The world's one-sample depth is drawn by passes of its own beside the multisampled one, which is then never resolved:
+	//on RADV any read of 4x D32 expands its whole compression in place, and every later depth test pays for it
+	internal static bool SingleDepthKept;
+
 	//Sample zero: the pyramid, AO and effects need a real surface's depth, not an average of two; no min/max cost
 	private static void ResolveDepthInto( ref RenderingAttachmentInfo depth, VkSwapchain.Pictures p )
 	{
@@ -1245,7 +1251,7 @@ internal static unsafe partial class VkFrame
 			//What was written becomes readable, because the whole point of drawing into a picture rather than the screen is that something reads it next.
 			if ( Current.Target == VkDevice.TargetShadow )
 			{
-				//The layer drawn readable again, like the rest of the map.
+				//The layer drawn readable again, like the rest of the map - by the fog's march too, which is compute
 				if ( VkTextures.ShadowMapOf( Current.ShadowMap ) is { } map &&
 					Current.ShadowLayer >= 0 && Current.ShadowLayer < map.Layouts.Length )
 				{
@@ -1253,7 +1259,7 @@ internal static unsafe partial class VkFrame
 						ImageLayout.DepthAttachmentOptimal, ImageLayout.ShaderReadOnlyOptimal,
 						PipelineStageFlags2.EarlyFragmentTestsBit | PipelineStageFlags2.LateFragmentTestsBit,
 						AccessFlags2.DepthStencilAttachmentWriteBit,
-						PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderSampledReadBit,
+						PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderSampledReadBit,
 						ImageAspectFlags.DepthBit, 0, 1, 1, (uint)Current.ShadowLayer );
 
 					map.Layouts[Current.ShadowLayer] = ImageLayout.ShaderReadOnlyOptimal;

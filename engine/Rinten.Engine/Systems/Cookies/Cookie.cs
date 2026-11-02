@@ -212,20 +212,47 @@ public sealed class CookieContainer
 		Timer = null;
 	}
 
+	//The timer's save: the text is made here, the disk is written on another thread - a slow disk held up the frame
 	private void OnTimerElapsed( object sender, ElapsedEventArgs e )
 	{
 		MainThread.Queue( () =>
 		{
-			try
+			var (text, number) = Snapshot();
+
+			if ( text == lastText )
 			{
-				Save();
-			}
-			finally
-			{
-				//reenable for next interval
 				Timer?.Start();
+				return;
 			}
+
+			System.Threading.Tasks.Task.Run( () =>
+			{
+				try
+				{
+					Write( text, number );
+				}
+				finally
+				{
+					//reenable for next interval
+					Timer?.Start();
+				}
+			} );
 		} );
+	}
+
+	//Writes one at a time, and never one older than what is on the disk already
+	private readonly System.Threading.Lock writing = new();
+	private long snapshots, written;
+	private string lastText;
+
+	//The cookies as the file holds them, null for none, and its place in the order they were made
+	private (string Text, long Number) Snapshot()
+	{
+		ClearExpired();
+
+		var text = CookieCache.Count == 0 ? null : JsonSerializer.Serialize( CookieCache, new JsonSerializerOptions( EnumConvert.Plain ) { WriteIndented = true } );
+
+		return (text, System.Threading.Interlocked.Increment( ref snapshots ));
 	}
 
 	private void Load()
@@ -258,6 +285,24 @@ public sealed class CookieContainer
 	{
 		if ( CookieCache == null ) return;
 
+		var (text, number) = Snapshot();
+		Write( text, number );
+	}
+
+	private void Write( string text, long number )
+	{
+		lock ( writing )
+		{
+			if ( number <= written ) return;
+
+			written = number;
+			lastText = text;
+			WriteFiles( text );
+		}
+	}
+
+	private void WriteFiles( string text )
+	{
 		var fnorig = $"{Name}.json";
 		var fnback = $"{Name}.json.backup";
 
@@ -281,17 +326,15 @@ public sealed class CookieContainer
 			FileSystem.CreateDirectory( System.IO.Path.GetDirectoryName( Name ) );
 		}
 
-		ClearExpired();
-
 		try
 		{
-			if ( CookieCache.Count == 0 )
+			if ( text is null )
 			{
 				FileSystem.DeleteFile( fnorig );
 			}
 			else
 			{
-				FileSystem.WriteAllText( fnorig, JsonSerializer.Serialize( CookieCache, new JsonSerializerOptions( EnumConvert.Plain ) { WriteIndented = true } ) );
+				FileSystem.WriteAllText( fnorig, text );
 			}
 
 			//that succeeded, so we can delete any backups

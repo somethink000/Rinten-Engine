@@ -153,7 +153,8 @@ internal static class PerfReport
 	private static long particlesAtArm, particleEffectsAtArm, particleStepsAtArm;
 
 	//How many charts of the sun had been traced as the window opened, and how often the world was built for the rays.
-	private static long bakesAtArm, shortAtArm, notWholeAtArm, restartsAtArm;
+	private static long bakesAtArm, shortAtArm, notWholeAtArm, restartsAtArm, rebakingAtArm, darkAtArm, runShortAtArm, moverFramesAtArm, moverCastersAtArm, moverTrianglesAtArm;
+	private static readonly long[] finestAtArm = new long[CoreSunPages.MostLevels + 1];
 
 	//The text counters as the window opened - see the text lines of the report
 	private static Rinten.UI.TextStats.Snapshot textAtArm;
@@ -418,6 +419,13 @@ internal static class PerfReport
 			shortAtArm = CoreSunPages.FramesShort;
 			notWholeAtArm = CoreSunPages.FramesNotWhole;
 			restartsAtArm = CoreSunPages.Restarts;
+			rebakingAtArm = CoreSunPages.FramesRebaking;
+			darkAtArm = CoreSunPages.FramesDark;
+			CoreSunPages.FramesFinest.CopyTo( finestAtArm, 0 );
+			runShortAtArm = CoreMeshRender.ShadowRunShort;
+			moverFramesAtArm = CoreSunPages.MoverFrames;
+			moverCastersAtArm = CoreSunPages.MoverCasters;
+			moverTrianglesAtArm = CoreSunPages.MoverTrianglesDrawn;
 			pagesAtArm = CoreSunPages.PagesBaked;
 			( bakedAtArm, bakedMsAtArm ) = CoreRender.PipelinesBaked;
 			CoreRender.SlowestBake( restart: true );
@@ -1241,6 +1249,12 @@ internal static class PerfReport
 			$"{CoreSunPages.PagesBaked - pagesAtArm} pages, {CoreSunPages.FramesShort - shortAtArm} frames a level fell short " +
 			$"({CoreSunPages.FramesNotWhole - notWholeAtArm} with a level not whole), " +
 			$"{CoreSunPages.Restarts - restartsAtArm} restarts (last {CoreSunPages.RestartWhy})" );
+		report.AppendLine( $"  {CoreSunPages.FramesRebaking - rebakingAtArm} frames baking every page again, {CoreSunPages.FramesDark - darkAtArm} frames with no sun shadow to read" );
+		report.AppendLine( $"  finest level readable at the eye, frames by level 0..{CoreSunPages.MostLevels - 1} then none: " +
+			string.Join( " ", CoreSunPages.FramesFinest.Select( ( n, i ) => n - finestAtArm[i] ) ) );
+		var moverFrames = Math.Max( 1, CoreSunPages.MoverFrames - moverFramesAtArm );
+		report.AppendLine( $"  sun movers' map on {CoreSunPages.MoverFrames - moverFramesAtArm} frames, {( CoreSunPages.MoverCasters - moverCastersAtArm ) / moverFrames} casters and " +
+			$"{( CoreSunPages.MoverTrianglesDrawn - moverTrianglesAtArm ) / moverFrames} triangles a frame; {CoreMeshRender.ShadowRunShort - runShortAtArm} frames the lights' views could hold more than their run" );
 		report.AppendLine( $"  {CoreSunPages.ChangesNoted - changesAtArm} still-world changes noted, leaving {CoreSunPages.PagesStaled - staledAtArm} pages to bake again" );
 		report.AppendLine( $"  {CoreLampMaps.FacesDrawn - lampFacesAtArm} lamp faces drawn in the window" );
 		report.AppendLine( $"  what moves: {CoreLampMaps.MoverFacesDrawn - moverFacesAtArm} faces, {CoreLampMaps.MoverFrustumsDrawn - moverFrustumsAtArm} frustums" );

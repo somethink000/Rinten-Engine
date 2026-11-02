@@ -407,6 +407,7 @@ internal sealed class CoreMeshRender
 		//The run all light lists share, sized by what CoreSunPages bakes this frame; none without lights
 		shadowIndexAt = binIndexAt + binIndexCapacity;
 		shadowIndexCapacity = viewCount > 1 && ( MeshKinds & 8 ) == 0 ? Math.Clamp( ShadowTriangles, 0L, MostShadowTriangles ) : 0L;
+		if ( viewCount > 1 && ShadowTriangles > MostShadowTriangles ) ShadowRunShort++;
 
 		var indexWanted = Math.Max( 3L, ( runAt + binIndexCapacity + shadowIndexCapacity ) * 3 );
 
@@ -705,6 +706,9 @@ internal sealed class CoreMeshRender
 	//How many triangles this frame's lights' views can hold between them - the finest levels of
 	//what stands in each view's square, added up. Set by the drawer from CoreSunPages before Begin.
 	internal long ShadowTriangles { get; set; }
+
+	//Frames whose lights' views could hold more than the run, at their finest - their last lists are cut short if they draw that much; for the report
+	internal static long ShadowRunShort;
 
 	//The most the lights' run may take: twelve bytes a triangle, so 24 MB.
 	private const long MostShadowTriangles = 1L << 21;

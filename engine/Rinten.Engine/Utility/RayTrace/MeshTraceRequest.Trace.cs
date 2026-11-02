@@ -224,7 +224,11 @@ partial struct MeshTraceRequest
 
 			if ( localDelta.IsNearZeroLength ) return false;
 
-			if ( !TraceTriangles( positions, indices, localStart, localDelta, out fraction, out var localNormal, out triangle ) )
+			var tree = Tree( found );
+
+			if ( tree is not null
+				? !tree.Trace( localStart, localDelta, request.cullMode, out fraction, out var localNormal, out triangle )
+				: !TraceTriangles( positions, indices, localStart, localDelta, out fraction, out localNormal, out triangle ) )
 				return false;
 
 			normal = transform.NormalToWorld( localNormal ).Normal;
@@ -291,6 +295,9 @@ partial struct MeshTraceRequest
 	//The triangles of a mapping mesh, or nothing for anything else.
 	private static IReadOnlyList<int> Triangles( SceneObject found )
 		=> found.Component is MeshComponent component ? component.Mesh?.TraceIndices : null;
+
+	private static ModelTraceMesh Tree( SceneObject found )
+		=> found.Component is MeshComponent component ? component.Mesh?.TraceTree : null;
 
 	//Model triangles for static models; animated ones fall back to bounds since bones move vertices
 	private static ModelTraceMesh ModelTriangles( SceneObject found )

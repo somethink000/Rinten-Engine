@@ -24,9 +24,13 @@ internal sealed class CoreSunPages : IDisposable
 	internal const float MoverReach = 64.0f;
 	internal const float MoverLeast = 2.0f;
 
-	//Per-frame bake limits; the rest waits, and a level isn't read until fully baked
+	//Per-frame bake limits; the rest waits, and a level isn't read until fully baked. The triangles are the run the lights'
+	//lists share (CoreMeshRender's MostShadowTriangles): a list past its end is cut short, and a bake cut short holds holes
 	internal const int MostBakes = 16;
 	internal const long MostBakeTriangles = 1L << 21;
+
+	//This frame's room for bakes in that run, after what moves - which is drawn into it after them
+	private long bakeRoom;
 
 	//The most views one frame adds to the cull: the bakes and the map of what moves.
 	internal const int MostViews = MostBakes + 1;
@@ -114,6 +118,14 @@ internal sealed class CoreSunPages : IDisposable
 	//The still world's footprints in the sun's frame, for a bake's count of what lands in it; radius < 0 where unused
 	private float[] footX = [], footY = [], footR = [];
 
+	//The footprints bucketed by centre, a FootCell square each, for a bake's count to visit only those near it;
+	//ones wider than a cell are kept apart and always visited. Made again on the first count after a footprint changes
+	private const float FootCell = 8.0f;
+	private bool footsMoved = true;
+	private int cellsX, cellsY, cellX0, cellY0;
+	private int[] cellStart = [], cellFeet = [];
+	private readonly List<int> wideFeet = new();
+
 	//One bake: a rectangle of a level's tiles and where in the layer its slots are.
 	private readonly struct Bake
 	{
@@ -150,6 +162,15 @@ internal sealed class CoreSunPages : IDisposable
 	//Frames since the process started on which a level was not to be read even short of its rim, outside a rebake -
 	//shadows there fell to a coarser level, which shows as a flicker on a moving eye
 	internal static long FramesShort, FramesNotWhole;
+
+	//Frames spent baking the pages again from nothing, and frames on which no sun shadow could be read at all - for the report
+	internal static long FramesRebaking, FramesDark;
+
+	//Frames that drew the movers' map, the casters in it and the triangles they could hold, added up - for the report
+	internal static long MoverFrames, MoverCasters, MoverTrianglesDrawn;
+
+	//Frames by the finest level a pixel next to the eye could read, the last entry none - for the report
+	internal static readonly long[] FramesFinest = new long[MostLevels + 1];
 
 	//Still-world changes the pages were told of, and the pages they left to bake again - for the report
 	internal static long ChangesNoted, PagesStaled;
@@ -363,6 +384,7 @@ internal sealed class CoreSunPages : IDisposable
 		var total = 0L;
 		validMask = 0;
 		edgeMask = 0;
+		bakeRoom = MostBakeTriangles - ( casters.MovingCount > 0 ? Math.Min( casters.MoverTriangles, MostBakeTriangles / 2 ) : 0 );
 
 		for ( var level = levels - 1; level >= 0; level-- )
 		{
@@ -395,6 +417,11 @@ internal sealed class CoreSunPages : IDisposable
 		//A rebake ends on the frame its last level is taken: the pixels turn from the kept map to this one, whole
 		if ( rebaking && validMask == ( 1u << levels ) - 1u ) rebaking = false;
 
+		var readable = validMask | edgeMask;
+		FramesFinest[readable == 0 ? MostLevels : System.Numerics.BitOperations.TrailingZeroCount( readable )]++;
+
+		if ( rebaking ) FramesRebaking++;
+		if ( ( validMask | edgeMask ) == 0 && !( rebaking && shown.Valid ) ) FramesDark++;
 		if ( !rebaking && ( validMask | edgeMask ) != ( 1u << levels ) - 1u ) FramesShort++;
 		if ( !rebaking && validMask != ( 1u << levels ) - 1u ) FramesNotWhole++;
 
@@ -405,6 +432,13 @@ internal sealed class CoreSunPages : IDisposable
 		Movers( lodPixels, eye );
 
 		Triangles = total + ( moverViews * casters.MoverTriangles );
+
+		if ( moverViews > 0 )
+		{
+			MoverFrames++;
+			MoverCasters += casters.MovingCount;
+			MoverTrianglesDrawn += casters.MoverTriangles;
+		}
 
 		if ( debug && ( ( ++debugFrame % 120 ) == 5 || ( traceBakes && bakes.Count > 0 ) ) )
 			Log.Info( $"sun pages: {levels} levels of {pageWorld:F3} m pages, far {far:F0}, whole 0x{validMask:X}{( rebaking ? ( shown.Valid ? $", rebaking - showing map {shown.Map} 0x{shown.Mask:X}" : ", rebaking" ) : "" )}, depth {zLow:F1}..{zHigh:F1} over a span of {spanLow:F1}..{spanHigh:F1}, eye {eyeSun.x:F1},{eyeSun.y:F1},{eyeSun.z:F1}, {bakes.Count} bakes of {total} triangles, {casters.Movers.Count} moving{TraceCasters()}" );
@@ -551,7 +585,16 @@ internal sealed class CoreSunPages : IDisposable
 		var page = PageOf( level );
 		var triangles = TrianglesUnder( tx * page, ty * page, ( tx + width ) * page, ( ty + height ) * page );
 
-		if ( total + triangles > MostBakeTriangles && bakes.Count > 0 ) return false;
+		if ( total + triangles > bakeRoom )
+		{
+			//Its halves, where they fit and the whole would not
+			if ( width > 1 || height > 1 ) return width >= height
+				? Take( level, sx, sy, width / 2, height, ref total ) && Take( level, sx + ( width / 2 ), sy, width - ( width / 2 ), height, ref total )
+				: Take( level, sx, sy, width, height / 2, ref total ) && Take( level, sx, sy + ( height / 2 ), width, height - ( height / 2 ), ref total );
+
+			//One page more than the room waits for a frame with no other bake, the most room there is
+			if ( bakes.Count > 0 ) return false;
+		}
 
 		total += triangles;
 		bakes.Add( new Bake( level, tx, ty, width, height, sx, sy, triangles ) );
@@ -579,20 +622,99 @@ internal sealed class CoreSunPages : IDisposable
 	//most a bake of it can hold, since no level of a chain holds more than its finest level.
 	private long TrianglesUnder( float x0, float y0, float x1, float y1 )
 	{
+		if ( footsMoved ) BucketFeet();
+
 		var sum = 0L;
-		var count = Math.Min( footR.Length, casters.Count );
 
-		for ( var i = 0; i < count; i++ )
+		foreach ( var i in wideFeet ) sum += Under( i, x0, y0, x1, y1 );
+
+		if ( cellsX == 0 ) return sum;
+
+		//A narrow footprint reaching the square has its centre within a cell of it
+		var ax = Math.Max( (int)MathF.Floor( ( x0 - FootCell ) / FootCell ) - cellX0, 0 );
+		var bx = Math.Min( (int)MathF.Floor( ( x1 + FootCell ) / FootCell ) - cellX0, cellsX - 1 );
+		var ay = Math.Max( (int)MathF.Floor( ( y0 - FootCell ) / FootCell ) - cellY0, 0 );
+		var by = Math.Min( (int)MathF.Floor( ( y1 + FootCell ) / FootCell ) - cellY0, cellsY - 1 );
+
+		for ( var cy = ay; cy <= by; cy++ )
 		{
-			var r = footR[i];
-			if ( r < 0.0f ) continue;
-			if ( footX[i] + r < x0 || footX[i] - r > x1 || footY[i] + r < y0 || footY[i] - r > y1 ) continue;
+			for ( var cx = ax; cx <= bx; cx++ )
+			{
+				var cell = ( cy * cellsX ) + cx;
 
-			sum += casters.TrianglesOf( i );
+				for ( var k = cellStart[cell]; k < cellStart[cell + 1]; k++ )
+					sum += Under( cellFeet[k], x0, y0, x1, y1 );
+			}
 		}
 
 		return sum;
 	}
+
+	private long Under( int i, float x0, float y0, float x1, float y1 )
+	{
+		var r = footR[i];
+		if ( footX[i] + r < x0 || footX[i] - r > x1 || footY[i] + r < y0 || footY[i] - r > y1 ) return 0;
+
+		return casters.TrianglesOf( i );
+	}
+
+	private void BucketFeet()
+	{
+		footsMoved = false;
+		wideFeet.Clear();
+		cellsX = cellsY = 0;
+
+		var count = Math.Min( footR.Length, casters.Count );
+		int lowX = int.MaxValue, lowY = int.MaxValue, highX = int.MinValue, highY = int.MinValue;
+
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( footR[i] < 0.0f ) continue;
+
+			if ( footR[i] > FootCell )
+			{
+				wideFeet.Add( i );
+				continue;
+			}
+
+			var cx = (int)MathF.Floor( footX[i] / FootCell );
+			var cy = (int)MathF.Floor( footY[i] / FootCell );
+			lowX = Math.Min( lowX, cx ); highX = Math.Max( highX, cx );
+			lowY = Math.Min( lowY, cy ); highY = Math.Max( highY, cy );
+		}
+
+		if ( lowX > highX ) return;
+
+		cellX0 = lowX;
+		cellY0 = lowY;
+		cellsX = highX - lowX + 1;
+		cellsY = highY - lowY + 1;
+
+		var cells = cellsX * cellsY;
+		if ( cellStart.Length < cells + 1 ) cellStart = new int[cells + 1];
+		else Array.Clear( cellStart, 0, cells + 1 );
+
+		//Counted, summed into starts, then filled - the cells' feet end up side by side
+		for ( var i = 0; i < count; i++ )
+			if ( footR[i] >= 0.0f && footR[i] <= FootCell ) cellStart[CellOf( i ) + 1]++;
+
+		for ( var c = 0; c < cells; c++ ) cellStart[c + 1] += cellStart[c];
+
+		if ( cellFeet.Length < cellStart[cells] ) cellFeet = new int[cellStart[cells]];
+
+		var fill = new int[cells];
+
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( footR[i] < 0.0f || footR[i] > FootCell ) continue;
+
+			var cell = CellOf( i );
+			cellFeet[cellStart[cell] + fill[cell]++] = i;
+		}
+	}
+
+	private int CellOf( int i )
+		=> ( ( (int)MathF.Floor( footY[i] / FootCell ) - cellY0 ) * cellsX ) + (int)MathF.Floor( footX[i] / FootCell ) - cellX0;
 
 	//The spheres the casters said changed, as slots of every level that no longer hold what they show; a stand-in's swap, only
 	//the levels whose texel is finer than its error - a coarser one would bake the same picture again
@@ -763,6 +885,8 @@ internal sealed class CoreSunPages : IDisposable
 			Array.Resize( ref footR, room );
 
 			for ( var i = from; i < room; i++ ) footR[i] = -1.0f;
+
+			footsMoved = true;
 		}
 
 		//A whole caster refresh restarts all pages, rebaked into the other map so shadows don't vanish
@@ -795,6 +919,8 @@ internal sealed class CoreSunPages : IDisposable
 	//A slot's footprint in the sun's frame, where it is part of the still world.
 	private void Foot( int slot )
 	{
+		footsMoved = true;
+
 		if ( !casters.Still( slot ) )
 		{
 			footR[slot] = -1.0f;

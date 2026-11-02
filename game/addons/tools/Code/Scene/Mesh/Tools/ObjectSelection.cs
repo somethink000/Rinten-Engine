@@ -573,8 +573,8 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 		//A drag taken over without a final call leaves its lists behind
 		_dragListsMade = false;
 
-		//Nothing is picked mid-drag, and what moves under the pointer would be traced afresh every frame
-		if ( DragStarted ) return;
+		//Nothing is picked mid-drag or while the camera is flown, and the ray would be traced afresh every frame
+		if ( DragStarted || SceneEditorExtensions.IsControllingCamera ) return;
 
 		if ( !IsAllowedToSelect ) return;
 

@@ -18,6 +18,22 @@ public sealed partial class PolygonMesh : IJsonConvert
 	internal IReadOnlyList<Vector3> TracePositions => _meshVertices;
 
 	internal IReadOnlyList<int> TraceIndices => _meshIndices;
+
+	//The same triangles as a tree, for a mesh traced again since its last rebuild - one rebuilt every frame while it is
+	//edited is traced through the lists, a tree a frame would cost more than it saves
+	private ModelTraceMesh _traceTree;
+	private bool _tracedSinceRebuild;
+
+	internal ModelTraceMesh TraceTree
+	{
+		get
+		{
+			if ( _traceTree is not null || _meshIndices.Count < 3 ) return _traceTree;
+			if ( !_tracedSinceRebuild ) { _tracedSinceRebuild = true; return null; }
+
+			return _traceTree = new ModelTraceMesh( _meshVertices.ToArray(), _meshIndices.ToArray() );
+		}
+	}
 	private readonly List<byte> _meshTriangleMaterials = new();
 	private readonly Dictionary<FaceHandle, FaceMesh> _meshFaces = new();
 	private readonly Dictionary<int, Material> _materialsById = new();
@@ -4452,6 +4468,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 		_badFaces.Clear();
 		_meshIndices.Clear();
 		_meshVertices.Clear();
+		_traceTree = null;
+		_tracedSinceRebuild = false;
 		_meshFaces.Clear();
 		_meshTriangleMaterials.Clear();
 		_faceNormalCache.Clear();

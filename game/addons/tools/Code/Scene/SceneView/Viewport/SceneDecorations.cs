@@ -121,6 +121,9 @@ internal sealed class SceneDecorations
 		if ( session is null ) return;
 		if ( !Gizmo.Settings.Selection ) return;
 
+		//Nothing is pointed at while the camera is flown or dragged, and the ray would be traced afresh every frame
+		if ( SceneEditorExtensions.IsControllingCamera ) return;
+
 		//Trace models in the scene, hover the hit one
 		var tr = session.Scene.Trace.Ray( Gizmo.CurrentRay, Gizmo.RayDepth )
 					.UseRenderMeshes( true )

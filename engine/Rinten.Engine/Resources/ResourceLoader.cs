@@ -359,6 +359,8 @@ internal static class ResourceLoader
 		if ( fs.FileExists( $"{source}_c" ) ) return;
 
 		//What the editor itself just wrote. Reading our own save back would tell the tools the file changed underneath them, on every save.
+		if ( asset.IsOwnWrite( fs.GetFullPath( source ) ) ) return;
+
 		var json = fs.ReadAllText( source );
 
 		if ( string.IsNullOrEmpty( json ) ) return;

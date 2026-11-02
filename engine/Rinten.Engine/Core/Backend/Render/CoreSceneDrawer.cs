@@ -2671,7 +2671,7 @@ internal sealed partial class CoreSceneDrawer
 			if ( meshRender.Begin( tables, views.AsSpan( 0, count ), pixels, pyramidShape, useDepth, prepassSlices ) && pyramid != 0 )
 			{
 				meshRender.Cull( pyramid );
-				meshRender.Skin();
+				meshRender.Skin( views[0] );
 			}
 
 			CoreRenderDevice.ZoneEnd();

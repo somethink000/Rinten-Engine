@@ -377,6 +377,8 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 		Scene.Source = resource;
 		Scene.Name = System.IO.Path.GetFileNameWithoutExtension( saveLocation );
 
+		( resource as SceneFile )?.LetGoOfObjects();
+
 		HasUnsavedChanges = false;
 		EditorEvent.Run( "scene.saved", Scene );
 

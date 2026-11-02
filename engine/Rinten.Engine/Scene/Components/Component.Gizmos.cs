@@ -18,6 +18,9 @@ public abstract partial class Component
 
 	internal virtual bool GizmoMayCatch( Ray ray, float depth ) => true;
 
+	//Whether its gizmo draws for a selected object wherever the pointer is, so the walk must not pass one by
+	internal virtual bool GizmoDrawsSelected => false;
+
 	internal void DrawGizmosInternal()
 	{
 		//Profiled per component type; editor calls this per viewport for many components

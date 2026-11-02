@@ -41,6 +41,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 			field = value;
 
 			//The model carries one kind of collision, so a different kind is a different model
+			if ( !_buildsMesh ) return;
+
 			RebuildRenderMesh();
 			RebuildImmediately();
 		}
@@ -174,9 +176,14 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		return Mesh.GetFaceMaterial( face );
 	}
 
+	//Set while enabled: properties read from a file arrive before that, and building for each would be thrown away by the next
+	bool _buildsMesh;
+
 	internal override void OnEnabledInternal()
 	{
 		GameObject.Tags.Add( "world" );
+
+		_buildsMesh = true;
 
 		//Mesh needs to build before collider.
 		RebuildRenderMesh();
@@ -187,6 +194,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	protected override void OnDisabled()
 	{
 		base.OnDisabled();
+
+		_buildsMesh = false;
 
 		DeleteSceneObject();
 	}
@@ -240,7 +249,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	void RebuildMesh( bool forceRebuild )
 	{
 		//Only rebuild dirty meshes in editor.
-		if ( !Active ) return;
+		if ( !_buildsMesh ) return;
 		if ( !Scene.IsEditor ) return;
 		if ( Mesh is null ) return;
 
@@ -251,9 +260,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		}
 		else if ( Mesh.IsVertexDataDirty )
 		{
-			//The colours into the model's own vertex arrays first, so the copy the engine holds agrees with the
-			//mesh, and so the dirty corners are let go of - without that this branch would fire every frame.
-			Mesh.UpdateVertexData();
+			//Let go of the dirty corners first, or this branch would fire every frame
+			Mesh.ClearVertexDataDirty();
 
 			//Vertex data isn't re-uploaded to the geometry pool, so rebuild fully for colour changes to show
 			RebuildRenderMesh();
@@ -349,7 +357,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 	void RebuildRenderMesh()
 	{
-		if ( !Active ) return;
+		if ( !_buildsMesh ) return;
 		if ( Mesh is null ) return;
 
 		Mesh.Transform = WorldTransform;

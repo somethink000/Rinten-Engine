@@ -10,6 +10,9 @@ public partial class SceneEditorSession
 	//one write rather than thirty; short enough that walking away from the machine for a moment leaves the work on the disk.
 	private const float QuietBeforeWriting = 1.5f;
 
+	//The journal already holds every edit, so a slow write can wait: writing takes at most this share of the editor's time.
+	private const double ShareOfTimeWriting = 0.05;
+
 	//How long the last edit has to be the last one before it is passed on. Shorter than the wait before writing, because this is what
 	//keeps a prefab's instances looking like the prefab and somebody is watching it happen. Long enough that a drag is one of them.
 	private const float QuietBeforePropagating = 0.25f;
@@ -53,7 +56,7 @@ public partial class SceneEditorSession
 	public void CheckpointWhenQuiet()
 	{
 		if ( !HasUnsavedChanges ) return;
-		if ( sinceEdited < QuietBeforeWriting ) return;
+		if ( sinceEdited < Math.Max( QuietBeforeWriting, LastCheckpointMilliseconds / 1000.0 / ShareOfTimeWriting ) ) return;
 
 		Checkpoint();
 	}

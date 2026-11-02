@@ -767,6 +767,34 @@ internal sealed class CoreMeshRender
 		return true;
 	}
 
+	//How far across a posed instance has to be on screen, in pixels of radius, to be posed every frame, every second and every fourth
+	private const float PoseEveryFrame = 48.0f, PoseEverySecond = 16.0f, PoseEveryFourth = 6.0f;
+
+	//A pose only bends the mesh inside its own transform: held, it goes unseen off camera (a light's view of it included) and
+	//hardly shows far away. A range never posed into holds nothing, so it cannot wait.
+	private static bool PoseCanWait( CoreSceneTables.Entry entry, System.Numerics.Vector4 sphere, in ViewSetup camera, int slot, int generation )
+	{
+		if ( entry.SkinnedAt != entry.PosedAt || entry.SkinnedGeneration != generation ) return false;
+
+		var centre = new System.Numerics.Vector3( sphere.X, sphere.Y, sphere.Z );
+
+		if ( Outside( camera.Plane0 ) || Outside( camera.Plane1 ) || Outside( camera.Plane2 ) ||
+			Outside( camera.Plane3 ) || Outside( camera.Plane4 ) || Outside( camera.Plane5 ) ) return true;
+
+		if ( !camera.Perspective ) return false;
+
+		var distance = System.Numerics.Vector3.Distance( centre, new System.Numerics.Vector3( camera.Eye.x, camera.Eye.y, camera.Eye.z ) );
+		if ( distance <= sphere.W ) return false;
+
+		var pixels = sphere.W / distance * MathF.Abs( camera.ScaleY ) * camera.HalfHeight;
+		var every = pixels >= PoseEveryFrame ? 1 : pixels >= PoseEverySecond ? 2 : pixels >= PoseEveryFourth ? 4 : 8;
+
+		return ( EngineLoop.LoopFrames + slot ) % every != 0;
+
+		bool Outside( in System.Numerics.Vector4 plane )
+			=> plane.X * centre.X + plane.Y * centre.Y + plane.Z * centre.Z + plane.W < -sphere.W;
+	}
+
 	//SkinPush in mesh_skin.slang, twelve words.
 	private ReadOnlySpan<byte> SkinPush( uint index, uint first, uint count, uint sumsAt, uint shaped, uint skinned,
 		uint wasAt, uint keepWas, uint deformAt, uint deformCount, uint anchorsAt )
@@ -796,7 +824,7 @@ internal sealed class CoreMeshRender
 	}
 
 	//Re-poses only instances whose pose hash or pool range changed; after the cull, before vertex reads
-	internal void Skin()
+	internal void Skin( in ViewSetup camera )
 	{
 		if ( !Ready || skinPipeline == 0 || !tables.AnyPosed ) return;
 
@@ -831,6 +859,8 @@ internal sealed class CoreMeshRender
 			if ( entry.PoseHash != 0 && entry.SkinnedHash == entry.PoseHash &&
 				entry.SkinnedAt == entry.PosedAt && entry.SkinnedGeneration == generation ) continue;
 
+			if ( PoseCanWait( entry, tables.RecordAt( slot ).Sphere, camera, slot, generation ) ) continue;
+
 			if ( !begun )
 			{
 				CoreRenderDevice.ZoneBegin( "skin" );
@@ -839,9 +869,7 @@ internal sealed class CoreMeshRender
 
 			//The shapes somebody set, summed a vertex before the bones - see mesh_shapes.slang. The sums
 			//are cleared and built again whole: what a shape added last frame is not something to subtract.
-			CoreRenderDevice.ZoneBegin( "skin shapes" );
 			var shaped = entry.ShapesAt >= 0 && Shape( entry, mesh );
-			CoreRenderDevice.ZoneEnd();
 			var skinned = entry.PaletteAt >= 0 && mesh.Skin != 0;
 			var deformed = entry.DeformAt >= 0 && entry.DeformVolumes > 0 && CoreSceneTables.Deformations.Buffer != 0;
 

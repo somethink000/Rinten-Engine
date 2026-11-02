@@ -450,6 +450,63 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		}
 	}
 
+	//One file as this resource last asked for it to be written
+	private sealed class DiskCopy
+	{
+		public string Path;
+		public ulong Hash;
+		public long Length;
+		public DateTime Time;
+		public volatile bool Landed;
+
+		public bool Matches( string path, ulong hash, long length )
+			=> Hash == hash && Length == length && string.Equals( Path, path, StringComparison.OrdinalIgnoreCase ) && ( !Landed || StillOnDisk() );
+
+		//A write in flight has no time to compare; once landed, any other writer shows in the length or the time
+		public bool StillOnDisk()
+		{
+			if ( !Landed ) return false;
+
+			var file = new System.IO.FileInfo( Path );
+			return file.Exists && file.Length == Length && file.LastWriteTimeUtc == Time;
+		}
+	}
+
+	private DiskCopy sourceCopy, blobCopy;
+
+	//Whether the last save found both files already holding what it would have written
+	internal bool LastSaveWroteNothing { get; private set; }
+
+	//Whether this path holds exactly what this resource last wrote there, told apart without reading it
+	internal bool IsOwnWrite( string path )
+		=> sourceCopy is { } copy && string.Equals( copy.Path, path, StringComparison.OrdinalIgnoreCase ) && copy.StillOnDisk();
+
+	//Writes unless the file already holds these bytes. False means nothing was written
+	private static bool WriteChanged( ref DiskCopy copy, string filename, byte[] contents, bool background )
+	{
+		var hash = Rinten.Hashing.XxHash3.HashToUInt64( contents );
+
+		if ( copy is not null && copy.Matches( filename, hash, contents.Length ) ) return false;
+
+		var next = copy = new DiskCopy { Path = filename, Hash = hash, Length = contents.Length };
+
+		void Write( string path, byte[] bytes )
+		{
+			WriteWithoutLosingIt( path, bytes );
+
+			var file = new System.IO.FileInfo( path );
+			next.Time = file.LastWriteTimeUtc;
+			next.Landed = true;
+		}
+
+		if ( background )
+			ResourceWrites.Queue( filename, contents, Write );
+		else
+			Write( filename, contents );
+
+		return true;
+	}
+
 	internal virtual void SaveToDisk( string filename, string jsonString, bool background = false )
 	{
 		_unsavedChanges = false;
@@ -457,11 +514,7 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		LastSavedSourceHash = jsonString.FastHash();
 
 		var bytes = System.Text.Encoding.UTF8.GetBytes( jsonString );
-
-		if ( background )
-			ResourceWrites.Queue( filename, bytes, WriteWithoutLosingIt );
-		else
-			WriteWithoutLosingIt( filename, bytes );
+		var wrote = WriteChanged( ref sourceCopy, filename, bytes, background );
 
 		//Write binary data if present
 		if ( BinaryData != null && BinaryData.Length > 0 )
@@ -470,12 +523,7 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 
 			try
 			{
-				var blobPath = CompiledPaths.BlobSidecar( filename );
-
-				if ( background )
-					ResourceWrites.Queue( blobPath, BinaryData, WriteWithoutLosingIt );
-				else
-					WriteWithoutLosingIt( blobPath, BinaryData );
+				wrote |= WriteChanged( ref blobCopy, CompiledPaths.BlobSidecar( filename ), BinaryData, background );
 			}
 			catch ( Exception e )
 			{
@@ -486,6 +534,8 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 				BinaryData = null;
 			}
 		}
+
+		LastSaveWroteNothing = !wrote;
 
 		IToolsDll.Current?.RunEvent<ResourceLibrary.IEventListener>( i => i.OnSave( this ) );
 	}

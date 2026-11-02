@@ -89,6 +89,11 @@ public sealed class BoxCollider : Collider
 		CalculateLocalBounds();
 	}
 
+	//Lays nothing until selected, and most boxes never are - a level can hold thousands
+	internal override bool GizmoOnlyCatches => true;
+	internal override bool GizmoMayCatch( Ray ray, float depth ) => false;
+	internal override bool GizmoDrawsSelected => true;
+
 	protected override void DrawGizmos()
 	{
 		if ( !Gizmo.IsSelected && !Gizmo.IsHovered )

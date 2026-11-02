@@ -132,6 +132,8 @@ public partial class Scene : GameObject
 
 				RootsReadMs = ( System.Diagnostics.Stopwatch.GetTimestamp() - startedRoots ) * 1000.0
 					/ System.Diagnostics.Stopwatch.Frequency;
+
+				sceneFile.LetGoOfObjects();
 			}
 
 			//Additive into a scene nothing was loaded into - a built game's start, see GameInstance.OpenStartupScene - is the first

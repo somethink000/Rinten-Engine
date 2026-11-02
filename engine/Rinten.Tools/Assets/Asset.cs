@@ -445,7 +445,7 @@ public abstract partial class Asset
 					System.Threading.Tasks.Task.Run( () => Rinten.TerrainBakeCache.WritePack( holder, pack ) );
 				}
 
-				if ( compile ) Compile( false );
+				if ( compile && ( !obj.LastSaveWroteNothing || !HasCompiledFile ) ) Compile( false );
 
 				obj.Register( Path );
 				return true;

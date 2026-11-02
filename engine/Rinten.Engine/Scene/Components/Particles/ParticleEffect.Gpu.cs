@@ -37,7 +37,7 @@ public sealed partial class ParticleEffect
 		if ( !ConstantMovement.IsNearlyZero() ) return "drifts";
 		if ( !LocalSpace.IsPlainConstant || LocalSpace.ConstantValue != 0.0f ) return "moves in local space";
 		if ( !PerParticleTimeScale.IsPlainConstant ) return "has a time scale per particle";
-		if ( _boneTargets.Count > 0 ) return "follows bones";
+		if ( _boneTargets is { Count: > 0 } ) return "follows bones";
 
 		//Only the runner steps each particle, and only with modules the card has
 		if ( OnStep is not { HasSingleTarget: true } step ) return "something besides its runner steps its particles";

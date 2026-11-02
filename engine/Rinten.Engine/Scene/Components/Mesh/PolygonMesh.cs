@@ -4387,52 +4387,12 @@ public sealed partial class PolygonMesh : IJsonConvert
 		IsDirty = true;
 	}
 
-	struct MeshVertexRef
-	{
-		public int SubmeshIndex;
-		public int VertexIndex;
-	}
-
-	readonly Dictionary<HalfEdgeHandle, List<MeshVertexRef>> _halfEdgeToMeshVertices = [];
 	readonly HashSet<HalfEdgeHandle> _dirtyHalfEdges = [];
 	readonly List<Submesh> _submeshes = [];
 	readonly Dictionary<FaceHandle, Vector3> _faceNormalCache = [];
 
-	internal void UpdateVertexData()
-	{
-		if ( _dirtyHalfEdges.Count == 0 ) return;
-
-		var dirtySubmeshes = new HashSet<int>();
-
-		foreach ( var hEdge in _dirtyHalfEdges )
-		{
-			var blend = Blends[hEdge];
-			var color = Colors[hEdge];
-
-			if ( _halfEdgeToMeshVertices.TryGetValue( hEdge, out var refs ) )
-			{
-				foreach ( var vertex in refs )
-				{
-					var vertices = _submeshes[vertex.SubmeshIndex].Vertices;
-					var v = vertices[vertex.VertexIndex];
-					v.Blend = blend;
-					v.Color = color;
-					vertices[vertex.VertexIndex] = v;
-
-					dirtySubmeshes.Add( vertex.SubmeshIndex );
-				}
-			}
-		}
-
-		foreach ( var submeshIndex in dirtySubmeshes )
-		{
-			var submesh = _submeshes[submeshIndex];
-			var mesh = submesh.Mesh;
-			mesh.SetVertexBufferData( submesh.Vertices );
-		}
-
-		_dirtyHalfEdges.Clear();
-	}
+	//Colours reach the render mesh through a rebuild, which reads them from the half edges
+	internal void ClearVertexDataDirty() => _dirtyHalfEdges.Clear();
 
 	/// <summary>Triangulate the polygons into a model, with only the collision asked for.</summary>
 	public Model Rebuild( MeshComponent.CollisionType collision = MeshComponent.CollisionType.Mesh )
@@ -4447,14 +4407,12 @@ public sealed partial class PolygonMesh : IJsonConvert
 		_meshVertices.Clear();
 		_meshFaces.Clear();
 		_meshTriangleMaterials.Clear();
-		_halfEdgeToMeshVertices.Clear();
 		_faceNormalCache.Clear();
 
 		//A quad face produces 4 vertices and 6 indices; use that as a rough capacity hint.
 		_meshVertices.EnsureCapacity( faceCount * 4 );
 		_meshIndices.EnsureCapacity( faceCount * 6 );
 		_meshTriangleMaterials.EnsureCapacity( faceCount * 2 );
-		_halfEdgeToMeshVertices.EnsureCapacity( halfEdgeCount );
 		_meshFaces.EnsureCapacity( faceCount );
 		_faceNormalCache.EnsureCapacity( faceCount );
 
@@ -6000,17 +5958,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 				Color = Colors[faceEdge],
 			} );
 
-			if ( !_halfEdgeToMeshVertices.TryGetValue( faceEdge, out var list ) )
-			{
-				list = new List<MeshVertexRef>( 1 );
-				_halfEdgeToMeshVertices.Add( faceEdge, list );
-			}
 
-			list.Add( new MeshVertexRef
-			{
-				SubmeshIndex = submesh.Index,
-				VertexIndex = vertexIndex
-			} );
 		}
 
 		_meshVertices.AddRange( vertexPositions );

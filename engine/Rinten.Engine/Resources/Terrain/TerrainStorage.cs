@@ -253,7 +253,7 @@ public partial class TerrainStorage : GameResource
 				using var packed = new MemoryStream();
 				using ( var into = new BinaryWriter( packed, System.Text.Encoding.UTF8, leaveOpen: true ) ) Mesh.Write( into );
 
-				var meshBytes = Compress<byte>( packed.ToArray() );
+				var meshBytes = Deflated( packed.GetBuffer().AsSpan( 0, (int)packed.Length ) );
 
 				writer.Stream.Write( 1 ); //map_count
 				writer.Stream.Write( "mesh" );
@@ -324,6 +324,23 @@ public partial class TerrainStorage : GameResource
 			}
 
 			return MemoryMarshal.Cast<byte, T>( decompressedStream.ToArray().AsSpan() );
+		}
+
+		//The mesh as last compressed: every save of its scene asks, and deflate is what a save of it costs
+		private ulong deflatedHash;
+		private byte[] deflated;
+
+		private byte[] Deflated( Span<byte> data )
+		{
+			var hash = Rinten.Hashing.XxHash3.HashToUInt64( data );
+
+			if ( deflated is null || deflatedHash != hash )
+			{
+				deflated = Compress( data );
+				deflatedHash = hash;
+			}
+
+			return deflated;
 		}
 
 		internal static byte[] Compress<T>( Span<T> data ) where T : struct

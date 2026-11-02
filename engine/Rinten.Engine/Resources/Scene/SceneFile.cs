@@ -25,7 +25,37 @@ public partial class SceneFile : GameResource
 	[JsonPropertyName( "__guid" )]
 	public Guid Id { get; set; }
 
-	public JsonObject[] GameObjects { get; set; }
+	public JsonObject[] GameObjects
+	{
+		get
+		{
+			if ( !objectsOnDisk ) return gameObjects;
+
+			objectsOnDisk = false;
+			FlushWrites();
+			LoadFromJson( EngineFileSystem.Mounted.ReadAllText( ResourcePath ) );
+
+			return gameObjects;
+		}
+		set
+		{
+			objectsOnDisk = false;
+			gameObjects = value;
+		}
+	}
+
+	private JsonObject[] gameObjects;
+	private bool objectsOnDisk;
+
+	//A big scene's objects are gigabytes as json and needed only to load it again, so the editor keeps them in the file
+	internal void LetGoOfObjects()
+	{
+		if ( !Application.IsEditor || gameObjects is null || string.IsNullOrEmpty( ResourcePath ) ) return;
+		if ( !EngineFileSystem.Mounted.FileExists( ResourcePath ) ) return;
+
+		gameObjects = null;
+		objectsOnDisk = true;
+	}
 	public JsonObject SceneProperties { get; set; }
 
 	public override int ResourceVersion => 6;

@@ -381,6 +381,25 @@ public partial class GameObject
 
 			go.DrawGizmosAt( Gizmo.Transform.ToLocal( go.WorldTransform ) );
 		}
+
+		//Pressed walks all of them above; else a selected one the ray cannot reach still has its gizmo
+		if ( everything ) return;
+
+		foreach ( var selected in Gizmo.Active.Selection )
+		{
+			if ( selected is not GameObject go || !go.IsValid() || !go.Active || go.Scene != scene ) continue;
+			if ( !go.SubtreeDrawsGizmos() || !go.LeafCatcher || go.Hidden() || !go.DrawsWhenSelected() ) continue;
+
+			go.DrawGizmosAt( Gizmo.Transform.ToLocal( go.WorldTransform ) );
+		}
+	}
+
+	private bool DrawsWhenSelected()
+	{
+		for ( var i = 0; i < catchers.Length; i++ )
+			if ( catchers[i].IsValid() && catchers[i].GizmoDrawsSelected ) return true;
+
+		return false;
 	}
 
 	//Hidden by itself or by anything over it - what the walk tests a child for on the way down.

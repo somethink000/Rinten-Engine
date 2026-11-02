@@ -23,11 +23,15 @@ public partial class PolygonMesh
 				if ( !hasTextureCoords )
 				{
 					mesh.ComputeFaceTextureCoordinatesFromParameters();
+					mesh._written = null;
 				}
 				else
 				{
 					mesh.ComputeFaceTextureParametersFromCoordinates();
 				}
+
+				//The bytes read are what the mesh is now, so a save of it unchanged writes them back
+				mesh._writtenAt = mesh.DataVersion;
 
 				mesh.IsDirty = true;
 
@@ -60,6 +64,8 @@ public partial class PolygonMesh
 
 				blob.ApplyTo( mesh );
 				hasTextureCoords = blob.TextureCoord.Length > 0;
+
+				if ( blob.Kept is not null ) mesh._written = blob.Encoded();
 				break;
 
 			case "Position": mesh._transform = mesh.Transform.WithPosition( Read<Vector3>( ref reader ) ); break;
@@ -142,7 +148,7 @@ public partial class PolygonMesh
 		writer.WriteStartObject();
 
 		//World-dependent texture params aren't saved; recomputed from TextureCoord on transform change
-		var blob = MeshBlob.FromMesh( mesh );
+		var blob = mesh.WrittenBlob();
 		writer.WritePropertyName( "Data" );
 
 		if ( BlobDataSerializer.IsActive )
@@ -158,6 +164,25 @@ public partial class PolygonMesh
 		}
 
 		writer.WriteEndObject();
+	}
+
+	//The last blob written and the data it was written from: an unchanged mesh is not encoded again
+	MeshBlob _written;
+	long _writtenAt = -1;
+
+	long DataVersion => Topology.Version + Positions.Version + Blends.Version + Colors.Version + TextureCoord.Version + MaterialIndex.Version + EdgeFlags.Version;
+
+	MeshBlob WrittenBlob()
+	{
+		var at = DataVersion;
+
+		if ( _written is null || _writtenAt != at )
+		{
+			_written = MeshBlob.FromMesh( this ).Encoded();
+			_writtenAt = at;
+		}
+
+		return _written;
 	}
 
 	//Mesh data as one binary blob of named sections; unknown sections are skipped, missing ones default
@@ -193,6 +218,24 @@ public partial class PolygonMesh
 			MaterialIndex = mesh.MaterialIndex.ToArray(),
 			EdgeFlags = mesh.EdgeFlags.ToArray(),
 		};
+
+		internal override bool KeepsBytes => true;
+
+		//Kept as its bytes only: the arrays are copies the bytes already hold
+		public MeshBlob Encoded()
+		{
+			Kept ??= BlobDataSerializer.ToBytes( this );
+
+			Topology = Array.Empty<byte>();
+			Positions = Array.Empty<Vector3>();
+			Blends = Array.Empty<Color32>();
+			Colors = Array.Empty<Color32>();
+			TextureCoord = Array.Empty<Vector2>();
+			MaterialIndex = Array.Empty<int>();
+			EdgeFlags = Array.Empty<int>();
+
+			return this;
+		}
 
 		public void ApplyTo( PolygonMesh mesh )
 		{
@@ -278,22 +321,8 @@ public partial class PolygonMesh
 			return result;
 		}
 
-		public byte[] ToBytes()
-		{
-			var stream = ByteStream.Create( 4096 );
-			try
-			{
-				stream.Write( Version );
-				var writer = new Writer { Stream = stream };
-				Serialize( ref writer );
-				stream = writer.Stream;
-				return stream.ToArray();
-			}
-			finally
-			{
-				stream.Dispose();
-			}
-		}
+		//The kept bytes where there are some: Encoded lets go of the arrays they were made from
+		public byte[] ToBytes() => BlobDataSerializer.ToBytes( this );
 
 		public static MeshBlob FromBytes( byte[] data )
 		{
@@ -308,6 +337,8 @@ public partial class PolygonMesh
 					blob.Upgrade( ref reader, dataVersion );
 				else
 					blob.Deserialize( ref reader );
+
+				if ( dataVersion == blob.Version ) blob.Kept = data;
 			}
 			finally
 			{

@@ -104,6 +104,9 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			_startPoints[go] = go.WorldTransform;
 		}
 
+		_boundsAtStart = CalculateSelectionBounds();
+		_moved = default;
+
 		_startFaceParameters.Clear();
 
 		foreach ( var mesh in _meshes )
@@ -145,6 +148,7 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 			entry.Key.WorldPosition = entry.Value.Position + delta;
 		}
 
+		_moved = delta;
 		Pivot.Drag( delta );
 	}
 
@@ -569,6 +573,9 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 		//A drag taken over without a final call leaves its lists behind
 		_dragListsMade = false;
 
+		//Nothing is picked mid-drag, and what moves under the pointer would be traced afresh every frame
+		if ( DragStarted ) return;
+
 		if ( !IsAllowedToSelect ) return;
 
 		//The nearest hit that belongs to an object: a scene draws plenty nobody owns, which would hide what is behind it
@@ -664,12 +671,20 @@ public sealed partial class ObjectSelection( MeshTool tool ) : SelectionTool( to
 	GameObject[] _boundsFor;
 	RealTimeSince _boundsCounted;
 
+	//The selection's bounds when the drag began, and how far a move has taken it since
+	BBox _boundsAtStart;
+	Vector3 _moved;
+
 	private void DrawBounds()
 	{
 		using ( Gizmo.Scope( "Bounds" ) )
 		{
-			//Walks every selected descendant: at a rate, unless what is selected is being dragged
-			if ( _startPoints.Count > 0 || _boundsFor != _objects || _boundsCounted >= BoundsSeconds )
+			//A move carries the box along; other drags walk every selected descendant each frame, and the rest at a rate
+			if ( _startPoints.Count > 0 && _transformKind == TextureLockTransform.Move )
+			{
+				_bounds = _boundsAtStart + _moved;
+			}
+			else if ( _startPoints.Count > 0 || _boundsFor != _objects || _boundsCounted >= BoundsSeconds )
 			{
 				_bounds = CalculateSelectionBounds();
 				_boundsFor = _objects;

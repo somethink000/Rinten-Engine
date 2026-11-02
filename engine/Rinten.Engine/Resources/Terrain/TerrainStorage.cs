@@ -305,8 +305,14 @@ public partial class TerrainStorage : GameResource
 						SplatMap = Decompress<uint>( compressed ).ToArray();
 						break;
 					case "mesh":
-						using ( var from = new BinaryReader( new MemoryStream( Decompress<byte>( compressed ).ToArray() ) ) )
+						var raw = Decompress<byte>( compressed ).ToArray();
+
+						using ( var from = new BinaryReader( new MemoryStream( raw ) ) )
 							Mesh = TerrainMesh.Read( from );
+
+						//What the next save would compress, if the mesh is written back as it was read
+						deflated = compressed;
+						deflatedHash = Rinten.Hashing.XxHash3.HashToUInt64( raw );
 						break;
 						//Unknown map type: skip (forward compatibility)
 				}

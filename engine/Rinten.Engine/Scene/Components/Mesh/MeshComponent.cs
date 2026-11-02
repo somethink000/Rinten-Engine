@@ -194,6 +194,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		{
 			mesh.Mesh.Transform = mesh.WorldTransform;
 			mesh.Mesh.SetSmoothingAngle( mesh.SmoothingAngle );
+			mesh.Mesh.SettleParameters();
 			mesh.Mesh.ResolveSurfaces();
 		}
 

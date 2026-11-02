@@ -40,6 +40,8 @@ internal static class BlobDataSerializer
 	//Serialize a blob to its binary payload: version prefix followed by the blob data.
 	private static byte[] SerializeBlob( BlobData blob )
 	{
+		if ( blob.Kept is { } kept ) return kept;
+
 		var stream = ByteStream.Create( DefaultStreamSize );
 		try
 		{
@@ -106,6 +108,8 @@ internal static class BlobDataSerializer
 				instance.Upgrade( ref reader, dataVersion );
 			else
 				instance.Deserialize( ref reader );
+
+			if ( instance.KeepsBytes && dataVersion == instance.Version ) instance.Kept = blobData;
 		}
 		finally
 		{

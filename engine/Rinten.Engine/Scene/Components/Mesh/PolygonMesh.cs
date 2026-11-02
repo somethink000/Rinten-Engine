@@ -79,10 +79,10 @@ public sealed partial class PolygonMesh : IJsonConvert
 	private HalfEdgeData<Color32> Blends { get; init; }
 	private HalfEdgeData<Color32> Colors { get; init; }
 	private HalfEdgeData<Vector2> TextureCoord { get; init; }
-	private FaceData<Vector3> TextureUAxis { get; init; }
-	private FaceData<Vector3> TextureVAxis { get; init; }
-	private FaceData<Vector2> TextureScale { get; init; }
-	private FaceData<Vector2> TextureOffset { get; init; }
+	private FaceData<Vector3> TextureUAxis { get { SettleParameters(); return field; } init; }
+	private FaceData<Vector3> TextureVAxis { get { SettleParameters(); return field; } init; }
+	private FaceData<Vector2> TextureScale { get { SettleParameters(); return field; } init; }
+	private FaceData<Vector2> TextureOffset { get { SettleParameters(); return field; } init; }
 	private FaceData<int> MaterialIndex { get; init; }
 	private HalfEdgeData<bool> EdgeSmoothing { get; init; }
 	private HalfEdgeData<int> EdgeFlags { get; init; }
@@ -216,10 +216,40 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 			_transform = value;
 
-			ComputeFaceTextureParametersFromCoordinates();
+			OweParameters( value );
 
 			IsDirty = true;
 		}
+	}
+
+	//The transform the face texture parameters are owed for: a move marks them, and they are worked out from the
+	//coordinates before anything reads them or changes what they come from, as if worked out on the move itself
+	Transform? _parametersOwed;
+	Action _settleParameters;
+
+	void OweParameters( in Transform transform )
+	{
+		_parametersOwed = transform;
+		_settleParameters ??= SettleParameters;
+
+		Topology.Changing = _settleParameters;
+		Positions.Changing = _settleParameters;
+		TextureCoord.Changing = _settleParameters;
+		MaterialIndex.Changing = _settleParameters;
+	}
+
+	internal void SettleParameters()
+	{
+		if ( _parametersOwed is not { } owed ) return;
+
+		_parametersOwed = null;
+
+		Topology.Changing = null;
+		Positions.Changing = null;
+		TextureCoord.Changing = null;
+		MaterialIndex.Changing = null;
+
+		ComputeFaceTextureParametersFromCoordinates( FaceHandles, Materials.Select( CalculateTextureSize ).ToArray(), owed );
 	}
 
 	/// <summary>Set transform without computing texture parameters from coordinates.</summary>
@@ -284,6 +314,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		if ( known.Count == usedIds.Count && known.Count == _materialNamesById.Count )
 			return;
+
+		SettleParameters();
 
 		//Dictionaries, not arrays: face ids can exceed the material table after skipped slots
 		var remap = new Dictionary<int, int>( known.Count );
@@ -4649,7 +4681,10 @@ public sealed partial class PolygonMesh : IJsonConvert
 		{
 			//Same name, and this time something loaded behind it - a material mounted after the mesh was read. Take it.
 			if ( material is not null && _materialsById.GetValueOrDefault( existingId ) is null )
+			{
+				SettleParameters();
 				_materialsById[existingId] = material;
+			}
 
 			return existingId;
 		}

@@ -13,6 +13,12 @@ public abstract class BlobData
 	/// <summary>The version of this binary data format. Used for upgrade paths.</summary>
 	public virtual int Version => 1;
 
+	//Its encoded bytes, version first, where it keeps them rather than encoding itself on every write
+	internal byte[] Kept;
+
+	//Keeps the bytes it was read from when they are of its own version, as what it would write
+	internal virtual bool KeepsBytes => false;
+
 	/// <summary>Serialize this object to binary format.</summary>
 	public abstract void Serialize( ref Writer writer );
 

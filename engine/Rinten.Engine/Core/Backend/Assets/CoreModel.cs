@@ -84,6 +84,14 @@ internal sealed partial class CoreModel : IDisposable
 		return handle is null ? null : new CoreModel( handle, name );
 	}
 
+	//The model keeps the array and may rewrite it, so the caller must not hold on to it
+	internal static CoreModel FromOwned( byte[] bytes, string name )
+	{
+		var handle = CoreAssets.ModelFile.LoadOwned( bytes );
+
+		return handle is null ? null : new CoreModel( handle, name );
+	}
+
 	//What a model built while the game is running is: a tool's brush, a mesh a component rebuilt, one of the built-in shapes. The builder is the caller's to destroy afterwards - the model keeps its own copy.
 	/// <summary>A model straight out of a builder, with no file in between.</summary>
 	public static CoreModel FromBuilder( CoreAssets.ModelBuilder builder, string name )

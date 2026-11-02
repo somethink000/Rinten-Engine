@@ -134,6 +134,20 @@ public partial class Model
 		return baseVertex;
 	}
 
+	//Vertices its meshes own, without those of LOD levels written after them
+	internal int OwnVertexCount()
+	{
+		var count = 0;
+
+		for ( var mesh = 0; mesh < MeshCount; mesh++ )
+		{
+			var range = core.MeshRange( mesh );
+			count = Math.Max( count, range.FirstVertex + range.VertexCount );
+		}
+
+		return count;
+	}
+
 	//Where one mesh of this model sits in its index and vertex buffers.
 	internal void MeshDrawRange( int mesh, out int startIndex, out int indexCount, out int baseVertex )
 	{

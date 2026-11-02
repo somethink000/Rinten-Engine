@@ -179,6 +179,53 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	//Set while enabled: properties read from a file arrive before that, and building for each would be thrown away by the next
 	bool _buildsMesh;
 
+	//A build done ahead of being enabled, and what it was built from
+	sealed record Ahead( byte[] Model, (WorldCell Cell, byte[] Bytes)[] Cells, CollisionType Collision, Transform World );
+
+	Ahead _ahead;
+
+	//Meshes share nothing, and a level holds many, so a whole load builds them together rather than one per enable
+	internal static void BuildAhead( Scene scene )
+	{
+		var meshes = scene.GetAllComponents<MeshComponent>().Where( x => !x._buildsMesh && x.Enabled && x.GameObject.Active && x.Mesh is not null ).ToArray();
+		if ( meshes.Length < 2 ) return;
+
+		foreach ( var mesh in meshes )
+		{
+			mesh.Mesh.Transform = mesh.WorldTransform;
+			mesh.Mesh.SetSmoothingAngle( mesh.SmoothingAngle );
+			mesh.Mesh.ResolveSurfaces();
+		}
+
+		var worlds = meshes.Select( x => ( x.WorldTransform, x.Hidden ) ).ToArray();
+
+		Jobs.JobSystem.For( meshes.Length, (meshes, worlds), static ( s, i ) => s.meshes[i].BuildOnWorker( s.worlds[i].WorldTransform, s.worlds[i].Hidden ) );
+	}
+
+	void BuildOnWorker( in Transform world, bool hidden )
+	{
+		//Enabling builds it again on the main thread, where a failure is reported as it always is
+		try
+		{
+			var bytes = Mesh.Triangulated( Collision, world ).ToBytes();
+			if ( bytes is not null ) _ahead = new Ahead( bytes, hidden ? null : Mesh.CompileCells( world ), Collision, world );
+		}
+		catch ( Exception )
+		{
+			_ahead = null;
+			Mesh.IsDirty = true;
+		}
+	}
+
+	//Nothing may have changed the mesh or what it is built with since
+	Ahead TakeAhead()
+	{
+		var ahead = _ahead;
+		_ahead = null;
+
+		return ahead is not null && !Mesh.IsDirty && ahead.Collision == Collision && ahead.World == WorldTransform ? ahead : null;
+	}
+
 	internal override void OnEnabledInternal()
 	{
 		GameObject.Tags.Add( "world" );
@@ -362,7 +409,9 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 		Mesh.Transform = WorldTransform;
 		Mesh.SetSmoothingAngle( SmoothingAngle );
-		Model = Mesh.Rebuild( Collision );
+
+		var ahead = TakeAhead();
+		Model = ahead is not null ? Model.FromOwnedBytes( ahead.Model, ModelBuilder.DefaultName ) ?? Model.Error : Mesh.Triangulated( Collision, WorldTransform ).Create();
 
 		if ( Model is null || Model.MeshCount == 0 )
 		{
@@ -385,16 +434,16 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 			_sceneObject.UpdateFlagsBasedOnMaterial();
 		}
 
-		RebuildCellObjects();
+		RebuildCellObjects( ahead );
 		UpdateSceneObject();
 	}
 
 	//The cells of the mesh made again from the last build, where it is wider than one - see _cellObjects.
-	void RebuildCellObjects()
+	void RebuildCellObjects( Ahead ahead = null )
 	{
 		DeleteCellObjects();
 
-		var cells = Mesh?.RenderCells( WorldTransform );
+		var cells = ahead is not null ? PolygonMesh.CellModels( ahead.Cells ) : Mesh?.RenderCells( WorldTransform );
 
 		if ( cells is not null )
 		{

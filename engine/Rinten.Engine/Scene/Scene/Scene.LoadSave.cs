@@ -155,6 +155,8 @@ public partial class Scene : GameObject
 				DropMismatchedPhysicsWorld();
 			}
 
+			CallbackBatch.Add( CommonCallback.BuildMeshes, () => MeshComponent.BuildAhead( this ), this, "BuildAhead" );
+
 			//Let ISceneLoadingEvents add their own tasks
 			List<LoadingContext> sceneLoadingTasks = new();
 			RunEvent<ISceneLoadingEvents>( x =>

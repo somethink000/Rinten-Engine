@@ -44,6 +44,10 @@ public sealed partial class Model : Resource
 	public static Model FromBytes( byte[] bytes, string name )
 		=> bytes is { Length: > 0 } ? FromCore( CoreModel.FromMemory( bytes, name ) ) : null;
 
+	//Bytes a builder just wrote and nobody else holds: the model reads them where they lie
+	internal static Model FromOwnedBytes( byte[] bytes, string name )
+		=> bytes is { Length: > 0 } ? FromCore( CoreModel.FromOwned( bytes, name ) ) : null;
+
 	void ReplaceCore( CoreModel next )
 	{
 		core?.Dispose();

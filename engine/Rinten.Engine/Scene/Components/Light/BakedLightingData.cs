@@ -21,7 +21,7 @@ public sealed class BakedLightingData : BlobData
 		/// <summary>Scale in xy, offset in zw - see ModelRenderer.LightmapRect.</summary>
 		public Vector4 Rect;
 
-		/// <summary>Its model's vertices: a MeshComponent edited since has another sheet, and reads the volume.</summary>
+		/// <summary>Its model's own vertices, below nought if not known: a MeshComponent edited since has another sheet, and reads the volume.</summary>
 		public int Vertices;
 	}
 
@@ -180,8 +180,11 @@ public sealed class BakedLightingData : BlobData
 
 	public bool IsEmpty => !HasSheet && !HasVolume;
 
-	//2: the sheet's shade and the baked lights' channels in it; 3: the sun's still shadow
-	public override int Version => 3;
+	//2: the sheet's shade and the baked lights' channels in it; 3: the sun's still shadow; 4: Place.Vertices without LOD levels
+	public override int Version => 4;
+
+	//Older bakes counted the LOD levels too, and how many there are depends on how the model was last built
+	static int VerticesKnown( int stored, int version ) => version >= 4 ? stored : -1;
 
 	internal void Touched() => Revision = System.Threading.Interlocked.Increment( ref stamped );
 
@@ -276,7 +279,7 @@ public sealed class BakedLightingData : BlobData
 				Renderer = s.Read<Guid>(),
 				Model = s.Read<string>(),
 				Rect = s.Read<Vector4>(),
-				Vertices = s.Read<int>(),
+				Vertices = VerticesKnown( s.Read<int>(), reader.DataVersion ),
 			} );
 		}
 

@@ -4396,6 +4396,21 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 	/// <summary>Triangulate the polygons into a model, with only the collision asked for.</summary>
 	public Model Rebuild( MeshComponent.CollisionType collision = MeshComponent.CollisionType.Mesh )
+		=> Triangulated( collision, null ).Create();
+
+	//Material slot to surface, read on the main thread by ResolveSurfaces: surfaces live in a context workers don't have
+	Dictionary<int, Surface> _surfaces;
+
+	internal void ResolveSurfaces()
+	{
+		_surfaces = new( _materialsById.Count );
+
+		foreach ( var (id, material) in _materialsById )
+			_surfaces[id] = material?.Surface ?? Surface.FindByName( "default" );
+	}
+
+	//The builder ready to write; with drawnAt, a mesh RenderCells will split there gets no LOD chain as only its cells are drawn
+	internal ModelBuilder Triangulated( MeshComponent.CollisionType collision, Transform? drawnAt )
 	{
 		var faceCount = Topology.FaceCount;
 		var halfEdgeCount = Topology.HalfEdgeCount;
@@ -4447,7 +4462,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 				submeshes.Add( materialId, submesh );
 
-				builder.AddSurface( material?.Surface );
+				builder.AddSurface( _surfaces is not null && _surfaces.TryGetValue( materialId, out var surface ) ? surface : material?.Surface );
 			}
 
 			TriangulateFace( hFace, submesh );
@@ -4455,6 +4470,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		_submeshes.Clear();
 		_submeshes.AddRange( submeshes.Values );
+
+		if ( drawnAt is { } world && SpansCells( world ) ) builder.WithoutLevelsOfDetail();
 
 		LayLightmap();
 
@@ -4492,13 +4509,58 @@ public sealed partial class PolygonMesh : IJsonConvert
 		IsDirty = false;
 
 		_faceNormalCache.Clear();
-		return builder.Create();
+		_surfaces = null;
+		return builder;
 	}
 
 	//Splits the render mesh by world grid cell so each cell picks its own LOD; null if it fits one cell
 	internal static long CutMeshes, CutCells;
 
-	internal List<(WorldCell Cell, Model Model)> RenderCells( Transform world )
+	static WorldCell CellOf( Submesh submesh, int triangle, in Transform world )
+	{
+		var vertices = submesh.Vertices;
+		var indices = submesh.Indices;
+		var middle = ( vertices[indices[triangle]].Position + vertices[indices[triangle + 1]].Position + vertices[indices[triangle + 2]].Position ) / 3.0f;
+
+		return WorldGrid.At( world.PointToWorld( middle ) );
+	}
+
+	bool SpansCells( in Transform world )
+	{
+		WorldCell? first = null;
+
+		foreach ( var submesh in _submeshes )
+		{
+			for ( var t = 0; t + 2 < submesh.Indices.Count; t += 3 )
+			{
+				var cell = CellOf( submesh, t, world );
+
+				if ( first is null ) first = cell;
+				else if ( first != cell ) return true;
+			}
+		}
+
+		return false;
+	}
+
+	internal List<(WorldCell Cell, Model Model)> RenderCells( Transform world ) => CellModels( CompileCells( world ) );
+
+	internal static List<(WorldCell Cell, Model Model)> CellModels( (WorldCell Cell, byte[] Bytes)[] compiled )
+	{
+		if ( compiled is null ) return null;
+
+		var cells = new List<(WorldCell, Model)>( compiled.Length );
+
+		foreach ( var (cell, bytes) in compiled )
+		{
+			if ( Model.FromOwnedBytes( bytes, CellName( cell ) ) is { } model )
+				cells.Add( ( cell, model ) );
+		}
+
+		return cells;
+	}
+
+	internal (WorldCell Cell, byte[] Bytes)[] CompileCells( in Transform world )
 	{
 		if ( _submeshes.Count == 0 ) return null;
 
@@ -4506,13 +4568,9 @@ public sealed partial class PolygonMesh : IJsonConvert
 
 		foreach ( var submesh in _submeshes )
 		{
-			var vertices = submesh.Vertices;
-			var indices = submesh.Indices;
-
-			for ( var t = 0; t + 2 < indices.Count; t += 3 )
+			for ( var t = 0; t + 2 < submesh.Indices.Count; t += 3 )
 			{
-				var middle = ( vertices[indices[t]].Position + vertices[indices[t + 1]].Position + vertices[indices[t + 2]].Position ) / 3.0f;
-				var cell = WorldGrid.At( world.PointToWorld( middle ) );
+				var cell = CellOf( submesh, t, world );
 
 				if ( !byCell.TryGetValue( cell, out var parts ) ) byCell[cell] = parts = new();
 				if ( !parts.TryGetValue( submesh, out var mine ) ) parts[submesh] = mine = new();
@@ -4526,48 +4584,57 @@ public sealed partial class PolygonMesh : IJsonConvert
 		System.Threading.Interlocked.Increment( ref CutMeshes );
 		System.Threading.Interlocked.Add( ref CutCells, byCell.Count );
 
-		var cells = new List<(WorldCell, Model)>( byCell.Count );
-		var remap = new Dictionary<int, int>();
+		var work = byCell.ToArray();
+		var compiled = new byte[work.Length][];
 
-		foreach ( var (cell, parts) in byCell )
-		{
-			var builder = Model.Builder.WithName( $"mesh cell {cell.X},{cell.Z}" ).WithoutCollision().WithLockedBorder();
+		Rinten.Jobs.JobSystem.For( work.Length, (work, compiled, fallback: DefaultMaterial), static ( s, i ) => s.compiled[i] = CompileCell( s.work[i].Key, s.work[i].Value, s.fallback ) );
 
-			foreach ( var (submesh, triangles) in parts )
-			{
-				var vertices = new List<MeshVertex>();
-				var indices = new List<int>( triangles.Count * 3 );
-				remap.Clear();
-
-				foreach ( var t in triangles )
-				{
-					for ( var k = 0; k < 3; k++ )
-					{
-						var source = submesh.Indices[t + k];
-
-						if ( !remap.TryGetValue( source, out var at ) )
-						{
-							at = vertices.Count;
-							remap[source] = at;
-							vertices.Add( submesh.Vertices[source] );
-						}
-
-						indices.Add( at );
-					}
-				}
-
-				var mesh = new Mesh( submesh.Material ?? DefaultMaterial );
-				mesh.CreateVertexBuffer( vertices.Count, vertices );
-				mesh.CreateIndexBuffer( indices.Count, indices );
-				mesh.Bounds = BBox.FromPoints( vertices.Select( x => x.Position ) );
-
-				builder.AddMesh( mesh );
-			}
-
-			cells.Add( ( cell, builder.Create() ) );
-		}
+		var cells = new (WorldCell, byte[])[work.Length];
+		for ( var i = 0; i < work.Length; i++ ) cells[i] = ( work[i].Key, compiled[i] );
 
 		return cells;
+	}
+
+	static string CellName( WorldCell cell ) => $"mesh cell {cell.X},{cell.Z}";
+
+	//Runs on a worker: touches only its own triangles' copies
+	static byte[] CompileCell( WorldCell cell, Dictionary<Submesh, List<int>> parts, Material fallback )
+	{
+		var remap = new Dictionary<int, int>();
+		var builder = Model.Builder.WithName( CellName( cell ) ).WithoutCollision().WithLockedBorder();
+
+		foreach ( var (submesh, triangles) in parts )
+		{
+			var vertices = new List<MeshVertex>();
+			var indices = new List<int>( triangles.Count * 3 );
+			remap.Clear();
+
+			foreach ( var t in triangles )
+			{
+				for ( var k = 0; k < 3; k++ )
+				{
+					var source = submesh.Indices[t + k];
+
+					if ( !remap.TryGetValue( source, out var at ) )
+					{
+						at = vertices.Count;
+						remap[source] = at;
+						vertices.Add( submesh.Vertices[source] );
+					}
+
+					indices.Add( at );
+				}
+			}
+
+			var mesh = new Mesh( submesh.Material ?? fallback );
+			mesh.CreateVertexBuffer( vertices.Count, vertices );
+			mesh.CreateIndexBuffer( indices.Count, indices );
+			mesh.Bounds = BBox.FromPoints( vertices.Select( x => x.Position ) );
+
+			builder.AddMesh( mesh );
+		}
+
+		return builder.ToBytes();
 	}
 
 	private int AddMaterial( Material material ) => AddMaterial( material?.Name, material );

@@ -206,6 +206,9 @@ internal enum CommonCallback
 	/// <summary>The component is awake. Called only once, on first enable.</summary>
 	Awake,
 
+	/// <summary>Editable meshes of a loading scene are built together, ready for being enabled</summary>
+	BuildMeshes,
+
 	/// <summary>Component has been enabled</summary>
 	Enable,
 

@@ -84,7 +84,7 @@ internal static partial class CoreBakedLighting
 
 				//A mesh edited since has a sheet of another shape: none until the next bake, as with a changed model
 				case MeshComponent built when built.IsValid() && built.GameObject.IsStatic && built.Model is { } model
-					&& model.GetVertices()?.Length == place.Vertices:
+					&& ( place.Vertices < 0 || model.OwnVertexCount() == place.Vertices ):
 					built.LightmapRect = rect;
 					break;
 			}
@@ -613,7 +613,7 @@ internal static partial class CoreBakedLighting
 				{
 					Renderer = receiver.Renderer.Id,
 					Model = receiver.Model.ResourcePath ?? "",
-					Vertices = receiver.Model.GetVertices()?.Length ?? 0,
+					Vertices = receiver.Model.OwnVertexCount(),
 					Rect = new Vector4( rect.X, rect.Y, rect.Z, rect.W ),
 				} );
 			}

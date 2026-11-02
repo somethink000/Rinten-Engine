@@ -51,7 +51,9 @@ public sealed partial class ModelBuilder
 	}
 
 	//What the model is called, where the caller never said.
-	private string Named => string.IsNullOrWhiteSpace( modelName ) ? "runtime_model" : modelName;
+	internal const string DefaultName = "runtime_model";
+
+	private string Named => string.IsNullOrWhiteSpace( modelName ) ? DefaultName : modelName;
 
 	//Core builder with all added meshes, or null if empty; pure, so it can run on a worker thread
 	private unsafe CoreAssets.ModelBuilder Filled( out List<CoreMesh> foreign )

@@ -30,7 +30,45 @@ public sealed partial class SceneWorld : IHandle
 	//Bumped only when the set of drawn objects changes, unlike Version which changes every frame
 	internal int Membership { get; private set; }
 
-	internal void TouchMembership() => Membership++;
+	internal void TouchMembership( SceneObject who = null )
+	{
+		lock ( InternalSceneObjects )
+		{
+			Membership++;
+
+			//Who it was, one entry a count; null for a change only a whole walk can tell - see Changed
+			if ( membershipLog.Count >= MostLogged )
+			{
+				membershipLog.RemoveRange( 0, MostLogged / 2 );
+				loggedFrom += MostLogged / 2;
+			}
+
+			membershipLog.Add( who );
+		}
+	}
+
+	//The objects that joined, left or changed model, a count each: membershipLog[i] is count loggedFrom + i + 1. Short, as it
+	//holds them alive: a reader further behind walks everything, which a change that large wants anyway
+	private const int MostLogged = 4096;
+	private readonly List<SceneObject> membershipLog = new();
+	private int loggedFrom;
+
+	//The objects whose membership changed since a count, into a list; false where only a whole walk can say
+	internal bool Changed( int since, List<SceneObject> into )
+	{
+		lock ( InternalSceneObjects )
+		{
+			if ( since < loggedFrom || since > Membership ) return false;
+
+			for ( var i = since - loggedFrom; i < membershipLog.Count; i++ )
+			{
+				if ( membershipLog[i] is not { } who ) return false;
+				into.Add( who );
+			}
+
+			return true;
+		}
+	}
 
 	//A terrain's heights round the eye - its picture's place in the table, and the world x, z of its corner - for the
 	//frame's GroundBelow; nought where none is laid. See Terrain.Ground

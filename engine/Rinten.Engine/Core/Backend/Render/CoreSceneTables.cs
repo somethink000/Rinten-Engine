@@ -325,6 +325,7 @@ internal sealed class CoreSceneTables
 
 	//The world's membership count when its objects were last taken in - see SceneWorld.Membership.
 	private int worldMembership = -1;
+	private SceneWorld membershipWorld;
 
 	//Scratch for taking the scene's renderers in - see SyncRenderers.
 	private readonly List<ModelRenderer> foundRenderers = new();
@@ -437,8 +438,10 @@ internal sealed class CoreSceneTables
 		//every object each time to find the same ones - see SceneWorld.Membership
 		if ( world is not null && world.Membership != worldMembership )
 		{
+			var since = world == membershipWorld ? worldMembership : -1;
+			membershipWorld = world;
 			worldMembership = world.Membership;
-			SyncObjects( world );
+			SyncObjects( world, since );
 		}
 
 		CoreRenderDevice.ZoneEnd();
@@ -653,8 +656,23 @@ internal sealed class CoreSceneTables
 	//Which sync last saw each entry - see SyncRenderers.
 	private int syncStamp;
 
-	private void SyncObjects( SceneWorld world )
+	private void SyncObjects( SceneWorld world, int since )
 	{
+		//Only those that joined, left or changed model since: a flight stands terrain chunks every frame, among tens of thousands
+		changedObjects.Clear();
+
+		if ( since >= 0 && world.Changed( since, changedObjects ) )
+		{
+			lock ( world.InternalSceneObjects )
+			{
+				foreach ( var found in changedObjects ) Consider( world, found );
+			}
+
+			changedObjects.Clear();
+			ListObjectSlots();
+			return;
+		}
+
 		//Kept, for the reason SyncRenderers gives.
 		seenObjects.Clear();
 
@@ -697,11 +715,44 @@ internal sealed class CoreSceneTables
 			Give( slot );
 		}
 
-		//The flat list the frame walks, built here as the only place membership changes
+		ListObjectSlots();
+	}
+
+	//The flat list the frame walks, built here as the only place membership changes
+	private void ListObjectSlots()
+	{
 		objectSlots.Clear();
 
 		foreach ( var (_, slot) in byObject ) objectSlots.Add( slot );
 	}
+
+	//One object whose membership changed: taken in, given back, or left as it is - what the whole walk would decide for it
+	private void Consider( SceneWorld world, SceneObject found )
+	{
+		var wanted = found.World == world && found is not ( SceneCustomObject or SceneDynamicObject ) &&
+			found.Component is not ModelRenderer && found.Model is not null && world.InternalSceneObjects.Contains( found );
+
+		var has = byObject.TryGetValue( found, out var slot );
+
+		if ( wanted && !has )
+		{
+			slot = Take();
+			var entry = entries[slot];
+			entry.Renderer = null;
+			entry.Object = found;
+			found.CullSlot = slot;
+			byObject[found] = slot;
+			Resolve( slot );
+		}
+		else if ( !wanted && has )
+		{
+			byObject.Remove( found );
+			found.CullSlot = -1;
+			Give( slot );
+		}
+	}
+
+	private readonly List<SceneObject> changedObjects = new();
 
 	//Object count above which the walk goes to the thread pool (fork ~2.5 us vs ~150 ns per object)
 	private const int ParallelObjects = 384;
@@ -904,6 +955,8 @@ internal sealed class CoreSceneTables
 		runs.Add( head );
 		SlotGeneration++;
 
+		for ( var slot = head; slot < head + count; slot++ ) Taken( slot );
+
 		Resolve( head );
 
 		return head;
@@ -1058,6 +1111,7 @@ internal sealed class CoreSceneTables
 		entries[slot] ??= new Entry();
 		entries[slot].Live = true;
 		SlotGeneration++;
+		Taken( slot );
 		return slot;
 	}
 
@@ -1077,17 +1131,36 @@ internal sealed class CoreSceneTables
 	//Counts every slot taken - whether a slot is still the thing it was.
 	internal int SlotGeneration { get; private set; }
 
-	//Camera visibility bits by tag; untagged instances are kept unless include is set; lights ignore it
-	internal void Hidden( IReadOnlySet<uint> include, IReadOnlySet<uint> exclude, Span<uint> bits )
+	//The generation each slot was last taken at, so a reader can work out only what changed since it last looked
+	private int[] takenAt = new int[256];
+
+	private void Taken( int slot )
 	{
-		bits.Clear();
+		if ( slot >= takenAt.Length ) Array.Resize( ref takenAt, Math.Max( slot + 1, takenAt.Length * 2 ) );
+		takenAt[slot] = SlotGeneration;
+	}
+
+	//Camera visibility bits by tag; untagged instances are kept unless include is set; lights ignore it.
+	//Given a generation, only the slots taken after it are worked out again - the rest of bits is as it was left
+	internal void Hidden( IReadOnlySet<uint> include, IReadOnlySet<uint> exclude, Span<uint> bits, int since = -1 )
+	{
+		if ( since < 0 ) bits.Clear();
 
 		for ( var slot = 0; slot < used; ++slot )
 		{
+			if ( since >= 0 )
+			{
+				if ( slot >= takenAt.Length || takenAt[slot] <= since ) continue;
+				bits[slot >> 5] &= ~( 1u << ( slot & 31 ) );
+			}
+
 			var entry = entries[slot];
 			if ( entry is null || !entry.Live ) continue;
 
-			var tags = ( entry.Renderer?.SceneObject ?? entry.Object )?.Tags?.GetTokens();
+			var set = ( entry.Renderer?.SceneObject ?? entry.Object )?.Tags;
+			if ( set is SceneObject.Internal.SceneObjectTags read ) read.Read = true;
+
+			var tags = set?.GetTokens();
 
 			var hide = false;
 

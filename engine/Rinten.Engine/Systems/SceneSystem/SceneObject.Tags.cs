@@ -19,6 +19,10 @@ public partial class SceneObject
 			//from them - which a camera draws, see CoreSceneTables.Hidden - knows when it is stale.
 			internal static int Version;
 
+			//Whether a camera's answer was worked out from these tags; until then a change is no news to anyone - a new
+			//object's slot is worked out fresh anyway, and every chunk a flight stands would otherwise redo every slot
+			internal bool Read;
+
 			//Cached frozen set; traces query tags per object every frame, so building one each time is too slow
 			IReadOnlySet<uint> frozen;
 
@@ -33,7 +37,7 @@ public partial class SceneObject
 
 				if ( !tokens.Add( token ) ) return;
 
-				System.Threading.Interlocked.Increment( ref Version );
+				if ( Read ) System.Threading.Interlocked.Increment( ref Version );
 
 				frozen = null;
 				//No-op: nothing to hand it to.
@@ -58,7 +62,7 @@ public partial class SceneObject
 
 				if ( !tokens.Remove( token ) ) return;
 
-				System.Threading.Interlocked.Increment( ref Version );
+				if ( Read ) System.Threading.Interlocked.Increment( ref Version );
 
 				frozen = null;
 				//No-op: nothing to hand it to.
@@ -69,7 +73,7 @@ public partial class SceneObject
 				tokens.Clear();
 				frozen = null;
 
-				System.Threading.Interlocked.Increment( ref Version );
+				if ( Read ) System.Threading.Interlocked.Increment( ref Version );
 				//No-op: nothing to hand it to.
 			}
 
@@ -99,7 +103,7 @@ public partial class SceneObject
 				foreach ( var token in wanted ) tokens.Add( token );
 
 				frozen = null;
-				System.Threading.Interlocked.Increment( ref Version );
+				if ( Read ) System.Threading.Interlocked.Increment( ref Version );
 			}
 		}
 	}

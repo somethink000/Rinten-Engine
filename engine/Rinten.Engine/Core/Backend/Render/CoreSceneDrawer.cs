@@ -565,7 +565,10 @@ internal sealed partial class CoreSceneDrawer
 	//the camera's tags change
 	private uint[] hiddenBits = [];
 	private bool hiding;
-	private (CoreSceneTables Tables, int Slots, int Count, int TagVersion, string Include, string Exclude) hiddenFor;
+	private (CoreSceneTables Tables, int TagVersion, string Include, string Exclude) hiddenFor;
+
+	//The tables' slot generation hiddenBits were last brought up to - see CoreSceneTables.Hidden
+	private int hiddenGeneration;
 
 	//Works hiddenBits out for a camera, if anything it depends on changed.
 	private void UpdateHidden( CameraComponent camera )
@@ -581,17 +584,24 @@ internal sealed partial class CoreSceneDrawer
 			return;
 		}
 
-		var key = ( tables, tables.SlotGeneration, tables.InstanceCount, SceneObject.Internal.SceneObjectTags.Version,
-			include.ToString(), exclude.ToString() );
+		var key = ( tables, SceneObject.Internal.SceneObjectTags.Version, include.ToString(), exclude.ToString() );
 
 		var words = ( tables.InstanceCount + 31 ) / 32;
 
+		//Everything again when the tags or the camera's sets changed; otherwise only the slots taken since - a few a frame
+		//while flying, against tens of thousands
 		if ( key != hiddenFor || hiddenBits.Length < words )
 		{
 			if ( hiddenBits.Length < words ) hiddenBits = new uint[Math.Max( words, hiddenBits.Length * 2 )];
 
 			tables.Hidden( include.GetTokens(), exclude.GetTokens(), hiddenBits.AsSpan( 0, words ) );
 			hiddenFor = key;
+			hiddenGeneration = tables.SlotGeneration;
+		}
+		else if ( hiddenGeneration != tables.SlotGeneration )
+		{
+			tables.Hidden( include.GetTokens(), exclude.GetTokens(), hiddenBits.AsSpan( 0, words ), hiddenGeneration );
+			hiddenGeneration = tables.SlotGeneration;
 		}
 
 		meshRender.HiddenFromCamera = hiddenBits.AsMemory( 0, words );

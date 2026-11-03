@@ -122,7 +122,7 @@ public partial class SceneObject : IHandle
 			if ( this is DecalSceneObject decal ) world.InternalDecals.Add( decal );
 			if ( this is SceneLight light ) world.InternalLights.Add( light );
 			world.Touch();
-			world.TouchMembership();
+			world.TouchMembership( this );
 		}
 	}
 
@@ -173,7 +173,7 @@ public partial class SceneObject : IHandle
 			if ( this is DecalSceneObject decal ) world.InternalDecals.Remove( decal );
 			if ( this is SceneLight light ) world.InternalLights.Remove( light );
 			world.Touch();
-			world.TouchMembership();
+			world.TouchMembership( this );
 		}
 
 		//What IsValid() reads. Deleted twice is deleted once.
@@ -191,7 +191,7 @@ public partial class SceneObject : IHandle
 				if ( this is DecalSceneObject gone ) World.InternalDecals.Remove( gone );
 				if ( this is SceneLight light ) World.InternalLights.Remove( light );
 				World.Touch();
-				World.TouchMembership();
+				World.TouchMembership( this );
 			}
 		}
 	}
@@ -394,7 +394,7 @@ public partial class SceneObject : IHandle
 			Touched();
 
 			//And the membership: whether an object is walked at all turns on its having a model - see SceneWorld.Membership
-			World?.TouchMembership();
+			World?.TouchMembership( this );
 
 			_model = value;
 

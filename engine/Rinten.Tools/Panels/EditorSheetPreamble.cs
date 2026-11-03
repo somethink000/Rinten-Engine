@@ -88,7 +88,8 @@ public static class EditorSheetPreamble
 
 		//The two sheets the theme itself comes from can't be written against it.
 		if ( normalized.EndsWith( "design.scss", System.StringComparison.OrdinalIgnoreCase )
-			|| normalized.EndsWith( "theme.scss", System.StringComparison.OrdinalIgnoreCase ) )
+			|| normalized.EndsWith( "theme.scss", System.StringComparison.OrdinalIgnoreCase )
+			|| normalized.Contains( "/styles/kit/", System.StringComparison.OrdinalIgnoreCase ) )
 			return false;
 
 		return prepared.GetOrAdd( normalized, IsEditorSheet );

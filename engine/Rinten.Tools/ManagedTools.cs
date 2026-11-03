@@ -59,9 +59,9 @@ internal static class ManagedTools
 		FileSystem.Temporary = new LocalFileSystem( FileSystem.Root.GetFullPath( "/.rinten" ) );
 	}
 
-	private static FileWatch stylesWatcher;
+	private static FileWatch stylesWatcher, kitWatcher;
 
-	//Watches theme.scss and design.scss for live reload.
+	//Watches the UI kit's theme and design, and the editor's theme.json, for live reload.
 	internal static void WatchEditorStyles()
 	{
 		if ( stylesWatcher is not null )
@@ -72,6 +72,9 @@ internal static class ManagedTools
 
 		stylesWatcher = FileSystem.Root.Watch( "/addons/tools/assets/styles/*" );
 		stylesWatcher.OnChangedFile += _ => Application.ReloadStyles();
+
+		kitWatcher = FileSystem.Root.Watch( "/addons/base/code/Styles/kit/*" );
+		kitWatcher.OnChangedFile += _ => Application.ReloadStyles();
 	}
 
 	/// <summary>The last of the editor's start: the styles are watched so a change to them shows up without a restart, and the tools' own addons are given time to finish compiling before anything asks them for a window.</summary>

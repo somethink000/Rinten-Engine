@@ -39,8 +39,9 @@
 		<EmbeddedResource Include="Core/Backend/Ui/editor.scss" />
 
 		<!-- The design tokens every editor sheet is written against, put in
-		     front of each of them as it is parsed (EditorTokens). -->
-		<EmbeddedResource Include="Core/Backend/Ui/_tokens.scss" />
+		     front of each of them as it is parsed (EditorTokens). The file is
+		     the UI kit's in the base addon, so games import the same one. -->
+		<EmbeddedResource Include="../../game/addons/base/code/Styles/kit/_tokens.scss" LogicalName="_tokens.scss" />
 
 		<!-- The area lights' LTC tables, fitted by engine/Tools/LtcFit (CoreAreaLights). -->
 		<EmbeddedResource Include="Core/Backend/Render/ltc.bin" LogicalName="ltc.bin" />

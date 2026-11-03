@@ -7,10 +7,10 @@ namespace Editor;
 public static class EditorDesign
 {
 	/// <summary>Editor theme variables — one SCSS file per theme.</summary>
-	public const string ThemePath = "/addons/tools/assets/styles/theme.scss";
+	public const string ThemePath = "/addons/base/code/Styles/kit/_theme.scss";
 
-	/// <summary>Where the sheet lives, beside the rest of the editor's own assets.</summary>
-	public const string Path = "/addons/tools/assets/styles/design.scss";
+	/// <summary>Where the sheet lives: the base addon's UI kit, which games import too.</summary>
+	public const string Path = "/addons/base/code/Styles/kit/_design.scss";
 
 	private static StyleSheet sheet;
 	private static bool tried;

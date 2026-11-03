@@ -65,6 +65,10 @@ internal static class EngineLoop
 		if ( !EngineInput.IsAppActive() )
 			effectiveFps = TightenCap( effectiveFps, RenderSettings.Instance.MaxFrameRateInactive, "fps_max_inactive" );
 
+		//An app nobody is using, with nothing of its own going on, waits for the next event instead of drawing
+		if ( AppWindow.Idle )
+			effectiveFps = TightenCap( effectiveFps, AppWindow.IdleFrameRate, IdleSource );
+
 		//Under vsync, a cap above the refresh lets the main thread race ahead of the present queue and stall on it
 		//(bimodal frame delivery / judder). Clamp to the refresh instead. No-op when the cap is already at/below it.
 		if ( RenderSettings.Instance.VSync )
@@ -79,6 +83,8 @@ internal static class EngineLoop
 
 		return effectiveFps;
 	}
+
+	const string IdleSource = "app_idle";
 
 	//Which cap won, for overlay_fps.
 	internal static string MaxFrameRateSource { get; private set; } = "fps_max";
@@ -140,8 +146,9 @@ internal static class EngineLoop
 		PerformanceStats.FrameRateCap = (float)maxFps;
 		PerformanceStats.FrameRateCapSource = MaxFrameRateSource;
 
+		var idle = MaxFrameRateSource == IdleSource;
 		double targetMilliseconds = maxFps > 0 ? 1000.0 / maxFps : 0;
-		if ( targetMilliseconds > 100 ) targetMilliseconds = 100; //min is 10fps
+		if ( targetMilliseconds > 100 && !idle ) targetMilliseconds = 100; //min is 10fps, except for an idle app
 
 		if ( targetMilliseconds <= 0 )
 		{
@@ -158,7 +165,16 @@ internal static class EngineLoop
 			if ( nowMs - deadlineMs > targetMilliseconds )
 				deadlineMs = nowMs;
 
-			if ( nowMs < deadlineMs )
+			if ( idle && nowMs < deadlineMs )
+			{
+				using var inst = _sleepForFrameCap.Start();
+
+				//Any event ends the wait, and the frame after it starts a fresh grid at the full rate
+				CoreWindow.WaitForEvent( (int)( deadlineMs - nowMs ) );
+				frameSleepMs = pacingClock.ElapsedMilliSeconds - nowMs;
+				deadlineMs = pacingClock.ElapsedMilliSeconds;
+			}
+			else if ( nowMs < deadlineMs )
 			{
 				using var inst = _sleepForFrameCap.Start();
 

@@ -20,6 +20,7 @@ public static class Standalone
 
 		_buildDate = Manifest.BuildDate;
 		Application.DebugExport = Manifest.Debug;
+		Application.IsApp = Manifest.App;
 		Splash.EngineSplash.Picture = Manifest.Splash;
 	}
 

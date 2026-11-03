@@ -50,6 +50,9 @@ public static class Application
 	/// <summary>True if the game is running in standalone mode</summary>
 	public static bool IsStandalone { get; internal set; }
 
+	/// <summary>A desktop program rather than a game: it sleeps while nobody uses it, and its builds leave out what only games need</summary>
+	public static bool IsApp { get; internal set; }
+
 	//Set by the browser player before anything else touches the engine.
 	internal static bool IsWeb { get; set; }
 

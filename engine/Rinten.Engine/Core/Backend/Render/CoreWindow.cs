@@ -241,6 +241,10 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		SDL_SyncWindow( Handle );
 	}
 
+	[LibraryImport( SDL, EntryPoint = "SDL_WaitEventTimeout" )]
+	[return: MarshalAs( UnmanagedType.U1 )]
+	private static unsafe partial bool SDL_WaitEventTimeout( void* eventOut, int timeoutMs );
+
 	[LibraryImport( SDL, EntryPoint = "SDL_PollEvent" )]
 	[return: MarshalAs( UnmanagedType.U1 )]
 	private static unsafe partial bool SDL_PollEvent( void* eventOut );
@@ -750,6 +754,15 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		framed.TryRemove( Handle, out _ );
 
 		SDL_SetWindowBordered( Handle, true );
+	}
+
+	/// <summary>Takes the system frame off; the caption is then drawn by the caller, who sets the drag strips</summary>
+	public void TakeTheFrame()
+	{
+		if ( OperatingSystem.IsBrowser() || Handle == IntPtr.Zero || Adopted ) return;
+
+		SDL_SetWindowBordered( Handle, false );
+		InstallHitTest();
 	}
 
 	private unsafe void InstallHitTest()
@@ -1670,6 +1683,28 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	//Timestamp of the last user input, so heavy work like full GCs can wait until the user is idle
 	private static long lastInput = System.Diagnostics.Stopwatch.GetTimestamp();
 
+	//Any event at all - a resize, a focus change, a redraw the compositor asked for - not only input
+	private static long lastEvent = System.Diagnostics.Stopwatch.GetTimestamp();
+
+	/// <summary>Seconds since the window system last said anything to any of our windows.</summary>
+	public static double SecondsSinceEvent
+		=> ( System.Diagnostics.Stopwatch.GetTimestamp() - System.Threading.Volatile.Read( ref lastEvent ) ) /
+			(double)System.Diagnostics.Stopwatch.Frequency;
+
+	/// <summary>Sleeps until an event arrives or the time is up; the event stays queued for the next poll.</summary>
+	public static unsafe void WaitForEvent( int milliseconds )
+	{
+		if ( milliseconds <= 0 ) return;
+
+		if ( !HasSdl || OperatingSystem.IsBrowser() )
+		{
+			System.Threading.Thread.Sleep( milliseconds );
+			return;
+		}
+
+		SDL_WaitEventTimeout( null, milliseconds );
+	}
+
 	//Says the person at the machine just did something, for input that does not come through SDL - see lastInput.
 	internal static void MarkInput()
 		=> System.Threading.Volatile.Write( ref lastInput, System.Diagnostics.Stopwatch.GetTimestamp() );
@@ -1683,6 +1718,8 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	private static void Route( uint type, byte* buffer )
 	{
 		if ( type is >= SDL_EVENT_DROP_FILE and <= SDL_EVENT_DROP_POSITION && HearDrop( type, buffer ) ) return;
+
+		System.Threading.Volatile.Write( ref lastEvent, System.Diagnostics.Stopwatch.GetTimestamp() );
 
 		if ( type == SDL_EVENT_MOUSE_MOTION ) MotionEvents++;
 		if ( type is SDL_EVENT_MOUSE_BUTTON_DOWN or SDL_EVENT_MOUSE_BUTTON_UP ) ButtonEvents++;

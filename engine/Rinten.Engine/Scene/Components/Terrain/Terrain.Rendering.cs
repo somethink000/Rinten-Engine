@@ -793,6 +793,7 @@ public partial class Terrain
 			Whole = chunks[index].Whole,
 			Changed = chunks[index].Changed,
 			Shaped = chunks[index].Shaped,
+			Pictured = pictureAtlas is not null && chunks[index].PictureShaped != chunks[index].Shaped,
 			GroundName = $"terrain_ground_{System.Threading.Interlocked.Increment( ref modelSerial )}",
 			SetInName = $"terrain_set_{System.Threading.Interlocked.Increment( ref modelSerial )}",
 			Shipped = string.IsNullOrEmpty( Storage.ResourcePath ) ? Scene?.Source?.ResourcePath : Storage.ResourcePath,

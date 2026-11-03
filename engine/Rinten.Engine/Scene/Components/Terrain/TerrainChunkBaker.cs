@@ -108,6 +108,9 @@ internal sealed class TerrainChunkJob
 	/// <summary>The chunk's shape count when gathered - see Terrain.Chunk.Shaped.</summary>
 	public int Shaped;
 
+	/// <summary>Whether the card lacks the chunk's picture at this shape, so the bake makes it - see Terrain.Picture.</summary>
+	public bool Pictured;
+
 	/// <summary>What the two models are called. Named on the main thread, where the count is kept.</summary>
 	public string GroundName, SetInName;
 
@@ -131,8 +134,8 @@ internal static class TerrainChunkBaker
 
 		TerrainBakeCache.Note( job, key );
 
-		//Made every time rather than kept: a few milliseconds of a worker against a cache every shipped terrain would have to bake again
-		var picture = job.Draws ? Picture( ground, job ) : null;
+		//Made rather than kept in the cache, which every shipped terrain would have to bake again for it - only for a shape the card lacks
+		var picture = job.Draws && job.Pictured ? Picture( ground, job ) : null;
 
 		if ( key is not null && TerrainBakeCache.Read( key, job.Shipped, job.Whole ) is { } kept )
 		{
@@ -299,6 +302,19 @@ internal static class TerrainChunkBaker
 
 	//Points an edge's missing ground is filled in from, at most
 	private const int PictureEdgeFill = 3;
+
+	/// <summary>Fills a run of picture points with ones that say there is no ground there.</summary>
+	public static void NoGroundPoint( Span<byte> points )
+	{
+		var none = BitConverter.HalfToUInt16Bits( (Half)( -PictureNoGround ) );
+
+		for ( var at = 0; at + PicturePointBytes <= points.Length; at += PicturePointBytes )
+		{
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian( points[( at + 4 )..], none );
+			points[at + 6] = 128;
+			points[at + 7] = 128;
+		}
+	}
 
 	//A direction folded onto the square y faces, a byte each way - see OctahedralNormal in terrain_layers.slang
 	private static (byte U, byte V) Octahedral( Vector3 n )

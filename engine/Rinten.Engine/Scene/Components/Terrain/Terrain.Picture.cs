@@ -34,8 +34,10 @@ public partial class Terrain
 			.WithName( "terrain_picture_atlas" )
 			.Finish();
 
-		//Nothing painted anywhere until a chunk says otherwise: an unpainted point is the vertices'
-		pictureAtlas?.Update( new ReadOnlySpan<byte>( new byte[wide * tall * 4] ) );
+		//No ground anywhere until a chunk says otherwise - a nought point would say ground at nought, faced every way
+		var empty = new byte[wide * tall * 4];
+		TerrainChunkBaker.NoGroundPoint( empty );
+		pictureAtlas?.Update( new ReadOnlySpan<byte>( empty ) );
 
 		UpdateParamsMap();
 	}

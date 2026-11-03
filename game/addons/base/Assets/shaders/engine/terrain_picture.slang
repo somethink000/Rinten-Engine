@@ -103,9 +103,15 @@ float GroundPictureRead( GroundPicture where, float3 local, float facingUp, inou
 	int2 base = clamp( int2( floor( at ) ), int2( 0, 0 ), int2( PictureCells - 1, PictureCells - 1 ) );
 	float2 f = saturate( at - float2( base ) );
 
-	//Under the top - a cave's floor - the vertices paint and light.
-	int2 nearest = base + int2( f + 0.5 );
-	float top = HalfToFloat( PictureBits( where.atlas, corner + int2( ( nearest.x * PicturePointTexels ) + 1, nearest.y ) ) & 0xFFFFu );
+	//Each point's height and normal; under the nearest one's top - a cave's floor - the vertices paint and light
+	uint4 rest;
+
+	[unroll]
+	for ( uint r = 0u; r < 4u; r++ )
+		rest[r] = PictureBits( where.atlas, corner + int2( ( ( base.x + int( r & 1u ) ) * PicturePointTexels ) + 1, base.y + int( r >> 1u ) ) );
+
+	uint nearest = ( f.x >= 0.5 ? 1u : 0u ) | ( f.y >= 0.5 ? 2u : 0u );
+	float top = HalfToFloat( rest[nearest] & 0xFFFFu );
 
 	if ( top < PictureNoGround || local.y < top - PictureUnder ) return 0.0;
 
@@ -124,11 +130,10 @@ float GroundPictureRead( GroundPicture where, float3 local, float facingUp, inou
 		float share = ( step.x == 1 ? f.x : 1.0 - f.x ) * ( step.y == 1 ? f.y : 1.0 - f.y ) * upright;
 
 		int2 point = base + step;
-		uint rest = PictureBits( where.atlas, corner + int2( ( point.x * PicturePointTexels ) + 1, point.y ) );
 
-		if ( share <= 0.0 || HalfToFloat( rest & 0xFFFFu ) < PictureNoGround ) continue;
+		if ( share <= 0.0 || HalfToFloat( rest[k] & 0xFFFFu ) < PictureNoGround ) continue;
 
-		bent += PictureNormal( rest >> 16 ) * ( share * level );
+		bent += PictureNormal( rest[k] >> 16 ) * ( share * level );
 		bentShare += share * level;
 
 		packed[k] = PictureBits( where.atlas, corner + int2( point.x * PicturePointTexels, point.y ) );

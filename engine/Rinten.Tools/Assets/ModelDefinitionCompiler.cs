@@ -12,8 +12,8 @@ namespace Rinten;
 internal class ModelDefinitionCompiler : ResourceCompiler
 {
 	//Raised whenever what a definition builds into changes with no change to its files, so models built before are built again -
-	//see ModelInputs.IsCurrent. 2: impostors carry the picture of which triangle each texel shows
-	internal const int Build = 2;
+	//see ModelInputs.IsCurrent. 3: impostors carry the picture of which triangle each texel shows, and are off by default
+	internal const int Build = 3;
 
 	protected override Task<bool> Compile()
 	{

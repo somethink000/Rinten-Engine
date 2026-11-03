@@ -615,6 +615,10 @@ internal sealed class CoreMeshRender
 		if ( noCounts.Length < bins * 4 ) noCounts = new uint[bins * 4];
 		if ( bins > 0 && !CoreRenderDevice.FrameWrite( visibleBuffer, (long)binCountsAt * 4, MemoryMarshal.AsBytes( noCounts.AsSpan( 0, bins * 4 ) ) ) ) return false;
 
+		//Each material's draws at nothing too: the bin's last group writes them, and a frame whose cull keeps no cluster
+		//runs no group of it - left alone, the draws read stale words, and a stale count hangs the card
+		if ( materials > 0 && !CoreRenderDevice.FrameFill( visibleBuffer, (long)binArgsAt * 4, (long)materials * binDraws * 5 * 4, 0u ) ) return false;
+
 		if ( wantAt != 0 && !CoreRenderDevice.FrameFill( visibleBuffer, (long)wantAt * 4, (long)materials * 4, 0u ) ) return false;
 
 		if ( hiddenAt != 0 && !CoreRenderDevice.FrameWrite( visibleBuffer, (long)hiddenAt * 4, MemoryMarshal.AsBytes( hidden[..hiddenWords] ) ) ) return false;

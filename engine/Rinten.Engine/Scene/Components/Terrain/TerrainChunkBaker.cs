@@ -48,6 +48,9 @@ internal sealed class TerrainChunkBake
 	/// <summary>Whether it holds the whole chunk, or only what a far one keeps: its far models, palette and collision.</summary>
 	public bool Whole = true;
 
+	/// <summary>The chunk's shape count it was gathered at - see Terrain.Chunk.Shaped.</summary>
+	public int Shaped;
+
 	/// <summary>Lets go of the geometry the models were written from.</summary>
 	public void Drop()
 	{
@@ -98,6 +101,9 @@ internal sealed class TerrainChunkJob
 
 	/// <summary>Whether its ground changed since it was last baked, rather than it only being read again whole or far.</summary>
 	public bool Changed;
+
+	/// <summary>The chunk's shape count when gathered - see Terrain.Chunk.Shaped.</summary>
+	public int Shaped;
 
 	/// <summary>What the two models are called. Named on the main thread, where the count is kept.</summary>
 	public string GroundName, SetInName;

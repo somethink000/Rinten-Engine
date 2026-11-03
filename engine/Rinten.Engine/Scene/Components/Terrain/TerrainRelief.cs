@@ -87,6 +87,9 @@ internal sealed class TerrainRelief : IDisposable
 	/// <summary>Where the eye was, in the terrain's metres, when the ring was built round it.</summary>
 	public Vector3 Eye => builtAt;
 
+	/// <summary>Where the ring last asked to be laid round, in the terrain's metres.</summary>
+	public Vector3 AskedAt => askedAt;
+
 	/// <summary>Metres of a cut's side a metre from the eye, for the ring on the card - see terrain_relief.shader.</summary>
 	public float CutPerMetre => builtPixels > 0.0f ? CutPixels / builtPixels : 0.0f;
 	private float builtPixels;

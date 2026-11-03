@@ -31,6 +31,10 @@ public partial class Terrain
 		/// <summary>Whether its shape changed since it last stood - then the shadow over it is baked again, which a swap between whole and far is not.</summary>
 		public bool Reshaped = true;
 
+		/// <summary>Counts its shape's changes; a bake at FarShaped makes the far models standing again.</summary>
+		public int Shaped;
+		public int FarShaped = -1;
+
 		/// <summary>Whether the physics world holds its collision - see Solidify. Its triangles are kept either way.</summary>
 		public bool Solid = true;
 
@@ -235,6 +239,7 @@ public partial class Terrain
 
 		foreach ( var job in jobs )
 		{
+			if ( job.Result is not null ) job.Result.Shaped = job.Shaped;
 			chunks[job.Chunk].Baked = job.Result;
 			chunks[job.Chunk].Stood = job.Result is null;
 		}
@@ -346,6 +351,7 @@ public partial class Terrain
 
 				chunk.Changed = true;
 				chunk.Reshaped = true;
+				chunk.Shaped++;
 				Again( chunk );
 			}
 		}
@@ -362,11 +368,13 @@ public partial class Terrain
 	//Pixels a metre covers a metre away, for a window as tall as most, where no camera has said yet.
 	private const float UnseenPixelsAtAMetre = 1000.0f;
 
-	//Where the ground is seen from in its metres, and how far chunks are kept whole; false where nobody looks yet
-	private bool Looked( out Vector3 eye, out float reach )
+	//Where the ground is seen from, in its metres, and how far chunks are kept whole: by the far models' error through
+	//the air, by what reads the ground (relief, KeepWhole) along it; false where nobody looks yet
+	private bool Looked( out Vector3 eye, out float reach, out float along )
 	{
 		eye = default;
 		reach = 0.0f;
+		along = 0.0f;
 
 		if ( Scene is null || Application.IsHeadless ) return false;
 
@@ -391,9 +399,9 @@ public partial class Terrain
 
 		//Where a far model's error reaches the pixels a model's chain may be off by, in the terrain's metres
 		reach = chunkSpan * TerrainChunkBaker.FarShare * pixels / MathF.Max( Rendering.DrawSettings.MeshLodPixels, 0.1f );
-		if ( Relieved ) reach = MathF.Max( reach, ReliefDistance );
+		if ( Relieved ) along = ReliefDistance;
 
-		foreach ( var wanted in keptWhole.Values ) reach = MathF.Max( reach, wanted );
+		foreach ( var wanted in keptWhole.Values ) along = MathF.Max( along, wanted );
 
 		return true;
 	}
@@ -409,30 +417,33 @@ public partial class Terrain
 	}
 
 	private Vector3? keptFrom;
-	private float keptReach;
+	private float keptReach, keptAlong;
 
 	//Chunks kept whole for an eye here: one in reach is read whole, one a chunk past drops to its far models
 	//Asked again once the eye moves an eighth of a chunk
 	private void Keep()
 	{
-		if ( chunks.Length == 0 || !Looked( out var eye, out var reach ) ) return;
+		if ( chunks.Length == 0 || !Looked( out var eye, out var reach, out var along ) ) return;
 
-		if ( keptFrom is { } was && ( eye - was ).Length < chunkSpan * 0.125f && reach == keptReach ) return;
+		if ( keptFrom is { } was && ( eye - was ).Length < chunkSpan * 0.125f && reach == keptReach && along == keptAlong ) return;
 
 		keptFrom = eye;
 		keptReach = reach;
+		keptAlong = along;
+
+		//The height over the ground's highest point counts towards the error's reach: from high up, nothing below is near
+		var bounds = Storage?.Mesh?.Bounds ?? default;
+		var up = MathF.Max( MathF.Max( eye.y - bounds.Maxs.y, bounds.Mins.y - eye.y ), 0.0f );
 
 		for ( var i = 0; i < chunks.Length; i++ )
 		{
 			var chunk = chunks[i];
 
-			var x0 = chunkOrigin.x + ( ( i % chunksWide ) * chunkSpan );
-			var z0 = chunkOrigin.y + ( ( i / chunksWide ) * chunkSpan );
-			var dx = MathF.Max( MathF.Max( x0 - eye.x, eye.x - ( x0 + chunkSpan ) ), 0.0f );
-			var dz = MathF.Max( MathF.Max( z0 - eye.z, eye.z - ( z0 + chunkSpan ) ), 0.0f );
-			var away = MathF.Sqrt( ( dx * dx ) + ( dz * dz ) );
+			var away = FlatAway( i, eye );
+			var through = MathF.Sqrt( ( away * away ) + ( up * up ) );
 
-			var whole = away <= ( chunk.Whole ? reach + chunkSpan : reach );
+			var held = chunk.Whole ? chunkSpan : 0.0f;
+			var whole = through <= reach + held || away <= along + held;
 			if ( whole == chunk.Whole ) continue;
 
 			chunk.Whole = whole;
@@ -508,9 +519,9 @@ public partial class Terrain
 
 		if ( !every )
 		{
-			if ( Looked( out var eye, out var whole ) )
+			if ( Looked( out var eye, out var whole, out var along ) )
 			{
-				reach = MathF.Max( reach, whole );
+				reach = MathF.Max( reach, MathF.Max( whole, along ) );
 				Mark( eye, reach );
 			}
 
@@ -628,6 +639,7 @@ public partial class Terrain
 
 		Keep();
 		Solidify( false );
+		Warm();
 
 		if ( dirtyChunks == 0 && buildingChunks == 0 && baked.IsEmpty && standing == chunks.Length ) return;
 
@@ -650,6 +662,7 @@ public partial class Terrain
 			if ( done.Result is null ) continue;
 
 			chunk.Baked = done.Result;
+			chunk.Baked.Shaped = done.Shaped;
 			chunk.Stood = false;
 
 			//Read again only to be kept whole or far, it collides as it did.
@@ -676,7 +689,8 @@ public partial class Terrain
 
 		if ( dirtyChunks == 0 || Storage?.Mesh is not { } mesh ) return;
 
-		var most = Math.Max( 1, Environment.ProcessorCount - 2 );
+		//A quarter of the cores: a flight keeps chunks coming, and more bakes at once take the cores the frame's loops wait on
+		var most = Math.Max( 1, Environment.ProcessorCount / 4 );
 
 		//The nearest chunk to the eye is built first, and where the eye is comes off CoreDetail - see LookForDetail.
 		var local = Scene is { Detail.Looking: true } ? WorldTransform.PointToLocal( Scene.Detail.Eye ) : mesh.Bounds.Center;
@@ -727,6 +741,27 @@ public partial class Terrain
 	//How many milliseconds of a frame go on turning finished bakes into models.
 	private const double BakeBudget = 4.0;
 
+	//The far looks' meshes made a little at a time - see Warm.
+	private const double WarmBudget = 0.5;
+	private readonly Queue<(Chunk Chunk, Model Model)> warming = new();
+
+	//A far look's mesh is made the first time it is shown, which a fast camera does to hundreds of chunks on the frames it
+	//crosses them; made here instead, a slice a frame, the swap finds it ready. Only while the chunk still wears it
+	private void Warm()
+	{
+		if ( warming.Count == 0 ) return;
+
+		var clock = Stopwatch.StartNew();
+
+		while ( warming.Count > 0 && clock.Elapsed.TotalMilliseconds < WarmBudget )
+		{
+			var (chunk, model) = warming.Dequeue();
+
+			if ( model is { IsValid: true } && ( chunk.FarGroundModel == model || chunk.FarSetInModel == model ) )
+				CoreResources.Mesh( model );
+		}
+	}
+
 	private readonly List<int> gathered = new();
 
 	//Copies what a chunk's bake reads: its triangles, neighbours' under solids reaching it, the modifiers over it
@@ -752,6 +787,7 @@ public partial class Terrain
 			Coarse = mesh.IsEditing,
 			Whole = chunks[index].Whole,
 			Changed = chunks[index].Changed,
+			Shaped = chunks[index].Shaped,
 			GroundName = $"terrain_ground_{System.Threading.Interlocked.Increment( ref modelSerial )}",
 			SetInName = $"terrain_set_{System.Threading.Interlocked.Increment( ref modelSerial )}",
 			Shipped = string.IsNullOrEmpty( Storage.ResourcePath ) ? Scene?.Source?.ResourcePath : Storage.ResourcePath,
@@ -872,8 +908,17 @@ public partial class Terrain
 		//Which layers its vertices' eight weights are for, and where the paint mask is.
 		if ( result.Palette is { } palette ) chunk.Palette = TerrainChunkBaker.PaletteNumbers( palette );
 
-		if ( result.HasFar )
+		//A bake of the same shape makes the same far models: the standing ones are kept, not swapped for copies
+		var farKept = result.Shaped == chunk.FarShaped && ( chunk.FarGroundModel is not null || chunk.FarSetInModel is not null );
+
+		if ( result.HasFar && farKept )
 		{
+			result.FarGroundBytes = null;
+			result.FarSetInBytes = null;
+		}
+		else if ( result.HasFar )
+		{
+			chunk.FarShaped = result.Shaped;
 			( was.FarGround, was.FarSetIn, was.FarGroundModel, was.FarSetInModel ) = ( chunk.FarGround, chunk.FarSetIn, chunk.FarGroundModel, chunk.FarSetInModel );
 
 			chunk.FarGroundModel = Load( result.FarGroundBytes, $"{result.GroundName}_far" );
@@ -882,6 +927,9 @@ public partial class Terrain
 			chunk.FarSetIn = chunk.FarSetInModel is null ? null : Place( new SceneObject( world, chunk.FarSetInModel, WorldTransform ), null );
 
 			if ( chunk.FarGround.IsValid() ) SayPaint( chunk.FarGround, chunk.Palette );
+
+			if ( chunk.FarGroundModel is not null ) warming.Enqueue( (chunk, chunk.FarGroundModel) );
+			if ( chunk.FarSetInModel is not null ) warming.Enqueue( (chunk, chunk.FarSetInModel) );
 
 			result.FarGroundBytes = null;
 			result.FarSetInBytes = null;
@@ -927,7 +975,21 @@ public partial class Terrain
 
 		if ( index >= 0 ) ChunkBaked?.Invoke( index % chunksWide, index / chunksWide );
 
-		reliefStale = true;
+		//Only a chunk under the ring, built or being laid, changes it - a flight stands chunks every frame far off
+		if ( relief is null || index < 0 || UnderRing( index, relief.Eye ) || UnderRing( index, relief.AskedAt ) ) reliefStale = true;
+	}
+
+	private bool UnderRing( int index, Vector3 eye ) => FlatAway( index, eye ) <= ReliefDistance;
+
+	//How far a chunk's square is from a point of the terrain's space, along the ground; nought inside it
+	private float FlatAway( int index, Vector3 eye )
+	{
+		var x0 = chunkOrigin.x + ( ( index % chunksWide ) * chunkSpan );
+		var z0 = chunkOrigin.y + ( ( index / chunksWide ) * chunkSpan );
+		var dx = MathF.Max( MathF.Max( x0 - eye.x, eye.x - ( x0 + chunkSpan ) ), 0.0f );
+		var dz = MathF.Max( MathF.Max( z0 - eye.z, eye.z - ( z0 + chunkSpan ) ), 0.0f );
+
+		return MathF.Sqrt( ( dx * dx ) + ( dz * dz ) );
 	}
 
 	//A model out of a bake's bytes, or null where there were none.

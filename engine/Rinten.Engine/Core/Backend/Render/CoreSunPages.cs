@@ -125,6 +125,82 @@ internal sealed class CoreSunPages : IDisposable
 	private int cellsX, cellsY, cellX0, cellY0;
 	private int[] cellStart = [], cellFeet = [];
 	private readonly List<int> wideFeet = new();
+	private int[] cellFill = [];
+
+	//The most cells the grid is made of, four bytes each twice over
+	private const int MostCells = 1 << 22;
+
+	//Feet changed since the grid was made: passed over in it and filed by where they are now, so a change costs no new
+	//grid - a flight swaps terrain chunks every frame. Past this many the grid is made again
+	private const int MostLooseFeet = 4096;
+	private readonly List<int> looseFeet = new();
+	private bool[] looseFoot = [];
+
+	//Where the loose feet are filed: a chain a cell, and one past the last cell for the wide and those outside the grid.
+	//Each foot's latest filing is the one counted - looseEntry - so one moved twice is not counted twice
+	private int[] looseHead = [], looseEntry = [];
+	private readonly List<int> filedSlot = new(), filedNext = new();
+
+	private bool Loose( int slot ) => slot < looseFoot.Length && looseFoot[slot];
+
+	//A changed foot, passed over in the grid and filed where it stands now - see looseHead.
+	private void Refile( int slot )
+	{
+		if ( footsMoved ) return;
+
+		if ( !Loose( slot ) )
+		{
+			if ( looseFeet.Count >= MostLooseFeet )
+			{
+				footsMoved = true;
+				return;
+			}
+
+			if ( slot >= looseFoot.Length ) Array.Resize( ref looseFoot, Math.Max( slot + 1, footR.Length ) );
+
+			looseFoot[slot] = true;
+			looseFeet.Add( slot );
+		}
+
+		if ( looseEntry.Length < looseFoot.Length )
+		{
+			var from = looseEntry.Length;
+			Array.Resize( ref looseEntry, looseFoot.Length );
+			Array.Fill( looseEntry, -1, from, looseEntry.Length - from );
+		}
+
+		looseEntry[slot] = -1;
+		if ( footR[slot] < 0.0f ) return;
+
+		var outside = cellsX * cellsY;
+		var cell = outside;
+
+		if ( footR[slot] <= FootCell && cellsX > 0 )
+		{
+			var cx = (int)MathF.Floor( footX[slot] / FootCell ) - cellX0;
+			var cy = (int)MathF.Floor( footY[slot] / FootCell ) - cellY0;
+			if ( cx >= 0 && cx < cellsX && cy >= 0 && cy < cellsY ) cell = ( cy * cellsX ) + cx;
+		}
+
+		looseEntry[slot] = filedSlot.Count;
+		filedSlot.Add( slot );
+		filedNext.Add( looseHead[cell] );
+		looseHead[cell] = looseEntry[slot];
+	}
+
+	//The loose feet filed in one chain, counted against a square.
+	private long LooseUnder( int head, float x0, float y0, float x1, float y1 )
+	{
+		var sum = 0L;
+
+		for ( var k = head; k >= 0; k = filedNext[k] )
+		{
+			var i = filedSlot[k];
+			if ( looseEntry[i] == k ) sum += Under( i, x0, y0, x1, y1 );
+		}
+
+		return sum;
+	}
 
 	//One bake: a rectangle of a level's tiles and where in the layer its slots are.
 	private readonly struct Bake
@@ -344,6 +420,7 @@ internal sealed class CoreSunPages : IDisposable
 			rebuild = false;
 			spanLow = float.MaxValue;
 			spanHigh = float.MinValue;
+			footsMoved = true;
 
 			for ( var slot = 0; slot < casters.Count; slot++ )
 			{
@@ -382,6 +459,7 @@ internal sealed class CoreSunPages : IDisposable
 		//Every level, the coarsest first: a pixel reads the finest level that is whole, so on
 		//a frame that cannot bake everything the coarse ones are what is worth having first.
 		var total = 0L;
+		var staleLevels = 0u;
 		validMask = 0;
 		edgeMask = 0;
 		bakeRoom = MostBakeTriangles - ( casters.MovingCount > 0 ? Math.Min( casters.MoverTriangles, MostBakeTriangles / 2 ) : 0 );
@@ -400,18 +478,35 @@ internal sealed class CoreSunPages : IDisposable
 				continue;
 			}
 
+			//Empty slots first, every level's: a stale one still reads as it was, an empty one leaves its level unreadable
 			var missing = Wanted( level );
-			var whole = missing == 0 || PlanLevel( level, ref total );
+			var stale = Narrow( toStale: false );
+			var whole = missing == stale || PlanLevel( level, ref total );
 
 			//Read wherever every slot holds its tile, stale or not; short of the rim where only the rim is empty
 			if ( whole || !EmptyIn( level, rimToo: true ) ) validMask |= 1u << level;
 			else if ( !EmptyIn( level, rimToo: false ) ) edgeMask |= 1u << level;
 
+			if ( stale > 0 ) staleLevels |= 1u << level;
+
 			//Known from here: what the plan just took is what the level holds.
 			levelTouched[level] = false;
-			levelWhole[level] = whole;
+			levelWhole[level] = whole && stale == 0;
 			wholeFromX[level] = fromX[level];
 			wholeFromY[level] = fromY[level];
+		}
+
+		//Then the stale ones, in the room the empty ones left
+		for ( var level = levels - 1; level >= 0; level-- )
+		{
+			if ( ( staleLevels & ( 1u << level ) ) == 0 ) continue;
+
+			Wanted( level );
+			var stillEmpty = Narrow( toStale: true );
+			var done = PlanLevel( level, ref total );
+
+			levelTouched[level] = false;
+			levelWhole[level] = stillEmpty == 0 && done;
 		}
 
 		//A rebake ends on the frame its last level is taken: the pixels turn from the kept map to this one, whole
@@ -496,6 +591,22 @@ internal sealed class CoreSunPages : IDisposable
 		}
 
 		return missing;
+	}
+
+	//Narrows a level's wanted slots to its empty ones, or to its stale ones; how many it let go
+	private int Narrow( bool toStale )
+	{
+		var dropped = 0;
+
+		for ( var i = 0; i < wanted.Length; i++ )
+		{
+			if ( !wanted[i] || empty[i] != toStale ) continue;
+
+			wanted[i] = false;
+			dropped++;
+		}
+
+		return dropped;
 	}
 
 	//Whether a level still wants, after its plan, a slot holding nothing - anywhere, or short of its region's outer EdgePages
@@ -626,7 +737,10 @@ internal sealed class CoreSunPages : IDisposable
 
 		var sum = 0L;
 
-		foreach ( var i in wideFeet ) sum += Under( i, x0, y0, x1, y1 );
+		foreach ( var i in wideFeet )
+			if ( !Loose( i ) ) sum += Under( i, x0, y0, x1, y1 );
+
+		sum += LooseUnder( looseHead[cellsX * cellsY], x0, y0, x1, y1 );
 
 		if ( cellsX == 0 ) return sum;
 
@@ -643,7 +757,9 @@ internal sealed class CoreSunPages : IDisposable
 				var cell = ( cy * cellsX ) + cx;
 
 				for ( var k = cellStart[cell]; k < cellStart[cell + 1]; k++ )
-					sum += Under( cellFeet[k], x0, y0, x1, y1 );
+					if ( !Loose( cellFeet[k] ) ) sum += Under( cellFeet[k], x0, y0, x1, y1 );
+
+				if ( looseHead[cell] >= 0 ) sum += LooseUnder( looseHead[cell], x0, y0, x1, y1 );
 			}
 		}
 
@@ -662,7 +778,19 @@ internal sealed class CoreSunPages : IDisposable
 	{
 		footsMoved = false;
 		wideFeet.Clear();
+
+		foreach ( var i in looseFeet )
+		{
+			looseFoot[i] = false;
+			if ( i < looseEntry.Length ) looseEntry[i] = -1;
+		}
+
+		looseFeet.Clear();
+		filedSlot.Clear();
+		filedNext.Clear();
 		cellsX = cellsY = 0;
+		if ( looseHead.Length < 1 ) looseHead = new int[1];
+		looseHead[0] = -1;
 
 		var count = Math.Min( footR.Length, casters.Count );
 		int lowX = int.MaxValue, lowY = int.MaxValue, highX = int.MinValue, highY = int.MinValue;
@@ -685,6 +813,15 @@ internal sealed class CoreSunPages : IDisposable
 
 		if ( lowX > highX ) return;
 
+		//Feet spread too far for a grid, one stray object kilometres off: all visited one by one, as the wide ones are
+		if ( ( (long)highX - lowX + 1 ) * ( (long)highY - lowY + 1 ) > MostCells )
+		{
+			for ( var i = 0; i < count; i++ )
+				if ( footR[i] >= 0.0f && footR[i] <= FootCell ) wideFeet.Add( i );
+
+			return;
+		}
+
 		cellX0 = lowX;
 		cellY0 = lowY;
 		cellsX = highX - lowX + 1;
@@ -694,6 +831,9 @@ internal sealed class CoreSunPages : IDisposable
 		if ( cellStart.Length < cells + 1 ) cellStart = new int[cells + 1];
 		else Array.Clear( cellStart, 0, cells + 1 );
 
+		if ( looseHead.Length < cells + 1 ) looseHead = new int[cells + 1];
+		Array.Fill( looseHead, -1, 0, cells + 1 );
+
 		//Counted, summed into starts, then filled - the cells' feet end up side by side
 		for ( var i = 0; i < count; i++ )
 			if ( footR[i] >= 0.0f && footR[i] <= FootCell ) cellStart[CellOf( i ) + 1]++;
@@ -702,7 +842,10 @@ internal sealed class CoreSunPages : IDisposable
 
 		if ( cellFeet.Length < cellStart[cells] ) cellFeet = new int[cellStart[cells]];
 
-		var fill = new int[cells];
+		if ( cellFill.Length < cells ) cellFill = new int[cells];
+		else Array.Clear( cellFill, 0, cells );
+
+		var fill = cellFill;
 
 		for ( var i = 0; i < count; i++ )
 		{
@@ -919,11 +1062,10 @@ internal sealed class CoreSunPages : IDisposable
 	//A slot's footprint in the sun's frame, where it is part of the still world.
 	private void Foot( int slot )
 	{
-		footsMoved = true;
-
 		if ( !casters.Still( slot ) )
 		{
 			footR[slot] = -1.0f;
+			Refile( slot );
 			return;
 		}
 
@@ -932,6 +1074,7 @@ internal sealed class CoreSunPages : IDisposable
 		footX[slot] = centre.x;
 		footY[slot] = centre.y;
 		footR[slot] = sphere.W;
+		Refile( slot );
 	}
 
 	//The span along the light, grown to hold a caster.

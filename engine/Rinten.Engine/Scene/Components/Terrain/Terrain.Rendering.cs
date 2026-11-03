@@ -35,6 +35,9 @@ public partial class Terrain
 		public int Shaped;
 		public int FarShaped = -1;
 
+		/// <summary>The shape count of the picture the atlas holds for it - see Terrain.Picture.</summary>
+		public int PictureShaped = -1;
+
 		/// <summary>Whether the physics world holds its collision - see Solidify. Its triangles are kept either way.</summary>
 		public bool Solid = true;
 
@@ -219,6 +222,8 @@ public partial class Terrain
 		for ( var i = 0; i < chunks.Length; i++ ) chunks[i] = new Chunk();
 
 		layoutVersion++;
+
+		LayOutPicture();
 
 		//Which are kept whole for where the eye is now; the rest read back only what is drawn of them far off, and their collision.
 		Keep();
@@ -966,6 +971,8 @@ public partial class Terrain
 
 		//Its models are stand-ins, so the still world's shadow is told only where the ground itself is new
 		var index = Array.IndexOf( chunks, chunk );
+
+		UploadPicture( chunk, index, result );
 
 		if ( chunk.Reshaped && index >= 0 )
 		{

@@ -127,8 +127,10 @@ public partial class Terrain
 	//The mask's two pictures and where its table starts and how far it runs, as the ground's draws were last told them.
 	private Vector2 maskPictures;
 	private Vector4 maskPlace;
+	private Vector4 picturePlace;
 
-	//Tells every draw of the ground where the mask is, where that changed - see g_vPalette and g_vMask in the terrain shader.
+	//Tells every draw of the ground where the mask and the picture are, where that changed - see g_vPalette, g_vMask
+	//and g_vPicture in the terrain shader
 	private void SayMask()
 	{
 		var pictures = maskAtlas is not null && maskTable is not null && maskSlots.Count > 0
@@ -137,10 +139,13 @@ public partial class Terrain
 
 		var place = new Vector4( maskOriginX, maskOriginZ, maskWide, maskDeep );
 
-		if ( pictures == maskPictures && place == maskPlace ) return;
+		var picture = PictureTold();
+
+		if ( pictures == maskPictures && place == maskPlace && picture == picturePlace ) return;
 
 		maskPictures = pictures;
 		maskPlace = place;
+		picturePlace = picture;
 
 		foreach ( var chunk in chunks )
 		{
@@ -158,6 +163,7 @@ public partial class Terrain
 	{
 		attributes.Set( "TerrainPalette", new Vector4( palette.x, palette.y, maskPictures.x, maskPictures.y ) );
 		attributes.Set( "TerrainMask", maskPlace );
+		attributes.Set( "TerrainPicture", picturePlace );
 	}
 
 	//Round every tile there is, with room to spare.
@@ -227,7 +233,7 @@ public partial class Terrain
 
 	//Three heaviest layers in five bits each, two weights in a byte each (the third's the rest), top bit where painted
 	//A rare fourth layer is dropped on the card
-	private static uint PackPoint( TerrainPaint paint )
+	internal static uint PackPoint( TerrainPaint paint )
 	{
 		if ( !paint.Painted ) return 0u;
 

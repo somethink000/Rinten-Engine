@@ -110,7 +110,9 @@ void WriteVertex( uint t, uint4 cut, uint n, uint i, uint j )
 
 	if ( share > 0.0 && g.layers > 0u )
 	{
-		Worn p = PaintAt( paint, paintMore, palette, MaskPlaceOfParams(), place, normal.y, g.layers );
+		//Painted as the pixel over it is; the lift follows the corner's own normal, not the picture's
+		float3 bent = normal;
+		Worn p = PaintAt( paint, paintMore, palette, MaskPlaceOfParams(), GroundPictureOfParams(), place, normal.y, g.layers, bent );
 		float3 sides = TriplanarSides( normal );
 
 		for ( uint l = 0u; l < PlaceLayers; l++ )

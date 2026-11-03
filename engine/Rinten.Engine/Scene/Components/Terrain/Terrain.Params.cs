@@ -120,6 +120,7 @@ public partial class Terrain
 
 		FillRelief();
 		FillMask();
+		FillPicture();
 	}
 
 	//Bindless index of a layer's compiled texture, looked up per frame since slots get reused

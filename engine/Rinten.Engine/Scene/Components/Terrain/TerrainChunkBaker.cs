@@ -51,6 +51,9 @@ internal sealed class TerrainChunkBake
 	/// <summary>The chunk's shape count it was gathered at - see Terrain.Chunk.Shaped.</summary>
 	public int Shaped;
 
+	/// <summary>The ground's top seen from above, for the shader to paint and light by place - see TerrainChunkBaker.Picture.</summary>
+	public byte[] Picture;
+
 	/// <summary>Lets go of the geometry the models were written from.</summary>
 	public void Drop()
 	{
@@ -128,10 +131,14 @@ internal static class TerrainChunkBaker
 
 		TerrainBakeCache.Note( job, key );
 
+		//Made every time rather than kept: a few milliseconds of a worker against a cache every shipped terrain would have to bake again
+		var picture = job.Draws ? Picture( ground, job ) : null;
+
 		if ( key is not null && TerrainBakeCache.Read( key, job.Shipped, job.Whole ) is { } kept )
 		{
 			kept.GroundName = job.GroundName;
 			kept.SetInName = job.SetInName;
+			kept.Picture = picture;
 
 			job.Result = kept;
 			return;
@@ -157,7 +164,162 @@ internal static class TerrainChunkBaker
 
 		if ( key is not null ) TerrainBakeCache.Write( key, bake );
 
+		bake.Picture = picture;
 		job.Result = bake;
+	}
+
+	/// <summary>Steps along a side of a chunk's picture; its points are one more, the far edge shared with the next chunk.</summary>
+	public const int PictureCells = 64;
+	public const int PictureSide = PictureCells + 1;
+
+	/// <summary>Bytes a point of the picture takes: its paint (Terrain.PackPoint), then its top as a half and its normal in two bytes.</summary>
+	public const int PicturePointBytes = 8;
+
+	//The ground's top over a grid of points seen from above, as terrain_layers.slang's PictureInto reads it. What the
+	//shader paints and lights the top by, so a far model or a coarse level - whose corners moved - paints the same places
+	private static byte[] Picture( TerrainSoup soup, TerrainChunkJob job )
+	{
+		if ( soup.Indices.Count < 3 ) return null;
+
+		const int side = PictureSide;
+
+		var step = ( job.Max.x - job.Min.x ) / PictureCells;
+		var x0 = job.Min.x;
+		var z0 = job.Min.y;
+
+		var top = new float[side * side];
+		var paint = new TerrainPaint[side * side];
+		var normal = new Vector3[side * side];
+		Array.Fill( top, TerrainMesh.NoGround );
+
+		var vertices = soup.Vertices;
+		var indices = soup.Indices;
+
+		for ( var t = 0; t + 2 < indices.Count; t += 3 )
+		{
+			var a = vertices[indices[t]];
+			var b = vertices[indices[t + 1]];
+			var c = vertices[indices[t + 2]];
+
+			var pa = a.Position;
+			var pb = b.Position;
+			var pc = c.Position;
+
+			var area = ( ( pb.x - pa.x ) * ( pc.z - pa.z ) ) - ( ( pc.x - pa.x ) * ( pb.z - pa.z ) );
+			if ( MathF.Abs( area ) < 1e-8f ) continue;
+
+			var i0 = Math.Max( (int)MathF.Ceiling( ( MathF.Min( pa.x, MathF.Min( pb.x, pc.x ) ) - x0 ) / step ), 0 );
+			var i1 = Math.Min( (int)MathF.Floor( ( MathF.Max( pa.x, MathF.Max( pb.x, pc.x ) ) - x0 ) / step ), PictureCells );
+			var j0 = Math.Max( (int)MathF.Ceiling( ( MathF.Min( pa.z, MathF.Min( pb.z, pc.z ) ) - z0 ) / step ), 0 );
+			var j1 = Math.Min( (int)MathF.Floor( ( MathF.Max( pa.z, MathF.Max( pb.z, pc.z ) ) - z0 ) / step ), PictureCells );
+
+			for ( var j = j0; j <= j1; j++ )
+			{
+				var pz = z0 + ( j * step );
+
+				for ( var i = i0; i <= i1; i++ )
+				{
+					var px = x0 + ( i * step );
+
+					var wb = ( ( ( px - pa.x ) * ( pc.z - pa.z ) ) - ( ( pc.x - pa.x ) * ( pz - pa.z ) ) ) / area;
+					var wc = ( ( ( pb.x - pa.x ) * ( pz - pa.z ) ) - ( ( px - pa.x ) * ( pb.z - pa.z ) ) ) / area;
+					var wa = 1.0f - wb - wc;
+
+					if ( wa < -1e-5f || wb < -1e-5f || wc < -1e-5f ) continue;
+
+					var y = ( pa.y * wa ) + ( pb.y * wb ) + ( pc.y * wc );
+					var at = ( j * side ) + i;
+
+					if ( y <= top[at] ) continue;
+
+					top[at] = y;
+					paint[at] = TerrainPaint.Mix( a.Paint, b.Paint, c.Paint, wa, wb, wc );
+					normal[at] = ( a.Normal * wa ) + ( b.Normal * wb ) + ( c.Normal * wc );
+				}
+			}
+		}
+
+		//A chunk holds the triangles whose middles are in it, so a sliver along its edge may be its neighbour's:
+		//points there take a neighbour's, the way the next chunk over sees much the same ground
+		var known = new bool[side * side];
+
+		for ( var pass = 0; pass < PictureEdgeFill; pass++ )
+		{
+			for ( var at = 0; at < known.Length; at++ ) known[at] = top[at] != TerrainMesh.NoGround;
+
+			var filled = false;
+
+			for ( var j = 0; j < side; j++ )
+			{
+				for ( var i = 0; i < side; i++ )
+				{
+					var at = ( j * side ) + i;
+					if ( known[at] ) continue;
+
+					var from = i > 0 && known[at - 1] ? at - 1
+						: i < side - 1 && known[at + 1] ? at + 1
+						: j > 0 && known[at - side] ? at - side
+						: j < side - 1 && known[at + side] ? at + side
+						: -1;
+
+					if ( from < 0 ) continue;
+
+					top[at] = top[from];
+					paint[at] = paint[from];
+					normal[at] = normal[from];
+					filled = true;
+				}
+			}
+
+			if ( !filled ) break;
+		}
+
+		var bytes = new byte[side * side * PicturePointBytes];
+
+		for ( var at = 0; at < side * side; at++ )
+		{
+			var point = bytes.AsSpan( at * PicturePointBytes, PicturePointBytes );
+			var ground = top[at] != TerrainMesh.NoGround;
+
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian( point, ground ? Terrain.PackPoint( paint[at] ) : 0u );
+			System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian( point[4..],
+				BitConverter.HalfToUInt16Bits( ground ? (Half)Math.Clamp( top[at], -PictureLowest, PictureLowest ) : (Half)( -PictureNoGround ) ) );
+
+			var (u, v) = Octahedral( normal[at] );
+			point[6] = u;
+			point[7] = v;
+		}
+
+		return bytes;
+	}
+
+	//Metres a top may be held at as a half, and the top a point with no ground says - the shader's PictureNoGround
+	private const float PictureLowest = 60000.0f;
+	private const float PictureNoGround = 65000.0f;
+
+	//Points an edge's missing ground is filled in from, at most
+	private const int PictureEdgeFill = 3;
+
+	//A direction folded onto the square y faces, a byte each way - see OctahedralNormal in terrain_layers.slang
+	private static (byte U, byte V) Octahedral( Vector3 n )
+	{
+		var sum = MathF.Abs( n.x ) + MathF.Abs( n.y ) + MathF.Abs( n.z );
+		if ( sum < 1e-8f ) return (128, 128);
+
+		var u = n.x / sum;
+		var v = n.z / sum;
+
+		if ( n.y < 0.0f )
+		{
+			var fu = ( 1.0f - MathF.Abs( v ) ) * ( u >= 0.0f ? 1.0f : -1.0f );
+			var fv = ( 1.0f - MathF.Abs( u ) ) * ( v >= 0.0f ? 1.0f : -1.0f );
+			u = fu;
+			v = fv;
+		}
+
+		static byte Byte( float x ) => (byte)Math.Clamp( MathF.Round( ( ( x * 0.5f ) + 0.5f ) * 255.0f ), 0.0f, 255.0f );
+
+		return (Byte( u ), Byte( v ));
 	}
 
 	//Compiles the chunk's models to bytes on the worker; main thread only does Model.FromBytes

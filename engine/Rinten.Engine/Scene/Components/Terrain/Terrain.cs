@@ -50,6 +50,7 @@ public sealed partial class Terrain : Collider, Component.ExecuteInEditor, Compo
 		ReleaseChunks();
 		DropRelief();
 		DropMask();
+		DropPicture();
 		DropGround();
 
 		if ( watched is not null ) watched.Changed -= MeshChanged;

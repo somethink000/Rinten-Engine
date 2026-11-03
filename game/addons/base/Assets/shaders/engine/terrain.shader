@@ -1,4 +1,4 @@
-﻿//Terrain: a baked mesh painted by 8 per-vertex weights (colour + both UVs) for the chunk's palette and a mask over the top, triplanar layers
+﻿//Terrain: a baked mesh painted and faced by a picture of its top, over 8 per-vertex weights (colour + both UVs) for the chunk's palette, a mask over both, triplanar layers
 
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1
@@ -22,6 +22,7 @@ PARAMETERS
 
 	//And the tile the mask's table starts at, x then z, and how many tiles it is across and deep - see Terrain.Mask.
 	float4 g_vMask < Attribute( "TerrainMask" ); Default4( 0.0, 0.0, 0.0, 0.0 ); >;
+
 }
 
 #include "depth_id.slang"
@@ -133,25 +134,18 @@ Out Shade( V2F i, bool front )
 	float3 facing = normalize( i.normal );
 	if ( !front ) facing = -facing;
 
-	float far = saturate( ( distance( i.world, EYE_FRAME( camera ).xyz ) - FarFrom ) / FarBand );
+	//The way the triangle faces, kept for what leaves the surface; facing itself is bent by the ground picture below
+	float3 faced = facing;
 
-	float3 sides = TriplanarSides( facing );
-	if ( far > 0.0 ) sides = FarSides( sides, far );
+	float far = saturate( ( distance( i.world, EYE_FRAME( camera ).xyz ) - FarFrom ) / FarBand );
 
 	float3 dxLocal = ddx( i.local );
 	float3 dyLocal = ddy( i.local );
 
-	float3 albedo = float3( 1.0, 1.0, 1.0 );
-	float3 normalOnTerrain = facing;
-	float roughness = 1.0;
-	float occlusion = 1.0;
-	float metalness = 0.0;
+	//Painted and faced by place first - see PictureInto - so the sides and layers below read the ground the whole chunk is
+	Worn p = (Worn)0;
 
-	if ( g.layers == 0u )
-	{
-		ProceduralGrid( i.local.xz, albedo, roughness );
-	}
-	else
+	if ( g.layers != 0u )
 	{
 #ifdef PORTABLE
 		//The layers past the ones this frame can bind are not there at all, so ground painted only with those reads as unpainted.
@@ -166,8 +160,24 @@ Out Shade( V2F i, bool front )
 		mask.origin = int2( round( g_vMask.xy ) );
 		mask.extent = int2( round( g_vMask.zw ) );
 
-		Worn p = PaintAt( i.paint, i.paintMore, i.palette, mask, i.local, facing.y, most );
+		p = PaintAt( i.paint, i.paintMore, i.palette, mask, GroundPictureOfParams(), i.local, faced.y, most, facing );
+	}
 
+	float3 sides = TriplanarSides( facing );
+	if ( far > 0.0 ) sides = FarSides( sides, far );
+
+	float3 albedo = float3( 1.0, 1.0, 1.0 );
+	float3 normalOnTerrain = facing;
+	float roughness = 1.0;
+	float occlusion = 1.0;
+	float metalness = 0.0;
+
+	if ( g.layers == 0u )
+	{
+		ProceduralGrid( i.local.xz, albedo, roughness );
+	}
+	else
+	{
 		//Far off, a layer weighing little is not read at all; what is left shares its weight.
 		if ( far > 0.0 )
 		{
@@ -239,7 +249,7 @@ Out Shade( V2F i, bool front )
 
 	//And the way the surface itself faces, before any layer's map bent it: what a ray leaving it is offset
 	//along. Left unsaid it is whatever was in the register, and the lighting normalises it into a black terrain.
-	float3 geometric = normalize( mul( float4( facing, 0.0 ), g_modelToWorld ).xyz );
+	float3 geometric = normalize( mul( float4( faced, 0.0 ), g_modelToWorld ).xyz );
 
 	Surface surface;
 	surface.world = i.world;

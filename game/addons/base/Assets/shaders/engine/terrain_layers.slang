@@ -5,6 +5,7 @@
 #define ENGINE_TERRAIN_LAYERS_INCLUDED
 
 #include "half.slang"
+#include "engine/terrain_picture.slang"
 
 //Terrain params picture: 32 bits per texel as RGBA8 bytes; layout must match Terrain.Params
 
@@ -603,9 +604,93 @@ float MaskInto( MaskPlace where, float3 local, float facingUp, inout Painted p )
 }
 #endif
 
-//The heaviest four layers at a place: the vertex's weights by the chunk's palette, or the mask where it covers
-//Unpainted ground wears the first layer; layers past the count are not there
-Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, float3 local, float facingUp, uint layers )
+//Where row 0 says the ground picture is, its four numbers from this column on - see Terrain.FillPicture. For what
+//has no draw number left to be told it by: the terrain's own shader, and the relief ring
+static const int PictureColumn = 11;
+
+GroundPicture GroundPictureOfParams()
+{
+	return GroundPictureOf( float4( asfloat( Bits( PictureColumn, RowTerrain ) ), asfloat( Bits( PictureColumn + 1, RowTerrain ) ),
+		asfloat( Bits( PictureColumn + 2, RowTerrain ) ), asfloat( Bits( PictureColumn + 3, RowTerrain ) ) ) );
+}
+
+#ifndef PORTABLE
+//One of the picture's layers into the vertex's eight places: onto the same layer, else into the lightest if it is lighter.
+void PictureAdd( inout Painted p, uint layer, float weight )
+{
+	bool merged = false;
+
+	[unroll]
+	for ( uint m = 0u; m < MaxLayers; m++ )
+	{
+		if ( !merged && p.weight[m] > 0.0 && p.layer[m] == layer )
+		{
+			p.weight[m] += weight;
+			merged = true;
+		}
+	}
+
+	if ( merged ) return;
+
+	uint lightest = 0u;
+	float least = p.weight[0];
+
+	[unroll]
+	for ( uint e = 1u; e < MaxLayers; e++ )
+	{
+		if ( p.weight[e] < least )
+		{
+			least = p.weight[e];
+			lightest = e;
+		}
+	}
+
+	if ( least >= weight ) return;
+
+	[unroll]
+	for ( uint r = 0u; r < MaxLayers; r++ )
+	{
+		if ( r == lightest )
+		{
+			p.layer[r] = layer;
+			p.weight[r] = weight;
+		}
+	}
+}
+
+//The ground picture's paint over the vertex's, where it covers, and its normal bent into normal - see GroundPictureRead.
+void PictureInto( GroundPicture where, float3 local, float facingUp, inout Painted p, inout float3 normal )
+{
+	uint4 packed;
+	float4 shares;
+	float cover = GroundPictureRead( where, local, facingUp, normal, packed, shares );
+
+	if ( cover <= 0.0 ) return;
+
+	[unroll]
+	for ( uint v = 0u; v < MaxLayers; v++ ) p.weight[v] *= 1.0 - cover;
+
+	[unroll]
+	for ( uint q = 0u; q < 4u; q++ )
+	{
+		if ( shares[q] <= 0.0 ) continue;
+
+		uint3 layers;
+		float3 weights;
+		PicturePaint( packed[q], layers, weights );
+
+		[unroll]
+		for ( uint k = 0u; k < 3u; k++ )
+			if ( weights[k] > 0.0 ) PictureAdd( p, layers[k], weights[k] * shares[q] );
+	}
+}
+#endif
+
+//The heaviest four layers at a place: the ground picture's over the vertex's weights by the chunk's palette, the mask
+//over both where it covers. Unpainted ground wears the first layer; layers past the count are not there. The picture
+//bends normal too - see PictureInto
+Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, GroundPicture picture, float3 local, float facingUp,
+	uint layers, inout float3 normal )
 {
 	Painted p;
 
@@ -637,6 +722,8 @@ Worn PaintAt( float4 paint, float4 paintMore, float2 palette, MaskPlace mask, fl
 	}
 
 #ifndef PORTABLE
+	PictureInto( picture, local, facingUp, p, normal );
+
 	float cover = MaskInto( mask, local, facingUp, p );
 
 	if ( cover > 0.0 )

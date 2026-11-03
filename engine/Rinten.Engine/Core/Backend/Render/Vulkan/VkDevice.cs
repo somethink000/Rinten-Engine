@@ -705,8 +705,9 @@ internal static unsafe partial class VkDevice
 
 	private const ulong RecordingSentinel = ulong.MaxValue;
 
-	//What a grave retired right now has to wait for: the open recording if there is one, otherwise only what has already been submitted.
-	private static ulong StampForNow() => recordingOpen ? RecordingSentinel : submittedTicket;
+	//What a grave retired right now has to wait for: the open recording, or the open upload batch that is sent just
+	//ahead of the next one, if there is either; otherwise only what has already been submitted.
+	private static ulong StampForNow() => recordingOpen || VkTextures.BatchOpen ? RecordingSentinel : submittedTicket;
 
 	//Ticket a few submissions later, for present semaphores and swapchains the fence doesn't cover
 	private static ulong StampAfter( uint submissions )

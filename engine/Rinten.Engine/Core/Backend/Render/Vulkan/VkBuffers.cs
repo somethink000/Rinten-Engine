@@ -501,7 +501,8 @@ internal static unsafe class VkBuffers
 					PCommandBufferInfos = &commandSubmit,
 				};
 
-				//Everything before it must have happened: what is read was written by a frame, another submission
+				//Everything before it must have happened: what is read was written by a frame, another submission, a batched upload
+				VkTextures.FlushTextureUploads();
 				VkSubmitter.DeviceWaitIdle();
 
 				if ( VkDevice.dialect.Submit( VkDevice.graphicsQueue, &submit, fence ) != Result.Success ) return 0;

@@ -439,6 +439,9 @@ internal static unsafe partial class VkTextures
 	//submission, so that the copies are queued ahead of the draws that sample them. The lock has to be held.
 	internal static void FlushTextureUploads() => SubmitBatch();
 
+	//Whether uploads are recorded and not yet sent - what is retired meanwhile waits for the frame they go ahead of
+	internal static bool BatchOpen => batch is not null;
+
 	//Room for this many bytes in the open batch, opening one where there is none. Null where the device would not give it what it needs. The bytes go at
 	//offset in the slot's staging buffer, which is what the caller's copy has to name - a batch is one buffer with everybody's pixels laid end to end in it.
 	private static UploadContext ReserveUpload( ulong size, out ulong offset )
@@ -514,6 +517,19 @@ internal static unsafe partial class VkTextures
 	{
 		if ( destination.Handle == 0 || data is null || size == 0 ) return false;
 
+		//Into the open batch with the pictures: a submission each takes one of four slots, and the fifth waits for the card.
+		//What fills, copies or reads buffers on its own sends the batch first
+		if ( batching && size <= BatchBytes && ReserveUpload( size, out var at ) is { } into )
+		{
+			System.Buffer.MemoryCopy( data, into.StagingMapped + at, size, size );
+
+			var batched = new BufferCopy { Size = size, SrcOffset = at, DstOffset = offset };
+			VkDevice.vk.CmdCopyBuffer( into.Commands, into.Staging, destination, 1, &batched );
+			BufferReadable( into.Commands, destination );
+
+			return true;
+		}
+
 		var slot = TakeUploadContext();
 		if ( slot is null ) return false;
 
@@ -534,34 +550,7 @@ internal static unsafe partial class VkTextures
 
 		vk.CmdCopyBuffer( commands, slot.Staging, destination, 1, &copy );
 
-		//Barrier must name every later use (vertex, index, shader, indirect, copy) or validation flags it
-		var barrier = new BufferMemoryBarrier2
-		{
-			SType = StructureType.BufferMemoryBarrier2,
-			SrcStageMask = PipelineStageFlags2.CopyBit,
-			SrcAccessMask = AccessFlags2.TransferWriteBit,
-			DstStageMask = PipelineStageFlags2.VertexInputBit |
-				PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
-				PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.DrawIndirectBit |
-				PipelineStageFlags2.CopyBit,
-			DstAccessMask = AccessFlags2.VertexAttributeReadBit |
-				AccessFlags2.IndexReadBit | AccessFlags2.ShaderStorageReadBit |
-				AccessFlags2.ShaderStorageWriteBit | AccessFlags2.IndirectCommandReadBit |
-				AccessFlags2.TransferWriteBit,
-			SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-			DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
-			Buffer = destination,
-			Size = Vk.WholeSize,
-		};
-
-		var dependency = new DependencyInfo
-		{
-			SType = StructureType.DependencyInfo,
-			BufferMemoryBarrierCount = 1,
-			PBufferMemoryBarriers = &barrier,
-		};
-
-		VkDevice.dialect.Barrier( commands, &dependency );
+		BufferReadable( commands, destination );
 
 		vk.EndCommandBuffer( commands );
 
@@ -609,10 +598,45 @@ internal static unsafe partial class VkTextures
 		return true;
 	}
 
+	//A copy into a buffer made visible to every later use - vertex, index, shader, indirect, copy - or validation flags it
+	private static void BufferReadable( CommandBuffer commands, VkBuffer buffer )
+	{
+		var barrier = new BufferMemoryBarrier2
+		{
+			SType = StructureType.BufferMemoryBarrier2,
+			SrcStageMask = PipelineStageFlags2.CopyBit,
+			SrcAccessMask = AccessFlags2.TransferWriteBit,
+			DstStageMask = PipelineStageFlags2.VertexInputBit |
+				PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+				PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.DrawIndirectBit |
+				PipelineStageFlags2.CopyBit,
+			DstAccessMask = AccessFlags2.VertexAttributeReadBit |
+				AccessFlags2.IndexReadBit | AccessFlags2.ShaderStorageReadBit |
+				AccessFlags2.ShaderStorageWriteBit | AccessFlags2.IndirectCommandReadBit |
+				AccessFlags2.TransferWriteBit | AccessFlags2.TransferReadBit,
+			SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+			DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+			Buffer = buffer,
+			Size = Vk.WholeSize,
+		};
+
+		var dependency = new DependencyInfo
+		{
+			SType = StructureType.DependencyInfo,
+			BufferMemoryBarrierCount = 1,
+			PBufferMemoryBarriers = &barrier,
+		};
+
+		VkDevice.dialect.Barrier( commands, &dependency );
+	}
+
 	//Copies bytes between two buffers on the device through the same upload slots, so it is ordered like an upload against whatever reads next.
 	internal static bool CopyBetweenBuffers( VkBuffer from, ulong fromOffset, VkBuffer into, ulong intoOffset, ulong size )
 	{
 		if ( from.Handle == 0 || into.Handle == 0 || size == 0 ) return false;
+
+		//After the uploads batched before it, which may write what it copies
+		SubmitBatch();
 
 		var slot = TakeUploadContext();
 		if ( slot is null ) return false;
@@ -632,34 +656,7 @@ internal static unsafe partial class VkTextures
 
 		vk.CmdCopyBuffer( commands, from, into, 1, &copy );
 
-		//The same dependency an upload leaves behind, for the same readers.
-		var barrier = new BufferMemoryBarrier2
-		{
-			SType = StructureType.BufferMemoryBarrier2,
-			SrcStageMask = PipelineStageFlags2.CopyBit,
-			SrcAccessMask = AccessFlags2.TransferWriteBit,
-			DstStageMask = PipelineStageFlags2.VertexInputBit |
-				PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
-				PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.DrawIndirectBit |
-				PipelineStageFlags2.CopyBit,
-			DstAccessMask = AccessFlags2.VertexAttributeReadBit |
-				AccessFlags2.IndexReadBit | AccessFlags2.ShaderStorageReadBit |
-				AccessFlags2.ShaderStorageWriteBit | AccessFlags2.IndirectCommandReadBit |
-				AccessFlags2.TransferWriteBit,
-			SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-			DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
-			Buffer = into,
-			Size = Vk.WholeSize,
-		};
-
-		var dependency = new DependencyInfo
-		{
-			SType = StructureType.DependencyInfo,
-			BufferMemoryBarrierCount = 1,
-			PBufferMemoryBarriers = &barrier,
-		};
-
-		VkDevice.dialect.Barrier( commands, &dependency );
+		BufferReadable( commands, into );
 
 		vk.EndCommandBuffer( commands );
 

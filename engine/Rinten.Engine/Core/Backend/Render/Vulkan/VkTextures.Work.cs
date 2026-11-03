@@ -284,6 +284,9 @@ internal static unsafe partial class VkTextures
 	{
 		if ( destination.Handle == 0 || size == 0 ) return false;
 
+		//After the uploads batched before it, which may write where it fills
+		SubmitBatch();
+
 		var slot = TakeUploadContext();
 		if ( slot is null ) return false;
 

@@ -25,6 +25,22 @@ partial class StandaloneExporter
 		"libspirv-cross.dylib",
 	];
 
+	//What only a game uses, left out of an app's build: the engine opens each only if it is there
+	private static readonly string[] NotForApps = [
+		//DLSS: the engine's bridge and NVIDIA's runtime, sixty megabytes for upscaling a 3D frame
+		"rintenngx.dll", "librintenngx.so", "nvngx_dlss.dll", "libnvidia-ngx-dlss.so",
+
+		//OpenXR, for a headset
+		"openxr_loader.dll", "libopenxr_loader.so", "libopenxr_loader.dylib",
+	];
+
+	//Matched on the name before any version suffix: libnvidia-ngx-dlss.so.310.9.1, libopenxr_loader.so.1
+	private static bool OnlyForGames( string file )
+	{
+		var name = Path.GetFileName( file );
+		return NotForApps.Any( x => name.Equals( x, StringComparison.OrdinalIgnoreCase ) || name.StartsWith( x + ".", StringComparison.OrdinalIgnoreCase ) );
+	}
+
 	//Whether a file in a bin folder travels with a game.
 	private static bool ShipsWithGames( string file )
 	{
@@ -58,6 +74,12 @@ partial class StandaloneExporter
 		}
 
 		var native = Directory.GetFiles( nativeDir ).Where( ShipsWithGames ).ToList();
+
+		if ( _exportConfig.App && !IsVr() )
+		{
+			var dropped = native.RemoveAll( OnlyForGames );
+			if ( dropped > 0 ) Logger.Info( $"An application: {dropped} libraries only games use stay behind (DLSS, OpenXR)." );
+		}
 
 		//Never ship the shader compiler; games use shaders baked at export
 		if ( NativePackages( engineDir, platform ).TryGetValue( "slang", out var slang ) )

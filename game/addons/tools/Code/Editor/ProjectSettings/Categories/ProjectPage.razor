@@ -99,6 +99,11 @@
 					<label>Export debug - the game may show its frame rate and its log</label>
 				</div>
 
+				<div class="option @(app ? "on" : null)" onclick="@ToggleApp">
+					<label class="material-icon">@(app ? "check_box" : "check_box_outline_blank")</label>
+					<label>Application - a desktop program, not a game: sleeps while idle, no DLSS or VR in the build</label>
+				</div>
+
 				<div class="loading-screen">
 					<label class="sub-title">Loading Screen</label>
 
@@ -183,6 +188,9 @@
 	//See ExportConfig.ExportDebug.
 	bool exportDebug;
 
+	//See ExportConfig.App; the project's own setting, since the game reads it too
+	bool app;
+
 	//See ExportConfig.LoadingScreen.
 	LoadingScreenKind loadingScreen;
 
@@ -264,6 +272,7 @@
 		executableName = config.GetMetaOrDefault( "Build.ExecutableName", project.Package?.Ident ?? config.Ident ?? "game" );
 		createZip = config.GetMetaOrDefault( "Build.Zip", true );
 		exportDebug = config.GetMetaOrDefault( "Build.Debug", false );
+		app = config.GetMetaOrDefault( "App", false );
 		loadingScreen = config.GetMetaOrDefault( "Build.LoadingScreen", LoadingScreenKind.Engine );
 		orientation = config.GetMetaOrDefault( "Build.Orientation", "landscape" );
 		if ( !Orientations.Contains( orientation ) ) orientation = "landscape";
@@ -279,6 +288,7 @@
 		config.SetMeta( "Build.SplashPicture", SplashPicture );
 		config.SetMeta( "Build.Zip", createZip );
 		config.SetMeta( "Build.Debug", exportDebug );
+		config.SetMeta( "App", app );
 		config.SetMeta( "Build.LoadingScreen", loadingScreen );
 		config.SetMeta( "Build.Orientation", orientation );
 		config.SetMeta( "Build.Microphone", microphone );
@@ -361,6 +371,12 @@
 	void ToggleDebug()
 	{
 		exportDebug = !exportDebug;
+		Changed();
+	}
+
+	void ToggleApp()
+	{
+		app = !app;
 		Changed();
 	}
 
@@ -519,6 +535,7 @@
 					ExecutableName = executableName,
 					CreateZip = createZip,
 					ExportDebug = exportDebug,
+					App = app,
 					LoadingScreen = loadingScreen,
 					StartupImage = SplashPicture,
 					TargetDir = TargetDir( platform ),

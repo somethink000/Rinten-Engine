@@ -68,6 +68,7 @@ public partial class StandaloneExporter
 			//The Build page's tick, or -exportdebug on a command line that wants one build for debugging without changing what the project saves.
 			ExportDebug = config.GetMetaOrDefault( "Build.Debug", false )
 				|| Rinten.Utility.CommandLine.HasSwitch( "-exportdebug" ),
+			App = config.GetMetaOrDefault( "App", false ),
 			LoadingScreen = config.GetMetaOrDefault( "Build.LoadingScreen", LoadingScreenKind.Engine ),
 			StartupImage = config.GetMetaOrDefault<string>( "Build.SplashPicture", null ),
 			BuildDate = DateTime.Now,
@@ -288,6 +289,7 @@ public partial class StandaloneExporter
 
 			IsVRProject = controlSettings.IsVROnly,
 			Debug = _exportConfig.ExportDebug,
+			App = _exportConfig.App,
 			Splash = SplashInBuild() is { } splash ? "/" + splash : null,
 		};
 	}

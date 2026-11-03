@@ -42,6 +42,10 @@ public class ExportConfig
 	[Title( "Export Debug" )]
 	public bool ExportDebug { get; set; }
 
+	/// <summary>A desktop program, not a game: it sleeps while idle and leaves out DLSS and OpenXR - see Application.IsApp.</summary>
+	[Title( "Application" )]
+	public bool App { get; set; }
+
 	/// <summary>What the game shows while it starts: the engine's splash or its own picture.</summary>
 	[Title( "Loading Screen" )]
 	public LoadingScreenKind LoadingScreen { get; set; }

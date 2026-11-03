@@ -501,10 +501,9 @@ internal sealed class CoreTexture
 		//device with no path for it - goes as one level, below, as everything used to.
 		if ( Chained && UploadChain( width, height ) is var chained && chained != 0 ) return chained;
 
-		//RGBA8 goes as the bytes it already is. Converting a format to itself through Pixels() walks every pixel through a read
-		//and a write, and on an interface repainting a window's worth of widgets that walk cost more than the upload it fed.
-		//Any other format is turned into RGBA8 in one buffer a thread keeps, not a new array of colours for every upload
-		ReadOnlySpan<byte> bytes = Format == ImageFormat.RGBA8888
+		//RGBA8, linear or not, goes as the bytes it is - the terrain's ground square is a million texels each time it is laid.
+		//Any other format turns into RGBA8 in one buffer a thread keeps
+		ReadOnlySpan<byte> bytes = Format is ImageFormat.RGBA8888 or ImageFormat.LINEAR_RGBA8888 or ImageFormat.RGBA8888_LINEAR
 			? MipData( 0 )
 			: Converted( width, height );
 

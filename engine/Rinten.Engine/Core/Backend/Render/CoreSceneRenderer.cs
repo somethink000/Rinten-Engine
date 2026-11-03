@@ -2373,13 +2373,12 @@ internal static unsafe class CoreSceneRenderer
 		var model = ready ?? builtIn?.Loaded;
 		var owned = false;
 
-		//The compiled model on disk, which its levels sit beside
-		var full = builtIn is null && !string.IsNullOrWhiteSpace( resourcePath )
-			? CoreModel.ResolveOnDisk( CompiledPaths.Model( resourcePath ).Replace( '\\', '/' ) )
-			: null;
-
 		if ( model is null )
 		{
+			//The compiled model on disk; a model handed in, such as one built in code, is never looked for there
+			var full = builtIn is null && !string.IsNullOrWhiteSpace( resourcePath )
+				? CoreModel.ResolveOnDisk( CompiledPaths.Model( resourcePath ).Replace( '\\', '/' ) )
+				: null;
 
 			//Through the same door as everything else that reads one: what is on disk may be our model,
 			//our model inside a resource container, or a definition whose geometry has not been built yet.
@@ -3040,27 +3039,42 @@ internal static unsafe class CoreSceneRenderer
 	//Forgets what every material file said - see materialFields.
 	internal static void ForgetMaterialFields()
 	{
-		lock ( materialFields ) materialFields.Clear();
+		lock ( materialFields )
+		{
+			materialFields.Clear();
+			materialMissed.Clear();
+		}
 	}
 
 	private static (MaterialFields How, Color Tint) MaterialOf( string materialPath )
 	{
 		var key = materialPath ?? "";
 
+		var now = Environment.TickCount64;
+
 		lock ( materialFields )
 		{
 			if ( materialFields.TryGetValue( key, out var found ) ) return found;
+			if ( materialMissed.TryGetValue( key, out var missed ) && now < missed.Until ) return missed.Made;
 		}
 
 		//Read outside the lock, as it touches the disk and one slow file would stall every material
 		var read = ReadMaterialFile( key, out var onDisk );
 		var made = ( read, Folded( read, ReadMaterialTintFile( key ) ) );
 
-		//Don't cache a material not found on disk; the filesystem may still be mounting
-		if ( onDisk ) lock ( materialFields ) materialFields[key] = made;
+		//One not on disk is looked for again after a while, as the filesystem may still be mounting - not on every mesh
+		lock ( materialFields )
+		{
+			if ( onDisk ) materialFields[key] = made;
+			else materialMissed[key] = (made, now + MissedFor);
+		}
 
 		return made;
 	}
+
+	//Milliseconds a material not found on disk is taken as missing before it is looked for again
+	private const long MissedFor = 5000;
+	private static readonly Dictionary<string, ((MaterialFields How, Color Tint) Made, long Until)> materialMissed = new();
 
 	internal static MaterialFields ReadMaterial( string materialPath ) => MaterialOf( materialPath ).How;
 

@@ -1,0 +1,149 @@
+@using System
+@namespace Rinten.UI
+@inherits Panel
+
+<root class="app-titlebar">
+	@if ( open is not null )
+	{
+		<div class="app-menu-catcher" onmousedown=@Close></div>
+	}
+	@if ( !string.IsNullOrEmpty( Icon ) )
+	{
+		<div class="app-mark"><i>@Icon</i></div>
+	}
+	<div class="app-menubar">
+		@foreach ( var m in Menus ?? [] )
+		{
+			<div class="app-menu-title @(open == m ? "open" : "")" onmousedown=@(() => Toggle( m )) onmouseover=@(() => Hover( m ))>
+				<label>@m.Title</label>
+				@if ( open == m )
+				{
+					<div class="app-dropdown" onmousedown=@(e => e.StopPropagation())>
+						@foreach ( var item in m.Items() )
+						{
+							@if ( item is null )
+							{
+								<div class="app-dropdown-sep"></div>
+							}
+							else
+							{
+								<div class="app-dropdown-row @(item.Enabled ? "" : "disabled") @(item.Checked ? "checked" : "")" onclick=@(() => Run( item ))>
+									<i class="check">@(item.Checked ? "check" : "")</i>
+									<label class="text">@item.Text</label>
+									<label class="shortcut">@item.Shortcut</label>
+								</div>
+							}
+						}
+					</div>
+				}
+			</div>
+		}
+	</div>
+	<div class="app-drag" @ref="Drag">
+		@if ( Center is not null )
+		{
+			@Center
+		}
+		else
+		{
+			<label class="app-title">@Title</label>
+		}
+	</div>
+	@if ( Right is not null )
+	{
+		<div class="app-titlebar-extra">@Right</div>
+	}
+	@if ( WindowButtons && AppWindow.HasWindow )
+	{
+		<div class="app-window-buttons">
+			<div class="app-window-button" onclick=@AppWindow.Minimize><i>remove</i></div>
+			<div class="app-window-button" onclick=@AppWindow.ToggleMaximized><i>@(AppWindow.IsMaximized ? "filter_none" : "crop_square")</i></div>
+			<div class="app-window-button close" onclick=@AppWindow.Close><i>close</i></div>
+		</div>
+	}
+</root>
+
+@code
+{
+	/// <summary>The menus, left to right.</summary>
+	public IReadOnlyList<AppMenu> Menus { get; set; }
+
+	/// <summary>The window's name: shown in the middle and given to the taskbar.</summary>
+	public string Title { get; set; } = "";
+
+	/// <summary>A Material Icons glyph at the left end, or none.</summary>
+	public string Icon { get; set; }
+
+	/// <summary>What the middle shows instead of the title, such as a search field; it still drags the window.</summary>
+	public RenderFragment Center { get; set; }
+
+	/// <summary>Buttons of the app's own, before the window's three.</summary>
+	public RenderFragment Right { get; set; }
+
+	/// <summary>Minimize, maximize and close, where there is a desktop window.</summary>
+	public bool WindowButtons { get; set; } = true;
+
+	/// <summary>Takes the system frame off the window while the bar is up, so this is the only title bar.</summary>
+	public bool Frameless { get; set; } = true;
+
+	Panel Drag { get; set; }
+	AppMenu open;
+	Rect dragShown;
+	string titleShown;
+	bool maximized;
+
+	public override void Tick()
+	{
+		base.Tick();
+
+		if ( Frameless && !AppWindow.Frameless ) AppWindow.Frameless = true;
+		if ( Title != titleShown ) { titleShown = Title; AppWindow.SetTitle( Title ); }
+		if ( AppWindow.IsMaximized != maximized ) { maximized = AppWindow.IsMaximized; StateHasChanged(); }
+		if ( open is not null && Input.Keyboard.Pressed( "escape" ) ) Close();
+
+		//The middle of the bar moves the window; the menus and buttons either side stay clickable
+		var rect = Drag?.Box.Rect ?? default;
+		if ( AppWindow.Frameless && rect != dragShown )
+		{
+			dragShown = rect;
+			AppWindow.SetDragAreas( rect );
+		}
+	}
+
+	public override void OnDeleted()
+	{
+		base.OnDeleted();
+		if ( Frameless ) AppWindow.Frameless = false;
+	}
+
+	/// <summary>Closes whichever menu is open.</summary>
+	public void Close()
+	{
+		open = null;
+		StateHasChanged();
+	}
+
+	void Toggle( AppMenu m )
+	{
+		open = open == m ? null : m;
+		StateHasChanged();
+	}
+
+	//With a menu open, pointing at another title opens that one, as menu bars do
+	void Hover( AppMenu m )
+	{
+		if ( open is null || open == m ) return;
+		open = m;
+		StateHasChanged();
+	}
+
+	void Run( AppMenuItem item )
+	{
+		if ( !item.Enabled ) return;
+		open = null;
+		StateHasChanged();
+		item.Run?.Invoke();
+	}
+
+	protected override int BuildHash() => HashCode.Combine( open, Title, Menus, maximized, AppWindow.HasWindow, Center, Right );
+}

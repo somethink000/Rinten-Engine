@@ -1,0 +1,355 @@
+//A desktop app's workbench, VS Code's dark grounds with the engine's accent: the title bar (AppTitleBar),
+//its menus, the resize bar (ResizeHandle), an icon bar, tabs and a status bar. Written against _tokens and _theme
+
+$app-chrome: #181818;
+$app-editor: #1f1f1f;
+$app-line: #2b2b2b;
+$app-hover: #2a2d2e;
+$app-picked: #37373d;
+$app-input: #313131;
+$app-input-edge: #3c3c3c;
+$app-ink: #cccccc;
+$app-ink-dim: #9d9d9d;
+$app-ink-faint: #6e7681;
+$app-menu: #1f1f1f;
+$app-menu-edge: #454545;
+$app-accent: $accent;
+$app-wash: rgba( 255, 255, 255, 0.1 );
+
+//── title bar ───────────────────────────────────────────────────────────────
+
+AppTitleBar,
+.app-titlebar
+{
+	position: relative;
+	flex-direction: row;
+	align-items: stretch;
+	flex-shrink: 0;
+	height: 35px;
+	background-color: $app-chrome;
+	border-bottom: 1px solid $app-line;
+	font-family: $font;
+	color: $app-ink;
+	z-index: 100;
+	pointer-events: all;
+
+	i { font-family: Material Icons; }
+}
+
+//Under the open menu and over everything else: a press anywhere closes it
+.app-menu-catcher
+{
+	position: absolute;
+	top: 0px;
+	left: 0px;
+	width: 100vw;
+	height: 100vh;
+	z-index: 50;
+}
+
+.app-mark
+{
+	width: 40px;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+
+	> i { font-size: 18px; color: $app-accent; }
+}
+
+.app-menubar
+{
+	flex-direction: row;
+	align-items: center;
+	flex-shrink: 0;
+	padding-left: 2px;
+	z-index: 60;
+}
+
+.app-menu-title
+{
+	position: relative;
+	height: 24px;
+	padding: 0px 8px;
+	align-items: center;
+	border-radius: 5px;
+	font-size: 13px;
+	cursor: pointer;
+
+	&:hover, &.open { background-color: $app-wash; }
+}
+
+.app-dropdown
+{
+	position: absolute;
+	top: 28px;
+	left: 0px;
+	min-width: 270px;
+	flex-direction: column;
+	padding: 4px 0px;
+	background-color: $app-menu;
+	border: 1px solid $app-menu-edge;
+	border-radius: 6px;
+	box-shadow: 0px 4px 16px rgba( 0, 0, 0, 0.6 );
+	z-index: 200;
+	cursor: default;
+}
+
+.app-dropdown-row
+{
+	flex-direction: row;
+	align-items: center;
+	flex-shrink: 0;
+	height: 26px;
+	margin: 0px 4px;
+	padding: 0px 12px 0px 4px;
+	border-radius: 4px;
+	font-size: 13px;
+	color: $app-ink;
+	cursor: pointer;
+
+	> .check { width: 22px; flex-shrink: 0; font-size: 14px; text-align: center; }
+	> .text { flex-grow: 1; white-space: nowrap; }
+	> .shortcut { margin-left: 28px; font-size: 12px; color: $app-ink-dim; white-space: nowrap; }
+
+	&:hover
+	{
+		background-color: $picked;
+		color: $ink;
+		> .shortcut { color: $ink; }
+	}
+
+	&.disabled
+	{
+		color: $app-ink-faint;
+		pointer-events: none;
+		> .shortcut { color: $app-ink-faint; }
+	}
+}
+
+.app-dropdown-sep
+{
+	flex-shrink: 0;
+	height: 1px;
+	margin: 4px 10px;
+	background-color: $app-menu-edge;
+}
+
+//The free middle: the window system drags the window by it
+.app-drag
+{
+	flex-grow: 1;
+	min-width: 40px;
+	align-items: center;
+	justify-content: center;
+}
+
+.app-title
+{
+	font-size: 12px;
+	color: $app-ink-dim;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+}
+
+//A search-field look for the middle, as VS Code's command centre
+.app-title-pill
+{
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	height: 24px;
+	width: 38%;
+	min-width: 160px;
+	max-width: 600px;
+	padding: 0px 10px;
+	background-color: $app-input;
+	border: 1px solid $app-input-edge;
+	border-radius: 6px;
+	color: $app-ink-dim;
+	font-size: 12px;
+
+	> i { font-size: 15px; }
+	> label { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+}
+
+.app-titlebar-extra
+{
+	flex-direction: row;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 2px;
+	padding: 0px 6px;
+}
+
+//A small glyph button for the bar, the side heads and the tab strip
+.app-icon-button
+{
+	width: 26px;
+	height: 24px;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	border-radius: 5px;
+	color: $app-ink-dim;
+	cursor: pointer;
+
+	> i { font-family: Material Icons; font-size: 16px; }
+	&:hover { background-color: $app-wash; color: $app-ink; }
+	&.on { color: $ink; }
+}
+
+.app-window-buttons
+{
+	flex-direction: row;
+	flex-shrink: 0;
+}
+
+.app-window-button
+{
+	width: 46px;
+	align-items: center;
+	justify-content: center;
+	color: $app-ink;
+	cursor: pointer;
+
+	> i { font-size: 16px; }
+	&:hover { background-color: $app-wash; }
+	&.close:hover { background-color: #c42b1c; color: white; }
+}
+
+//── resize bar ──────────────────────────────────────────────────────────────
+
+//Sits between two panes, drawn as the 1px seam between them, 5px wide to grab
+.resize-handle
+{
+	flex-shrink: 0;
+	width: 5px;
+	margin: 0px -2px;
+	z-index: 10;
+	cursor: ew-resize;
+	background-color: transparent;
+	transition: background-color 0.1s ease;
+
+	&:hover, &.dragging { background-color: rgba( $app-accent, 0.6 ); }
+
+	&.vertical
+	{
+		width: auto;
+		height: 5px;
+		margin: -2px 0px;
+		cursor: ns-resize;
+	}
+}
+
+//── icon bar, tabs, status bar ──────────────────────────────────────────────
+
+.app-activity
+{
+	width: 42px;
+	flex-shrink: 0;
+	flex-direction: column;
+	align-items: stretch;
+	padding: 4px 0px;
+	background-color: $app-chrome;
+	border-right: 1px solid $app-line;
+}
+
+.app-activity-button
+{
+	height: 40px;
+	align-items: center;
+	justify-content: center;
+	color: $app-ink-faint;
+	border-left: 2px solid transparent;
+	border-right: 2px solid transparent;
+	cursor: pointer;
+
+	> i { font-family: Material Icons; font-size: 20px; }
+	&:hover { color: $app-ink; }
+	&.active { color: $ink; border-left-color: $app-accent; }
+}
+
+.app-tabs
+{
+	flex-direction: row;
+	align-items: stretch;
+	flex-shrink: 0;
+	height: 35px;
+	background-color: $app-chrome;
+	border-bottom: 1px solid $app-line;
+	padding-right: 6px;
+
+	> .app-icon-button { align-self: center; }
+}
+
+.app-tab
+{
+	flex-direction: row;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 6px;
+	padding: 0px 6px 0px 10px;
+	color: $app-ink-dim;
+	background-color: $app-chrome;
+	border-right: 1px solid $app-line;
+	border-top: 1px solid transparent;
+	cursor: pointer;
+
+	> i { font-family: Material Icons; }
+	> .file-icon { font-size: 15px; }
+	> label { white-space: nowrap; font-size: 13px; }
+
+	> .close
+	{
+		width: 20px;
+		height: 20px;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+		font-size: 14px;
+		border-radius: 4px;
+		color: transparent;
+		&:hover { background-color: $app-wash; color: $app-ink; }
+	}
+
+	&:hover { background-color: $app-editor; > .close { color: $app-ink-dim; } }
+	&.dirty > .close { font-size: 9px; color: $app-ink; }
+
+	&.open
+	{
+		background-color: $app-editor;
+		color: $ink;
+		border-top-color: $app-accent;
+		margin-bottom: -1px;
+		> .close { color: $app-ink; }
+	}
+}
+
+.app-statusbar
+{
+	flex-direction: row;
+	align-items: stretch;
+	flex-shrink: 0;
+	height: 22px;
+	background-color: $app-chrome;
+	border-top: 1px solid $app-line;
+	font-size: 12px;
+	color: $app-ink-dim;
+}
+
+.app-status-item
+{
+	flex-direction: row;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 4px;
+	padding: 0px 8px;
+	cursor: pointer;
+
+	> i { font-family: Material Icons; font-size: 14px; }
+	> label { white-space: nowrap; }
+	&:hover { background-color: rgba( 255, 255, 255, 0.12 ); color: $app-ink; }
+}

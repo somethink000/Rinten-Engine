@@ -1,0 +1,7 @@
+//The base addon's UI kit: the editor's own look for any game or app, in one import -
+//@import "/styles/kit/kit.scss"; then AppTitleBar, ResizeHandle, .tree-row, .btn and the rest are dressed
+@import "/styles/kit/_tokens.scss";
+@import "/styles/kit/_theme.scss";
+@import "/styles/kit/_design.scss";
+@import "/styles/kit/_tree.scss";
+@import "/styles/kit/_app.scss";

@@ -1036,6 +1036,9 @@ internal static class ModelSpill
 	//Ranges models gave back, by offset, neighbours merged; a streamed terrain would otherwise grow the file all session
 	private static readonly List<(long At, long Length)> holes = new();
 
+	/// <summary>How far the file reaches, holes included.</summary>
+	public static long Size => end;
+
 	//The offset it went to, or -1 where there is no spill file
 	public static long Write( ReadOnlySpan<byte> data )
 	{

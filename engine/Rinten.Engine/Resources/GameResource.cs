@@ -325,7 +325,7 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 			throw new ArgumentException( "Couldn't load json" );
 		}
 
-		using var blobs = BlobDataSerializer.Load( BinaryData, ResourcePath );
+		using var blobs = ReadsBlobs ? BlobDataSerializer.Load( BinaryData, ResourcePath ) : null;
 
 		if ( NeedsUpgrade( root ) )
 		{
@@ -350,6 +350,9 @@ public abstract partial class GameResource : Resource, ISourceLineProvider
 		BinaryData = null;
 		_awaitingLoad = false;
 	}
+
+	//Whether its own properties hold blobs; a scene's json is kept raw and its blobs are read when the scene loads
+	internal virtual bool ReadsBlobs => true;
 
 	//Whether this json was written by an older version of the resource - see JsonUpgrade.
 	bool NeedsUpgrade( JsonElement root )

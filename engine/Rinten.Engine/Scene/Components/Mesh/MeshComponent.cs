@@ -189,6 +189,9 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 	Built _built;
 
+	//Play meshes that took an editor mesh's models, for PerfReport
+	internal static int SharedTaken;
+
 	//Editor meshes holding a build, weakly - see FindShared. Main thread
 	static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MeshComponent, Built> builders = new();
 
@@ -469,6 +472,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		{
 			if ( ahead is null ) Mesh.Triangulated( Collision, WorldTransform );
 			Model = shared.Whole;
+			System.Threading.Interlocked.Increment( ref SharedTaken );
 		}
 		else
 		{

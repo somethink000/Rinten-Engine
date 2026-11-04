@@ -1349,6 +1349,8 @@ internal static class PerfReport
 		report.AppendLine( "  buffers of a MB or more by maker: " + string.Join( ", ",
 			CoreRenderDevice.BigBuffers().Take( 14 ).Select( x => $"{x.Maker} {x.Bytes / mb:F0} MB" + ( x.Count > 1 ? $" in {x.Count}" : "" ) ) ) );
 
+		report.AppendLine( $"  meshes that took an editor mesh's models: {MeshComponent.SharedTaken}, spill file {CoreAssets.ModelSpill.Size / mb:F0} MB" );
+
 		if ( PolygonMesh.CutMeshes > 0 )
 			report.AppendLine( $"  scene meshes cut by the world's grid: {PolygonMesh.CutMeshes} builds into {PolygonMesh.CutCells} cells" );
 

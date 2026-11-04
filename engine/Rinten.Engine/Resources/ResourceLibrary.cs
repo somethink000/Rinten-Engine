@@ -421,6 +421,8 @@ public class ResourceSystem
 			var sourceFile = file[..^2];
 
 			string json = null;
+			string sourceText = null;
+			var headOnly = false;
 
 			//Its header first: a model's compiled file is its built mesh, not one of these,
 			//and reading all of it to find that out was hundreds of megabytes a project.
@@ -438,7 +440,18 @@ public class ResourceSystem
 					return null;
 				}
 
-				json = System.Text.Encoding.UTF8.GetString( data );
+				//A big scene's objects are read when it is opened; the editor's startup reads only its head
+				if ( Application.IsEditor && data.Length >= SceneFile.HeadOnlyFrom && type.TargetType == typeof( SceneFile ) &&
+					SceneFile.HeadOf( data, out var version ) is { } head && version >= SceneFile.CurrentVersion )
+				{
+					json = head;
+					headOnly = true;
+				}
+				else
+				{
+					json = System.Text.Encoding.UTF8.GetString( data );
+					sourceText = json;
+				}
 			}
 
 			if ( json is null )
@@ -456,16 +469,20 @@ public class ResourceSystem
 			if ( sourcePackage is not null )
 				se.Package = sourcePackage;
 
+			if ( headOnly ) se.BinaryData = Array.Empty<byte>();
+
 			se.LoadFromJson( json );
+
+			if ( headOnly ) ( (SceneFile)se ).LeaveObjectsOnDisk();
 
 			if ( Application.IsEditor )
 			{
+				//The source as read above where it was read, not a second read of a file that can be hundreds of megabytes
 				var sourceFilePath = file.Substring( 0, file.Length - 2 );
-				if ( fs.FileExists( sourceFilePath ) )
-				{
-					var jsonBlob = fs.ReadAllText( sourceFilePath );
-					se.LastSavedSourceHash = jsonBlob.FastHash();
-				}
+
+				if ( sourceText is not null ) se.LastSavedSourceHash = sourceText.FastHash();
+				else if ( headOnly ) se.LastSavedSourceHash = System.Text.Encoding.UTF8.GetString( data ).FastHash();
+				else if ( fs.FileExists( sourceFilePath ) ) se.LastSavedSourceHash = fs.ReadAllText( sourceFilePath ).FastHash();
 			}
 
 			//Purpose unclear - possibly for maps

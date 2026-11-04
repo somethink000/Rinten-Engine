@@ -58,7 +58,70 @@ public partial class SceneFile : GameResource
 	}
 	public JsonObject SceneProperties { get; set; }
 
-	public override int ResourceVersion => 6;
+	//Its objects are raw json, read against the blobs only when a scene loads them - see Scene.Load
+	internal override bool ReadsBlobs => false;
+
+	//A scene this big is read at startup only for its head; its objects wait in the file for whoever opens it
+	internal const int HeadOnlyFrom = 4 << 20;
+
+	//The file's top-level properties without GameObjects, as json, and the version it was written at; null where it cannot be cut
+	internal static string HeadOf( ReadOnlySpan<byte> utf8, out int version )
+	{
+		version = 0;
+
+		try
+		{
+			if ( utf8.StartsWith( (ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF] ) ) utf8 = utf8[3..];
+
+			var reader = new System.Text.Json.Utf8JsonReader( utf8, new System.Text.Json.JsonReaderOptions { MaxDepth = 512, CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true } );
+			if ( !reader.Read() || reader.TokenType != System.Text.Json.JsonTokenType.StartObject ) return null;
+
+			using var stream = new System.IO.MemoryStream();
+			using ( var writer = new System.Text.Json.Utf8JsonWriter( stream ) )
+			{
+				writer.WriteStartObject();
+
+				while ( reader.Read() && reader.TokenType == System.Text.Json.JsonTokenType.PropertyName )
+				{
+					var name = reader.GetString();
+					if ( !reader.Read() ) return null;
+
+					if ( name == nameof( GameObjects ) )
+					{
+						reader.Skip();
+						continue;
+					}
+
+					if ( name == "__version" && reader.TokenType == System.Text.Json.JsonTokenType.Number ) version = reader.GetInt32();
+
+					var start = (int)reader.TokenStartIndex;
+					reader.Skip();
+
+					writer.WritePropertyName( name );
+					writer.WriteRawValue( utf8[start..(int)reader.BytesConsumed], skipInputValidation: true );
+				}
+
+				writer.WriteEndObject();
+			}
+
+			return System.Text.Encoding.UTF8.GetString( stream.GetBuffer(), 0, (int)stream.Length );
+		}
+		catch ( System.Text.Json.JsonException )
+		{
+			return null;
+		}
+	}
+
+	//Loaded from its head: the objects are read from the file on first asking
+	internal void LeaveObjectsOnDisk()
+	{
+		gameObjects = null;
+		objectsOnDisk = true;
+	}
+
+	public override int ResourceVersion => CurrentVersion;
+
+	internal const int CurrentVersion = 6;
 
 	[Hide, JsonIgnore]
 	protected override Type ActionGraphTargetType => null;

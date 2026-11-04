@@ -150,6 +150,11 @@ internal sealed unsafe partial class ModelBuilder : IDisposable
 
 	private int clusterLevels;
 
+	/// <summary>Writes no clusters nor positions: the model is drawn only if ever asked, and is cut then - see ModelFormat.ModelFlags.NoClusters.</summary>
+	public void SetNoClusters( bool value ) => noClusters = value;
+
+	private bool noClusters;
+
 	/// <summary>What share of a level's triangles the next level of the chain keeps - a half, unless the model says otherwise. See LevelChain.BuildChain.</summary>
 	public void SetChainStep( float value ) => chainStep = value is >= 0.1f and <= 0.9f ? value : 0.5f;
 

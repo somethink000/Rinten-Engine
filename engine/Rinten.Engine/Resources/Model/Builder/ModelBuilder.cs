@@ -8,6 +8,7 @@ public sealed partial class ModelBuilder
 	private string surfaceProperty = "";
 	private bool collides = true;
 	private int clusterLevels;
+	private bool noClusters;
 
 	/// <summary>Sets the mass, in kilograms, used by collision shapes added directly to this builder. The default is 1000.</summary>
 	public ModelBuilder WithMass( float mass )
@@ -41,6 +42,13 @@ public sealed partial class ModelBuilder
 	public ModelBuilder WithoutLevelsOfDetail()
 	{
 		clusterLevels = 1;
+		return this;
+	}
+
+	//No clusters at all, for a model something else draws; cut at level nought only if it is ever drawn
+	internal ModelBuilder WithoutClusters()
+	{
+		noClusters = true;
 		return this;
 	}
 

@@ -14,6 +14,7 @@ internal sealed partial class CoreModel : IDisposable
 	{
 		this.handle = handle;
 		Name = name;
+		if ( handle is not null ) handle.Tag = name;
 	}
 
 	public string Name { get; }

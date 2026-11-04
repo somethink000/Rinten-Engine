@@ -2632,6 +2632,10 @@ internal static unsafe class CoreSceneRenderer
 			if ( !Place( mesh, model, vertices, indices, skin ) ) return null;
 
 			meshes[key] = mesh;
+
+			//Up on the card: its clusters, positions and impostor wait on disk until a re-upload asks
+			if ( !owned ) model.Shed();
+
 			return mesh;
 		}
 		catch ( Exception e )

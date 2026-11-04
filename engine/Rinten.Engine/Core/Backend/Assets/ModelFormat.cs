@@ -421,6 +421,9 @@ internal static unsafe class ModelFormat
 
 		/// <summary>Its levels are a chain, one level of the whole model at a time - see LevelChain.BuildChain - rather than a DAG cut a cluster at a time. Two bits from <see cref="ShadowOffsetShift"/> say how many levels coarser its shadows are.</summary>
 		Chain = 2,
+
+		/// <summary>Written without clusters because something else draws it (a mesh's cells); level nought is cut on first draw.</summary>
+		NoClusters = 4,
 	}
 
 	/// <summary>Where in <see cref="Header.flags"/> a chain's shadow level offset is, two bits.</summary>

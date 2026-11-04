@@ -236,7 +236,7 @@ internal sealed unsafe partial class ModelBuilder
 		//Cut clusters before writing vertices, since LOD levels add vertices; morphed models too
 		var built = new LevelChain.Build();
 
-		if ( vertices.Count > 0 )
+		if ( vertices.Count > 0 && !noClusters )
 		{
 			try
 			{
@@ -449,7 +449,7 @@ internal sealed unsafe partial class ModelBuilder
 		}
 
 		//The clusters, cut above, and the positions on their own.
-		if ( all.Length > 0 )
+		if ( all.Length > 0 && !noClusters )
 		{
 			var positions = new float[all.Length * 3];
 
@@ -468,7 +468,8 @@ internal sealed unsafe partial class ModelBuilder
 		}
 
 		//The chain's bits are this build's to say, not something a copied model brings.
-		header.flags = (uint)Flags & ~( (uint)ModelFormat.ModelFlags.Chain | ( 3u << ModelFormat.ShadowOffsetShift ) );
+		header.flags = (uint)Flags & ~( (uint)ModelFormat.ModelFlags.Chain | (uint)ModelFormat.ModelFlags.NoClusters | ( 3u << ModelFormat.ShadowOffsetShift ) );
+		if ( noClusters && all.Length > 0 ) header.flags |= (uint)ModelFormat.ModelFlags.NoClusters;
 
 		//A chain, and how many levels coarser its shadows are - see ModelFormat.ModelFlags.
 		if ( built.Clusters.Count > 0 )

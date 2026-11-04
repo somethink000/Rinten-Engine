@@ -11,7 +11,7 @@ internal sealed unsafe class ModelFile : IDisposable
 {
 	private byte[] bytes;
 
-	//The clusters cut on load, for a file written before the format carried them. Null when the file brought its own - see the loader below.
+	//The clusters cut on load, for a file written before the format carried them. Null when the file brought its own - see Own.
 	private LevelChain.Build own;
 
 	private float[] ownPositions;
@@ -25,6 +25,11 @@ internal sealed unsafe class ModelFile : IDisposable
 	internal static long HeldBytes;
 	internal static int HeldFiles;
 
+	//Who loaded it, for the perf report's breakdown of held bytes
+	internal string Tag;
+
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ModelFile, object> live = new();
+
 	private ModelFile( byte[] bytes )
 	{
 		this.bytes = bytes;
@@ -33,6 +38,194 @@ internal sealed unsafe class ModelFile : IDisposable
 
 		System.Threading.Interlocked.Add( ref HeldBytes, bytes.Length );
 		System.Threading.Interlocked.Increment( ref HeldFiles );
+
+		live.AddOrUpdate( this, null );
+	}
+
+	/// <summary>Held model bytes summed by tag kind (digits dropped) and by block, for the perf report.</summary>
+	internal static (List<(string Kind, long Bytes, int Count)> Kinds, List<(string Block, long Bytes)> Blocks) HeldBreakdown()
+	{
+		var kinds = new Dictionary<string, (long Bytes, int Count)>();
+		var blocks = new Dictionary<string, long>();
+
+		foreach ( var (model, _) in live )
+		{
+			var held = model.bytes;
+			if ( held is null ) continue;
+
+			var kind = KindOf( model.Tag );
+			var was = kinds.GetValueOrDefault( kind );
+			kinds[kind] = ( was.Bytes + held.Length, was.Count + 1 );
+
+			ref readonly var h = ref HeaderIn( held );
+			var stride = ModelFormat.VertexSizeOf( h.version );
+
+			void Add( string name, long bytes ) { if ( bytes > 0 ) blocks[name] = blocks.GetValueOrDefault( name ) + bytes; }
+
+			Add( "vertices", (long)h.vertices.count * stride );
+			Add( "indices", (long)h.indices.count * 4 );
+			var tailShed = model.shedAt >= 0 && held.Length == model.shedFrom;
+			if ( !tailShed ) Add( "positions", (long)h.positions.count * 4 );
+			if ( tailShed ) Add( "shed to disk", model.shedLength );
+			if ( !tailShed ) Add( "clusters", (long)h.clusters.count * sizeof( ModelFormat.Cluster ) );
+			if ( !tailShed ) Add( "cluster vertices", (long)h.clusterVertices.count * 4 );
+			if ( !tailShed ) Add( "cluster triangles", h.clusterTriangles.count );
+			Add( "collision", ( (long)h.collisionPoints.count * 4 ) + ( (long)h.collisionIndices.count * 4 ) );
+			Add( "skin", (long)h.skin.count * sizeof( ModelFormat.SkinVertex ) );
+			Add( "morphs", ( (long)h.morphDeltas.count * sizeof( ModelFormat.MorphDelta ) ) + ( (long)h.morphRuns.count * sizeof( ModelFormat.MorphRun ) ) );
+			if ( !tailShed ) Add( "impostor", (long)h.impostorColour.count + h.impostorShape.count + h.impostorPicture.count );
+		}
+
+		return ( kinds.Select( x => ( x.Key, x.Value.Bytes, x.Value.Count ) ).OrderByDescending( x => x.Bytes ).ToList(),
+			blocks.Select( x => ( x.Key, x.Value ) ).OrderByDescending( x => x.Value ).ToList() );
+	}
+
+	//"models/foo/bar.mdl" -> "models/foo", "terrain chunk 12_4" -> "terrain chunk #_#"
+	private static string KindOf( string tag )
+	{
+		if ( string.IsNullOrEmpty( tag ) ) return "(no name)";
+
+		var slash = tag.LastIndexOf( '/' );
+		if ( slash > 0 && tag.IndexOf( '.', slash ) > 0 ) return tag[..slash];
+
+		var kind = new StringBuilder( tag.Length );
+		foreach ( var c in tag ) if ( !char.IsAsciiDigit( c ) || kind.Length == 0 || kind[^1] != '#' ) kind.Append( char.IsAsciiDigit( c ) ? '#' : c );
+
+		return kind.Length > 48 ? kind.ToString( 0, 48 ) : kind.ToString();
+	}
+
+	//-- the card-only tail ---------------------------------------------------
+
+	//Clusters, positions and the impostor are written last and read only to upload; once up they wait in a spill file
+	private int shedFrom;
+	private int shedLength;
+	private long shedAt = -1;
+
+	//Below this a tail is not worth a write and a copy
+	private const int MostKeptTail = 64 * 1024;
+
+	/// <summary>Card-only bytes moved out to the spill file, for PerfReport.</summary>
+	internal static long ShedBytes;
+
+	//The header of a given array: tail readers take the array once, so a shed between two reads cannot split them
+	private static ref readonly ModelFormat.Header HeaderIn( byte[] held )
+		=> ref Unsafe.As<byte, ModelFormat.Header>( ref MemoryMarshal.GetArrayDataReference( held ) );
+
+	//Where the card-only tail starts, or -1 where something the processor reads lies past it (a file written in another order)
+	private static int TailStart( byte[] held )
+	{
+		ref readonly var h = ref HeaderIn( held );
+
+		var from = long.MaxValue;
+
+		void Tail( in ModelFormat.Block block ) { if ( block.count > 0 ) from = Math.Min( from, block.offset ); }
+
+		Tail( h.clusters );
+		Tail( h.clusterVertices );
+		Tail( h.clusterTriangles );
+		Tail( h.positions );
+		Tail( h.impostor );
+		Tail( h.impostorColour );
+		Tail( h.impostorShape );
+		Tail( h.impostorPicture );
+
+		if ( from == long.MaxValue || from < ModelFormat.HeaderSize ) return -1;
+
+		var stride = ModelFormat.VertexSizeOf( h.version );
+		var past = false;
+
+		void Kept( in ModelFormat.Block block, int size ) { if ( block.count > 0 && block.offset + ( (long)block.count * size ) > from ) past = true; }
+
+		Kept( h.text, 1 );
+		Kept( h.vertices, stride );
+		Kept( h.indices, sizeof( uint ) );
+		Kept( h.meshes, sizeof( ModelFormat.Mesh ) );
+		Kept( h.bodyParts, sizeof( ModelFormat.BodyPart ) );
+		Kept( h.shapes, sizeof( ModelFormat.Shape ) );
+		Kept( h.collisionPoints, sizeof( float ) );
+		Kept( h.collisionIndices, sizeof( uint ) );
+		Kept( h.skin, sizeof( ModelFormat.SkinVertex ) );
+		Kept( h.bones, sizeof( ModelFormat.Bone ) );
+		Kept( h.renderParts, sizeof( ModelFormat.RenderPart ) );
+		Kept( h.partChoices, sizeof( ModelFormat.PartChoice ) );
+		Kept( h.materialGroups, sizeof( ModelFormat.MaterialGroup ) );
+		Kept( h.groupMaterials, sizeof( uint ) );
+		Kept( h.surfaces, sizeof( ModelFormat.Surface ) );
+		Kept( h.morphs, sizeof( ModelFormat.Morph ) );
+		Kept( h.morphDeltas, sizeof( ModelFormat.MorphDelta ) );
+		Kept( h.morphRuns, sizeof( ModelFormat.MorphRun ) );
+
+		return past ? -1 : (int)from;
+	}
+
+	/// <summary>Lets go of the card-only tail once the mesh is up; the first time it is written to the spill file. Read back by <see cref="Full"/>.</summary>
+	internal void Shed()
+	{
+		lock ( this )
+		{
+			var held = bytes;
+			if ( held is null || own is not null || cutLater ) return;
+			if ( shedAt >= 0 && held.Length == shedFrom ) return;
+
+			if ( shedAt < 0 )
+			{
+				var from = TailStart( held );
+				if ( from < 0 || held.Length - from < MostKeptTail ) return;
+
+				var at = ModelSpill.Write( held.AsSpan( from ) );
+				if ( at < 0 ) return;
+
+				shedAt = at;
+				shedFrom = from;
+				shedLength = held.Length - from;
+			}
+
+			//Every offset before the cut is the same in both arrays, so a reader of the old one reads the same
+			var head = new byte[shedFrom];
+			held.AsSpan( 0, shedFrom ).CopyTo( head );
+			bytes = head;
+
+			System.Threading.Interlocked.Add( ref HeldBytes, -shedLength );
+			System.Threading.Interlocked.Add( ref ShedBytes, shedLength );
+		}
+	}
+
+	//The whole file, the tail read back from the spill file where it was shed; what reads the tail asks for it through this
+	private byte[] Full()
+	{
+		var held = bytes;
+		if ( held is null || shedAt < 0 || held.Length != shedFrom ) return held;
+
+		lock ( this )
+		{
+			held = bytes;
+			if ( held is null || held.Length != shedFrom ) return held;
+
+			var full = new byte[shedFrom + shedLength];
+			held.CopyTo( full, 0 );
+
+			//Lost tail: the readers below see no clusters and no impostor rather than garbage
+			if ( !ModelSpill.Read( shedAt, full.AsSpan( shedFrom ) ) ) return held;
+
+			bytes = full;
+
+			System.Threading.Interlocked.Add( ref HeldBytes, shedLength );
+			System.Threading.Interlocked.Add( ref ShedBytes, -shedLength );
+
+			return full;
+		}
+	}
+
+	//A tail block of the whole file, or empty where it could not be read back
+	private ReadOnlySpan<T> TailSpan<T>( Func<ModelFormat.Header, ModelFormat.Block> pick ) where T : unmanaged
+	{
+		var full = Full();
+		if ( full is null ) return ReadOnlySpan<T>.Empty;
+
+		var block = pick( HeaderIn( full ) );
+		if ( block.count == 0 || block.offset + ( (long)block.count * sizeof( T ) ) > full.Length ) return ReadOnlySpan<T>.Empty;
+
+		return MemoryMarshal.Cast<byte, T>( full.AsSpan( (int)block.offset, (int)block.count * sizeof( T ) ) );
 	}
 
 	/// <summary>Whether this model still holds a file.</summary>
@@ -156,30 +349,58 @@ internal sealed unsafe class ModelFile : IDisposable
 
 		var carried = header.clusters.count > 0 && header.positions.count == header.vertices.count * 3;
 
+		//Flagged NoClusters: something else draws it, so the cut waits for a first draw that may never come
 		if ( !carried && header.vertices.count > 0 )
 		{
-			//Written before the file carried them: cut now, and again every load until the editor rebuilds the model. The first
-			//level and no more - the ones above it make vertices of their own, and a file being read has nowhere to keep them.
-			model.own = new LevelChain.Build();
-
-			var all = model.Vertices;
-
-			LevelChain.CutClusters( all, model.Indices, model.Meshes, model.own, most: 1 );
-
-			model.ownPositions = new float[header.vertices.count * 3];
-
-			for ( var v = 0; v < all.Length; v++ )
-			{
-				model.ownPositions[( v * 3 ) + 0] = all[v].Position.x;
-				model.ownPositions[( v * 3 ) + 1] = all[v].Position.y;
-				model.ownPositions[( v * 3 ) + 2] = all[v].Position.z;
-			}
-
-			//The unpacked copy was for the cut, not to be held beside the file.
-			model.unpacked = null;
+			if ( ( header.flags & (uint)ModelFormat.ModelFlags.NoClusters ) != 0 ) model.cutLater = true;
+			else model.CutOwn();
 		}
 
 		return model;
+	}
+
+	//Level nought cut here, for a file written without clusters. The first level and no more - the ones
+	//above it make vertices of their own, and a file being read has nowhere to keep them.
+	private void CutOwn()
+	{
+		var built = new LevelChain.Build();
+		var all = Vertices;
+
+		LevelChain.CutClusters( all, Indices, Meshes, built, most: 1 );
+
+		var positions = new float[all.Length * 3];
+
+		for ( var v = 0; v < all.Length; v++ )
+		{
+			positions[( v * 3 ) + 0] = all[v].Position.x;
+			positions[( v * 3 ) + 1] = all[v].Position.y;
+			positions[( v * 3 ) + 2] = all[v].Position.z;
+		}
+
+		ownPositions = positions;
+		own = built;
+
+		//The unpacked copy was for the cut, not to be held beside the file.
+		unpacked = null;
+	}
+
+	private volatile bool cutLater;
+
+	//The clusters cut on load or on first asking; null where the file carries its own
+	private LevelChain.Build Own
+	{
+		get
+		{
+			if ( !cutLater ) return own;
+
+			lock ( this )
+			{
+				if ( cutLater && bytes is not null ) CutOwn();
+				cutLater = false;
+			}
+
+			return own;
+		}
 	}
 
 	/// <summary>The same for a pointer and a length, which is what the ABI took.</summary>
@@ -247,12 +468,23 @@ internal sealed unsafe class ModelFile : IDisposable
 
 	public void Dispose()
 	{
-		if ( bytes is null ) return;
+		//From the finalizer's thread too - see Model.Destroy
+		lock ( this )
+		{
+			if ( bytes is null ) return;
 
-		System.Threading.Interlocked.Add( ref HeldBytes, -bytes.Length );
-		System.Threading.Interlocked.Decrement( ref HeldFiles );
+			System.Threading.Interlocked.Add( ref HeldBytes, -bytes.Length );
+			System.Threading.Interlocked.Decrement( ref HeldFiles );
 
-		bytes = null;
+			if ( shedAt >= 0 )
+			{
+				if ( bytes.Length == shedFrom ) System.Threading.Interlocked.Add( ref ShedBytes, -shedLength );
+				ModelSpill.Give( shedAt, shedLength );
+				shedAt = -1;
+			}
+
+			bytes = null;
+		}
 	}
 
 	//-- what the file holds ------------------------------------------------
@@ -312,19 +544,19 @@ internal sealed unsafe class ModelFile : IDisposable
 
 	/// <summary>What the impostor is: its grid, its sphere, its plane. Default where there is none.</summary>
 	public ModelFormat.Impostor Impostor
-		=> HasImpostor ? ModelFormat.Span<ModelFormat.Impostor>( All, in Header.impostor )[0] : default;
+		=> HasImpostor && TailSpan<ModelFormat.Impostor>( static h => h.impostor ) is { Length: 1 } one ? one[0] : default;
 
 	/// <summary>The impostor's colour and cover, as a compiled texture file.</summary>
-	public ReadOnlySpan<byte> ImpostorColour => ModelFormat.Span<byte>( All, in Header.impostorColour );
+	public ReadOnlySpan<byte> ImpostorColour => TailSpan<byte>( static h => h.impostorColour );
 
 	/// <summary>Its normal and depth, as a compiled texture file.</summary>
-	public ReadOnlySpan<byte> ImpostorShape => ModelFormat.Span<byte>( All, in Header.impostorShape );
+	public ReadOnlySpan<byte> ImpostorShape => TailSpan<byte>( static h => h.impostorShape );
 
 	/// <summary>Whether its planes are shaded by the model's own surfaces, through the picture of which triangle each texel shows.</summary>
 	public bool HasImpostorPicture => HasImpostor && Header.impostorPicture.count > 0;
 
 	/// <summary>That picture, as a compiled texture file - see ModelBuilder.ImpostorPicture.</summary>
-	public ReadOnlySpan<byte> ImpostorPicture => ModelFormat.Span<byte>( All, in Header.impostorPicture );
+	public ReadOnlySpan<byte> ImpostorPicture => TailSpan<byte>( static h => h.impostorPicture );
 
 	/// <summary>How many meshes the impostor's planes are, one a material, in a row from Impostor.mesh.</summary>
 	public int ImpostorMeshes
@@ -723,27 +955,27 @@ internal sealed unsafe class ModelFile : IDisposable
 	public static int ClusterStride => sizeof( ModelFormat.Cluster );
 
 	public ReadOnlySpan<ModelFormat.Cluster> Clusters
-		=> own is not null
-			? CollectionsMarshal.AsSpan( own.Clusters )
-			: ModelFormat.Span<ModelFormat.Cluster>( All, in Header.clusters );
+		=> Own is { } cut
+			? CollectionsMarshal.AsSpan( cut.Clusters )
+			: TailSpan<ModelFormat.Cluster>( static h => h.clusters );
 
 	public ReadOnlySpan<uint> ClusterVertices
-		=> own is not null
-			? CollectionsMarshal.AsSpan( own.Vertices )
-			: ModelFormat.Span<uint>( All, in Header.clusterVertices );
+		=> Own is { } cut
+			? CollectionsMarshal.AsSpan( cut.Vertices )
+			: TailSpan<uint>( static h => h.clusterVertices );
 
 	public ReadOnlySpan<byte> ClusterTriangles
-		=> own is not null
-			? CollectionsMarshal.AsSpan( own.Triangles )
-			: ModelFormat.Span<byte>( All, in Header.clusterTriangles );
+		=> Own is { } cut
+			? CollectionsMarshal.AsSpan( cut.Triangles )
+			: TailSpan<byte>( static h => h.clusterTriangles );
 
 	public ReadOnlySpan<float> Positions
-		=> own is not null ? ownPositions : ModelFormat.Span<float>( All, in Header.positions );
+		=> Own is not null ? ownPositions : TailSpan<float>( static h => h.positions );
 
 	public int ClusterCount => Clusters.Length;
 	public int ClusterVertexCount => ClusterVertices.Length;
 	public int ClusterTriangleCount => ClusterTriangles.Length / 3;
-	public int ClusterLevels => own is not null ? (int)own.Levels : (int)Header.clusterLevels;
+	public int ClusterLevels => Own is { } cut ? (int)cut.Levels : (int)Header.clusterLevels;
 
 	public int CopyClusters( void* outClusters, int capacity )
 	{
@@ -790,5 +1022,137 @@ internal sealed unsafe class ModelFile : IDisposable
 
 		all[..( take * 3 )].CopyTo( new Span<float>( outPositions, take * 3 ) );
 		return take;
+	}
+}
+
+//Where shed model tails wait: one file a process, unlinked as soon as it is open, so a crash leaves nothing behind
+internal static class ModelSpill
+{
+	private static readonly object gate = new();
+	private static Microsoft.Win32.SafeHandles.SafeFileHandle file;
+	private static long end;
+	private static bool failed;
+
+	//Ranges models gave back, by offset, neighbours merged; a streamed terrain would otherwise grow the file all session
+	private static readonly List<(long At, long Length)> holes = new();
+
+	//The offset it went to, or -1 where there is no spill file
+	public static long Write( ReadOnlySpan<byte> data )
+	{
+		lock ( gate )
+		{
+			if ( !Open() ) return -1;
+
+			var at = end;
+			var hole = -1;
+
+			for ( var i = 0; i < holes.Count; i++ )
+			{
+				if ( holes[i].Length < data.Length ) continue;
+				if ( hole < 0 || holes[i].Length < holes[hole].Length ) hole = i;
+			}
+
+			if ( hole >= 0 ) at = holes[hole].At;
+
+			try
+			{
+				RandomAccess.Write( file, data, at );
+			}
+			catch ( IOException )
+			{
+				return -1;
+			}
+
+			if ( hole < 0 ) end += data.Length;
+			else if ( holes[hole].Length == data.Length ) holes.RemoveAt( hole );
+			else holes[hole] = ( at + data.Length, holes[hole].Length - data.Length );
+
+			return at;
+		}
+	}
+
+	public static void Give( long at, long length )
+	{
+		if ( at < 0 || length <= 0 ) return;
+
+		lock ( gate )
+		{
+			var i = 0;
+			while ( i < holes.Count && holes[i].At < at ) i++;
+
+			holes.Insert( i, ( at, length ) );
+
+			if ( i + 1 < holes.Count && holes[i].At + holes[i].Length == holes[i + 1].At )
+			{
+				holes[i] = ( holes[i].At, holes[i].Length + holes[i + 1].Length );
+				holes.RemoveAt( i + 1 );
+			}
+
+			if ( i > 0 && holes[i - 1].At + holes[i - 1].Length == holes[i].At )
+			{
+				holes[i - 1] = ( holes[i - 1].At, holes[i - 1].Length + holes[i].Length );
+				holes.RemoveAt( i );
+			}
+		}
+	}
+
+	public static bool Read( long at, Span<byte> into )
+	{
+		lock ( gate )
+		{
+			if ( file is null ) return false;
+
+			try
+			{
+				var done = 0;
+
+				while ( done < into.Length )
+				{
+					var read = RandomAccess.Read( file, into[done..], at + done );
+					if ( read <= 0 ) return false;
+					done += read;
+				}
+
+				return true;
+			}
+			catch ( IOException )
+			{
+				return false;
+			}
+		}
+	}
+
+	//On the home disk beside the terrain cache, never the temp folder: on this kind of machine that is memory
+	private static bool Open()
+	{
+		if ( file is not null ) return true;
+		if ( failed ) return false;
+
+		//A browser's files are its memory: nothing to gain
+		if ( OperatingSystem.IsBrowser() ) { failed = true; return false; }
+
+		try
+		{
+			var root = Environment.GetFolderPath( Environment.SpecialFolder.LocalApplicationData );
+			if ( string.IsNullOrEmpty( root ) ) { failed = true; return false; }
+
+			var folder = Path.Combine( root, "Rinten", "spill" );
+			Directory.CreateDirectory( folder );
+
+			var path = Path.Combine( folder, $"{Environment.ProcessId}.bin" );
+			//Windows keeps an open file's name, so there it goes when the handle does
+			var windows = OperatingSystem.IsWindows();
+			file = File.OpenHandle( path, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete,
+				windows ? FileOptions.DeleteOnClose : FileOptions.None );
+
+			if ( !windows ) File.Delete( path );
+
+			return true;
+		}
+		catch ( Exception )
+		{
+			failed = true;
+			return false;
+		}
 	}
 }

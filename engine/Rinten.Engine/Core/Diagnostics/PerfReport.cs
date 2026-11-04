@@ -1289,9 +1289,13 @@ internal static class PerfReport
 
 		if ( pixels.Bytes <= 0 && models.Bytes <= 0 ) return;
 
-		report.AppendLine( $"  still on the processor: models {models.Bytes / mb:F0} MB in {models.Count}, " +
+		report.AppendLine( $"  still on the processor: models {models.Bytes / mb:F0} MB in {models.Count} ({CoreAssets.ModelFile.ShedBytes / mb:F0} MB shed to disk), " +
 			$"texture pixels {pixels.Bytes / mb:F0} MB in {pixels.Count} - " +
 			$"copies of what the card already has" );
+
+		var (kinds, blocks) = CoreAssets.ModelFile.HeldBreakdown();
+		report.AppendLine( "    models by kind: " + string.Join( ", ", kinds.Take( 10 ).Select( x => $"{x.Kind} {x.Bytes / mb:F0} MB in {x.Count}" ) ) );
+		report.AppendLine( "    models by block: " + string.Join( ", ", blocks.Select( x => $"{x.Block} {x.Bytes / mb:F0}" ) ) );
 
 		//The heaviest of the pictures, by name - what to look at first.
 		foreach ( var (name, bytes) in CoreTexture.HeaviestHeld( 8 ) )
@@ -1341,6 +1345,9 @@ internal static class PerfReport
 
 		line.Append( $" other buffers {( memory.Buffers - held ) / mb:F1}" );
 		report.AppendLine( line.ToString() );
+
+		report.AppendLine( "  buffers of a MB or more by maker: " + string.Join( ", ",
+			CoreRenderDevice.BigBuffers().Take( 14 ).Select( x => $"{x.Maker} {x.Bytes / mb:F0} MB" + ( x.Count > 1 ? $" in {x.Count}" : "" ) ) ) );
 
 		if ( PolygonMesh.CutMeshes > 0 )
 			report.AppendLine( $"  scene meshes cut by the world's grid: {PolygonMesh.CutMeshes} builds into {PolygonMesh.CutCells} cells" );

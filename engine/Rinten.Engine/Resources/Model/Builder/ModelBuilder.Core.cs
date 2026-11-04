@@ -69,6 +69,7 @@ public sealed partial class ModelBuilder
 			builder.SetName( name );
 
 			if ( clusterLevels > 0 ) builder.SetClusterLevels( clusterLevels );
+			builder.SetNoClusters( noClusters );
 			builder.SetLockBorder( lockedBorder );
 
 			var bounds = new BBox();

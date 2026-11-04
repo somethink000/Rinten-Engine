@@ -4521,7 +4521,8 @@ public sealed partial class PolygonMesh : IJsonConvert
 		_submeshes.Clear();
 		_submeshes.AddRange( submeshes.Values );
 
-		if ( drawnAt is { } world && SpansCells( world ) ) builder.WithoutLevelsOfDetail();
+		//Its cells draw it, so the whole model is for collision, traces and the bake: clusters only if it is ever drawn
+		if ( drawnAt is { } world && SpansCells( world ) ) builder.WithoutClusters();
 
 		LayLightmap();
 

@@ -129,6 +129,9 @@ internal static class ResourceLoader
 		//on server/client like editing an asset while the gamemode is running would?
 	}
 
+	//Work between loading-screen frames; at 8 ms the frames' vsync waits took a third of a big project's load
+	internal const int YieldAfterMs = 30;
+
 	internal static async Task LoadAllGameResourceAsync( BaseFileSystem fileSystem, CancellationToken ct = default, bool reloadExisting = false, Package sourcePackage = null )
 	{
 		var sw = Stopwatch.StartNew();
@@ -144,7 +147,7 @@ internal static class ResourceLoader
 			allFiles.Add( file );
 			if ( allExtensions.Contains( System.IO.Path.GetExtension( file ) ) )
 				Game.Resources.RegisterPath( file );
-			if ( sw.ElapsedMilliseconds > 8 ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( file ); await Task.Yield(); sw.Restart(); }
+			if ( sw.ElapsedMilliseconds > YieldAfterMs ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( file ); await Task.Yield(); sw.Restart(); }
 		}
 
 		var allResources = new List<GameResource>();
@@ -179,14 +182,14 @@ internal static class ResourceLoader
 				Log.Warning( ex, $"Exception when trying to load {file}" );
 			}
 
-			if ( sw.ElapsedMilliseconds > 8 ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( file ); await Task.Yield(); sw.Restart(); }
+			if ( sw.ElapsedMilliseconds > YieldAfterMs ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( file ); await Task.Yield(); sw.Restart(); }
 		}
 
 		foreach ( var resource in allResources )
 		{
 			ct.ThrowIfCancellationRequested();
 			resource.PostLoadInternal();
-			if ( sw.ElapsedMilliseconds > 8 ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( resource.ResourcePath ); await Task.Yield(); sw.Restart(); }
+			if ( sw.ElapsedMilliseconds > YieldAfterMs ) { LoadingScreen.Subtitle = System.IO.Path.GetFileName( resource.ResourcePath ); await Task.Yield(); sw.Restart(); }
 		}
 
 		LoadingScreen.Subtitle = null;

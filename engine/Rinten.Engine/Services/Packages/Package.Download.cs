@@ -63,7 +63,7 @@ public partial class Package
 		foreach ( var e in entries )
 		{
 			TryAddToDownloadQueue( e, fs, downloadQueue, token );
-			if ( loopSw.ElapsedMilliseconds > 8 ) { global::Rinten.LoadingScreen.Subtitle = System.IO.Path.GetFileName( e.Path ); await Task.Yield(); loopSw.Restart(); }
+			if ( loopSw.ElapsedMilliseconds > ResourceLoader.YieldAfterMs ) { global::Rinten.LoadingScreen.Subtitle = System.IO.Path.GetFileName( e.Path ); await Task.Yield(); loopSw.Restart(); }
 		}
 
 		//nothing to download

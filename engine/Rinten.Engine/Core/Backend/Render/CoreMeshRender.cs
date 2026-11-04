@@ -317,11 +317,11 @@ internal sealed class CoreMeshRender
 
 	private static bool Reach( ref ulong buffer, ref long have, long wanted, int bytesEach )
 	{
-		//Given back once it has been four times what a frame wants for a second of frames running
-		//- not at once, or a frame of many views and the next of one would make it again and again.
+		//Given back once it has been twice what a frame wants for 120 frames running - not at once, or a
+		//frame of many views and the next of one would make it again and again. Room is a quarter over.
 		if ( buffer != 0 && have >= wanted )
 		{
-			if ( have <= Math.Max( wanted * 4, 1L << 20 ) ) { oversized.Remove( buffer ); return true; }
+			if ( have <= Math.Max( wanted * 2, 1L << 20 ) ) { oversized.Remove( buffer ); return true; }
 
 			var frames = oversized.GetValueOrDefault( buffer ) + 1;
 			oversized[buffer] = frames;
@@ -329,13 +329,14 @@ internal sealed class CoreMeshRender
 
 			oversized.Remove( buffer );
 			CoreRenderDevice.DestroyBuffer( buffer );
-			have = wanted * 2;
+			have = wanted + ( wanted / 4 );
 			buffer = CoreRenderDevice.ReserveBuffer( have * bytesEach );
 			return buffer != 0;
 		}
 
+		//A scene streaming in asks a little more each frame: a quarter over, not double, or the run settles near twice its need
 		if ( buffer != 0 ) CoreRenderDevice.DestroyBuffer( buffer );
-		have = Math.Max( wanted, Math.Max( have * 2, 1024 ) );
+		have = Math.Max( wanted + ( wanted / 4 ), Math.Max( have + ( have / 4 ), 1024 ) );
 		buffer = CoreRenderDevice.ReserveBuffer( have * bytesEach );
 
 		return buffer != 0;

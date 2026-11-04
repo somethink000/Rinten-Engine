@@ -1325,7 +1325,8 @@ internal static unsafe class CoreRenderDevice
 	//-- buffers ---------------------------------------------------------------
 
 	/// <summary>Puts bytes in a device buffer for vertices or indices; zero on failure, see Description.</summary>
-	public static ulong CreateBuffer( ReadOnlySpan<byte> data )
+	public static ulong CreateBuffer( ReadOnlySpan<byte> data,
+		[System.Runtime.CompilerServices.CallerFilePath] string file = "", [System.Runtime.CompilerServices.CallerMemberName] string member = "" )
 	{
 		if ( !CoreNative.Available || data.IsEmpty ) return 0;
 
@@ -1334,19 +1335,41 @@ internal static unsafe class CoreRenderDevice
 			var handle = CoreRender.BufferCreate( bytes, data.Length );
 
 			if ( handle == 0 ) log.Warning( $"no buffer: {Description}" );
+			else NoteBuffer( handle, data.Length, file, member );
 
 			return handle;
 		}
 	}
 
+	//Buffers of a megabyte or more by handle, with the code that made them - what the perf report names
+	private static readonly Dictionary<ulong, (long Bytes, string Maker)> bigBuffers = new();
+
+	private static void NoteBuffer( ulong handle, long bytes, string file, string member )
+	{
+		if ( bytes < ( 1 << 20 ) ) return;
+
+		lock ( bigBuffers ) bigBuffers[handle] = ( bytes, $"{Path.GetFileNameWithoutExtension( file )}.{member}" );
+	}
+
+	/// <summary>Live buffers of a megabyte or more, summed by the code that made them, largest first.</summary>
+	internal static List<(string Maker, long Bytes, int Count)> BigBuffers()
+	{
+		lock ( bigBuffers )
+			return bigBuffers.Values.GroupBy( x => x.Maker )
+				.Select( g => ( g.Key, g.Sum( x => x.Bytes ), g.Count() ) )
+				.OrderByDescending( x => x.Item2 ).ToList();
+	}
+
 	/// <summary>A buffer of that many bytes, rewritten each frame without reallocating; 0 if refused</summary>
-	public static ulong ReserveBuffer( long bytes )
+	public static ulong ReserveBuffer( long bytes,
+		[System.Runtime.CompilerServices.CallerFilePath] string file = "", [System.Runtime.CompilerServices.CallerMemberName] string member = "" )
 	{
 		if ( !CoreNative.Available || bytes <= 0 ) return 0;
 
 		var handle = CoreRender.BufferReserve( bytes );
 
 		if ( handle == 0 ) log.Warning( $"no buffer of {bytes} bytes: {Description}" );
+		else NoteBuffer( handle, bytes, file, member );
 
 		return handle;
 	}
@@ -1448,6 +1471,8 @@ internal static unsafe class CoreRenderDevice
 	public static void DestroyBuffer( ulong buffer )
 	{
 		if ( !CoreNative.Available || buffer == 0 ) return;
+
+		lock ( bigBuffers ) bigBuffers.Remove( buffer );
 
 		CoreRender.BufferDestroy( buffer );
 	}

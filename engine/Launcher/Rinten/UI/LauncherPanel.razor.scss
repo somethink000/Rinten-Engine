@@ -21,7 +21,12 @@ LauncherPanel
 	font-size: $type-small;
 	color: $ink;
 
-	background-color: $panel-ground;
+	overflow: hidden;
+
+	@include frame;
+
+	//The band's own dark behind the contents, so the round inside of the band shows no speck of the pane's grey at the corners.
+	background-color: $frame-gap;
 
 	i
 	{
@@ -34,9 +39,12 @@ LauncherPanel
 
 	.fill { flex-grow: 1; }
 
-	//The side and the pane, side by side.
+	//The side and the pane, side by side, rounded to the inside of the band.
 	.body
 	{
+		overflow: hidden;
+		border-radius: 5px;
+
 		//What the shade along the foot is placed against.
 		position: relative;
 
@@ -1372,28 +1380,13 @@ LauncherPanel
 	to   { left: 105%; }
 }
 
-//Launcher as a card over an editor with no project: 1000x596 inside the window frame
+//Launcher as a card over an open project: 1000x596 inside the window frame; the window it starts in is this size too
 LauncherPanel.over-editor
 {
 	flex-grow: 0;
-	flex-shrink: 1;
 
 	width: 1006px;
 	height: 602px;
 	max-width: 94%;
 	max-height: 94%;
-
-	overflow: hidden;
-
-	@include frame;
-
-	//The band's own dark behind the contents, so the round inside of the band shows no speck of the pane's grey at the corners.
-	background-color: $frame-gap;
-
-	//The contents rounded to the inside of the band.
-	.body
-	{
-		overflow: hidden;
-		border-radius: 5px;
-	}
 }

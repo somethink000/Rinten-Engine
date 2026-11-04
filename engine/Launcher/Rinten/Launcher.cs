@@ -32,8 +32,7 @@ public static class Launcher
 		//A project handed over on its own, which is how a file manager opens one.
 		AdoptProjectArgument();
 
-		//Nothing asked for is the editor with no project in it and the projects over it as a modal - see StartupLoadProject.ShowPicker.
-		//It used to be a launcher of its own: a window, and then a second start of the whole editor for every project opened from it.
+		//With no -project the editor window opens filled by the launcher while it loads - see StartupLoadProject.ShowPicker
 		Editor.StartupLoadProject.ProjectPicker = Editor.ProjectsOverEditor.Make;
 
 		new CoreEditorAppSystem().Run();

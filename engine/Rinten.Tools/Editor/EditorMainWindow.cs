@@ -416,12 +416,13 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 	//Whether the built-in projects are in, and with them the docks the default layout is made of.
 	bool docksReady;
 
-	//The editor, up with no project in it: the window and its menus now, the docks
-	//once the built-in projects that define them are in - see OnBuiltInsReady.
-	internal void StartEmpty()
-	{
-		PrepareSize();
+	//The launcher's card (LauncherPanel.over-editor) under the title bar
+	static readonly Vector2 LauncherSize = new( 1006, 602 + TitleBar.BarHeight );
 
+	//The editor, up with no project in it: the window and its menus now, the docks once the built-in
+	//projects that define them are in - see OnBuiltInsReady. Launcher-sized until a project opens
+	internal void StartEmpty( bool launcher )
+	{
 		//Register our menu bar, doesn't open anything
 		using ( var _ = Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Start Editor: Menus" ) )
 			MenuBar.RegisterNamed( "Editor", MenuBar );
@@ -430,12 +431,28 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 		Workspaces.TabBar.Visible = false;
 		MenuBar.TitlesHidden = true;
 
+		if ( launcher )
+		{
+			Size = LauncherSize;
+			Center();
+		}
+
 		using ( var _ = Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Start Editor: Open Window" ) )
 			SetVisible( true );
 
-		//Where the window was, or filling the screen the first time. The layout that goes with it waits for the docks - see BuildDefaultLayout.
 		using ( var _ = Rinten.Engine.Bootstrap.StartupTiming?.ScopeTimer( "Start Editor: Restore Geometry" ) )
-			StateCookie = "RintenSceneEditor";
+		{
+			if ( !launcher ) UseEditorGeometry();
+		}
+	}
+
+	//Where the window was, or filling the screen the first time; the layout that goes with it waits for the docks
+	void UseEditorGeometry()
+	{
+		if ( StateCookie is not null ) return;
+
+		PrepareSize();
+		StateCookie = "RintenSceneEditor";
 	}
 
 	//The built-in projects are in: their docks and menus join the window, laid out the default way until a project brings the layout it was left in.
@@ -456,6 +473,8 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 	//A project is open in the editor: what it had open, laid out the way it was.
 	internal void OnProjectOpened()
 	{
+		UseEditorGeometry();
+
 		//Load gizmo settings
 		EditorScene.RestoreState();
 
@@ -547,7 +566,7 @@ public class EditorMainWindow : DockWindow, IUndoSystemProvider
 	}
 
 	//Un-maximized size for a first run, fitted to the usable desktop instead of a fixed 1920x1080
-	internal void PrepareSize()
+	void PrepareSize()
 	{
 		var (_, _, width, height) = Rinten.CoreWindow.UsableDesktop();
 

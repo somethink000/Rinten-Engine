@@ -81,8 +81,17 @@ i,
 {
 	z-index: 50;
 
-	background-color: rgba( 0, 0, 0, 0.12 );
-	backdrop-filter: blur( 24px ) brightness( 0.75 ) saturate( 0.9 );
+	&:not(.fills)
+	{
+		background-color: rgba( 0, 0, 0, 0.12 );
+		backdrop-filter: blur( 24px ) brightness( 0.75 ) saturate( 0.9 );
+	}
+
+	//Covers the window: its own ground in the corners round the content, no editor showing
+	&.fills
+	{
+		background-color: $frame-gap;
+	}
 }
 
 //Sunken: a field, a track, a cell.

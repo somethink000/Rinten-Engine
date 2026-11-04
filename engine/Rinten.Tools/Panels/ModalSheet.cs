@@ -19,8 +19,8 @@ public sealed class ModalSheet : Panel
 		Style.PointerEvents = PointerEvents.All;
 	}
 
-	/// <summary>Holds <paramref name="content"/> over <paramref name="over"/> until it is closed.</summary>
-	public static ModalSheet Open( Window over, Panel content )
+	/// <summary>Holds content over the window until closed; fill stretches it over the whole window with no blur.</summary>
+	public static ModalSheet Open( Window over, Panel content, bool fill = false )
 	{
 		if ( content is null ) return null;
 
@@ -29,6 +29,13 @@ public sealed class ModalSheet : Panel
 		if ( layer is null ) return null;
 
 		var sheet = new ModalSheet();
+
+		//Content covers the whole window, so the stylesheet leaves out the blur behind it
+		if ( fill )
+		{
+			sheet.AddClass( "fills" );
+			sheet.Style.AlignItems = Align.Stretch;
+		}
 
 		//Under the bar where the window draws its own.
 		sheet.Style.Top = Length.Pixels( over?.MenuWidget is TitleBar ? TitleBar.BarHeight : 0 );

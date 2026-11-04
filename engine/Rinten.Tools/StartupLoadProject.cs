@@ -30,9 +30,8 @@ static partial class StartupLoadProject
 	static int CurrentStep;
 	static int TotalSteps;
 
-	//Makes the panel to pick a project with, and says which project file was picked. The launcher, which lives in the program that starts the editor
-	//rather than in here - so it hands itself over before the editor starts, and is asked only when nothing on the command line said which project.
-	internal static Func<Action<string>, Rinten.UI.Panel> ProjectPicker { get; set; }
+	//Makes the launcher panel (chosen gets the picked project file, the bool says it is over an open project); set by the launcher program
+	internal static Func<Action<string>, bool, Rinten.UI.Panel> ProjectPicker { get; set; }
 
 	//The built-in projects coming in, once they have been started.
 	static Task builtIns;
@@ -134,7 +133,7 @@ static partial class StartupLoadProject
 			window = new EditorMainWindow();
 
 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( "Start Editor: Show" ) )
-			window.StartEmpty();
+			window.StartEmpty( launcher: string.IsNullOrWhiteSpace( path ) && ProjectPicker is not null );
 
 		if ( !string.IsNullOrWhiteSpace( path ) )
 		{
@@ -142,7 +141,11 @@ static partial class StartupLoadProject
 			return;
 		}
 
-		ShowPicker();
+		//The first pick is the one: its card is lit until the project is open, and a second press is somebody impatient
+		ShowPicker( chosen =>
+		{
+			if ( requested is null && !opening ) requested = chosen;
+		}, overProject: false );
 	}
 
 	//Between two frames: the built-in projects are started once the first one has been drawn, and a project asked for is opened.
@@ -258,33 +261,29 @@ static partial class StartupLoadProject
 		waiting?.TrySetResult();
 	}
 
-	//Holds the launcher over the window until a project from it is open.
-	static void ShowPicker()
+	//The launcher: filling the window while the editor starts, a card over the project from File > Open Launcher
+	static void ShowPicker( Action<string> chosen, bool overProject )
 	{
+		if ( picker.IsValid() ) return;
+
 		if ( ProjectPicker is null )
 		{
-			Log.Warning( "no project was asked for, and there is nothing here to pick one with" );
+			Log.Warning( "there is no launcher here to pick a project with" );
 			return;
 		}
 
-		var content = ProjectPicker( chosen =>
-		{
-			//The first pick is the one: its card is lit until the project is open, and a second press is somebody impatient.
-			if ( requested is null && !opening ) requested = chosen;
-		} );
+		picker = ModalSheet.Open( EditorMainWindow.Current, ProjectPicker( chosen, overProject ), fill: !overProject );
 
-		picker = ModalSheet.Open( EditorMainWindow.Current, content );
+		if ( picker is not null )
+			picker.Dismissable = overProject;
 	}
 
-	//The launcher over the editor while a project is open - File > Open Launcher. Picking another project restarts the editor
-	//on it (a project is not swapped in-process - see Open); picking this one, a press beside the card or Escape leave it.
+	//Picking another project restarts the editor on it; picking this one, a press beside the card or Escape leave it
 	internal static void ShowLauncher()
 	{
-		if ( ProjectPicker is null || picker.IsValid() ) return;
-
 		var current = Project.Current?.ConfigFilePath;
 
-		var content = ProjectPicker( chosen =>
+		ShowPicker( chosen =>
 		{
 			picker?.Close();
 			picker = null;
@@ -293,12 +292,7 @@ static partial class StartupLoadProject
 				return;
 
 			EditorUtility.RestartEditor( chosen );
-		} );
-
-		picker = ModalSheet.Open( EditorMainWindow.Current, content );
-
-		if ( picker is not null )
-			picker.Dismissable = true;
+		}, overProject: true );
 	}
 
 	//Opens a project into the editor that is up.

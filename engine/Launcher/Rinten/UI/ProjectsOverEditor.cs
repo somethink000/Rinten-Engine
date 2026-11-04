@@ -1,10 +1,10 @@
 namespace Editor;
 
-//Launcher shown as a modal over an editor with no project; picked projects open in that editor
+//The launcher inside the editor window: filling it at startup, a card over an open project
 internal static class ProjectsOverEditor
 {
-	//The card, telling chosen which project file was picked.
-	public static Rinten.UI.Panel Make( Action<string> chosen )
+	//Tells chosen which project file was picked
+	public static Rinten.UI.Panel Make( Action<string> chosen, bool overProject )
 	{
 		var panel = new LauncherPanel
 		{
@@ -19,8 +19,8 @@ internal static class ProjectsOverEditor
 
 		EditorStyles.Apply( panel, "LauncherPanel.razor.scss" );
 
-		//A pane over the editor rather than a window: its size, its tint and its edge are the stylesheet's - see LauncherPanel.over-editor.
-		panel.AddClass( "over-editor" );
+		//Its card size and frame are the stylesheet's - see LauncherPanel.over-editor
+		if ( overProject ) panel.AddClass( "over-editor" );
 
 		return panel;
 	}

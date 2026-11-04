@@ -534,7 +534,7 @@ static partial class StartupLoadProject
 
 		using ( var _updated = timing?.ScopeTimer( $"Wait For Project Code" ) )
 		{
-			updated = await EditorUtility.Projects.Updated( project, settle: false );
+			updated = await EditorUtility.Projects.Updated( project );
 		}
 
 		//Code failed to build: open anyway and report later; the code is picked up once it compiles

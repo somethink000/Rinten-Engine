@@ -6,11 +6,7 @@ public static partial class EditorUtility
 	{
 		public static IReadOnlyList<Project> GetAll() => Project.All.AsReadOnly();
 
-		/// <summary>Saves the project, compiles everything and loads what changed; false if the code did not build.</summary>
-		public static Task<bool> Updated( Project addon ) => Updated( addon, true );
-
-		//settle false: nothing of this project is loaded yet, so no dll watcher has anything to pick up
-		internal static async Task<bool> Updated( Project addon, bool settle )
+		public static async Task<bool> Updated( Project addon )
 		{
 			//Save changes
 			addon?.Save();
@@ -34,7 +30,7 @@ public static partial class EditorUtility
 					return false;
 			}
 
-			await WaitForCompiles( settle );
+			await WaitForCompiles();
 
 			EditorEvent.Run( "localaddons.changed" );
 			SceneEditorSession.Active?.UpdateEditorTitle();
@@ -43,9 +39,7 @@ public static partial class EditorUtility
 		}
 
 		/// <summary>Wait for the local compiles to be finished</summary>
-		public static Task WaitForCompiles() => WaitForCompiles( true );
-
-		static async Task WaitForCompiles( bool settle )
+		public static async Task WaitForCompiles()
 		{
 			//give time for any files to finish being written
 			//await Task.Delay( 1000 );
@@ -57,7 +51,7 @@ public static partial class EditorUtility
 			await Project.CompileAsync();
 
 			//Wait for file watch to pick up written files; hacky, PackageLoader needs a manual reload trigger
-			if ( settle ) await Task.Delay( 500 );
+			await Task.Delay( 500 );
 
 			//filesystem callbacks..
 			FileWatch.Tick();

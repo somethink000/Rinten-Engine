@@ -179,10 +179,49 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 	//Set while enabled: properties read from a file arrive before that, and building for each would be thrown away by the next
 	bool _buildsMesh;
 
-	//A build done ahead of being enabled, and what it was built from
-	sealed record Ahead( byte[] Model, (WorldCell Cell, byte[] Bytes)[] Cells, CollisionType Collision, Transform World );
+	//A build done ahead of being enabled, and what it was built from; Shared where an editor mesh's models are taken instead
+	sealed record Ahead( byte[] Model, (WorldCell Cell, byte[] Bytes)[] Cells, CollisionType Collision, Transform World, Built Shared = null );
 
 	Ahead _ahead;
+
+	//Models an editor mesh drew with, and what they were built from; a play copy of the same mesh takes them rather than building its own
+	sealed record Built( long At, CollisionType Collision, Transform World, float Smoothing, Model Whole, List<(WorldCell Cell, Model Model)> Cells );
+
+	Built _built;
+
+	//Editor meshes holding a build, weakly - see FindShared. Main thread
+	static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MeshComponent, Built> builders = new();
+
+	//An editor mesh unchanged since its build whose bytes hash as this one's: its models are this mesh's, cut and on the card already
+	Built FindShared( in Transform world )
+	{
+		if ( Scene.IsEditor || Mesh?.WrittenHash() is not { } hash ) return null;
+
+		foreach ( var (other, built) in builders )
+		{
+			if ( other._built != built || !other.IsValid() || other.Mesh is not { } mesh ) continue;
+			if ( built.At != mesh.DataVersion || built.Collision != Collision || built.World != world || built.Smoothing != SmoothingAngle ) continue;
+			if ( mesh.WrittenHash() != hash ) continue;
+
+			return built;
+		}
+
+		return null;
+	}
+
+	void KeepBuilt( List<(WorldCell Cell, Model Model)> cells )
+	{
+		if ( !Scene.IsEditor || Hidden || Model is null ) return;
+
+		_built = new Built( Mesh.DataVersion, Collision, WorldTransform, SmoothingAngle, Model, cells );
+		builders.AddOrUpdate( this, _built );
+	}
+
+	void DropBuilt()
+	{
+		_built = null;
+		builders.Remove( this );
+	}
 
 	//Meshes share nothing, and a level holds many, so a whole load builds them together rather than one per enable
 	internal static void BuildAhead( Scene scene )
@@ -198,17 +237,26 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 			mesh.Mesh.ResolveSurfaces();
 		}
 
-		var worlds = meshes.Select( x => ( x.WorldTransform, x.Hidden ) ).ToArray();
+		var worlds = meshes.Select( x => ( x.WorldTransform, x.Hidden, Shared: x.FindShared( x.WorldTransform ) ) ).ToArray();
 
-		Jobs.JobSystem.For( meshes.Length, (meshes, worlds), static ( s, i ) => s.meshes[i].BuildOnWorker( s.worlds[i].WorldTransform, s.worlds[i].Hidden ) );
+		Jobs.JobSystem.For( meshes.Length, (meshes, worlds), static ( s, i ) => s.meshes[i].BuildOnWorker( s.worlds[i].WorldTransform, s.worlds[i].Hidden, s.worlds[i].Shared ) );
 	}
 
-	void BuildOnWorker( in Transform world, bool hidden )
+	void BuildOnWorker( in Transform world, bool hidden, Built shared )
 	{
 		//Enabling builds it again on the main thread, where a failure is reported as it always is
 		try
 		{
-			var bytes = Mesh.Triangulated( Collision, world ).ToBytes();
+			//Triangulated all the same: traces and picking read what it leaves on the mesh
+			var builder = Mesh.Triangulated( Collision, world );
+
+			if ( shared is not null )
+			{
+				_ahead = new Ahead( null, null, Collision, world, shared );
+				return;
+			}
+
+			var bytes = builder.ToBytes();
 			if ( bytes is not null ) _ahead = new Ahead( bytes, hidden ? null : Mesh.CompileCells( world ), Collision, world );
 		}
 		catch ( Exception )
@@ -245,6 +293,7 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 
 		_buildsMesh = false;
 
+		DropBuilt();
 		DeleteSceneObject();
 	}
 
@@ -412,7 +461,19 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		Mesh.SetSmoothingAngle( SmoothingAngle );
 
 		var ahead = TakeAhead();
-		Model = ahead is not null ? Model.FromOwnedBytes( ahead.Model, ModelBuilder.DefaultName ) ?? Model.Error : Mesh.Triangulated( Collision, WorldTransform ).Create();
+		var shared = ahead is not null ? ahead.Shared : FindShared( WorldTransform );
+
+		DropBuilt();
+
+		if ( shared is not null )
+		{
+			if ( ahead is null ) Mesh.Triangulated( Collision, WorldTransform );
+			Model = shared.Whole;
+		}
+		else
+		{
+			Model = ahead is not null ? Model.FromOwnedBytes( ahead.Model, ModelBuilder.DefaultName ) ?? Model.Error : Mesh.Triangulated( Collision, WorldTransform ).Create();
+		}
 
 		if ( Model is null || Model.MeshCount == 0 )
 		{
@@ -435,16 +496,18 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 			_sceneObject.UpdateFlagsBasedOnMaterial();
 		}
 
-		RebuildCellObjects( ahead );
+		var cells = RebuildCellObjects( ahead, shared );
+		KeepBuilt( cells );
 		UpdateSceneObject();
 	}
 
 	//The cells of the mesh made again from the last build, where it is wider than one - see _cellObjects.
-	void RebuildCellObjects( Ahead ahead = null )
+	List<(WorldCell Cell, Model Model)> RebuildCellObjects( Ahead ahead = null, Built shared = null )
 	{
 		DeleteCellObjects();
 
-		var cells = ahead is not null ? PolygonMesh.CellModels( ahead.Cells ) : Mesh?.RenderCells( WorldTransform );
+		var cells = shared is not null ? shared.Cells
+			: ahead is not null ? PolygonMesh.CellModels( ahead.Cells ) : Mesh?.RenderCells( WorldTransform );
 
 		if ( cells is not null )
 		{
@@ -455,6 +518,8 @@ public sealed class MeshComponent : Collider, ExecuteInEditor, IMaterialSetter
 		}
 
 		if ( _sceneObject.IsValid() ) _sceneObject.RenderingEnabled = _cellObjects is null;
+
+		return cells;
 	}
 
 	void DeleteCellObjects()

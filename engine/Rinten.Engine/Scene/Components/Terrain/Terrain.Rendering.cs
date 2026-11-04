@@ -297,8 +297,8 @@ public partial class Terrain
 		chunk.Ground = null;
 		chunk.SetIn = null;
 
-		if ( chunk.GroundModel is not null ) CoreResources.Forget( chunk.GroundModel );
-		if ( chunk.SetInModel is not null ) CoreResources.Forget( chunk.SetInModel );
+		Unhold( chunk.GroundModel );
+		Unhold( chunk.SetInModel );
 
 		chunk.GroundModel = null;
 		chunk.SetInModel = null;
@@ -311,8 +311,8 @@ public partial class Terrain
 		chunk.FarGround = null;
 		chunk.FarSetIn = null;
 
-		if ( chunk.FarGroundModel is not null ) CoreResources.Forget( chunk.FarGroundModel );
-		if ( chunk.FarSetInModel is not null ) CoreResources.Forget( chunk.FarSetInModel );
+		Unhold( chunk.FarGroundModel );
+		Unhold( chunk.FarSetInModel );
 
 		chunk.FarGroundModel = null;
 		chunk.FarSetInModel = null;
@@ -927,8 +927,8 @@ public partial class Terrain
 			chunk.FarShaped = result.Shaped;
 			( was.FarGround, was.FarSetIn, was.FarGroundModel, was.FarSetInModel ) = ( chunk.FarGround, chunk.FarSetIn, chunk.FarGroundModel, chunk.FarSetInModel );
 
-			chunk.FarGroundModel = Load( result.FarGroundBytes, $"{result.GroundName}_far" );
-			chunk.FarSetInModel = Load( result.FarSetInBytes, $"{result.SetInName}_far" );
+			chunk.FarGroundModel = Load( result.FarGroundBytes, $"{result.GroundName}_far", result.Key, "far ground" );
+			chunk.FarSetInModel = Load( result.FarSetInBytes, $"{result.SetInName}_far", result.Key, "far set" );
 			chunk.FarGround = chunk.FarGroundModel is null ? null : Place( new SceneObject( world, chunk.FarGroundModel, WorldTransform ), DrawnWith );
 			chunk.FarSetIn = chunk.FarSetInModel is null ? null : Place( new SceneObject( world, chunk.FarSetInModel, WorldTransform ), null );
 
@@ -948,8 +948,8 @@ public partial class Terrain
 		{
 			( was.Ground, was.SetIn, was.GroundModel, was.SetInModel ) = ( chunk.Ground, chunk.SetIn, chunk.GroundModel, chunk.SetInModel );
 
-			chunk.GroundModel = Load( result.GroundBytes, result.GroundName );
-			chunk.SetInModel = Load( result.SetInBytes, result.SetInName );
+			chunk.GroundModel = Load( result.GroundBytes, result.GroundName, result.Key, "ground" );
+			chunk.SetInModel = Load( result.SetInBytes, result.SetInName, result.Key, "set" );
 			chunk.Ground = chunk.GroundModel is null ? null : Place( new SceneObject( world, chunk.GroundModel, WorldTransform ), DrawnWith );
 			chunk.SetIn = chunk.SetInModel is null ? null : Place( new SceneObject( world, chunk.SetInModel, WorldTransform ), null );
 
@@ -1000,14 +1000,54 @@ public partial class Terrain
 		return MathF.Sqrt( ( dx * dx ) + ( dz * dz ) );
 	}
 
-	//A model out of a bake's bytes, or null where there were none.
-	private static Model Load( byte[] bytes, string name )
+	//Chunk models by bake key and part, with how many chunks stand on each: an editor terrain and its play copy draw one set
+	private static readonly Dictionary<string, (Model Model, int Holders)> shared = new();
+	private static readonly Dictionary<Model, string> sharedKey = new();
+
+	//A model out of a bake's bytes, or the one already made under the same key; the model adopts the array, which every caller drops right after
+	private static Model Load( byte[] bytes, string name, string key, string part )
 	{
 		if ( bytes is null ) return null;
 
-		var model = Model.FromBytes( bytes, name );
+		var at = key is null ? null : $"{key}:{part}";
 
-		return model is not null && model != Model.Error ? model : null;
+		if ( at is not null && shared.TryGetValue( at, out var had ) && had.Model is { IsValid: true } )
+		{
+			shared[at] = ( had.Model, had.Holders + 1 );
+			return had.Model;
+		}
+
+		var model = Model.FromOwnedBytes( bytes, name );
+		if ( model is null || model == Model.Error ) return null;
+
+		if ( at is not null )
+		{
+			if ( shared.Remove( at, out var stale ) ) sharedKey.Remove( stale.Model );
+			shared[at] = ( model, 1 );
+			sharedKey[model] = at;
+		}
+
+		return model;
+	}
+
+	//A chunk lets go of a model: off the card once the last chunk standing on it has
+	private static void Unhold( Model model )
+	{
+		if ( model is null ) return;
+
+		if ( sharedKey.TryGetValue( model, out var at ) && shared.TryGetValue( at, out var had ) && had.Holders > 1 )
+		{
+			shared[at] = ( had.Model, had.Holders - 1 );
+			return;
+		}
+
+		if ( at is not null )
+		{
+			shared.Remove( at );
+			sharedKey.Remove( model );
+		}
+
+		CoreResources.Forget( model );
 	}
 
 	//The square of the terrain's own space a chunk covers, the ground's whole height up and down

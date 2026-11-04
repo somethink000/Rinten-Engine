@@ -170,7 +170,35 @@ public partial class PolygonMesh
 	MeshBlob _written;
 	long _writtenAt = -1;
 
-	long DataVersion => Topology.Version + Positions.Version + Blends.Version + Colors.Version + TextureCoord.Version + MaterialIndex.Version + EdgeFlags.Version;
+	internal long DataVersion => Topology.Version + Positions.Version + Blends.Version + Colors.Version + TextureCoord.Version + MaterialIndex.Version + EdgeFlags.Version;
+
+	//The bytes last read or written and the material names, hashed: equal hashes build equal models
+	internal UInt128? WrittenHash()
+	{
+		if ( _written?.Kept is not { } kept || _writtenAt != DataVersion || _hiddenFaces.Count > 0 ) return null;
+		if ( ReferenceEquals( _hashedBlob, _written ) ) return _writtenHash;
+
+		//Two seeds, as TerrainBakeCache keys: a collision here would be another mesh's geometry
+		var one = new Rinten.Hashing.XxHash3();
+		var two = new Rinten.Hashing.XxHash3( unchecked((long)0x5bd1e9955bd1e995) );
+		one.Append( kept );
+		two.Append( kept );
+
+		foreach ( var (id, name) in _materialNamesById.OrderBy( x => x.Key ) )
+		{
+			var bytes = System.Text.Encoding.UTF8.GetBytes( $"{id}:{name}\n" );
+			one.Append( bytes );
+			two.Append( bytes );
+		}
+
+		_writtenHash = new UInt128( one.GetCurrentHashAsUInt64(), two.GetCurrentHashAsUInt64() );
+		_hashedBlob = _written;
+
+		return _writtenHash;
+	}
+
+	MeshBlob _hashedBlob;
+	UInt128 _writtenHash;
 
 	MeshBlob WrittenBlob()
 	{

@@ -38,6 +38,9 @@ internal sealed class TerrainChunkBake
 	/// <summary>What those models are called.</summary>
 	public string GroundName, SetInName;
 
+	/// <summary>The cache key it was baked or read under, or null; equal keys are equal models - see Terrain.Rendering.Load.</summary>
+	public string Key;
+
 	/// <summary>The two drawn past where the chunk is kept whole (Thinned); null for none.</summary>
 	public byte[] FarGroundBytes;
 	public byte[] FarSetInBytes;
@@ -142,6 +145,7 @@ internal static class TerrainChunkBaker
 			kept.GroundName = job.GroundName;
 			kept.SetInName = job.SetInName;
 			kept.Picture = picture;
+			kept.Key = key;
 
 			job.Result = kept;
 			return;
@@ -168,6 +172,7 @@ internal static class TerrainChunkBaker
 		if ( key is not null ) TerrainBakeCache.Write( key, bake );
 
 		bake.Picture = picture;
+		bake.Key = key;
 		job.Result = bake;
 	}
 
@@ -338,7 +343,7 @@ internal static class TerrainChunkBaker
 		return (Byte( u ), Byte( v ));
 	}
 
-	//Compiles the chunk's models to bytes on the worker; main thread only does Model.FromBytes
+	//Compiles the chunk's models to bytes on the worker; the main thread only adopts them
 	private static void Write( TerrainChunkJob job, TerrainChunkBake bake )
 	{
 		if ( !job.Draws ) return;

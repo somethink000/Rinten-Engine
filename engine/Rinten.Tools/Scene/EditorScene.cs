@@ -218,6 +218,9 @@ public static class EditorScene
 
 			Game.ActiveScene.Load( options );
 
+			//The snapshot stays as the play scene's Source; its objects as json are the whole scene again, and nothing reads them now
+			current.GameObjects = null;
+
 			Game.ActiveScene.RunEvent<ISceneStartup>( x => x.OnHostInitialize() );
 			Game.ActiveScene.RunEvent<ISceneStartup>( x => x.OnClientInitialize() );
 		}

@@ -1443,8 +1443,7 @@ internal static unsafe partial class VkFrame
 
 		const ImageUsageFlags usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit;
 
-		//In the one format its pipelines are made for - see VkPipelines, which names every picture's own. It used to try the world's half floats
-		//when this would not be made, which no pipeline drawing into it expected; and this format is one every device draws into and blends.
+		//In the one format its pipelines are made for - see VkPipelines; every device draws into and blends this one
 		if ( !VkSwapchain.MakePicture( VkDevice.FinalFormat, p.ScreenExtent, 1, usage,
 			out var image, out var memory, out var view ) )
 		{

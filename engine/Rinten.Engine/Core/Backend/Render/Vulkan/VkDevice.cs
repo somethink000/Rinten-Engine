@@ -34,8 +34,9 @@ internal static unsafe partial class VkDevice
 	/// <summary>Velocity: xy = screen motion, z = writer's depth, w = written flag (zero motion is still valid)</summary>
 	public const Format VelocityFormat = Format.R16G16B16A16Sfloat;
 
+	//sRGB as the window is: linear ten bits stepped ~3 window codes near black, and SMAA reads it back linear
 	/// <summary>The finished picture, at the window's size, for the passes that run after the compose.</summary>
-	public const Format FinalFormat = Format.A2B10G10R10UnormPack32;
+	public const Format FinalFormat = Format.R8G8B8A8Srgb;
 
 	/// <summary>Half-size pass format: small floats, else SceneFormat.</summary>
 	public static Format CompactFormat { get; private set; } = SceneFormat;

@@ -56,10 +56,15 @@ internal static partial class DrawSettings
 		Help = "Radiance below which a lamp is dropped (0 trusts the authored radius)." )]
 	internal static float LightCutoff { get; set; } = 0.001f;
 
-	/// <summary>MSAA sample count (0 is none); temporal upscalers replace it</summary>
+	/// <summary>MSAA sample count (0 is none); temporal upscalers replace it, the portable frame takes SMAA for it</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
-		Help = "Samples per pixel (0 off). Ignored under a temporal upscaler, which does its own anti-aliasing." )]
+		Help = "Samples per pixel (0 off). Full frame only, ignored under a temporal upscaler; the portable frame runs SMAA instead." )]
 	internal static int Msaa { get; set; } = 4;
+
+	/// <summary>Whether SMAA smooths the finished picture's edges; temporal upscalers replace it</summary>
+	[ConVar( "r_smaa", ConVarFlags.Saved,
+		Help = "Smooth the finished picture's edges with SMAA (0 off). Ignored under a temporal upscaler." )]
+	internal static bool Smaa { get; set; } = false;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>
 	[ConVar( "r_upscaling", ConVarFlags.Saved, Min = 0, Max = 5,

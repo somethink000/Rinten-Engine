@@ -21,8 +21,15 @@ internal sealed class CorePortableGlow
 	private static int pipelineFormat;
 	private static bool failed;
 
-	//The compose or the finish carrying a run of point effects, by entry and the run's key - see ChainPipeline
-	private static readonly Dictionary<(string Entry, string Key), ulong> chainPipelines = new();
+	//The compose or the finish carrying a run of point effects, by entry, the run's key and the picture's format
+	private static readonly Dictionary<(string Entry, string Key, int Format), ulong> chainPipelines = new();
+
+	//The two again into SMAA's picture, and the format they were made for - see OpenFinished
+	private static ulong composeIntoPipeline, finishIntoPipeline;
+	private static int finishedFormat;
+
+	//What the pipelines are made for when the finish draws onto the screen
+	private const int OntoScreen = -1;
 	private static byte[] composeVertex;
 
 	//The halvings, and what each is carried back up into; up[0] is the glow
@@ -49,6 +56,10 @@ internal sealed class CorePortableGlow
 
 	private readonly byte[] push = new byte[64];
 
+	//SMAA this frame's finish goes through, or null for none; and whether its picture is open to draw into
+	private CoreSmaa smoothing;
+	private bool finishOpen;
+
 	/// <summary>The world as drawn aside this frame, kept past white - what the first pass and the finish read.</summary>
 	internal ulong World => world;
 
@@ -61,10 +72,12 @@ internal sealed class CorePortableGlow
 	/// <summary>Their size, which is the screen's and the world's drawn aside.</summary>
 	internal (int Width, int Height) PassSize => ( passWidth, passHeight );
 
-	/// <summary>Sends the world aside for glow, passes, or a finish-only run; false where it cannot.</summary>
-	internal bool Open( Settings? wanted, bool passes, bool carry, float frameExposure )
+	/// <summary>Sends the world aside for glow, passes, a finish-only run or SMAA; false where it cannot.</summary>
+	internal bool Open( Settings? wanted, bool passes, bool carry, float frameExposure, CoreSmaa smooth = null )
 	{
-		if ( failed || wanted is null && !passes && !carry ) return false;
+		smoothing = null;
+
+		if ( failed || wanted is null && !passes && !carry && smooth is null ) return false;
 
 		//The picture is the screen's size, which the levels follow
 		world = CoreRenderDevice.WorldAside( true, out var screenWidth, out var screenHeight );
@@ -81,6 +94,7 @@ internal sealed class CorePortableGlow
 
 		glowing = wanted is not null;
 		settings = wanted ?? default;
+		smoothing = smooth is not null && smooth.Ready( screenWidth, screenHeight ) ? smooth : null;
 		( worldWidth, worldHeight ) = ( screenWidth, screenHeight );
 		exposure = frameExposure;
 		return true;
@@ -107,6 +121,15 @@ internal sealed class CorePortableGlow
 
 		var lit = light ? 1.0f : 0.0f;
 
+		//A world that finished itself is in the screen's own format already: SMAA reads it, and no finish is drawn
+		if ( finished && !glowing && reads == world && smoothing is not null )
+		{
+			var smoothed = smoothing.Run( world, CoreRender.TargetKind.Screen );
+			smoothing = null;
+
+			if ( smoothed ) return;
+		}
+
 		if ( !glowing )
 		{
 			CoreRenderDevice.ZoneBegin( "finish" );
@@ -114,9 +137,12 @@ internal sealed class CorePortableGlow
 			Write( 1.0f / Math.Max( worldWidth, 1 ), 1.0f / Math.Max( worldHeight, 1 ), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, curve, lit );
 
 			//A texture is a material of itself in every slot
-			var finish = ChainPipeline( FinishEntry, chain );
-			CoreRenderDevice.Draw( finish != 0 ? finish : finishPipeline, 3, push, reads );
+			var into = OpenFinished();
+			var finish = ChainPipeline( FinishEntry, chain, into );
+			CoreRenderDevice.Draw( finish != 0 ? finish : into == OntoScreen ? finishPipeline : finishIntoPipeline, 3, push, reads );
 			CoreRenderDevice.ZoneEnd();
+
+			CloseFinished();
 			return;
 		}
 
@@ -150,27 +176,98 @@ internal sealed class CorePortableGlow
 			settings.Threshold, settings.Falloff, settings.Mode, 1.0f / Math.Max( total, 1e-4f ), curve, lit );
 
 		//The curve alone while the run's compose compiles, and for good where it would not
-		var compose = ChainPipeline( ComposeEntry, chain );
-		if ( composeInputs != 0 ) CoreRenderDevice.Draw( compose != 0 ? compose : composePipeline, 3, push, composeInputs );
+		if ( composeInputs != 0 )
+		{
+			var target = OpenFinished();
+			var compose = ChainPipeline( ComposeEntry, chain, target );
+
+			CoreRenderDevice.Draw( compose != 0 ? compose : target == OntoScreen ? composePipeline : composeIntoPipeline, 3, push, composeInputs );
+		}
 
 		CoreRenderDevice.ZoneEnd();
+
+		CloseFinished();
 	}
 
+	//Where the finish draws: the screen, or SMAA's picture, whose format its pipelines are made for
+	private int OpenFinished()
+	{
+		if ( smoothing is null ) return OntoScreen;
+
+		var picture = smoothing.Finished;
+
+		if ( picture == 0 || !CoreRenderDevice.PictureShape( picture, out _, out _, out _, out var format ) ||
+			!EnsureIntoPipelines( format ) || !CoreRenderDevice.BeginPicture( picture, 0, default, discard: true ) )
+		{
+			smoothing = null;
+			return OntoScreen;
+		}
+
+		finishOpen = true;
+		return format;
+	}
+
+	//SMAA's picture closed and smoothed onto the screen; copied there as it is where SMAA would not run
+	private void CloseFinished()
+	{
+		var open = finishOpen;
+		finishOpen = false;
+
+		if ( smoothing is null || !open )
+		{
+			smoothing = null;
+			return;
+		}
+
+		CoreRenderDevice.EndTarget();
+
+		var picture = Texture( smoothing.Finished );
+		var smoothed = smoothing.Run( picture, CoreRender.TargetKind.Screen );
+
+		smoothing = null;
+		if ( smoothed ) return;
+
+		//The linear curve at an exposure of one writes a finished picture out unchanged
+		exposure = 1.0f;
+		Write( 1.0f / Math.Max( worldWidth, 1 ), 1.0f / Math.Max( worldHeight, 1 ), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+			(float)(int)Tonemapping.TonemappingMode.Linear, 1.0f );
+
+		CoreRenderDevice.Draw( finishPipeline, 3, push, picture );
+	}
+
+	//The compose and the finish into a picture of this format, made again where it changes
+	private static bool EnsureIntoPipelines( int format )
+	{
+		if ( format == finishedFormat && composeIntoPipeline != 0 && finishIntoPipeline != 0 ) return true;
+
+		var compose = CoreShaderCache.Pass( EngineShaders.Glow, ComposeEntry, CoreShaderCompiler.Stage.Pixel );
+		var finish = CoreShaderCache.Pass( EngineShaders.Glow, FinishEntry, CoreShaderCompiler.Stage.Pixel );
+
+		composeIntoPipeline = compose is null ? 0 : Into( composeVertex, compose, format );
+		finishIntoPipeline = finish is null ? 0 : Into( composeVertex, finish, format );
+		finishedFormat = format;
+
+		return composeIntoPipeline != 0 && finishIntoPipeline != 0;
+	}
+
+	private static ulong Into( byte[] vs, byte[] ps, int format )
+		=> CoreRenderDevice.CreatePipeline( vs, ps, CoreRender.VertexLayoutKind.None,
+			depthTest: false, CoreRender.Topology.Triangles, blend: false, depthWrite: false,
+			target: CoreRender.TargetKind.Picture, pictureFormat: format );
+
 	//The compose or the finish with a run of point effects, the curve among them; nought while it compiles
-	private static ulong ChainPipeline( string entry, string key )
+	private static ulong ChainPipeline( string entry, string key, int format )
 	{
 		if ( key is null || composeVertex is null ) return 0;
 
-		if ( chainPipelines.TryGetValue( (entry, key), out var made ) ) return made;
+		if ( chainPipelines.TryGetValue( (entry, key, format), out var made ) ) return made;
 
 		var pixel = CoreShaderJobs.Words( CoreShaderCache.Revision + "|glow#" + entry + "#" + key, () => ChainRequest( key, entry ), out var waiting );
 		if ( pixel is null && waiting ) return 0;
 
-		made = pixel is null ? 0 : CoreRenderDevice.CreatePipeline( composeVertex, pixel, CoreRender.VertexLayoutKind.None,
-			depthTest: false, CoreRender.Topology.Triangles, blend: false, depthWrite: false,
-			target: CoreRender.TargetKind.Screen );
+		made = pixel is null ? 0 : format == OntoScreen ? Screen( composeVertex, pixel ) : Into( composeVertex, pixel, format );
 
-		chainPipelines[(entry, key)] = made;
+		chainPipelines[(entry, key, format)] = made;
 		return made;
 	}
 
@@ -380,7 +477,8 @@ internal sealed class CorePortableGlow
 	internal static void ForgetPipelines()
 	{
 		brightPipeline = downPipeline = upPipeline = composePipeline = finishPipeline = 0;
-		pipelineFormat = 0;
+		composeIntoPipeline = finishIntoPipeline = 0;
+		pipelineFormat = finishedFormat = 0;
 		failed = false;
 		composeVertex = null;
 		chainPipelines.Clear();

@@ -96,11 +96,19 @@ public partial class RenderSettings
 		set => Rinten.Rendering.DrawSettings.Msaa = value.SampleCount();
 	}
 
+	/// <summary>Whether SMAA smooths the finished picture's edges, kept in r_smaa.</summary>
+	public bool Smaa
+	{
+		get => Rinten.Rendering.DrawSettings.Smaa;
+		set => Rinten.Rendering.DrawSettings.Smaa = value;
+	}
+
 	internal struct VideoModeSnapshot
 	{
 		public int Width, Height;
 		public bool Fullscreen, Borderless, VSync;
 		public MultisampleAmount AntiAlias;
+		public bool Smaa;
 		public int MaxFps, MaxFpsInactive;
 		public float Fov;
 	}
@@ -113,6 +121,7 @@ public partial class RenderSettings
 		Borderless = Borderless,
 		VSync = VSync,
 		AntiAlias = AntiAliasQuality,
+		Smaa = Smaa,
 		MaxFps = MaxFrameRate,
 		MaxFpsInactive = MaxFrameRateInactive,
 		Fov = DefaultFOV,
@@ -126,6 +135,7 @@ public partial class RenderSettings
 		Borderless = snap.Borderless;
 		VSync = snap.VSync;
 		AntiAliasQuality = snap.AntiAlias;
+		Smaa = snap.Smaa;
 		MaxFrameRate = snap.MaxFps;
 		MaxFrameRateInactive = snap.MaxFpsInactive;
 		DefaultFOV = snap.Fov;

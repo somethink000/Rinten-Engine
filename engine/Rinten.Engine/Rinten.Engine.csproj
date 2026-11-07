@@ -45,6 +45,10 @@
 
 		<!-- The area lights' LTC tables, fitted by engine/Tools/LtcFit (CoreAreaLights). -->
 		<EmbeddedResource Include="Core/Backend/Render/ltc.bin" LogicalName="ltc.bin" />
+
+		<!-- SMAA's area and search tables, the reference's AreaTex.h and SearchTex.h as bytes (MIT, CoreSmaa). -->
+		<EmbeddedResource Include="Core/Backend/Render/smaa_area.bin" LogicalName="smaa_area.bin" />
+		<EmbeddedResource Include="Core/Backend/Render/smaa_search.bin" LogicalName="smaa_search.bin" />
 	</ItemGroup>
 
 	<ItemGroup>

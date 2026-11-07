@@ -36,6 +36,9 @@
 !*.trie
 # Area-light LTC tables, embedded by Rinten.Engine.csproj - see CoreAreaLights
 !/engine/Rinten.Engine/Core/Backend/Render/ltc.bin
+# SMAA's area and search tables, embedded the same way - see CoreSmaa
+!/engine/Rinten.Engine/Core/Backend/Render/smaa_area.bin
+!/engine/Rinten.Engine/Core/Backend/Render/smaa_search.bin
 
 # Native core sources (engine/Core and its vendored dependencies)
 !*.c

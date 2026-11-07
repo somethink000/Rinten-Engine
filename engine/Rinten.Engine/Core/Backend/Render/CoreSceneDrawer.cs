@@ -1804,6 +1804,9 @@ internal sealed partial class CoreSceneDrawer
 	private readonly CorePortableGlow glow = new();
 	private bool aside;
 
+	//SMAA's pictures for this view - see CoreSmaa
+	private readonly CoreSmaa smaa = new();
+
 	//Drawn aside with nothing to add: the world finishes itself, and the finish writes it out as it is
 	private bool asideFinished;
 
@@ -2254,6 +2257,7 @@ internal sealed partial class CoreSceneDrawer
 		CoreSkyLight.ForgetPipelines();
 		CoreLight2D.ForgetPipelines();
 		CorePortableGlow.ForgetPipelines();
+		CoreSmaa.ForgetPipelines();
 		backgroundPipeline = 0;
 		velocityPipeline = 0;
 		velocityPosedPipeline = 0;
@@ -2269,6 +2273,7 @@ internal sealed partial class CoreSceneDrawer
 		DropPostInputs();
 		skyLight.Release();
 		glow.Release();
+		smaa.Release();
 		upscaler.Release();
 		probeGrid.Release();
 
@@ -2489,8 +2494,9 @@ internal sealed partial class CoreSceneDrawer
 
 		var carry = CoreRenderDevice.PortableFrame && CorePointChain.Refused( lastFoldKey );
 
+		//And SMAA, its one anti-aliasing, which reads the finished picture the finish writes
 		aside = CoreRenderDevice.PortableFrame && !overlayOnly && !BothEyes &&
-			glow.Open( camera.PostProcess?.Glow, passes, carry, exposure );
+			glow.Open( camera.PostProcess?.Glow, passes, carry, exposure, CoreSmaa.Asked && Eye is null ? smaa : null );
 
 		//While an export writes down the runs it bakes, the one the portable frame carries beside its passes too
 		if ( CorePointChain.Recording && !CoreRenderDevice.PortableFrame ) FoldChain( camera, passes: true );
@@ -2749,6 +2755,9 @@ internal sealed partial class CoreSceneDrawer
 		//Multisampled, the world goes through its picture: the resolve weighs its samples in the light the screen will show
 		var sampled = CoreRenderDevice.WorldSampled && !worldEmpty;
 
+		//SMAA reads the composed picture, so there has to be a compose; a temporal upscaler has smoothed it already
+		var smoothing = !CoreRenderDevice.PortableFrame && CoreSmaa.Asked && !upscaler.Temporal && !worldEmpty && Eye is null;
+
 		//And whatever a project hung between the depth pre-pass and the window. Every one of these stages
 		//draws into the world's picture or reads it; AfterUI is the only one that happens past all of this.
 		var staged = camera.PostProcess is not null && (
@@ -2774,7 +2783,7 @@ internal sealed partial class CoreSceneDrawer
 		var fills = !overlayOnly && ( skyShown || backgroundPipeline != 0 );
 
 		//Whether the world's shading carries the point effects instead of the compose (see FoldChain)
-		var folding = foldKey is not null && !aside && !sampled && !carryingUp && !stretching && !upscaling && !inspecting &&
+		var folding = foldKey is not null && !aside && !sampled && !smoothing && !carryingUp && !stretching && !upscaling && !inspecting &&
 			( !blending || CoreRenderDevice.PortableFrame ) &&
 			skyShown && !CorePointChain.Refused( foldKey );
 
@@ -2799,7 +2808,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//The portable frame (RenderTier) shades onto the screen, so it has no world picture to read
 		var readsWorld = !CoreRenderDevice.PortableFrame &&
-			( sampled || carryingUp || stretching || upscaling || ( staged && !folds ) || inspecting || blending || !fills );
+			( sampled || smoothing || carryingUp || stretching || upscaling || ( staged && !folds ) || inspecting || blending || !fills );
 
 		//Log when readsWorld flips, since the extra full-screen pass isn't visible in the picture
 		if ( readsWorld != saidReadsWorld || !saidReads )
@@ -2810,7 +2819,7 @@ internal sealed partial class CoreSceneDrawer
 			//Trace: views that come and go would repeat it; chased with the bisect convars
 			Log.Trace( readsWorld
 				? "the world is drawn into a picture of its own: " +
-					( sampled ? "edges " : "" ) + ( carryingUp ? "upscale " : "" ) +
+					( sampled ? "samples " : "" ) + ( smoothing ? "SMAA " : "" ) + ( carryingUp ? "upscale " : "" ) +
 					( upscaling ? $"{upscaler.Kind} " : "" ) +
 					( staged && !folds ? "an effect " : "" ) +
 					( inspecting ? "a debug view " : "" ) + ( blending ? "something translucent " : "" ) +
@@ -3190,7 +3199,15 @@ internal sealed partial class CoreSceneDrawer
 			//Anything after the compose? If not, it draws onto the window and the finished pair is never made
 			var after = Hung( camera, Rinten.Rendering.Stage.AfterPostProcess );
 
-			var target = after ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
+			//SMAA before what comes after lays a HUD over the picture; never over the blocks of a pixelation
+			var smoothed = smoothing && !CorePointChain.Moves( CollectionsMarshal.AsSpan( composeChain ) ) &&
+				smaa.Ready( pixels.Width, pixels.Height );
+
+			//The compose then writes a picture for SMAA to read - the other one where SMAA itself writes Final
+			var offWindow = after || smoothed;
+			var composeInto = smoothed && after ? CoreRender.TargetKind.FinalSecond : CoreRender.TargetKind.Final;
+
+			var target = offWindow ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
 			var pipeline = CorePointChain.Compose( CollectionsMarshal.AsSpan( composeChain ), split, target, carrying );
 			var numbers = pipeline == 0 ? -1 : CorePointChain.Upload( CollectionsMarshal.AsSpan( composeChain ) );
 
@@ -3203,8 +3220,8 @@ internal sealed partial class CoreSceneDrawer
 				if ( carrying ) EnsureCarryCompose();
 
 				pipeline = carrying && composeCarryPipeline != 0
-					? ( after ? composeCarryFinalPipeline : composeCarryPipeline )
-					: ( after ? composeFinalPipeline : composePipeline );
+					? ( offWindow ? composeCarryFinalPipeline : composeCarryPipeline )
+					: ( offWindow ? composeFinalPipeline : composePipeline );
 
 				numbers = 0;
 			}
@@ -3228,11 +3245,11 @@ internal sealed partial class CoreSceneDrawer
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) ),
 				upscaled != 0 ? upscaler.ComposeSharpening : 0.0f );
 
-			var finishing = after && CoreRenderDevice.BeginTarget( CoreRender.TargetKind.Final, Color.Transparent,
+			var finishing = offWindow && CoreRenderDevice.BeginTarget( composeInto, Color.Transparent,
 				clearFirst: false, discard: true );
 
 			//The finished picture was asked for but not had: compose onto the window, nothing after
-			if ( after && !finishing )
+			if ( offWindow && !finishing )
 			{
 				pipeline = CorePointChain.Compose( CollectionsMarshal.AsSpan( composeChain ), split, CoreRender.TargetKind.Screen, carrying );
 				if ( pipeline == 0 ) pipeline = composePipeline;
@@ -3244,7 +3261,16 @@ internal sealed partial class CoreSceneDrawer
 
 			CoreRenderDevice.ZoneEnd();
 
-			if ( finishing )
+			//Into Final for the passes after, else onto the window; a copy where SMAA would not run
+			if ( finishing && smoothed )
+			{
+				var into = after ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
+
+				if ( !smaa.Run( CoreRenderDevice.TargetTexture( viewport, composeInto ), into ) )
+					CopyOnto( composeInto, into, near, far );
+			}
+
+			if ( finishing && after )
 			{
 				RunStage( camera, Rinten.Rendering.Stage.AfterPostProcess, CoreRender.TargetKind.Final,
 					near, far, settle: false,
@@ -4050,22 +4076,27 @@ internal sealed partial class CoreSceneDrawer
 			return;
 		}
 
-		var settled = CorePostBlit.Settled;
+		CopyOnto( CorePostBlit.Settled, CoreRender.TargetKind.Screen, near, far );
+	}
+
+	//One finished picture onto the window or into the other, post-compose point effects laid on the way
+	private void CopyOnto( CoreRender.TargetKind settled, CoreRender.TargetKind into, float near, float far )
+	{
 		var texture = CoreRenderDevice.TargetTexture( viewport, settled );
 
 		if ( texture == 0 ) return;
 
 		var (width, height) = size;
 
-		//The pair is that one picture twice: nothing alternates here, there is one pass and it draws on the window.
+		//One pass from the one picture to the other, or onto the window where the pair is that picture twice
 		CorePostBlit.Begin( new CorePostBlit.Frame(
-			CoreRender.TargetKind.Screen,
+			into,
 			Indexed( texture ),
 			Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 1 ) ),
 			Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) ),
 			Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) ),
 			width, height, near, far, (float)(int)Rinten.Rendering.Stage.AfterPostProcess, viewport ),
-			settled, ( settled, settled ) );
+			settled, ( settled, into == CoreRender.TargetKind.Screen ? settled : into ) );
 
 		try
 		{

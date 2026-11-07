@@ -967,6 +967,7 @@ internal static class EngineShaders
 	internal const string Velocity = "shaders/engine/velocity.slang";
 	internal const string Compose = "shaders/engine/compose.slang";
 	internal const string MsaaResolve = "shaders/engine/msaa_resolve.slang";
+	internal const string Smaa = "shaders/engine/smaa.slang";
 
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";
@@ -1049,6 +1050,15 @@ internal static class EngineShaders
 	private static readonly (string, CoreShaderCompiler.Stage)[] Runs =
 		[("main", CoreShaderCompiler.Stage.Compute)];
 
+	private static readonly (string, CoreShaderCompiler.Stage)[] SmaaDraws =
+	[
+		("MainVs", CoreShaderCompiler.Stage.Vertex), ("EdgesPs", CoreShaderCompiler.Stage.Pixel),
+		("WeightsPs", CoreShaderCompiler.Stage.Pixel), ("BlendPs", CoreShaderCompiler.Stage.Pixel),
+	];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] SmaaRuns =
+		[("EdgesCs", CoreShaderCompiler.Stage.Compute), ("WeightsCs", CoreShaderCompiler.Stage.Compute)];
+
 	//Every pass variant a bake compiles; Everywhere means the portable frame has it too
 	internal static IReadOnlyList<(string File, string Defines, (string Entry, CoreShaderCompiler.Stage Stage)[] Stages, bool Everywhere)> All =>
 	[
@@ -1064,6 +1074,9 @@ internal static class EngineShaders
 		( Background, "", Draws, true ),
 		//The portable frame's bloom, in pixel passes - see CorePortableGlow
 		( Glow, "", GlowDraws, true ),
+		//SMAA's passes: drawn in the portable frame, edges and weights in compute in the full one - see CoreSmaa
+		( Smaa, "", SmaaDraws, true ),
+		( Smaa, CoreSmaa.ComputeDefines, SmaaRuns, false ),
 		( Velocity, "", VelocityDraws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),

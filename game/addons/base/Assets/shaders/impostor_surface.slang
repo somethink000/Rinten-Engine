@@ -1,5 +1,7 @@
-//Impostor planes shaded by the model's own surface: the plane facing the eye, and per pixel the real triangle the
+//Impostor planes shaded by the model's own surface: the planes ImpostorPlace draws, and per pixel the real triangle the
 //sheet's picture names, its corners read out of the pool and run through the surface's Vertex and Shade
+
+#include "impostor_place.slang"
 
 //The material records - flags, cover picture, cutoff, triangle picture - see CoreMaterialTable.Write. A draw is one
 //material, so the pictures they name are the same over the draw and are indexed plainly
@@ -39,35 +41,15 @@ ImpostorV2F MainImpostorVs( uint vid : SV_VertexID )
 	float3 position = v.position;
 	float3 centre = v.uv1.xyz;
 
-	//The eye from the centre in the model's space; nothing was baked from below, so below the horizon is the horizon
-	float3 toEyeWorld = EYE_FRAME( camera ).xyz - mul( float4( centre, 1.0 ), modelToWorld ).xyz;
-	float3 toEye = float3( dot( modelToWorld[0].xyz, toEyeWorld ), dot( modelToWorld[1].xyz, toEyeWorld ),
-		dot( modelToWorld[2].xyz, toEyeWorld ) );
-	toEye.y = max( toEye.y, 0.0 );
-
-	//The side nearest the eye's view; every corner asks about the same centre, so exactly one plane is drawn
-	float3 along = abs( toEye );
-	float3 chosen = along.y >= along.x && along.y >= along.z ? float3( 0.0, 1.0, 0.0 )
-		: along.x >= along.z ? float3( toEye.x < 0.0 ? -1.0 : 1.0, 0.0, 0.0 )
-		: float3( 0.0, 0.0, toEye.z < 0.0 ? -1.0 : 1.0 );
-
-	//A side turned about the upright through the centre to face the eye - see impostor.shader
-	if ( chosen.y == 0.0 )
-	{
-		float2 h = normalize( toEye.xz + float2( 1e-20, 0.0 ) );
-		float2 q = float2( ( h.x * chosen.x ) + ( h.y * chosen.z ), ( h.y * chosen.x ) - ( h.x * chosen.z ) );
-		float2 p = position.xz - centre.xz;
-
-		position.xz = centre.xz + float2( ( q.x * p.x ) - ( q.y * p.y ), ( q.x * p.y ) + ( q.y * p.x ) );
-	}
+	bool drawn = ImpostorPlace( position, VertexFrameNormal( v.frame ), v.uv1, modelToWorld );
 
 	precise float3 world = mul( float4( position, 1.0 ), modelToWorld ).xyz;
 
 	ImpostorV2F o;
 	o.position = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
 
-	//The other five past the screen's edge, so the raster drops them before a pixel
-	if ( dot( VertexFrameNormal( v.frame ), chosen ) < 0.5 ) o.position = float4( 2.0, 2.0, 0.5, 1.0 );
+	//The planes not drawn past the screen's edge, so the raster drops them before a pixel
+	if ( !drawn ) o.position = float4( 2.0, 2.0, 0.5, 1.0 );
 
 	o.uv = v.uv0.xy;
 

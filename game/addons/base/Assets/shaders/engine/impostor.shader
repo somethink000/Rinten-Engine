@@ -1,10 +1,10 @@
-//Model impostor: six quads with pictures of each box side; only the one facing the eye is shown
+//Model impostor: six quads with pictures of each box side, drawn as ImpostorPlace says - a box near, one turned side far
 
 //Only the engine makes materials on this, so the material editor does not offer it
 #define ENGINE_INTERNAL 1
 
 //Not in the depth pre-pass: the pre-pass cuts at a half and puts a corner where the mesh says, and a quad cuts its cover
-//against a pattern and is turned to the eye - the pass that shades it writes its depth, see CoreResources.MovesVertices.
+//against a pattern and is moved by the view - the pass that shades it writes its depth, see CoreResources.MovesVertices.
 #define ENGINE_MOVES_VERTICES 1
 
 FEATURES
@@ -38,6 +38,7 @@ struct V2F
 
 #include "frame.slang"
 #include "surface_shading.slang"
+#include "impostor_place.slang"
 
 //A normal the bake folded to two numbers - ModelBuilder.Fold, the other way.
 float3 ImpostorUnfold( float2 folded )
@@ -59,40 +60,16 @@ V2F Vertex( VIn i )
 	row_major float4x4 modelToWorld = g_modelToWorld;
 
 	float3 position = i.position;
-	float3 centre = i.texCoord1.xyz;
 
-	//The way to the eye from the model's centre, in the model's space: the transpose of the matrix's axes, which for a turn and an even scale
-	//points the same way as its inverse. Nothing was baked from below that a side does not show better, so below the horizon is the horizon.
-	float3 toEyeWorld = EYE_FRAME( camera ).xyz - mul( float4( centre, 1.0 ), modelToWorld ).xyz;
-	float3 toEye = float3( dot( modelToWorld[0].xyz, toEyeWorld ), dot( modelToWorld[1].xyz, toEyeWorld ),
-		dot( modelToWorld[2].xyz, toEyeWorld ) );
-	toEye.y = max( toEye.y, 0.0 );
-
-	//The side whose view is nearest the eye's: the axis it is furthest along. Every corner of every
-	//quad asks about the same centre, so all of a quad's corners agree, and exactly one quad is drawn.
-	float3 along = abs( toEye );
-	float3 chosen = along.y >= along.x && along.y >= along.z ? float3( 0.0, 1.0, 0.0 )
-		: along.x >= along.z ? float3( toEye.x < 0.0 ? -1.0 : 1.0, 0.0, 0.0 )
-		: float3( 0.0, 0.0, toEye.z < 0.0 ? -1.0 : 1.0 );
-
-	//A side, turned about the upright through the centre until it faces the eye across: the turn that takes its way to the eye's, as a complex number
-	//in x and z - the eye's way times the side's conjugate. Never more than a quarter of a right angle off the picture's own, and never edge-on.
-	if ( chosen.y == 0.0 )
-	{
-		float2 h = normalize( toEye.xz + float2( 1e-20, 0.0 ) );
-		float2 q = float2( ( h.x * chosen.x ) + ( h.y * chosen.z ), ( h.y * chosen.x ) - ( h.x * chosen.z ) );
-		float2 p = position.xz - centre.xz;
-
-		position.xz = centre.xz + float2( ( q.x * p.x ) - ( q.y * p.y ), ( q.x * p.y ) + ( q.y * p.x ) );
-	}
+	bool drawn = ImpostorPlace( position, i.normal, i.texCoord1, modelToWorld );
 
 	float3 world = mul( float4( position, 1.0 ), modelToWorld ).xyz;
 
 	V2F o;
 	o.position = mul( float4( world, 1.0 ), EYE_FRAME( worldToClip ) );
 
-	//The other five: past the screen's right edge, all three corners of each triangle, so the raster drops them before a pixel.
-	if ( dot( i.normal, chosen ) < 0.5 ) o.position = float4( 2.0, 2.0, 0.5, 1.0 );
+	//The planes not drawn: past the screen's right edge, all three corners of each triangle, so the raster drops them before a pixel.
+	if ( !drawn ) o.position = float4( 2.0, 2.0, 0.5, 1.0 );
 
 	o.world = world;
 	o.uv = i.texCoord0.xy;

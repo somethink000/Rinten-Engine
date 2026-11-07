@@ -168,8 +168,9 @@ internal sealed unsafe partial class ModelBuilder
 		var spread = 0.0f;
 		foreach ( var face in drawn ) spread = MathF.Max( spread, face.Spread );
 
-		//The meshes it is a picture of, by the material they wear: each material's planes are drawn by its own shader, and keep the texels of its parts alone
-		var parts = new Dictionary<string, uint>( StringComparer.OrdinalIgnoreCase );
+		//The meshes it is a picture of, by the material and art surface they wear: each pair's planes are shaded as its meshes are, and keep their texels alone
+		var parts = new Dictionary<(string Material, ModelFormat.Surface Surface), uint>();
+		var spelled = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
 		var count = meshes.Count;
 
 		for ( var m = 0; m < count; m++ )
@@ -177,12 +178,15 @@ internal sealed unsafe partial class ModelBuilder
 			if ( ( meshes[m].Flags & ModelFormat.MeshFlags.StandsIn ) != 0 || meshes[m].LevelOf >= 0 || meshes[m].IndexCount < 3 ) continue;
 
 			var name = meshes[m].Material ?? "";
-			parts[name] = parts.GetValueOrDefault( name ) | PartBit( m );
+			if ( !spelled.TryGetValue( name, out var first ) ) spelled[name] = first = name;
+
+			var key = ( first, meshes[m].Surface );
+			parts[key] = parts.GetValueOrDefault( key ) | PartBit( m );
 		}
 
 		impostorMesh = meshes.Count;
 
-		foreach ( var (wearing, mask) in parts )
+		foreach ( var ((wearing, surface), mask) in parts )
 		{
 			var first = vertices.Count;
 			var firstIndex = indices.Count;
@@ -223,6 +227,7 @@ internal sealed unsafe partial class ModelBuilder
 			{
 				Name = "impostor",
 				Material = wearing,
+				Surface = surface,
 				FirstIndex = (uint)firstIndex,
 				IndexCount = (uint)( indices.Count - firstIndex ),
 				FirstVertex = (uint)first,

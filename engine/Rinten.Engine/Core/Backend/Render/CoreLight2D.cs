@@ -18,6 +18,10 @@ internal static class CoreLight2D
 		//How big a texel of this view's pictures is in the world - see TexelOf
 		public float Texel { get; set; }
 
+		//The pictures' size in texels, held while the zoom moves - see Held
+		public int Wide { get; set; }
+		public int Tall { get; set; }
+
 		public static Names For( int view ) => new( $"L2D.{view}.Scene", $"L2D.{view}.Light",
 			$"L2D.{view}.SeedsA", $"L2D.{view}.SeedsB", $"L2D.{view}.CascadeA", $"L2D.{view}.CascadeB", $"L2D.{view}.Shadows" );
 	}
@@ -65,8 +69,11 @@ internal static class CoreLight2D
 		var across = TexelOf( names, frame, width, height, scale );
 		if ( across <= 0.0f ) across = 1.0f / scale;
 
-		var wide = Math.Clamp( (int)MathF.Ceiling( width * grow / across ) + 1, 1, MostTexels );
-		var tall = Math.Clamp( (int)MathF.Ceiling( height * grow / across ) + 1, 1, MostTexels );
+		names.Wide = Held( names.Wide, (int)MathF.Ceiling( width * grow / across ) + 1 );
+		names.Tall = Held( names.Tall, (int)MathF.Ceiling( height * grow / across ) + 1 );
+
+		var wide = names.Wide;
+		var tall = names.Tall;
 
 		//The screen inside the pictures, each way: what of them it is, so the margin is what is left
 		var shrink = new System.Numerics.Vector2( width / ( wide * across ), height / ( tall * across ) );
@@ -165,6 +172,17 @@ internal static class CoreLight2D
 
 	//The widest a picture is let be, whatever the texel size asks for
 	private const int MostTexels = 4096;
+
+	//A size kept while it covers what is needed and wastes under a quarter; else what is needed and an eighth. A size
+	//per zoom frame made screen-sized pictures every frame, the pool kept each 240 frames, and VRAM ran out
+	private static int Held( int had, int needed )
+	{
+		needed = Math.Clamp( needed, 1, MostTexels );
+
+		if ( had >= needed && had <= needed + ( needed / 4 ) ) return had;
+
+		return Math.Min( needed + ( needed / 8 ), MostTexels );
+	}
 
 	//How many screen pixels a texel of this view's pictures is. Its size in the world is held, not its size on the
 	//screen: a camera that zooms changed the world's size of a texel every frame, every occluder fell on the pictures'

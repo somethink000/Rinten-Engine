@@ -139,12 +139,35 @@ internal static unsafe class VkPictures
 
 			var made = Make( format, extent, count, storage );
 
-			if ( made is null ) return 0;
+			if ( made is null )
+			{
+				DropIdle();
+				return 0;
+			}
 
 			made.Held = true;
 			all[made.Id] = made;
 
 			return made.Id;
+		}
+	}
+
+	//Out of memory: every picture given back goes now, so the next frame's ask has room once the graveyard empties
+	private static void DropIdle()
+	{
+		List<Picture> idle = null;
+
+		foreach ( var one in all.Values )
+		{
+			if ( !one.Held ) ( idle ??= new() ).Add( one );
+		}
+
+		if ( idle is null ) return;
+
+		foreach ( var one in idle )
+		{
+			Drop( one, deferred: true );
+			all.Remove( one.Id );
 		}
 	}
 
@@ -166,7 +189,11 @@ internal static unsafe class VkPictures
 
 			var made = Make( format, new Extent2D( width, height ), 1, false );
 
-			if ( made is null ) return 0;
+			if ( made is null )
+			{
+				DropIdle();
+				return 0;
+			}
 
 			made.Held = true;
 			all[made.Id] = made;

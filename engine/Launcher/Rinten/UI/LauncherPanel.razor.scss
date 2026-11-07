@@ -1309,6 +1309,9 @@ LauncherPanel
 		}
 	}
 
+	//Stopped part way: the track stays, the accent rests
+	.release.paused .mark i { color: $accent; }
+
 	//A project's engines, under its card: the channel chips, wrapping where there are many
 	.channels.engines
 	{

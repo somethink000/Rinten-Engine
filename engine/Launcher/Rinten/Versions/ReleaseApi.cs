@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -127,62 +128,102 @@ public sealed class ReleaseApi : IDisposable
 		throw new HttpRequestException( $"GitHub answered {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}" );
 	}
 
-	//Downloads an artifact into targetDirectory and returns the file path; a sha256 mismatch leaves nothing behind
+	//Downloads an artifact to path, carrying on from path.part where an earlier run stopped; a sha256 mismatch leaves nothing behind
 	public async Task<string> DownloadAsync(
 		EngineArtifact artifact,
-		string targetDirectory,
+		string path,
 		IProgress<DownloadProgress> progress = null,
 		CancellationToken cancel = default )
 	{
 		if ( artifact.Url is null )
 			throw new InvalidOperationException( $"artifact for {artifact.Platform} has no url" );
 
-		Directory.CreateDirectory( targetDirectory );
+		Directory.CreateDirectory( Path.GetDirectoryName( path ) );
 
-		var finalPath = Path.Combine( targetDirectory, $"rinten-{artifact.Platform}.zip" );
-		var tempPath = finalPath + ".part";
+		var tempPath = path + ".part";
 
-		//The asset's API url with octet-stream is the file itself, private or not
+		//A part longer than the asset belongs to an older upload of it
+		if ( File.Exists( tempPath ) && artifact.SizeBytes > 0 && new FileInfo( tempPath ).Length > artifact.SizeBytes )
+			File.Delete( tempPath );
+
+		var resumed = File.Exists( tempPath ) && new FileInfo( tempPath ).Length > 0;
+
+		var hash = await Fetch( artifact, tempPath, progress, cancel );
+
+		//A part cut short by a power loss can hold zeros where data was; start over once
+		if ( resumed && !Matches( artifact, hash ) )
+		{
+			File.Delete( tempPath );
+			hash = await Fetch( artifact, tempPath, progress, cancel );
+		}
+
+		if ( !Matches( artifact, hash ) )
+		{
+			File.Delete( tempPath );
+			throw new InvalidDataException( $"sha256 mismatch for {artifact.Platform}: expected {artifact.Sha256}, got {hash}" );
+		}
+
+		File.Move( tempPath, path, overwrite: true );
+
+		return path;
+	}
+
+	private static bool Matches( EngineArtifact artifact, string hash ) =>
+		string.IsNullOrEmpty( artifact.Sha256 ) || string.Equals( hash, artifact.Sha256, StringComparison.OrdinalIgnoreCase );
+
+	//Appends what tempPath lacks and returns the whole file's sha256 in lowercase hex
+	private async Task<string> Fetch( EngineArtifact artifact, string tempPath, IProgress<DownloadProgress> progress, CancellationToken cancel )
+	{
+		using var hasher = IncrementalHash.CreateHash( HashAlgorithmName.SHA256 );
+		var buffer = new byte[81920];
+
+		await using var target = new FileStream( tempPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None );
+
+		int chunk;
+
+		while ( (chunk = await target.ReadAsync( buffer, cancel )) > 0 )
+			hasher.AppendData( buffer, 0, chunk );
+
+		long read = target.Length;
+		long? total = artifact.SizeBytes > 0 ? artifact.SizeBytes : null;
+
+		if ( read > 0 && read == total )
+			return Convert.ToHexString( hasher.GetHashAndReset() ).ToLowerInvariant();
+
+		//The asset's API url with octet-stream is the file itself, private or not; the redirect keeps the Range header
 		using var request = new HttpRequestMessage( HttpMethod.Get, artifact.Url );
 		request.Headers.Accept.ParseAdd( "application/octet-stream" );
+
+		if ( read > 0 )
+			request.Headers.Range = new RangeHeaderValue( read, null );
 
 		using var response = await http.SendAsync( request, HttpCompletionOption.ResponseHeadersRead, cancel );
 		await ThrowIfRefused( response );
 
-		var total = response.Content.Headers.ContentLength
-			?? (artifact.SizeBytes > 0 ? artifact.SizeBytes : null);
-
-		using var hasher = IncrementalHash.CreateHash( HashAlgorithmName.SHA256 );
-		var buffer = new byte[81920];
-		long read = 0;
-
-		await using ( var source = await response.Content.ReadAsStreamAsync( cancel ) )
-		await using ( var target = File.Create( tempPath ) )
+		//A 200 to a range request is the whole file again
+		if ( read > 0 && response.StatusCode != HttpStatusCode.PartialContent )
 		{
-			int chunk;
-
-			while ( (chunk = await source.ReadAsync( buffer, cancel )) > 0 )
-			{
-				hasher.AppendData( buffer, 0, chunk );
-				await target.WriteAsync( buffer.AsMemory( 0, chunk ), cancel );
-
-				read += chunk;
-				progress?.Report( new DownloadProgress( read, total ) );
-			}
+			read = 0;
+			target.SetLength( 0 );
+			hasher.GetHashAndReset();
 		}
 
-		var hash = Convert.ToHexString( hasher.GetHashAndReset() ).ToLowerInvariant();
+		total ??= response.Content.Headers.ContentLength + read;
 
-		if ( artifact.Sha256 is { Length: > 0 } expected
-			&& !string.Equals( hash, expected, StringComparison.OrdinalIgnoreCase ) )
+		progress?.Report( new DownloadProgress( read, total ) );
+
+		await using var source = await response.Content.ReadAsStreamAsync( cancel );
+
+		while ( (chunk = await source.ReadAsync( buffer, cancel )) > 0 )
 		{
-			File.Delete( tempPath );
-			throw new InvalidDataException( $"sha256 mismatch for {artifact.Platform}: expected {expected}, got {hash}" );
+			hasher.AppendData( buffer, 0, chunk );
+			await target.WriteAsync( buffer.AsMemory( 0, chunk ), cancel );
+
+			read += chunk;
+			progress?.Report( new DownloadProgress( read, total ) );
 		}
 
-		File.Move( tempPath, finalPath, overwrite: true );
-
-		return finalPath;
+		return Convert.ToHexString( hasher.GetHashAndReset() ).ToLowerInvariant();
 	}
 
 	public void Dispose()

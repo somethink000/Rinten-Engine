@@ -34,6 +34,9 @@ internal sealed class LauncherVersionList
 
 		//Whether this is the row being worked on.
 		public bool Working;
+
+		//Whether part of its download is on the disk, waiting for Resume
+		public bool Paused;
 	}
 
 	public IReadOnlyList<Row> Rows { get; private set; } = [];
@@ -53,6 +56,11 @@ internal sealed class LauncherVersionList
 	public int Revision => revision;
 
 	private int revision;
+
+	private CancellationTokenSource stopping;
+
+	//Whether the stopped download is thrown away rather than kept for Resume
+	private bool discarding;
 
 	private void Changed() => Interlocked.Increment( ref revision );
 
@@ -92,6 +100,14 @@ internal sealed class LauncherVersionList
 			status = $"Couldn't read the releases: {e.Message}";
 		}
 
+		//The row being downloaded keeps its object, which the download reports into
+		foreach ( var working in Rows.Where( x => x.Working ) )
+		{
+			var at = rows.FindIndex( x => x.Version == working.Version );
+
+			if ( at >= 0 ) rows[at] = working;
+		}
+
 		Rows = rows;
 		Status = status;
 		Loading = false;
@@ -105,7 +121,11 @@ internal sealed class LauncherVersionList
 
 		Busy = true;
 		row.Working = true;
-		row.Progress = 0.0f;
+		row.Paused = false;
+		row.Progress = Fraction( row );
+
+		stopping = new CancellationTokenSource();
+		discarding = false;
 
 		Changed();
 
@@ -115,9 +135,17 @@ internal sealed class LauncherVersionList
 
 			var progress = new Progress<DownloadProgress>( p => Report( row, (float)( p.Fraction ?? 0.0 ) ) );
 
-			await EngineVersions.InstallAsync( api, row.Release, progress );
+			await EngineVersions.InstallAsync( api, row.Release, progress, stopping.Token );
 
 			Status = $"Installed {row.Version}";
+		}
+		catch ( OperationCanceledException ) when ( stopping.IsCancellationRequested )
+		{
+			if ( discarding ) EngineVersions.DiscardDownload( row.Version );
+
+			row.Paused = !discarding;
+
+			Status = discarding ? $"Cancelled {row.Version}" : $"Paused {row.Version} - Resume carries on, even after a restart";
 		}
 		catch ( Exception e )
 		{
@@ -126,13 +154,50 @@ internal sealed class LauncherVersionList
 		finally
 		{
 			row.Working = false;
-			row.Progress = 0.0f;
+			row.Progress = row.Paused ? Fraction( row ) : 0.0f;
 			Busy = false;
+
+			stopping.Dispose();
+			stopping = null;
 
 			Changed();
 		}
 
 		await Refresh();
+	}
+
+	//Stops the download and keeps what came, for Resume
+	public void Pause()
+	{
+		stopping?.Cancel();
+	}
+
+	//Stops the download, or forgets a paused one, and deletes what came
+	public void Cancel( Row row )
+	{
+		if ( row is null ) return;
+
+		if ( row.Working )
+		{
+			discarding = true;
+			stopping?.Cancel();
+			return;
+		}
+
+		try
+		{
+			EngineVersions.DiscardDownload( row.Version );
+			Status = $"Cancelled {row.Version}";
+		}
+		catch ( Exception e )
+		{
+			Status = $"Couldn't delete the download of {row.Version}: {e.Message}";
+		}
+
+		row.Paused = false;
+		row.Progress = 0.0f;
+
+		Changed();
 	}
 
 	public async Task Uninstall( Row row )
@@ -172,20 +237,29 @@ internal sealed class LauncherVersionList
 		if ( (int)( fraction * 100.0f ) != before ) Changed();
 	}
 
+	private static float Fraction( Row row ) =>
+		row.Size > 0 ? Math.Clamp( (float)EngineVersions.Downloaded( row.Version ) / row.Size, 0.0f, 1.0f ) : 0.0f;
+
 	private static Row FromRelease( EngineReleaseInfo release )
 	{
 		var artifact = release.Artifacts?.FirstOrDefault( x => x.Platform == ReleaseApi.CurrentPlatform );
+		var installed = EngineVersions.IsInstalled( release.Version );
 
-		return new Row
+		var row = new Row
 		{
 			Version = release.Version,
 			Notes = release.Notes,
 			Published = release.PublishedAt,
 			Size = artifact is { Available: true } ? artifact.SizeBytes : 0,
 			Available = artifact is { Available: true },
-			Installed = EngineVersions.IsInstalled( release.Version ),
+			Installed = installed,
 			Release = release,
+			Paused = !installed && EngineVersions.Downloaded( release.Version ) > 0,
 		};
+
+		if ( row.Paused ) row.Progress = Fraction( row );
+
+		return row;
 	}
 
 	//The engines on this machine the releases do not mention.

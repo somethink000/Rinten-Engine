@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Rinten;
@@ -49,9 +50,33 @@ internal static class EngineVersions
 	public static bool IsInstalled( string version ) =>
 		ListInstalled().Any( x => x.Version == version );
 
-	//Download, verify and unpack a release. The version folder appears atomically - everything happens in a dot-prefixed staging dir that ListInstalled
-	//ignores, and the finished tree is moved into place as the last step, so a crash mid-install can't leave something that looks installed but isn't.
-	public static async Task InstallAsync( ReleaseApi api, EngineReleaseInfo release, IProgress<DownloadProgress> progress = null )
+	//Downloads survive a pause, a crash or a reboot here, as <version>.zip.part until whole
+	static string Downloads => Path.Combine( Root, ".downloads" );
+
+	static string ZipPath( string version ) => Path.Combine( Downloads, $"{version}-{ReleaseApi.CurrentPlatform}.zip" );
+
+	//Bytes of this version already on the disk, whole or partial; nought when nothing is
+	public static long Downloaded( string version )
+	{
+		var zip = ZipPath( version );
+
+		if ( File.Exists( zip ) ) return new FileInfo( zip ).Length;
+		if ( File.Exists( zip + ".part" ) ) return new FileInfo( zip + ".part" ).Length;
+
+		return 0;
+	}
+
+	//Throws away what a paused download has fetched
+	public static void DiscardDownload( string version )
+	{
+		var zip = ZipPath( version );
+
+		File.Delete( zip );
+		File.Delete( zip + ".part" );
+	}
+
+	//Download, verify and unpack a release; the version folder is moved into place last, so a crash can't leave a half install
+	public static async Task InstallAsync( ReleaseApi api, EngineReleaseInfo release, IProgress<DownloadProgress> progress = null, CancellationToken cancel = default )
 	{
 		var artifact = release.Artifacts?.FirstOrDefault( x => x.Platform == ReleaseApi.CurrentPlatform && x.Available )
 			?? throw new InvalidOperationException( $"{release.Version} has no build for {ReleaseApi.CurrentPlatform}" );
@@ -61,11 +86,30 @@ internal static class EngineVersions
 		if ( Directory.Exists( staging ) )
 			Directory.Delete( staging, true );
 
-		var zipPath = await api.DownloadAsync( artifact, staging, progress );
+		var zipPath = ZipPath( release.Version );
+
+		if ( !File.Exists( zipPath ) )
+			await api.DownloadAsync( artifact, zipPath, progress, cancel );
+
+		try
+		{
+			//Off the panel's thread, so Pause stays pressable while it unpacks
+			await Task.Run( () => Extract( zipPath, Path.Combine( staging, "extract" ), cancel ), cancel );
+		}
+		catch ( InvalidDataException ) when ( !cancel.IsCancellationRequested )
+		{
+			//A zip that doesn't open is not worth resuming
+			File.Delete( zipPath );
+			Directory.Delete( staging, true );
+			throw;
+		}
+		catch
+		{
+			if ( Directory.Exists( staging ) ) Directory.Delete( staging, true );
+			throw;
+		}
 
 		var extractDir = Path.Combine( staging, "extract" );
-		Extract( zipPath, extractDir );
-		File.Delete( zipPath );
 
 		//Zips often wrap everything in a single top folder; the install shouldn't care which way the archive was rolled
 		var tree = extractDir;
@@ -76,6 +120,7 @@ internal static class EngineVersions
 
 		if ( !File.Exists( Path.Combine( tree, EngineExecutables.EditorFile ) ) )
 		{
+			File.Delete( zipPath );
 			Directory.Delete( staging, true );
 			throw new InvalidDataException( $"{release.Version} unpacked without a {EngineExecutables.EditorFile} - not an engine build" );
 		}
@@ -89,11 +134,13 @@ internal static class EngineVersions
 
 		if ( Directory.Exists( staging ) )
 			Directory.Delete( staging, true );
+
+		File.Delete( zipPath );
 	}
 
 	//ZipFile.ExtractToDirectory writes a link entry as a file holding the target's name, and a
 	//libSkiaSharp.so that is 23 bytes of text fails FontManager's type initializer at startup
-	static void Extract( string zipPath, string into )
+	static void Extract( string zipPath, string into, CancellationToken cancel )
 	{
 		var root = Path.GetFullPath( into ) + Path.DirectorySeparatorChar;
 
@@ -101,6 +148,8 @@ internal static class EngineVersions
 
 		foreach ( var entry in archive.Entries )
 		{
+			cancel.ThrowIfCancellationRequested();
+
 			var path = Path.GetFullPath( Path.Combine( into, entry.FullName ) );
 
 			if ( !path.StartsWith( root, StringComparison.Ordinal ) )

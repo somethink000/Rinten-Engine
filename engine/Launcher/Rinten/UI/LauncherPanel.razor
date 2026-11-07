@@ -457,10 +457,10 @@
 
 				@foreach ( var row in Versions.Rows )
 				{
-					<div class="release @(row.Installed ? "installed" : "") @(row.Working ? "working" : "")"
+					<div class="release @(row.Installed ? "installed" : "") @(row.Working ? "working" : "") @(row.Paused ? "paused" : "")"
 						style="animation-delay: @Stagger( line++ )">
 
-						@if ( row.Working )
+						@if ( row.Working || row.Paused )
 						{
 							<div class="track">
 								<div class="done" style="width: @Percent( row.Progress )"></div>
@@ -479,6 +479,27 @@
 						@if ( row.Working )
 						{
 							<div class="state">@Percent( row.Progress )</div>
+
+							<div class="button plain" tooltip="Stop and keep what came, to carry on later" onclick=@PauseInstall>
+								<div class="caption">Pause</div>
+							</div>
+
+							<div class="button plain" tooltip="Stop and delete what came" onclick=@( () => CancelInstall( row ) )>
+								<div class="caption">Cancel</div>
+							</div>
+						}
+						else if ( row.Paused )
+						{
+							<div class="state">@Percent( row.Progress )</div>
+
+							<div class="button primary @(Versions.Busy ? "off" : "")" onclick=@( () => Install( row ) )>
+								<i>play_arrow</i>
+								<div class="caption">Resume</div>
+							</div>
+
+							<div class="button plain" tooltip="Delete what came" onclick=@( () => CancelInstall( row ) )>
+								<div class="caption">Cancel</div>
+							</div>
 						}
 						else if ( row.Installed )
 						{
@@ -1414,6 +1435,10 @@
 	private void RefreshVersions() => _ = Versions.Refresh();
 
 	private void Install( LauncherVersionList.Row row ) => _ = Versions.Install( row );
+
+	private void PauseInstall() => Versions.Pause();
+
+	private void CancelInstall( LauncherVersionList.Row row ) => Versions.Cancel( row );
 
 	private void OpenVersion( LauncherVersionList.Row row )
 	{

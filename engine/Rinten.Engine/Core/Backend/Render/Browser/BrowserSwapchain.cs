@@ -20,9 +20,6 @@ internal static unsafe class BrowserSwapchain
 
 		/// <summary>Layers: two for a view drawing both headset eyes in one pass, one for every other picture.</summary>
 		public int Layers;
-
-		/// <summary>One, or four for a picture only drawn into and resolved - see Viewport.Samples.</summary>
-		public int Samples;
 	}
 
 	private static void DropPicture( ref Picture picture )
@@ -34,11 +31,11 @@ internal static unsafe class BrowserSwapchain
 	}
 
 	private static bool MakePicture( ref Picture picture, int width, int height, string format,
-		int usage, string aspect = BrowserDevice.AspectAll, int layers = 1, int samples = 1 )
+		int usage, string aspect = BrowserDevice.AspectAll, int layers = 1 )
 	{
 		DropPicture( ref picture );
 
-		picture.Image = BrowserDevice.MakeTexture( width, height, format, usage, 1, layers, samples );
+		picture.Image = BrowserDevice.MakeTexture( width, height, format, usage, 1, layers );
 		if ( picture.Image == 0 ) return false;
 
 		picture.View = BrowserDevice.MakeView( picture.Image, format, aspect );
@@ -48,7 +45,6 @@ internal static unsafe class BrowserSwapchain
 		picture.Height = height;
 		picture.Format = format;
 		picture.Layers = layers;
-		picture.Samples = samples;
 		return true;
 	}
 
@@ -113,13 +109,6 @@ internal static unsafe class BrowserSwapchain
 		/// <summary>The screen's format and size, which the world's pass draws into while AsideWorldOn.</summary>
 		public Picture AsideWorld;
 		public bool AsideWorldOn, AsideWorldBegun;
-
-		/// <summary>Samples the world's pass draws with: one for views, WantedSamples for the canvas.</summary>
-		public int Samples = 1;
-		public Picture Multisampled;
-
-		/// <summary>Samples of the pass being recorded, which picks a pipeline's bake.</summary>
-		public int PassSamples = 1;
 
 		public readonly FrameScratch[] Scratch =
 			[new FrameScratch(), new FrameScratch()];
@@ -304,22 +293,6 @@ internal static unsafe class BrowserSwapchain
 			BrowserDevice.TextureUse.TextureBinding | BrowserDevice.TextureUse.CopySrc;
 		const int depthUsage = colourUsage;
 
-		//A canvas's world drawn a sample at a time is a depth that is never read - on a page nothing reads the world's
-		//depth, see CoreRender.DepthReadable - and a picture of the samples that is resolved into the screen's.
-		var samples = colour ? 1 : viewport.Samples;
-
-		if ( samples > 1 )
-		{
-			if ( !MakePicture( ref viewport.Depth, width, height, BrowserDevice.FormatDepth32,
-					BrowserDevice.TextureUse.RenderAttachment, BrowserDevice.AspectDepth, 1, samples ) )
-				return false;
-
-			return MakePicture( ref viewport.Multisampled, width, height, BrowserDevice.ScreenFormat,
-				BrowserDevice.TextureUse.RenderAttachment, BrowserDevice.AspectAll, 1, samples );
-		}
-
-		DropPicture( ref viewport.Multisampled );
-
 		if ( !MakePicture( ref viewport.Depth, width, height, BrowserDevice.FormatDepth32, depthUsage,
 				BrowserDevice.AspectDepth, layers ) )
 			return false;
@@ -346,7 +319,6 @@ internal static unsafe class BrowserSwapchain
 		DropPicture( ref viewport.Scene );
 		DropPicture( ref viewport.SceneNormal );
 		DropPicture( ref viewport.Screen );
-		DropPicture( ref viewport.Multisampled );
 		DropPicture( ref viewport.AsideWorld );
 		viewport.ScreenHandle = 0;
 	}
@@ -444,7 +416,7 @@ internal static unsafe class BrowserSwapchain
 	//-- passes ------------------------------------------------------------------------
 
 	//A pass description the page has been told about, and the number it was told with - see PassToken.
-	private readonly record struct PassShape( int Colour, int Colour2, int Depth, int Resolve,
+	private readonly record struct PassShape( int Colour, int Colour2, int Depth,
 		bool ClearColour, bool ClearDepth, float R, float G, float B, float A );
 
 	//Pass descriptions the page already knows, small and walked linearly; avoids JSON per pass
@@ -455,10 +427,10 @@ internal static unsafe class BrowserSwapchain
 		=> json.Append( value.ToString( "R", CultureInfo.InvariantCulture ) );
 
 	//The number the page knows this pass description by, describing it first where it has not been described yet.
-	private static int PassToken( int colour, int colour2, int depth, int resolve,
+	private static int PassToken( int colour, int colour2, int depth,
 		ReadOnlySpan<float> clear, bool clearColour, bool clearDepth )
 	{
-		var shape = new PassShape( colour, colour2, depth, resolve, clearColour, clearDepth,
+		var shape = new PassShape( colour, colour2, depth, clearColour, clearDepth,
 			clear[0], clear[1], clear[2], clear[3] );
 
 		for ( var i = 0; i < passCount; i++ )
@@ -474,12 +446,12 @@ internal static unsafe class BrowserSwapchain
 
 		var token = passCount++;
 		passShapes[token] = shape;
-		BrowserNative.DefinePass( token, PassJson( colour, colour2, depth, resolve, clear, clearColour, clearDepth ) );
+		BrowserNative.DefinePass( token, PassJson( colour, colour2, depth, clear, clearColour, clearDepth ) );
 
 		return token;
 	}
 
-	private static string PassJson( int colour, int colour2, int depth, int resolve,
+	private static string PassJson( int colour, int colour2, int depth,
 		ReadOnlySpan<float> clear, bool clearColour, bool clearDepth )
 	{
 		var json = new StringBuilder( 320 );
@@ -497,12 +469,7 @@ internal static unsafe class BrowserSwapchain
 			Number( json, clear[2] );
 			json.Append( ',' );
 			Number( json, clear[3] );
-			json.Append( ']' );
-
-			//Where the samples are averaged into when the pass closes. The samples themselves are kept: the
-			//world's pass is opened again after a pass of another kind, and carries on from what it drew.
-			if ( resolve != 0 ) json.Append( ",\"resolve\":" ).Append( resolve );
-			json.Append( '}' );
+			json.Append( "]}" );
 		}
 
 		if ( colour2 != 0 )
@@ -530,15 +497,14 @@ internal static unsafe class BrowserSwapchain
 	}
 
 	private static bool BeginPass( int colour, int colour2, int depth,
-		ReadOnlySpan<float> clear, bool clearColour, bool clearDepth, int resolve = 0, int samples = 1 )
+		ReadOnlySpan<float> clear, bool clearColour, bool clearDepth )
 	{
 		EndPass();
 
 		if ( Current.Encoder == 0 ) return false;
 
-		Current.PassSamples = samples;
 		Current.Pass = BrowserNative.BeginRenderPass( Current.Encoder,
-			PassToken( colour, colour2, depth, resolve, clear, clearColour, clearDepth ) );
+			PassToken( colour, colour2, depth, clear, clearColour, clearDepth ) );
 		Current.BoundPipeline = 0;
 		Current.BoundTexture = 0;
 		ForgetBindings();
@@ -569,11 +535,6 @@ internal static unsafe class BrowserSwapchain
 			clearColour = !Current.AsideWorldBegun;
 			Current.AsideWorldBegun = true;
 		}
-
-		//Drawn into the samples and averaged into the screen's picture - see Viewport.Samples.
-		if ( Current.Multisampled.View != 0 )
-			return BeginPass( Current.Multisampled.View, 0, Current.Depth.View, Current.Clear, clearColour, first,
-				colour, Current.Multisampled.Samples );
 
 		return BeginPass( colour, 0, Current.Depth.View, Current.Clear, clearColour, first );
 	}
@@ -721,12 +682,12 @@ internal static unsafe class BrowserSwapchain
 
 		if ( !EnsureWorldPass() ) return 0;
 
-		var baked = BrowserPipelines.Get( pipeline, Current.PassSamples );
+		var baked = BrowserPipelines.Get( pipeline );
 		if ( baked == 0 )
 		{
 			//Not drawn because the browser has not finished it yet - which a pass whose result is kept
 			//has to know, or it keeps a picture missing the draw for good.
-			if ( BrowserPipelines.Baking( pipeline, Current.PassSamples ) ) DrawsWaiting++;
+			if ( BrowserPipelines.Baking( pipeline ) ) DrawsWaiting++;
 			return 0;
 		}
 
@@ -961,15 +922,25 @@ internal static unsafe class BrowserSwapchain
 	private const int KeptBack = 12;
 
 	//Formats as PictureShape says them - what BrowserPipelines bakes a pipeline for the picture in
-	internal const int PictureHalves = 1, PictureBytes = 2;
+	internal const int PictureHalves = 1, PictureBytes = 2, PictureSrgb = 3;
 
-	internal static string PictureFormatName( int format ) => format == PictureBytes ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+	internal static string PictureFormatName( int format ) => format switch
+	{
+		PictureBytes => BrowserDevice.FormatRgba8,
+		PictureSrgb => BrowserDevice.FormatRgba8Srgb,
+		_ => BrowserDevice.FormatRgba16Float,
+	};
 
 	internal static ulong PictureAcquire( int kind, int width, int height, int levels )
 	{
 		if ( !BrowserDevice.Ready || width < 1 || height < 1 || levels != 1 ) return 0;
 
-		var format = kind == (int)CoreRender.PictureKind.Colour ? BrowserDevice.FormatRgba8 : BrowserDevice.FormatRgba16Float;
+		var format = kind switch
+		{
+			(int)CoreRender.PictureKind.Colour => BrowserDevice.FormatRgba8,
+			(int)CoreRender.PictureKind.Srgb => BrowserDevice.FormatRgba8Srgb,
+			_ => BrowserDevice.FormatRgba16Float,
+		};
 
 		foreach ( var id in givenBack )
 		{
@@ -1020,7 +991,12 @@ internal static unsafe class BrowserSwapchain
 		width = one.Picture.Width;
 		height = one.Picture.Height;
 		levels = 1;
-		format = one.Picture.Format == BrowserDevice.FormatRgba8 ? PictureBytes : PictureHalves;
+		format = one.Picture.Format switch
+		{
+			BrowserDevice.FormatRgba8 => PictureBytes,
+			BrowserDevice.FormatRgba8Srgb => PictureSrgb,
+			_ => PictureHalves,
+		};
 		return 1;
 	}
 
@@ -1150,7 +1126,7 @@ internal static unsafe class BrowserSwapchain
 			return 0;
 		}
 
-		var made = new Viewport { Width = width, Height = height, Samples = WantedSamples };
+		var made = new Viewport { Width = width, Height = height };
 		made.Surface = MakeCanvasSurface( made, null );
 
 		if ( made.Surface == 0 )
@@ -1174,10 +1150,6 @@ internal static unsafe class BrowserSwapchain
 		swapchains[handle] = made;
 		return handle;
 	}
-
-	//The canvas's anti-aliasing (RenderSettings.AntiAliasQuality → DrawSettings.Msaa), on by default; four samples,
-	//the one count WebGPU promises besides one, or WebGL2's most up to that
-	private static int WantedSamples => Rinten.Rendering.DrawSettings.Msaa >= 2 ? 4 : 1;
 
 	//Matches sbc_window_kind: the browser's canvas.
 	private const int WindowCanvas = 5;
@@ -1237,13 +1209,6 @@ internal static unsafe class BrowserSwapchain
 		{
 			active = placeholder;
 			return 0;
-		}
-
-		//The setting changed since the last frame: the pictures it shapes are made again, as a resize makes them.
-		if ( viewport.Samples != WantedSamples )
-		{
-			viewport.Samples = WantedSamples;
-			if ( !MakeTargets( viewport, viewport.Width, viewport.Height, false ) ) return 0;
 		}
 
 		BrowserDevice.RefreshLost();

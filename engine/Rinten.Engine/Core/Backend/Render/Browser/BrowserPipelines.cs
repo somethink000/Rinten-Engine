@@ -15,18 +15,6 @@ internal static class BrowserPipelines
 		public int Handle;
 		public Task<int> Baked;
 		public ulong Key;
-
-		/// <summary>The same pipeline for a pass of four samples, baked the first time one asks - see <see cref="Get"/>. WebGPU fixes the sample count in the pipeline; a canvas's world is drawn with four and a view's with one, and every surface can be drawn into either.</summary>
-		public int Multisampled;
-		public Task<int> BakedMultisampled;
-		public bool AskedMultisampled;
-
-		/// <summary>What the second bake is made from, kept only where it may be asked for: a pipeline that draws colour onto the screen, on WebGPU. Nought otherwise.</summary>
-		public string Describe;
-		public int VertexModule;
-		public int PixelModule;
-		public int Layout;
-		public bool Stereo;
 	}
 
 	private static readonly Dictionary<ulong, Pipeline> pipelines = new();
@@ -35,23 +23,9 @@ internal static class BrowserPipelines
 	private static ulong nextHandle = 1;
 
 	//The browser's pipeline behind a handle, or nought while it is still baking.
-	internal static int Get( ulong handle, int samples = 1 )
+	internal static int Get( ulong handle )
 	{
 		if ( !pipelines.TryGetValue( handle, out var found ) ) return 0;
-
-		if ( samples > 1 && found.Describe is not null )
-		{
-			if ( !found.AskedMultisampled )
-			{
-				found.AskedMultisampled = true;
-				found.BakedMultisampled = Bake( found.Describe.Replace( SingleSample, FourSamples ),
-					found.VertexModule, found.PixelModule, found.Layout, found.Stereo, release: false );
-				if ( !baking.Contains( found ) ) baking.Add( found );
-			}
-
-			if ( found.BakedMultisampled is not null ) Settle();
-			return found.Multisampled;
-		}
 
 		if ( found.Baked is not null ) Settle();
 
@@ -59,27 +33,16 @@ internal static class BrowserPipelines
 	}
 
 	//Whether the pipeline behind a handle is still being baked by the browser - a draw with it draws nothing yet, and will once it lands.
-	internal static bool Baking( ulong handle, int samples = 1 )
-	{
-		if ( !pipelines.TryGetValue( handle, out var found ) ) return false;
-
-		return samples > 1 && found.Describe is not null
-			? !found.AskedMultisampled || found.BakedMultisampled is not null
-			: found.Baked is not null;
-	}
+	internal static bool Baking( ulong handle )
+		=> pipelines.TryGetValue( handle, out var found ) && found.Baked is not null;
 
 	private const string SingleSample = "\"multisample\":{\"count\":1,";
-	private const string FourSamples = "\"multisample\":{\"count\":4,";
 
 	//Everything the browser holds for one pipeline.
 	private static void ReleaseOne( Pipeline one )
 	{
 		if ( one.Handle != 0 ) BrowserNative.Release( one.Handle );
-		if ( one.Multisampled != 0 ) BrowserNative.Release( one.Multisampled );
-		if ( one.VertexModule != 0 ) BrowserNative.Release( one.VertexModule );
-		if ( one.PixelModule != 0 ) BrowserNative.Release( one.PixelModule );
-		if ( one.Layout != 0 ) BrowserNative.Release( one.Layout );
-		one.Handle = one.Multisampled = one.VertexModule = one.PixelModule = one.Layout = 0;
+		one.Handle = 0;
 	}
 
 	internal static void DestroyPipelines()
@@ -425,24 +388,12 @@ internal static class BrowserPipelines
 		//Only the vertex stage says so: the pixel stage is told its view, not asked.
 		var stereo = new ReadOnlySpan<byte>( vertexCode, vertexSize ).IndexOf( "num_views"u8 ) >= 0;
 
-		//Only what may be drawn into a canvas's world keeps what a second bake takes.
-		var keep = target == BrowserDevice.Target.Screen && depthOnly == 0 &&
-			BrowserDevice.ShaderFormat != CoreShaderCompiler.Format.Glsl;
-
 		var made = new Pipeline
 		{
 			Key = key,
-			Baked = Bake( describe, vertexModule, pixelModule, pipelineLayout, stereo, release: !keep ),
+			Baked = Bake( describe, vertexModule, pixelModule, pipelineLayout, stereo ),
 		};
 
-		if ( keep )
-		{
-			made.Describe = describe;
-			made.VertexModule = vertexModule;
-			made.PixelModule = pixelModule;
-			made.Layout = pipelineLayout;
-			made.Stereo = stereo;
-		}
 		var handle = nextHandle++;
 
 		pipelines[handle] = made;
@@ -452,8 +403,7 @@ internal static class BrowserPipelines
 		return handle;
 	}
 
-	private static async Task<int> Bake( string describe, int vertexModule, int pixelModule, int pipelineLayout, bool stereo,
-		bool release )
+	private static async Task<int> Bake( string describe, int vertexModule, int pixelModule, int pipelineLayout, bool stereo )
 	{
 		try
 		{
@@ -477,11 +427,10 @@ internal static class BrowserPipelines
 		}
 		finally
 		{
-			//The modules and the layout are the browser's to keep for as long as the pipeline needs them; these were only ever
-			//handles onto them - unless another bake is to be made from them, and then the pipeline lets them go when it goes.
-			if ( release ) BrowserNative.Release( vertexModule );
-			if ( release ) BrowserNative.Release( pixelModule );
-			if ( release && pipelineLayout != 0 ) BrowserNative.Release( pipelineLayout );
+			//The browser keeps the modules and the layout for as long as the pipeline needs them; these are only handles
+			BrowserNative.Release( vertexModule );
+			BrowserNative.Release( pixelModule );
+			if ( pipelineLayout != 0 ) BrowserNative.Release( pipelineLayout );
 		}
 	}
 
@@ -498,13 +447,7 @@ internal static class BrowserPipelines
 				one.Baked = null;
 			}
 
-			if ( one.BakedMultisampled is { IsCompleted: true } )
-			{
-				one.Multisampled = one.BakedMultisampled.IsCompletedSuccessfully ? one.BakedMultisampled.Result : 0;
-				one.BakedMultisampled = null;
-			}
-
-			if ( one.Baked is null && one.BakedMultisampled is null ) baking.RemoveAt( i );
+			if ( one.Baked is null ) baking.RemoveAt( i );
 		}
 	}
 

@@ -86,17 +86,6 @@ internal static unsafe partial class VkSwapchain
 		public ImageView VelocityView;
 		public ulong VelocityHandle;
 
-		/// <summary>The screen pass's multisampled colour and depth, resolved into the screen and DepthImage.</summary>
-		public VkImage SampledColourImage, SampledDepthImage;
-		public DeviceMemory SampledColourMemory, SampledDepthMemory;
-		public ImageView SampledColourView, SampledDepthView;
-
-		/// <summary>What they were made for, and whether they have left the layout an image is made in.</summary>
-		public uint Samples;
-		public Format SampledFormat;
-		public Extent2D SampledExtent;
-		public bool SampledReady;
-
 		/// <summary>The full frame's multisampled world: colour read by the resolve, normals and depth resolved in their pass.</summary>
 		public VkImage WorldSampledColourImage, WorldSampledNormalImage, WorldSampledDepthImage;
 		public DeviceMemory WorldSampledColourMemory, WorldSampledNormalMemory, WorldSampledDepthMemory;
@@ -334,9 +323,6 @@ internal static unsafe partial class VkSwapchain
 
 		/// <summary>Whether the world's pass has already been begun once this frame, and so has to be resumed rather than started - loading what is there instead of clearing over it. Taking a backdrop copy is the only thing that interrupts it.</summary>
 		public bool MainBegun;
-
-		/// <summary>Samples a pixel the world's pass takes this frame - see VkFrame.MainSamples.</summary>
-		public uint MainSamples = 1;
 
 		/// <summary>Samples a pixel the open target pass takes - see VkFrame.TargetSamplesFor.</summary>
 		public uint TargetSamples = 1;
@@ -935,7 +921,6 @@ internal static unsafe partial class VkSwapchain
 		DropImage( default, default, p.PostTop, deferred );
 		DropImage( p.PostImage, p.PostMemory, p.PostView, deferred );
 		DropImage( p.DepthImage, p.DepthMemory, p.DepthView, deferred );
-		DropSampled( p, deferred );
 		DropWorldSampled( p, deferred );
 		DropHandle( p.ScreenDepthHandle, deferred );
 		DropImage( p.ScreenDepthImage, p.ScreenDepthMemory, p.ScreenDepthView, deferred );
@@ -943,47 +928,6 @@ internal static unsafe partial class VkSwapchain
 		VkFovea.Release( p.Fovea, deferred );
 
 		p.Forget();
-	}
-
-	//The multisampled pair let go, to be made again at the next pass that wants them
-	internal static void DropSampled( Pictures p, bool deferred )
-	{
-		DropImage( p.SampledColourImage, p.SampledColourMemory, p.SampledColourView, deferred );
-		DropImage( p.SampledDepthImage, p.SampledDepthMemory, p.SampledDepthView, deferred );
-
-		p.SampledColourImage = p.SampledDepthImage = default;
-		p.SampledColourMemory = p.SampledDepthMemory = default;
-		p.SampledColourView = p.SampledDepthView = default;
-		p.Samples = 0;
-		p.SampledFormat = Format.Undefined;
-		p.SampledExtent = default;
-		p.SampledReady = false;
-	}
-
-	//The multisampled pair for a pass of this colour, at the screen's size and layers: kept while all of that holds
-	internal static bool EnsureSampled( Pictures p, Format colour, uint samples )
-	{
-		if ( p.Samples == samples && p.SampledFormat == colour && p.SampledExtent.Width == p.ScreenExtent.Width &&
-			p.SampledExtent.Height == p.ScreenExtent.Height && p.SampledColourView.Handle != 0 ) return true;
-
-		DropSampled( p, deferred: true );
-
-		const ImageUsageFlags drawn = ImageUsageFlags.TransientAttachmentBit;
-
-		if ( !MakePicture( colour, p.ScreenExtent, 1, ImageUsageFlags.ColorAttachmentBit | drawn,
-				out p.SampledColourImage, out p.SampledColourMemory, out p.SampledColourView, p.Layers, samples ) ||
-			!MakePicture( VkDevice.DepthFormat, p.ScreenExtent, 1, ImageUsageFlags.DepthStencilAttachmentBit | drawn,
-				out p.SampledDepthImage, out p.SampledDepthMemory, out p.SampledDepthView, p.Layers, samples ) )
-		{
-			DropSampled( p, deferred: true );
-			return false;
-		}
-
-		p.Samples = samples;
-		p.SampledFormat = colour;
-		p.SampledExtent = p.ScreenExtent;
-
-		return true;
 	}
 
 	internal static void DropWorldSampled( Pictures p, bool deferred )

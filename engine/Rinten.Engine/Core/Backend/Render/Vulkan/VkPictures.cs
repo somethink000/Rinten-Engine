@@ -77,6 +77,7 @@ internal static unsafe class VkPictures
 			(int)CoreRender.PictureKind.Ten => Format.A2B10G10R10UnormPack32,
 			(int)CoreRender.PictureKind.Whole => Format.R32Uint,
 			(int)CoreRender.PictureKind.WholePair => Format.R32G32Sint,
+			(int)CoreRender.PictureKind.Srgb => Format.R8G8B8A8Srgb,
 			_ => VkDevice.SceneFormat,
 		};
 

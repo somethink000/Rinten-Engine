@@ -65,6 +65,9 @@ internal static unsafe class CoreRender
 
 		/// <summary>Two signed integers: a movement in whole pixels, read as stored, not as float.</summary>
 		WholePair = 9,
+
+		/// <summary>Eight bits a channel through the sRGB curve: a finished picture, read back linear.</summary>
+		Srgb = 10,
 	}
 
 	internal enum TargetKind

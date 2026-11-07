@@ -20,7 +20,7 @@ internal static unsafe partial class VkPipelines
 	private static bool saidUnkept;
 
 	//Whether pipeline recipes are kept: for two-eye pipelines where a headset is wanted (CoreXr.Wanted),
-	//or wherever a pass may be multisampled (VkFrame.MainSamples, VkFrame.WorldSamples)
+	//or wherever a pass may be multisampled (VkFrame.WorldSamples)
 	internal static bool KeepRecipes => ( VkDevice.multiview && CoreXr.Wanted ) || VkDevice.mostSamples > 1;
 
 	/// <summary>Whether a bind has to ask for its variant even at one sample: a base may have been baked at more.</summary>

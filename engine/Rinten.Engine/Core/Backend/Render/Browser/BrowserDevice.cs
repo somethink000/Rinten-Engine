@@ -210,13 +210,12 @@ internal static class BrowserDevice
 		return BrowserNative.CreateBuffer( ( size + 3 ) & ~3L, usage, null );
 	}
 
-	internal static int MakeTexture( int width, int height, string format, int usage, int mips = 1, int layers = 1,
-		int samples = 1 )
+	internal static int MakeTexture( int width, int height, string format, int usage, int mips = 1, int layers = 1 )
 	{
 		if ( width <= 0 || height <= 0 ) return 0;
 
 		return BrowserNative.CreateTexture( width, height, mips <= 0 ? 1 : mips, format, usage, null,
-			layers <= 0 ? 1 : layers, samples <= 1 ? 1 : samples );
+			layers <= 0 ? 1 : layers, 1 );
 	}
 
 	internal static int MakeView( int texture, string format, string aspect = AspectAll )

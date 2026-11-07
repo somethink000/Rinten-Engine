@@ -2,33 +2,63 @@
 
 public static class SettingsMenus
 {
-	//Temporal upscalers (r_upscaling 3-5) replace MSAA while they are on
+	//One kind at a time: SMAA over the finished picture, TAA through the engine's temporal upscaler, or MSAA
 	[Menu( "Editor", "Settings/Anti-Aliasing/Off" )]
-	public static bool MsaaOff
+	public static bool AntiAliasOff
 	{
-		get => ConsoleSystem.GetValueInt( "r_msaa" ) < 2;
-		set => ConsoleSystem.SetValue( "r_msaa", "0" );
+		get => !Smaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) < 2;
+		set => AntiAlias( smaa: false, taa: false, msaa: 0 );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/SMAA" )]
+	public static bool Smaa
+	{
+		get => ConsoleSystem.GetValueInt( "r_smaa" ) != 0;
+		set => AntiAlias( smaa: true, taa: false, msaa: 0 );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/TAA" )]
+	public static bool Taa
+	{
+		get => ConsoleSystem.GetValueInt( "r_upscaling" ) == 5;
+		set => AntiAlias( smaa: false, taa: true, msaa: 0 );
 	}
 
 	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 2x" )]
 	public static bool Msaa2x
 	{
-		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 2;
-		set => ConsoleSystem.SetValue( "r_msaa", "2" );
+		get => Multisampled( 2 );
+		set => AntiAlias( smaa: false, taa: false, msaa: 2 );
 	}
 
 	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 4x" )]
 	public static bool Msaa4x
 	{
-		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 4;
-		set => ConsoleSystem.SetValue( "r_msaa", "4" );
+		get => Multisampled( 4 );
+		set => AntiAlias( smaa: false, taa: false, msaa: 4 );
 	}
 
 	[Menu( "Editor", "Settings/Anti-Aliasing/MSAA 8x" )]
 	public static bool Msaa8x
 	{
-		get => ConsoleSystem.GetValueInt( "r_msaa" ) == 8;
-		set => ConsoleSystem.SetValue( "r_msaa", "8" );
+		get => Multisampled( 8 );
+		set => AntiAlias( smaa: false, taa: false, msaa: 8 );
+	}
+
+	//A temporal upscaler replaces MSAA while it is on, so a count shows only without one
+	private static bool Multisampled( int samples )
+		=> !Smaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) == samples;
+
+	private static void AntiAlias( bool smaa, bool taa, int msaa )
+	{
+		ConsoleSystem.SetValue( "r_smaa", smaa ? "1" : "0" );
+		ConsoleSystem.SetValue( "r_msaa", msaa.ToString() );
+
+		//Leaving TAA goes back to drawing at the window's size; another upscaler is left as it was
+		if ( taa ) ConsoleSystem.SetValue( "r_upscaling", "5" );
+		else if ( Taa ) ConsoleSystem.SetValue( "r_upscaling", "0" );
+
+		if ( taa ) ConsoleSystem.SetValue( "r_taa_scale", "1" );
 	}
 
 	/// <summary>Whether lighting is traced with hardware rays (r_rt), where the card can.</summary>

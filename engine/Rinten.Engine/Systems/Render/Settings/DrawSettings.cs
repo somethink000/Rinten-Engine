@@ -42,6 +42,12 @@ internal static partial class DrawSettings
 		Help = "Present each window frame on a thread of its own while the next frame is being prepared." )]
 	internal static bool SubmitThread { get; set; } = true;
 
+	//Off by default: AMD's Windows driver lost the device on the first frame drawn by it
+	/// <summary>Draw cluster depth by the mesh stage where the device has one, instead of the indexed draw.</summary>
+	[ConVar( "r_mesh_shaders", ConVarFlags.Saved,
+		Help = "Draw cluster depth with mesh shaders where the card has them (0 uses the indexed draw)." )]
+	internal static bool MeshShaders { get; set; }
+
 	[ConVar( "r_mesh_lod_pixels", Min = 0.1f, Max = 16.0f,
 		Help = "How much error on the screen, in pixels, a cluster may carry before its finer children are drawn instead. A shadow map is cut the same way in its own texels." )]
 	internal static float MeshLodPixels { get; set; } = 1.0f;

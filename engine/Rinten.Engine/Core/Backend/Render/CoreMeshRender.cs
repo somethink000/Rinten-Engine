@@ -385,7 +385,8 @@ internal sealed class CoreMeshRender
 			for ( var k = 0; k < 3; k++ ) kindRun[k] = kindRun[k] * MostListTriangles / wanted;
 
 		//Drawn by the mesh stage, the camera's lists have no runs of their own - the bins' run is the same triangles, and it keeps its size.
-		MeshKinds = cameraDepth.PrepassMesh != 0 && lightDepth.PrepassMesh != 0 && Rinten.Rendering.Wireframe.Clusters <= 0 ? MeshWhere : 0;
+		MeshKinds = Rinten.Rendering.DrawSettings.MeshShaders && cameraDepth.PrepassMesh != 0 && lightDepth.PrepassMesh != 0
+			&& Rinten.Rendering.Wireframe.Clusters <= 0 ? MeshWhere : 0;
 
 		var runAt = 0L;
 		var binned = 0L;

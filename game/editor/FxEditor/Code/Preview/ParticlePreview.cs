@@ -203,7 +203,7 @@ internal sealed class ParticlePreviewPanel : EditorPanel
 			var cameraObject = new GameObject( true, "camera" );
 
 			_camera = cameraObject.AddComponent<CameraComponent>();
-			_camera.BackgroundColor = Theme.ControlBackground;
+			_camera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 			_camera.FieldOfView = 60.0f;
 			_camera.ZNear = 0.02f;
 			_camera.ZFar = 5000.0f;

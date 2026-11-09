@@ -96,10 +96,10 @@ public static class EditorPreferences
 		set => EditorCookie.Set( "SceneView.CameraFOV", value );
 	}
 
-	//The viewport's background where nobody has chosen one - parsed once, not on every read.
-	static readonly Color DefaultCameraBackground = (Color)"#32415e";
+	//Linear, as the world is shaded: ACES at exposure 1 brings it to #1b1d20 on screen, the panels' own dark
+	static readonly Color DefaultCameraBackground = new( 0.0206f, 0.0221f, 0.0246f );
 
-	/// <summary>Camera viewport background color</summary>
+	/// <summary>What every editor scene view shows where its scene has no sky of its own.</summary>
 	[Title( "Background Color" )]
 	public static Color CameraBackgroundColor
 	{

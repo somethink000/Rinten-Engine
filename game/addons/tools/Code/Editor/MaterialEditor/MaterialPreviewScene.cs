@@ -147,7 +147,7 @@ public sealed class MaterialPreviewScene : IDisposable
 		using ( Scene.Push() )
 		{
 			Camera = new GameObject( true, "camera" ).AddComponent<CameraComponent>();
-			Camera.BackgroundColor = Theme.Sunken;
+			Camera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 			Camera.FieldOfView = 40f;
 			Camera.ZFar = 2540f;
 			Camera.ZNear = 0.00254f;

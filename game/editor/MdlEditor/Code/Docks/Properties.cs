@@ -582,7 +582,7 @@ internal sealed class PropertiesPanel : EditorPanel
 		{
 			var camGo = new GameObject( true, "camera" );
 			_miniCamera = camGo.AddComponent<CameraComponent>();
-			_miniCamera.BackgroundColor = Theme.ControlBackground;
+			_miniCamera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 			_miniCamera.FieldOfView = 30f;
 			_miniCamera.ZFar = 15000f;
 			_miniCamera.ZNear = 0.1f;

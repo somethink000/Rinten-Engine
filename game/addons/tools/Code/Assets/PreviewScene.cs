@@ -58,7 +58,7 @@ class PreviewScene : AssetPreview
 					var camera = new GameObject( true, "camera" );
 					var cc = camera.Components.Create<CameraComponent>();
 					cc.FieldOfView = 40;
-					cc.BackgroundColor = "#19181a";
+					cc.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 					cc.ZFar = 2540f;
 					cc.ZNear = 0.0254f;
 				}

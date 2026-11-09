@@ -216,7 +216,6 @@ internal sealed class ViewportCamera
 			transitionBlend = 1f;
 			currentFov = 1f;
 			targetFov = 1f;
-			Active.BackgroundColor = Color.Black;
 			Active.RenderExcludeTags.Set( "skybox", true );
 		}
 		else

@@ -111,7 +111,7 @@ public class PreviewScenePanel : EditorPanel
 		{
 			var camGo = new GameObject( true, "camera" );
 			Camera = camGo.AddComponent<CameraComponent>();
-			Camera.BackgroundColor = Theme.ControlBackground;
+			Camera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 			Camera.FieldOfView = 60f;
 			Camera.ZFar = 15000f;
 			//Worked out again from how far the camera is - see UpdateCamera. A tenth of a metre cut the model open as soon as it came close.

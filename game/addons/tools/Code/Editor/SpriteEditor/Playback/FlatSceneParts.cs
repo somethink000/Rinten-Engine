@@ -13,7 +13,7 @@ internal static class FlatSceneParts
 
 		camera.Orthographic = true;
 		camera.OrthographicHeight = ViewHeight;
-		camera.BackgroundColor = Theme.SurfaceBackground;
+		camera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 
 		return camera;
 	}

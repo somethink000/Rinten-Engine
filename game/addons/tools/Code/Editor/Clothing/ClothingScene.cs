@@ -24,7 +24,7 @@ public class ClothingScene
 			//Body.Model = Model.Load( "models/citizen_human/citizen_human_female.vmdl" );
 			Body.Model = Model.Load( "models/citizen_human/citizen_human_male.vmdl" );
 
-			camera.BackgroundColor = new Color( 0.1f, 0.1f, 0.1f, 0.0f );
+			camera.BackgroundColor = EditorPreferences.CameraBackgroundColor;
 			camera.GetOrAddComponent<Sharpen>().Scale = 0.5f;
 
 			PreviewLighting.HideSky( camera );

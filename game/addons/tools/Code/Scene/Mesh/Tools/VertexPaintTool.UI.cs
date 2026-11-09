@@ -411,7 +411,7 @@ partial class VertexPaintTool
 					}
 				}
 
-				Texture = Texture.Create( w, h )
+				Texture = Rinten.Texture.Create( w, h )
 					.WithData( data )
 					.WithName( "vertex_paint_noise_preview" )
 					.Finish();

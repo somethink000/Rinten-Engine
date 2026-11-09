@@ -28,7 +28,7 @@ static class GradientPaint
 		Fill( bitmap, gradient, width );
 
 		//The texture the image already has, filled again where it still fits.
-		if ( image.Texture is { } existing && existing.Width == width && existing.Height == 1 )
+		if ( image.Texture is Texture existing && existing.Width == width && existing.Height == 1 )
 		{
 			existing.Update( bitmap );
 			return;

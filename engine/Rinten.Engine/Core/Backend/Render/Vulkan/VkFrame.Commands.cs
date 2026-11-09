@@ -52,7 +52,7 @@ internal static unsafe partial class VkFrame
 			SType = StructureType.MemoryBarrier2,
 			SrcStageMask = PipelineStageFlags2.AllTransferBit,
 			SrcAccessMask = AccessFlags2.TransferWriteBit,
-			DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
+			DstStageMask = PipelineStageFlags2.ComputeShaderBit | VkDevice.VertexStages |
 				PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit |
 				PipelineStageFlags2.VertexInputBit | PipelineStageFlags2.AllTransferBit,
 			DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |

@@ -392,6 +392,11 @@ internal static unsafe partial class VkDevice
 	internal static ShaderStageFlags DrawStages => ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit
 		| ( meshShaders ? ShaderStageFlags.MeshBitExt : 0 );
 
+	//The stages that fetch a draw's corners, for barriers: the vertex stage is not the mesh stage, and AMD's own driver
+	//lets a mesh stage the mask leaves out read before the writes land
+	internal static PipelineStageFlags2 VertexStages => PipelineStageFlags2.VertexShaderBit
+		| ( meshShaders ? PipelineStageFlags2.MeshShaderBitExt : 0 );
+
 	//VkCmdDrawIndexedIndirectCount: a draw whose count the card wrote
 	internal static bool drawIndirectCount;
 

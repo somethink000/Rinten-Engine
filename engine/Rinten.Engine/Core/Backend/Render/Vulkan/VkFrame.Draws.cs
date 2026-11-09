@@ -1902,7 +1902,7 @@ internal static unsafe partial class VkFrame
 					var before = new MemoryBarrier2
 					{
 						SType = StructureType.MemoryBarrier2,
-						SrcStageMask = PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+						SrcStageMask = VkDevice.VertexStages | PipelineStageFlags2.FragmentShaderBit |
 							PipelineStageFlags2.ComputeShaderBit,
 						DstStageMask = PipelineStageFlags2.CopyBit,
 					};
@@ -1930,7 +1930,7 @@ internal static unsafe partial class VkFrame
 				SType = StructureType.MemoryBarrier2,
 				SrcStageMask = PipelineStageFlags2.CopyBit,
 				SrcAccessMask = AccessFlags2.TransferWriteBit,
-				DstStageMask = PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+				DstStageMask = VkDevice.VertexStages | PipelineStageFlags2.FragmentShaderBit |
 					PipelineStageFlags2.ComputeShaderBit,
 				DstAccessMask = AccessFlags2.UniformReadBit,
 			};
@@ -2153,7 +2153,7 @@ internal static unsafe partial class VkFrame
 				SType = StructureType.MemoryBarrier2,
 				SrcStageMask = PipelineStageFlags2.CopyBit,
 				SrcAccessMask = AccessFlags2.TransferWriteBit,
-				DstStageMask = PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.VertexShaderBit |
+				DstStageMask = PipelineStageFlags2.ComputeShaderBit | VkDevice.VertexStages |
 					PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.CopyBit,
 				DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
 					AccessFlags2.IndirectCommandReadBit | AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit,
@@ -2168,7 +2168,7 @@ internal static unsafe partial class VkFrame
 				SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
 				SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
 				DstStageMask = PipelineStageFlags2.ComputeShaderBit |
-					PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+					VkDevice.VertexStages | PipelineStageFlags2.FragmentShaderBit |
 					PipelineStageFlags2.VertexInputBit | PipelineStageFlags2.DrawIndirectBit |
 					PipelineStageFlags2.CopyBit,
 				DstAccessMask = AccessFlags2.ShaderStorageReadBit |

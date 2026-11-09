@@ -328,7 +328,7 @@ internal static unsafe partial class VkTextures
 			SrcStageMask = PipelineStageFlags2.AllTransferBit,
 			SrcAccessMask = AccessFlags2.TransferWriteBit,
 			DstStageMask = PipelineStageFlags2.VertexInputBit |
-				PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+				VkDevice.VertexStages | PipelineStageFlags2.FragmentShaderBit |
 				PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.DrawIndirectBit |
 				PipelineStageFlags2.AllTransferBit,
 			DstAccessMask = AccessFlags2.VertexAttributeReadBit |

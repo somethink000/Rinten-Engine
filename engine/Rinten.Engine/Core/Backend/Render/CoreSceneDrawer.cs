@@ -1976,9 +1976,6 @@ internal sealed partial class CoreSceneDrawer
 	private static float gridCentreX;
 	private static float gridCentreZ;
 
-	//And whether the cells were in it, which a perspective view leaves out.
-	private static bool gridCells;
-
 	//World X and Z axis colours as the gizmo hex says (line.slang decodes sRGB itself); opaque on purpose
 	private static readonly Color32 AxisX = new( 255, 112, 150, 255 );
 	private static readonly Color32 AxisZ = new( 0, 168, 232, 255 );
@@ -6367,8 +6364,6 @@ internal sealed partial class CoreSceneDrawer
 		var cell = spacing;
 		while ( cell < onScreen * 0.01f ) cell *= 2.0f;
 
-		//Cells only in orthographic views; perspective gets just the two axes, the grid goes on surfaces
-		var cells = camera.IsValid() && camera.Orthographic;
 
 		//Snapped to the major lines, so the grid does not crawl under a camera that is moving: the
 		//lines stay on their own multiples of the cell and only the patch they are cut from moves.
@@ -6376,14 +6371,13 @@ internal sealed partial class CoreSceneDrawer
 		var centreX = System.MathF.Round( eye.x / block ) * block;
 		var centreZ = System.MathF.Round( eye.z / block ) * block;
 
-		if ( grid is null || gridCells != cells || !gridSpacing.AlmostEqual( cell ) ||
+		if ( grid is null || !gridSpacing.AlmostEqual( cell ) ||
 			!gridCentreX.AlmostEqual( centreX ) || !gridCentreZ.AlmostEqual( centreZ ) )
 		{
-			grid = BuildGrid( cell, centreX, centreZ, cells );
+			grid = BuildGrid( cell, centreX, centreZ );
 			gridSpacing = cell;
 			gridCentreX = centreX;
 			gridCentreZ = centreZ;
-			gridCells = cells;
 		}
 
 		CoreRenderDevice.DrawDynamic( linePipeline,
@@ -6466,11 +6460,11 @@ internal sealed partial class CoreSceneDrawer
 
 
 	//Ground grid lines around a centre: fixed count, every tenth stronger, edge faded, axes in colour
-	private static LineVertex[] BuildGrid( float cell, float centreX, float centreZ, bool cells )
+	private static LineVertex[] BuildGrid( float cell, float centreX, float centreZ )
 	{
 		const int extent = 120;
 
-		var lines = new System.Collections.Generic.List<LineVertex>( cells ? ( extent * 2 + 1 ) * 4 + 4 : 4 );
+		var lines = new System.Collections.Generic.List<LineVertex>( ( extent * 2 + 1 ) * 4 + 4 );
 
 		var far = extent * cell;
 
@@ -6508,13 +6502,10 @@ internal sealed partial class CoreSceneDrawer
 			}
 		}
 
-		if ( cells )
+		for ( var i = -extent; i <= extent; i++ )
 		{
-			for ( var i = -extent; i <= extent; i++ )
-			{
-				Row( i, alongX: true );
-				Row( i, alongX: false );
-			}
+			Row( i, alongX: true );
+			Row( i, alongX: false );
 		}
 
 		//The axes, only where the patch covers them; X red and Z blue, opaque

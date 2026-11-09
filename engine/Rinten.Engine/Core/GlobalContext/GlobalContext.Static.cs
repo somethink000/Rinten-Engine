@@ -13,7 +13,7 @@ internal partial class GlobalContext
 	public static GlobalContext Game;
 
 	/// <summary>The current active context</summary>
-	public static GlobalContext Current
+	public static new GlobalContext Current
 	{
 		get => _current.Value ?? Game;
 		set => _current.Value = value;

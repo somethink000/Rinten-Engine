@@ -251,7 +251,7 @@ public partial class GameObject
 				var text = new TextRendering.Scope( _handle.Icon, Color.White, 64, "Material Icons", 400 );
 				text.Shadow = new TextRendering.Shadow { Enabled = true, Color = Color.Black, Offset = 2, Size = 8 };
 
-				picture = TextRendering.GetOrCreateTexture( text, flag: TextFlag.Center );
+				picture = TextRendering.GetOrCreateTexture( text, flag: TextFlag.Center ) as Texture;
 			}
 
 			if ( picture is null )

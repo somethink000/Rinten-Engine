@@ -7,7 +7,7 @@ using System.Threading;
 
 namespace Rinten.Engine;
 
-internal partial class GlobalContext
+internal partial class GlobalContext : Rinten.UI.UiContext
 {
 	/// <summary>Rinten.GameInstance or Rinten.Menu</summary>
 	public Assembly LocalAssembly { get; set; }
@@ -41,9 +41,6 @@ internal partial class GlobalContext
 	/// <summary>For actiongraph</summary>
 	public NodeLibrary NodeLibrary { get; set; }
 
-	/// <summary>All of the mounted assets</summary>
-	public BaseFileSystem FileMount { get; set; }
-
 	/// <summary>A persistent data folder for the current package.</summary>
 	public BaseFileSystem FileData { get; set; }
 
@@ -53,17 +50,8 @@ internal partial class GlobalContext
 	/// <summary>Special options for serializing json; the plain ones until the context sets up its own.</summary>
 	public JsonSerializerOptions JsonSerializerOptions { get; set; } = EnumConvert.Plain;
 
-	/// <summary>For running tasks in a kind of sandboxed way</summary>
-	public TaskSource TaskSource { get; set; }
-
-	/// <summary>Creates tokens that will be cancelled at the end of the game</summary>
-	public CancellationTokenSource CancellationTokenSource { get; set; }
-
 	/// <summary>The event system isn't used that much anymore, we should move away from it.</summary>
 	public EventSystem EventSystem { get; set; }
-
-	/// <summary>The UI system for the game, which manages the user interface elements and their interactions.</summary>
-	public UISystem UISystem { get; set; }
 
 	/// <summary>Holds cookies for the game, which can be used for storing session data or other small pieces of information that need to persist across requests.</summary>
 	public CookieContainer Cookies { get; set; }

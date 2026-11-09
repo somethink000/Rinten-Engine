@@ -9,10 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Resources\BidiClasses.trie" />
-    <None Remove="Resources\GraphemeClusterClasses.trie" />
-    <None Remove="Resources\LineBreakClasses.trie" />
-    <None Remove="Resources\WordBoundaryClasses.trie" />
+    <None Remove="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\BidiClasses.trie" />
+    <None Remove="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\GraphemeClusterClasses.trie" />
+    <None Remove="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\LineBreakClasses.trie" />
+    <None Remove="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\WordBoundaryClasses.trie" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,10 +25,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\BidiClasses.trie" />
-    <EmbeddedResource Include="Resources\GraphemeClusterClasses.trie" />
-    <EmbeddedResource Include="Resources\LineBreakClasses.trie" />
-    <EmbeddedResource Include="Resources\WordBoundaryClasses.trie" />
+    <EmbeddedResource Include="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\BidiClasses.trie" LogicalName="Topten.RichTextKit.Resources.BidiClasses.trie" />
+    <EmbeddedResource Include="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\GraphemeClusterClasses.trie" LogicalName="Topten.RichTextKit.Resources.GraphemeClusterClasses.trie" />
+    <EmbeddedResource Include="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\LineBreakClasses.trie" LogicalName="Topten.RichTextKit.Resources.LineBreakClasses.trie" />
+    <EmbeddedResource Include="../../RintenUI/ThirdParty/Topten.RichTextKit/Resources\WordBoundaryClasses.trie" LogicalName="Topten.RichTextKit.Resources.WordBoundaryClasses.trie" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../RintenUI/ThirdParty/Topten.RichTextKit/**/*.cs" Exclude="../../RintenUI/ThirdParty/Topten.RichTextKit/obj/**;../../RintenUI/ThirdParty/Topten.RichTextKit/bin/**" />
   </ItemGroup>
 
 </Project>

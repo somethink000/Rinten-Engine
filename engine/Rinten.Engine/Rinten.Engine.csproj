@@ -51,6 +51,12 @@
 		<EmbeddedResource Include="Core/Backend/Render/smaa_search.bin" LogicalName="smaa_search.bin" />
 	</ItemGroup>
 
+	<!-- The interface toolkit is compiled in from the RintenUI repository: the same sources Rinten.UI.dll is built from for apps, with
+	     the engine's side of it - scenes, the type library, the mouse - in Systems/UI as the other half of its partial classes. -->
+	<ItemGroup>
+		<Compile Include="../RintenUI/UI/**/*.cs" Exclude="../RintenUI/UI/obj/**;../RintenUI/UI/bin/**;../RintenUI/UI/Standalone/**;../RintenUI/UI/Assembly.cs" LinkBase="UI" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Facepunch.ActionGraphs" Version="1.9.27" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.12.0-beta1.25218.8" />
@@ -106,11 +112,6 @@
 	</Target>
 
 	<ItemGroup>
-		<Compile Update="Systems\UI\Styles\BaseStyles.Generated.cs">
-			<DependentUpon>BaseStyles.Generated.tt</DependentUpon>
-			<DesignTime>True</DesignTime>
-			<AutoGen>True</AutoGen>
-		</Compile>
         <Compile Update="Platform\VR\VRSystem.Generated.cs">
             <DesignTime>True</DesignTime>
             <AutoGen>True</AutoGen>
@@ -119,10 +120,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Update="Systems\UI\Styles\BaseStyles.Generated.tt">
-			<LastGenOutput>BaseStyles.Generated.cs</LastGenOutput>
-			<Generator>TextTemplatingFileGenerator</Generator>
-		</None>
         <None Update="Platform\VR\VRSystem.Generated.tt">
             <Generator>TextTemplatingFileGenerator</Generator>
             <LastGenOutput>VRSystem.Generated.cs</LastGenOutput>

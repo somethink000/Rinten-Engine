@@ -25,4 +25,8 @@
     <PackageReference Include="Zio" Version="0.23.0" />
   </ItemGroup>
   
+	<ItemGroup>
+		<Compile Include="../RintenUI/Filesystem/**/*.cs" Exclude="../RintenUI/Filesystem/obj/**;../RintenUI/Filesystem/bin/**;../RintenUI/Filesystem/Standalone/**" LinkBase="Filesystem" />
+	</ItemGroup>
+
 </Project>

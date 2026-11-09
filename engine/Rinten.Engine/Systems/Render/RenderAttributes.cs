@@ -308,6 +308,12 @@ public partial class RenderAttributes
 	public void Set( in StringToken k, in Matrix value ) { values[k] = Held.OfReference( value ); WroteReference(); }
 	public void Set( in StringToken k, in GpuBuffer value ) { values[k] = Held.OfReference( value ); WroteReference(); }
 
+	/// <summary>An interface picture, which in the engine is always one of its textures.</summary>
+	public void Set( in StringToken k, ITexture value, in int mip = -1 ) => Set( k, value as Texture, mip );
+
+	/// <summary>An interface picture, which in the engine is always one of its textures.</summary>
+	public void Set( [StringToken.Convert] in string k, ITexture value, in int mip = -1 ) => Set( (StringToken)k, value as Texture, mip );
+
 	/// <summary>A texture, and which mip of it to read. -1 is all of them.</summary>
 	public void Set( in StringToken k, in Texture value, in int mip = -1 )
 	{
@@ -478,6 +484,7 @@ public partial class RenderAttributes
 	public void Set( [StringToken.Convert] in string k, in Angles value ) => Set( (StringToken)k, value );
 	public void Set( [StringToken.Convert] in string k, in string value ) => Set( (StringToken)k, value );
 	public void Set( [StringToken.Convert] in string k, in Texture value, in int mip = -1 ) => Set( (StringToken)k, value, mip );
+
 	public void Set( [StringToken.Convert] in string k, in float value ) => Set( (StringToken)k, value );
 	public void Set( [StringToken.Convert] in string k, in double value ) => Set( (StringToken)k, (float)value );
 	public Texture GetTexture( [StringToken.Convert] in string name, in Texture defaultValue = default ) => GetTexture( (StringToken)name, defaultValue );

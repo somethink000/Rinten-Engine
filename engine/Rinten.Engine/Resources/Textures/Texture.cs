@@ -1,12 +1,23 @@
-using NativeEngine;
+﻿using NativeEngine;
 
 namespace Rinten;
 
 /// <summary>A texture is an image used in rendering. Can be a static texture loaded from disk, or a dynamic texture rendered to by code. Can also be 2D, 3D (multiple slices), or a cube texture (6 slices).</summary>
 [SkipHotload]
 [ResourceType( "tex" )]
-public partial class Texture : Resource, IDisposable
+public partial class Texture : Resource, IDisposable, ITexture
 {
+	//What the interface toolkit asks of a picture, answered from the device's copy
+	void ITexture.MarkUsed()
+	{
+		if ( core is { } c ) c.UiDrawnAt = EngineLoop.LoopFrames;
+	}
+
+	long ITexture.DrawnAt => core?.UiDrawnAt ?? 0;
+	int ITexture.Content => core?.Content ?? 0;
+	bool ITexture.Opaque => core?.Opaque ?? false;
+	int ITexture.DirtyVersion => DirtyVersion;
+
 
 
 	//The pixels, where this texture is one of ours. Null for a texture that came from the legacy render device, which is every

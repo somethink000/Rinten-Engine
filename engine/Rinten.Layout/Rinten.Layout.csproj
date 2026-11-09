@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The interface's layout engine: flexbox today, block, grid and inline text as the plan in docs/layout-engine-plan.md lands. Pure managed code with no engine
        dependencies, so it can be unit tested, benchmarked and compared against a frozen copy of itself in isolation. Rinten.Engine drives it through the seam in Systems/UI. -->
@@ -25,5 +25,9 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../RintenUI/Layout/**/*.cs" Exclude="../RintenUI/Layout/obj/**;../RintenUI/Layout/bin/**;../RintenUI/Layout/Standalone/**" LinkBase="Layout" />
+  </ItemGroup>
 
 </Project>

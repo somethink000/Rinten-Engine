@@ -12,4 +12,8 @@
 	  <LangVersion>latest</LangVersion>
   </PropertyGroup>
   
+  <ItemGroup>
+    <Compile Include="../RintenUI/ThirdParty/Microsoft.AspNetCore.Components/**/*.cs" Exclude="../RintenUI/ThirdParty/Microsoft.AspNetCore.Components/obj/**;../RintenUI/ThirdParty/Microsoft.AspNetCore.Components/bin/**" />
+  </ItemGroup>
+
 </Project>

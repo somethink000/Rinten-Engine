@@ -100,12 +100,6 @@ internal static partial class DebugOverlay
 			pos.y += OverlaySpacing;
 		}
 
-		if ( overlay_ui == 1 )
-		{
-			DebugOverlay.UI.Draw( ref pos );
-			pos.y += OverlaySpacing;
-		}
-
 		if ( overlay_audio != 0 )
 		{
 			DebugOverlay.Audio.Draw( ref pos );

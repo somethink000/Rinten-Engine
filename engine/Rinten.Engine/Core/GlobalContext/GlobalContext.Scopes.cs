@@ -8,6 +8,12 @@ internal partial class GlobalContext
 	/// <summary>Should only be called at a really high level, when doing menu stuff</summary>
 	public static IDisposable MenuScope() => new GlobalContextScope( Menu );
 
+	/// <summary>Makes this the current context until disposed.</summary>
+	public override IDisposable Enter() => new GlobalContextScope( this );
+
+	/// <summary>Whether this is the menu's context.</summary>
+	public override bool IsMenu => ReferenceEquals( this, Menu );
+
 
 	public struct GlobalContextScope : IDisposable
 	{

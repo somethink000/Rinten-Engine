@@ -4237,7 +4237,7 @@ internal sealed partial class CoreSceneDrawer
 
 		//Other cameras' boxes each frame; Recycle keeps their vertex lists
 		CoreUiRenderer.Recycle( batches );
-		CoreUiRenderer.BuildCameraLayers( scene, batches );
+		CoreSceneUi.BuildCameraLayers( scene, batches );
 
 		screenBatches.Clear();
 		screenBatches.AddRange( batches );
@@ -4482,6 +4482,9 @@ internal sealed partial class CoreSceneDrawer
 				System.Runtime.InteropServices.CollectionsMarshal.AsSpan( batch.Vertices ) ),
 			batch.Vertices.Count, UiVertexStride, push, texture );
 	}
+
+	//An interface picture, which in the engine is always one of its textures
+	private static ulong UploadUiTexture( ITexture texture ) => UploadUiTexture( texture as Texture );
 
 	//Uploads an engine texture to our device once via the CPU; fine for still images only
 	private static ulong UploadUiTexture( Texture texture )

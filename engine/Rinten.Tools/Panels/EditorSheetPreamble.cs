@@ -1,4 +1,4 @@
-using Rinten.Engine;
+﻿using Rinten.Engine;
 using Rinten.UI;
 
 namespace Editor;
@@ -175,7 +175,7 @@ public static class EditorSheetPreamble
 			if ( !ShouldPreparePath( sheet.FileName ) )
 				continue;
 
-			using ( new GlobalContext.GlobalContextScope( sheet.Context ) )
+			using ( sheet.Context?.Enter() )
 			{
 				sheet.Variables = null;
 				sheet.UpdateFromFile( sheet.FileName, true, sheet.Context );

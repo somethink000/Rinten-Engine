@@ -13,6 +13,8 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo( "Benchmark" )]
 
 [assembly: InternalsVisibleTo( "Rinten.Engine" )]
+[assembly: InternalsVisibleTo( "Rinten.UI" )]
+[assembly: InternalsVisibleTo( "Rinten.UI.Native" )]
 [assembly: InternalsVisibleTo( "Rinten.Tools" )]
 [assembly: InternalsVisibleTo( "Rinten.Bind" )]
 [assembly: InternalsVisibleTo( "Rinten.Reflection" )]

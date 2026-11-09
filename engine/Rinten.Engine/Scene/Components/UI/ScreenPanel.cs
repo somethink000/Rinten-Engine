@@ -208,13 +208,6 @@ public sealed class ScreenPanel : Component, IRootPanelComponent
 
 	//Whether a lazy sheet is still on its way round after the head.
 	private bool following;
-
-	internal void Render()
-	{
-		if ( !rootPanel.IsValid() ) return;
-
-		rootPanel.RenderManual();
-	}
 }
 
 class GameRootPanel : RootPanel
@@ -224,10 +217,6 @@ class GameRootPanel : RootPanel
 	public ScreenPanel.AutoScale ScaleStrategy;
 
 	override public bool IsWorldPanel => false;
-
-	//Whether this frame's panel is a sheet in front of a headset rather than a screen. Laid out on Canvas and drawn
-	//through Sheet then - see CoreSceneDrawer.DrawHeadsetPanels - and pointed at by the controllers rather than the mouse.
-	internal bool InHeadset;
 
 	//The size the panel is laid out at in a headset - see ScreenPanel.VrCanvas.
 	internal Vector2 Canvas = new( 1920, 1080 );

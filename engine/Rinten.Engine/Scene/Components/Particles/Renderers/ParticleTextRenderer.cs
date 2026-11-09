@@ -100,7 +100,7 @@ public sealed class ParticleTextRenderer : ParticleRenderer, Component.ExecuteIn
 	public bool IsSorted => SortMode != ParticleSortMode.Unsorted;
 
 	/// <summary>Provides texture for rendering the sprite</summary>
-	public Texture RenderTexture => TextRendering.GetOrCreateTexture( Text, 4096 ) ?? Texture.White;
+	public Texture RenderTexture => TextRendering.GetOrCreateTexture( Text, 4096 ) as Texture ?? Texture.White;
 
 	ParticleType IBatchedParticleSpriteRenderer.Type => ParticleType.Text;
 

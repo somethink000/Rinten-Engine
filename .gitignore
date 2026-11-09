@@ -5,6 +5,7 @@
 # Git
 !.gitignore
 !.gitattributes
+!.gitmodules
 
 # The .gitignore a new project starts with; the whitelist goes by extension, so it is named
 !/game/templates/template.gitignore

@@ -30,4 +30,9 @@
 		<PackageReference Include="Vestris.ResourceLib" Version="2.2.0" />
   </ItemGroup>
   
+	<!-- The maths, colour, html, attributes and logging RintenUI is written in, from its own repository; the engine's halves of them are here. -->
+	<ItemGroup>
+		<Compile Include="../RintenUI/Core/**/*.cs" Exclude="../RintenUI/Core/obj/**;../RintenUI/Core/bin/**;../RintenUI/Core/Standalone/**" LinkBase="Core" />
+	</ItemGroup>
+
 </Project>

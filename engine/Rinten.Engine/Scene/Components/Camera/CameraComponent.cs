@@ -414,31 +414,6 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 		camera.OnRenderStageHook = executeCommandListsHook ??= ExecuteCommandLists;
 	}
 
-	//Update the SceneCamera UI with the settings from this component
-	private void UpdateSceneCameraUI( SceneCamera camera )
-	{
-		if ( Scene is null )
-			return;
-
-		camera.OnRenderUI = () => OnCameraRenderUI( camera );
-	}
-
-	private void OnCameraRenderUI( SceneCamera camera )
-	{
-		if ( Scene is null )
-			return;
-
-		foreach ( var c in Scene.GetAll<ScreenPanel>().OrderBy( x => x.ZIndex ) )
-		{
-			if ( !c.Active ) continue;
-			var target = c.TargetCamera ?? (IsMainCamera ? this : null);
-			if ( target != this ) continue;
-			if ( RenderExcludeTags.HasAny( c.GameObject.Tags ) ) continue;
-
-			c.Render();
-		}
-	}
-
 	//Set after the component is added, so the scene looks for its cameras again then
 	internal bool IsSceneEditorCamera
 	{
@@ -468,7 +443,6 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 				UpdateSceneCamera( sceneCamera );
 			}
 
-			UpdateSceneCameraUI( sceneCamera );
 			sceneCamera.RenderUI = renderUI;
 			UpdateSceneCameraStereo( sceneCamera );
 		}
@@ -785,8 +759,6 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 			rootPanel.PreLayout( screenRect );
 			rootPanel.CalculateLayout();
 			rootPanel.PostLayout();
-
-			rootPanel.BuildCommandList();
 		}
 	}
 }

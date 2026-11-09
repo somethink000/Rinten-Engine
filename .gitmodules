@@ -1,0 +1,3 @@
+[submodule "engine/RintenUI"]
+	path = engine/RintenUI
+	url = https://github.com/somethink000/RintenUI.git

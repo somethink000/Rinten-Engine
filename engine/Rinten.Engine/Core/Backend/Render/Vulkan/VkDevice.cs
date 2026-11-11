@@ -236,7 +236,7 @@ internal static unsafe partial class VkDevice
 	//Levels one pass may store into and buffers it may write: twelve, as FSR 3's luma pyramid stores nine
 	//(see CoreFsr3); buffers follow at binding twelve
 	internal const uint PassImages = 12;
-	internal const uint PassBuffers = 4;
+	internal const uint PassBuffers = 8;
 
 	//Whether the device stores into small float formats, as the bloom chains want - see CompactFormat
 	internal static bool storageExtended;

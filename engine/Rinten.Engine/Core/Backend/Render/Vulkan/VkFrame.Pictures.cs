@@ -417,14 +417,19 @@ internal static unsafe partial class VkFrame
 	//Compute pass bound like a fullscreen blit; set 2 holds the storage outputs (images, then buffers)
 	private static readonly VkPictures.Picture[] passStored = new VkPictures.Picture[VkDevice.PassImages];
 
+	//Indirect where argsBuffer is set: the group counts are three words an earlier pass wrote there
 	internal static int PassDispatch( ulong pipeline, ulong material, ulong* outputs, int* levels, int outputCount,
-		ulong* buffers, int bufferCount, byte* pushData, int pushSize, int groupsX, int groupsY, int groupsZ )
+		ulong* buffers, int bufferCount, byte* pushData, int pushSize, int groupsX, int groupsY, int groupsZ,
+		ulong argsBuffer = 0, int argsOffset = 0 )
 	{
 		lock ( VkDevice.renderLock )
 		{
 			if ( !Current.Recording ) return 0;
 			if ( groupsX <= 0 || groupsY <= 0 || groupsZ <= 0 ) return 0;
 			if ( outputCount > (int)VkDevice.PassImages || bufferCount > (int)VkDevice.PassBuffers ) return 0;
+
+			var args = argsBuffer != 0 ? VkBuffers.Get( argsBuffer ) : default;
+			if ( argsBuffer != 0 && ( args.Handle == 0 || argsOffset < 0 ) ) return 0;
 
 			if ( !VkPipelines.IsCompute( pipeline ) )
 			{
@@ -568,7 +573,8 @@ internal static unsafe partial class VkFrame
 
 			PushConstants( frame, layout, ShaderStageFlags.ComputeBit, pushData, pushSize );
 
-			vk.CmdDispatch( commands, (uint)groupsX, (uint)groupsY, (uint)groupsZ );
+			if ( args.Handle != 0 ) vk.CmdDispatchIndirect( commands, args, (ulong)argsOffset );
+			else vk.CmdDispatch( commands, (uint)groupsX, (uint)groupsY, (uint)groupsZ );
 
 			//What it stored, readable by whatever comes next - a draw, a blit, the next dispatch.
 			for ( var i = 0; i < outputCount; ++i )
@@ -582,7 +588,9 @@ internal static unsafe partial class VkFrame
 					SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
 					SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
 					DstStageMask = PipelineStageFlags2.AllCommandsBit,
-					DstAccessMask = AccessFlags2.MemoryReadBit,
+
+					//Written too: the next pass may store into what this one stored - or read it as its group counts
+					DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
 				};
 
 				var dependency = new DependencyInfo

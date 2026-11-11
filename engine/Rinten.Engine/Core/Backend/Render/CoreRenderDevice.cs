@@ -758,6 +758,22 @@ internal static unsafe class CoreRenderDevice
 		}
 	}
 
+	/// <summary>DispatchPass with its group counts written by an earlier pass: three words at argsOffset bytes of argsBuffer.</summary>
+	public static bool DispatchPassIndirect( ulong pipeline, ulong material, ReadOnlySpan<ulong> outputs, ReadOnlySpan<int> levels,
+		ReadOnlySpan<ulong> buffers, ReadOnlySpan<byte> push, ulong argsBuffer, int argsOffset = 0 )
+	{
+		if ( !CoreNative.Available || pipeline == 0 || argsBuffer == 0 || outputs.Length != levels.Length ) return false;
+
+		fixed ( ulong* outputPtr = outputs )
+		fixed ( int* levelPtr = levels )
+		fixed ( ulong* bufferPtr = buffers )
+		fixed ( byte* pushPtr = push )
+		{
+			return CoreRender.PassDispatch( pipeline, material, outputPtr, levelPtr, outputs.Length,
+				bufferPtr, buffers.Length, pushPtr, push.Length, 1, 1, 1, argsBuffer, argsOffset ) != 0;
+		}
+	}
+
 	/// <summary>A layered depth square for sun pages or a movers map - see CoreSunPages; nought on failure.</summary>
 	public static ulong CreateShadowMap( int side, int layers, bool readDepth = false )
 		=> CoreNative.Available ? CoreRender.ShadowMapCreate( side, layers, readDepth ) : 0;

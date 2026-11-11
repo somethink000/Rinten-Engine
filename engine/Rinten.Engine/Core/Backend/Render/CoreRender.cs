@@ -421,9 +421,10 @@ internal static unsafe class CoreRender
 		=> Portable ? 0 : VkPipelines.PassCreatePipeline( code, byteCount );
 
 	internal static int PassDispatch( ulong pipeline, ulong material, ulong* outputs, int* levels, int outputCount,
-		ulong* buffers, int bufferCount, byte* push, int pushSize, int groupsX, int groupsY, int groupsZ )
+		ulong* buffers, int bufferCount, byte* push, int pushSize, int groupsX, int groupsY, int groupsZ,
+		ulong argsBuffer = 0, int argsOffset = 0 )
 		=> Portable ? 0 : VkFrame.PassDispatch( pipeline, material, outputs, levels, outputCount,
-			buffers, bufferCount, push, pushSize, groupsX, groupsY, groupsZ );
+			buffers, bufferCount, push, pushSize, groupsX, groupsY, groupsZ, argsBuffer, argsOffset );
 
 	internal static void TargetEnd()
 	{

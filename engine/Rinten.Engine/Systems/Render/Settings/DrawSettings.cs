@@ -65,12 +65,13 @@ internal static partial class DrawSettings
 	/// <summary>MSAA sample count (0 is none); temporal upscalers replace it, the portable frame takes SMAA for it</summary>
 	[ConVar( "r_msaa", ConVarFlags.Saved, Min = 0, Max = 16,
 		Help = "Samples per pixel (0 off). Full frame only, ignored under a temporal upscaler; the portable frame runs SMAA instead." )]
-	internal static int Msaa { get; set; } = 4;
+	internal static int Msaa { get; set; } = 0;
 
+	//The default: edges near MSAA 2x's for a quarter of MSAA 4x's cost in a windy forest (+0.38 against +1.65 ms)
 	/// <summary>Whether SMAA T2x smooths the finished picture's edges over two frames half a pixel apart; temporal upscalers replace it</summary>
 	[ConVar( "r_smaa", ConVarFlags.Saved,
 		Help = "Smooth the finished picture's edges with SMAA T2x - one frame alone on the portable frame (0 off). Ignored under a temporal upscaler." )]
-	internal static bool Smaa { get; set; } = false;
+	internal static bool Smaa { get; set; } = true;
 
 	/// <summary>Whether FXAA smooths the finished picture's edges, where SMAA does not; temporal upscalers replace it</summary>
 	[ConVar( "r_fxaa", ConVarFlags.Saved,

@@ -209,8 +209,8 @@ public partial class RenderSettings
 		Borderless = true;
 		VSync = true;
 
-		AntiAliasQuality = MultisampleAmount.Multisample4x;
-		Smaa = false;
+		AntiAliasQuality = MultisampleAmount.MultisampleNone;
+		Smaa = true;
 		Fxaa = false;
 		Cmaa = false;
 		MaxFrameRate = 144;

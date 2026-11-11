@@ -49,7 +49,7 @@ internal sealed class CoreSmaa
 	//T2x: this frame's blended picture and last frame's, written in turn, and the resolve's reads of them with the depth
 	private readonly ulong[] frames = new ulong[2];
 	private readonly ulong[] resolveReads = new ulong[2];
-	private ulong resolveDepth;
+	private ulong resolveDepth, resolveMotion;
 	private int frameNow;
 	private bool frameHeld;
 
@@ -103,8 +103,10 @@ internal sealed class CoreSmaa
 	}
 
 	/// <summary>Smooths the edges of source into the screen or, in the full frame, into Final; T2x also blends in last frame,
-	/// found through depth and toBefore (this frame's clip space into last frame's, unjittered).</summary>
-	internal bool Run( ulong source, CoreRender.TargetKind into, ulong depth = 0, System.Numerics.Matrix4x4 toBefore = default )
+	/// found through depth and toBefore (this frame's clip space into last frame's, unjittered) or, where moved says this frame
+	/// drew it, the motion picture.</summary>
+	internal bool Run( ulong source, CoreRender.TargetKind into, ulong depth = 0, System.Numerics.Matrix4x4 toBefore = default,
+		ulong motion = 0, bool moved = false )
 	{
 		if ( source == 0 || width == 0 ) return false;
 
@@ -132,7 +134,7 @@ internal sealed class CoreSmaa
 		if ( !Fxaa && edges == 0 ) return false;
 
 		var fxaa = Fxaa;
-		var t2x = !fxaa && T2x && depth != 0 && EnsureT2x( depth );
+		var t2x = !fxaa && T2x && depth != 0 && EnsureT2x( depth, motion );
 		if ( !t2x ) frameHeld = false;
 
 		//SMAA 4x: S2x already smoothed this frame's edges, so the frame goes into T2x's blend with no weights at all. The
@@ -165,7 +167,7 @@ internal sealed class CoreSmaa
 				if ( !weighed ) return false;
 			}
 
-			if ( t2x ) return Resolved( into, toBefore, smoothed ? unweighedReads : blendReads );
+			if ( t2x ) return Resolved( into, toBefore, smoothed ? unweighedReads : blendReads, moved );
 
 			var blend = fxaa
 				? ( into == CoreRender.TargetKind.Screen ? fxaaScreenPipeline : fxaaFinalPipeline )
@@ -307,7 +309,7 @@ internal sealed class CoreSmaa
 	}
 
 	//T2x: the blend into this frame's picture, then the two frames resolved into where the frame goes
-	private bool Resolved( CoreRender.TargetKind into, System.Numerics.Matrix4x4 toBefore, ulong frameReads )
+	private bool Resolved( CoreRender.TargetKind into, System.Numerics.Matrix4x4 toBefore, ulong frameReads, bool moved )
 	{
 		var now = frameNow;
 		var resolve = into == CoreRender.TargetKind.Screen ? resolveScreenPipeline : resolveFinalPipeline;
@@ -332,6 +334,7 @@ internal sealed class CoreSmaa
 
 			//Two samples a pixel, evenly; the first frame has no last one
 			floats[16] = frameHeld ? 0.5f : 0.0f;
+			floats[19] = moved && resolveMotion != 0 ? 1.0f : 0.0f;
 
 			var opened = into != CoreRender.TargetKind.Screen;
 			if ( opened && !CoreRenderDevice.BeginTarget( into, Color.Transparent, clearFirst: false, discard: true ) ) return false;
@@ -350,8 +353,8 @@ internal sealed class CoreSmaa
 		}
 	}
 
-	//T2x's two pictures, the blend into them, and the resolve's reads, made again where the depth picture changes
-	private bool EnsureT2x( ulong depth )
+	//T2x's two pictures, the blend into them, and the resolve's reads, made again where the depth or motion picture changes
+	private bool EnsureT2x( ulong depth, ulong motion )
 	{
 		for ( var k = 0; k < 2; k++ )
 		{
@@ -366,17 +369,21 @@ internal sealed class CoreSmaa
 			if ( blendFramePipeline == 0 ) return false;
 		}
 
-		if ( resolveDepth != depth || resolveReads[0] == 0 )
+		if ( resolveDepth != depth || resolveMotion != motion || resolveReads[0] == 0 )
 		{
+			var heldDepth = resolveDepth == depth;
 			ForgetResolveReads();
 
 			for ( var k = 0; k < 2; k++ )
-				resolveReads[k] = CoreRenderDevice.CreateMaterial( Texture( frames[k] ), Texture( frames[1 - k] ), depth, Texture( frames[k] ), 1, 0, 0, 0 );
+				resolveReads[k] = CoreRenderDevice.CreateMaterial( Texture( frames[k] ), Texture( frames[1 - k] ), depth,
+					motion != 0 ? motion : Texture( frames[k] ), 1, 0, 0, 0 );
 
 			if ( resolveReads[0] == 0 || resolveReads[1] == 0 ) return false;
 
+			//A new depth picture is a new view, whose last frame is not this one's; motion coming and going is not
+			frameHeld &= heldDepth;
 			resolveDepth = depth;
-			frameHeld = false;
+			resolveMotion = motion;
 		}
 
 		return true;
@@ -390,7 +397,7 @@ internal sealed class CoreSmaa
 			resolveReads[k] = 0;
 		}
 
-		resolveDepth = 0;
+		resolveDepth = resolveMotion = 0;
 	}
 
 	//4x's read of the frame with a weights picture that is nought everywhere

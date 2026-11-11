@@ -984,8 +984,8 @@ internal sealed partial class CoreSceneDrawer
 	}
 
 	//Draws movers and what posed itself anew into the velocity picture, now over then, and says whether it drew,
-	//as an idle frame leaves another frame's contents
-	private bool DrawVelocities( ulong viewport )
+	//as an idle frame leaves another frame's contents; without movers, the wind's surfaces are left out
+	private bool DrawVelocities( ulong viewport, bool movers = true )
 	{
 		if ( velocityPipeline == 0 || tables is null ) return false;
 
@@ -1000,7 +1000,7 @@ internal sealed partial class CoreSceneDrawer
 			}
 		}
 
-		var movers = meshRender.Ready && meshRender.AnyMovers();
+		movers = movers && meshRender.Ready && meshRender.AnyMovers();
 
 		if ( tables.Moved.Count == 0 && !anyPose && !movers ) return false;
 
@@ -1810,6 +1810,9 @@ internal sealed partial class CoreSceneDrawer
 	//T2x: frames drawn since it went on, whose parity picks the half pixel, and this frame's clip space into last frame's
 	private int t2xFrame;
 	private System.Numerics.Matrix4x4 t2xToBefore = System.Numerics.Matrix4x4.Identity;
+
+	//T2x: whether this frame drew into the velocity picture
+	private bool t2xMoved;
 
 	//Drawn aside with nothing to add: the world finishes itself, and the finish writes it out as it is
 	private bool asideFinished;
@@ -3161,6 +3164,9 @@ internal sealed partial class CoreSceneDrawer
 			//Draw velocities only if motion blur or a temporal upscaler will read them
 			var moved = ( ( camera.PostProcess?.WantsMotion ?? false ) || upscaling ) && DrawVelocities( viewport );
 
+			//SMAA T2x follows what moved by itself through it; not the wind's sway, too slow to need its pass (0.3 ms in a forest)
+			t2xMoved = moved || t2x && DrawVelocities( viewport, movers: false );
+
 			//The frame may stay where the chain leaves it once the other picture exists; until then copy back
 			var settle = !PostInputsReady();
 
@@ -3279,8 +3285,9 @@ internal sealed partial class CoreSceneDrawer
 				var into = after ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
 
 				var t2xDepth = CoreSmaa.T2x ? CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) : 0ul;
+				var t2xMotion = CoreSmaa.T2x ? CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) : 0ul;
 
-				if ( !smaa.Run( CoreRenderDevice.TargetTexture( viewport, composeInto ), into, t2xDepth, t2xToBefore ) )
+				if ( !smaa.Run( CoreRenderDevice.TargetTexture( viewport, composeInto ), into, t2xDepth, t2xToBefore, t2xMotion, t2xMoved ) )
 					CopyOnto( composeInto, into, near, far );
 			}
 

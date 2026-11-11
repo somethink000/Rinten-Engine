@@ -146,42 +146,54 @@ float4 BlendPs( V2F i ) : SV_Target
 }
 
 //SMAA T2x's resolve: this frame's blended picture and last frame's, drawn a half pixel apart, averaged - two samples a
-//pixel. Last frame's is found through the camera alone and held inside this frame's neighbourhood, so what moved by itself
-//(wind) keeps no trail: there it is this frame's SMAA alone. Colour: this frame, normal: last frame, third: depth
+//pixel. Last frame's is found through the camera, or where a body moved by itself through its written motion (fourth,
+//w of g_resolve set when there is any) and only there held inside this frame's neighbourhood: on detail finer than a
+//pixel the two half pixels differ by more than any 3x3 holds, so clamping a still pixel flickers.
+//Colour: this frame, normal: last frame, third: depth
 [shader("fragment")]
 float4 ResolvePs( V2F i ) : SV_Target
 {
 	int2 pixel = int2( i.position.xy );
-	int2 most = int2( g_metrics.zw ) - 1;
-
-	float3 now = g_color.Load( int3( pixel, 0 ) ).rgb;
-	float3 low = now;
-	float3 high = now;
-
-	[unroll]
-	for ( int y = -1; y <= 1; y++ )
-	{
-		[unroll]
-		for ( int x = -1; x <= 1; x++ )
-		{
-			if ( x == 0 && y == 0 ) continue;
-			float3 side = g_color.Load( int3( clamp( pixel + int2( x, y ), int2( 0, 0 ), most ), 0 ) ).rgb;
-			low = min( low, side );
-			high = max( high, side );
-		}
-	}
-
 	float2 uv = ( float2( pixel ) + 0.5 ) * g_metrics.xy;
-	float4 clip = float4( ( uv * 2.0 ) - 1.0, min( g_third.Load( int3( pixel, 0 ) ).r, 1.0 ), 1.0 );
-	float3 before = float3( dot( clip, g_toBeforeX ), dot( clip, g_toBeforeY ), dot( clip, g_toBeforeW ) );
+	float3 now = g_color.Load( int3( pixel, 0 ) ).rgb;
+
+	float4 written = g_resolve.w > 0.5 ? g_fourth.Load( int3( pixel, 0 ) ) : float4( 0.0, 0.0, 0.0, 0.0 );
+	bool moving = written.a > 0.5;
 
 	float weight = g_resolve.x;
-	float2 then = uv;
+	float2 then = uv - written.xy;
 
-	if ( before.z > 1e-6 ) then = ( ( before.xy / before.z ) * 0.5 ) + 0.5;
+	if ( !moving )
+	{
+		float4 clip = float4( ( uv * 2.0 ) - 1.0, min( g_third.Load( int3( pixel, 0 ) ).r, 1.0 ), 1.0 );
+		float3 before = float3( dot( clip, g_toBeforeX ), dot( clip, g_toBeforeY ), dot( clip, g_toBeforeW ) );
+		if ( before.z > 1e-6 ) then = ( ( before.xy / before.z ) * 0.5 ) + 0.5;
+	}
+
 	if ( any( then < 0.0 ) || any( then > 1.0 ) ) weight = 0.0;
 
-	float3 last = clamp( Read( g_normal, then ).rgb, low, high );
+	float3 last = Read( g_normal, then ).rgb;
+
+	if ( moving )
+	{
+		int2 most = int2( g_metrics.zw ) - 1;
+		float3 low = now;
+		float3 high = now;
+
+		[unroll]
+		for ( int y = -1; y <= 1; y++ )
+		{
+			[unroll]
+			for ( int x = -1; x <= 1; x++ )
+			{
+				float3 side = g_color.Load( int3( clamp( pixel + int2( x, y ), int2( 0, 0 ), most ), 0 ) ).rgb;
+				low = min( low, side );
+				high = max( high, side );
+			}
+		}
+
+		last = clamp( last, low, high );
+	}
 
 	return float4( lerp( now, last, weight ), 1.0 );
 }

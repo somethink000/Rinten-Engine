@@ -24,6 +24,19 @@ Rough RoughFor( float roughness )
 	return r;
 }
 
+//Geometric specular antialiasing (Tokuyoshi and Kaplanyan 2019): where the normal turns within a pixel, a highlight
+//narrower than the pixel blinks as it lands on a sample or between them, so the lobe is widened by how far the normal
+//turns across the screen - alpha squared grows by twice its variance there, at most 0.18 - and roughness comes back
+float SpecularAntiAliased( float3 normal, float roughness )
+{
+	float3 across = ddx( normal );
+	float3 down = ddy( normal );
+	float spread = min( 0.5 * ( dot( across, across ) + dot( down, down ) ), 0.18 );
+
+	float a = roughness * roughness;
+	return sqrt( sqrt( saturate( ( a * a ) + spread ) ) );
+}
+
 //GGX distribution; the divisor guard must stay tiny or sharp highlights get clipped flat
 float DistributionGGX( float nDotH, Rough r )
 {
@@ -457,7 +470,7 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 	float3 normal = s.normal;
 	float3 albedo = s.albedo;
 
-	float roughness = s.roughness;
+	float roughness = SpecularAntiAliased( normal, s.roughness );
 	float metalness = s.metalness;
 	float occlusion = s.occlusion;
 

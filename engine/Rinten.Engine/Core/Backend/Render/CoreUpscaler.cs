@@ -296,9 +296,8 @@ internal sealed class CoreUpscaler
 
 		var floats = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>( push );
 
-		//Where glass and sprites changed the world - see ReactiveCs
-		var reacting = Reactivity( colour );
-		floats[15] = reacting == 0 ? 0.0f : CoreSceneDrawer.Indexed( reacting );
+		//The world before glass and sprites, which the pass compares with what was drawn - ReactiveCs's step, inline
+		floats[15] = opaqueKept ? CoreSceneDrawer.Indexed( CoreRenderDevice.PictureTexture( opaque ) ) : 0.0f;
 
 		//How much a pixel may have gathered: more the more it is upscaled, since each frame then lands fewer samples near any one pixel.
 		var upscale = DisplaySize.Width / (float)RenderSize.Width;

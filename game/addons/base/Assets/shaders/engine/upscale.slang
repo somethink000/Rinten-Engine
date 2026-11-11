@@ -145,18 +145,20 @@ void CopyCs( uint3 id : SV_DispatchThreadID )
 
 //How much of a texel what was laid over the opaque world changed, as AMD's generated reactive mask: the largest channel's
 //step as the eye sees it, nothing under a small one, at most 0.9 so a texel never forgets its history whole
+float Reacted( float3 final, float3 opaque )
+{
+	return saturate( ( Max3( abs( Squeeze( final ) - Squeeze( opaque ) ) ) - 0.02 ) * 4.0 ) * 0.9;
+}
+
+//The mask as a picture, for FSR3; the engine's own temporal pass works it out inline
 [numthreads(8, 8, 1)]
 void ReactiveCs( uint3 id : SV_DispatchThreadID )
 {
 	float2 size = g_vFrameSize.xy;
 	if ( any( float2( id.xy ) >= size ) ) return;
 
-	float3 final = Squeeze( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb );
-	float3 opaque = Squeeze( Texel( g_vFramePictures.y, int2( id.xy ), size ).rgb );
-
-	float step = Max3( abs( final - opaque ) );
-
-	g_out[id.xy] = float4( saturate( ( step - 0.02 ) * 4.0 ) * 0.9, 0.0, 0.0, 0.0 );
+	g_out[id.xy] = float4( Reacted( Texel( g_vFramePictures.x, int2( id.xy ), size ).rgb,
+		Texel( g_vFramePictures.y, int2( id.xy ), size ).rgb ), 0.0, 0.0, 0.0 );
 }
 
 //---- the temporal pass -------------------------------------------------------
@@ -338,7 +340,11 @@ void TemporalCs( uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint 
 		gathered *= 1.0 / ( 1.0 + speed * 0.05 );
 
 		//Glass, particles and sprites move over what the motion follows: where they changed the picture, the history counts less
-		if ( g_vFrameParams.w > 0.5 ) gathered *= 1.0 - Texel( g_vFrameParams.w, clamp( nearest, int2( 0, 0 ), last ), inSize ).r;
+		if ( g_vFrameParams.w > 0.5 )
+		{
+			int2 at = clamp( nearest, int2( 0, 0 ), last );
+			gathered *= 1.0 - Reacted( Texel( g_vFramePictures.x, at, inSize ).rgb, Texel( g_vFrameParams.w, at, inSize ).rgb );
+		}
 
 		//This frame's samples count by how close they fell to this pixel - a sample right
 		//on it is a whole frame's worth, one between output pixels a fraction of one.

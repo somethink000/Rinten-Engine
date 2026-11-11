@@ -967,9 +967,14 @@ internal static unsafe class CoreSceneRenderer
 	internal static float ExposureOf( float[] frame )
 		=> frame is null || frame.Length < FrameFloats ? 1.0f : frame[FinishAt + 0];
 
+	//The exposure the last frame block was finished with - what SMAA S2x reads the world's light by, see CoreWorldResolve
+	internal static float LastExposure = 1.0f;
+
 	internal static void SetFinish( float[] frame, float exposure, float curve, float chain = 0.0f )
 	{
 		if ( frame is null || frame.Length < FrameFloats ) return;
+
+		LastExposure = exposure;
 
 		frame[FinishAt + 0] = exposure;
 		frame[FinishAt + 1] = curve;
@@ -1965,7 +1970,10 @@ internal static unsafe class CoreSceneRenderer
 				//Passed with the target: the mover pre-pass draws depth alone, and a colour attachment would not match
 				depthOnly: kind.DepthOnly,
 				target: kind.Target, pictureFormat: kind.Target == CoreRender.TargetKind.Picture ? kind.PictureFormat : -1,
-				compare: kind.Light ? CoreRenderDevice.DepthCompare.LightNearerOrSame : CoreRenderDevice.DepthCompare.NearerOrSame,
+				//Equal over another pass's depth: that pass cut the leaves and this one does not, so a nearer fragment here is a
+				//cut-away texel, and passing it painted the hole over whatever the cull's order drew before it
+				compare: kind.Light ? CoreRenderDevice.DepthCompare.LightNearerOrSame
+					: kind.DepthOnly || kind.Moves ? CoreRenderDevice.DepthCompare.NearerOrSame : CoreRenderDevice.DepthCompare.Equal,
 
 				//The screen-covering pass, so worth baking several ways - see ShadeSpecialize
 				specialize: kind.Specialize );

@@ -67,10 +67,25 @@ internal static partial class DrawSettings
 		Help = "Samples per pixel (0 off). Full frame only, ignored under a temporal upscaler; the portable frame runs SMAA instead." )]
 	internal static int Msaa { get; set; } = 4;
 
-	/// <summary>Whether SMAA smooths the finished picture's edges; temporal upscalers replace it</summary>
+	/// <summary>Whether SMAA T2x smooths the finished picture's edges over two frames half a pixel apart; temporal upscalers replace it</summary>
 	[ConVar( "r_smaa", ConVarFlags.Saved,
-		Help = "Smooth the finished picture's edges with SMAA (0 off). Ignored under a temporal upscaler." )]
+		Help = "Smooth the finished picture's edges with SMAA T2x - one frame alone on the portable frame (0 off). Ignored under a temporal upscaler." )]
 	internal static bool Smaa { get; set; } = false;
+
+	/// <summary>Whether FXAA smooths the finished picture's edges, where SMAA does not; temporal upscalers replace it</summary>
+	[ConVar( "r_fxaa", ConVarFlags.Saved,
+		Help = "Smooth the finished picture's edges with FXAA (0 off). SMAA and CMAA2 win where on; ignored under a temporal upscaler." )]
+	internal static bool Fxaa { get; set; } = false;
+
+	/// <summary>Whether CMAA2 smooths the finished picture's edges, where SMAA does not; full frame only</summary>
+	[ConVar( "r_cmaa", ConVarFlags.Saved,
+		Help = "Smooth the finished picture's edges with CMAA2 (0 off). SMAA wins where both are on; full frame only, ignored under a temporal upscaler." )]
+	internal static bool Cmaa { get; set; } = false;
+
+	/// <summary>Whether SMAA smooths each of MSAA 2x's samples apart before they are averaged (SMAA S2x; with r_smaa, SMAA 4x)</summary>
+	[ConVar( "r_smaa_s2x", ConVarFlags.Saved,
+		Help = "SMAA on each of MSAA 2x's samples before they are averaged (0 off); with r_smaa on, SMAA 4x. Needs r_msaa 2, full frame only." )]
+	internal static bool SmaaS2x { get; set; } = false;
 
 	/// <summary>How a world drawn smaller than its window is upscaled to it; temporal modes also do AA</summary>
 	[ConVar( "r_upscaling", ConVarFlags.Saved, Min = 0, Max = 5,

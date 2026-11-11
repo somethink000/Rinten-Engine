@@ -211,6 +211,8 @@ public partial class RenderSettings
 
 		AntiAliasQuality = MultisampleAmount.Multisample4x;
 		Smaa = false;
+		Fxaa = false;
+		Cmaa = false;
 		MaxFrameRate = 144;
 		MaxFrameRateInactive = 60;
 		MaxFrameRateMenu = 144;
@@ -248,6 +250,8 @@ public partial class RenderSettings
 		VSync = false;
 		AntiAliasQuality = MultisampleAmount.MultisampleNone;
 		Smaa = false;
+		Fxaa = false;
+		Cmaa = false;
 		MaxFrameRate = 10000;
 		MaxFrameRateInactive = 10000;
 		DefaultFOV = 75;

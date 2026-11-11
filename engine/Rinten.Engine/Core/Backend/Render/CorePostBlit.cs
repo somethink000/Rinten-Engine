@@ -163,7 +163,7 @@ internal static class CorePostBlit
 	//The compose's push block: every pass's, with the compose's own numbers in its tail - the size of what it
 	//carries up, how far it sharpens, and where its point effects' numbers start. See compose.slang.
 	internal static Span<byte> ComposePush( Span<byte> into, Vector2 size, Vector2 source, int chain,
-		float near, float far, int colour, int normals, int depth, int velocity, float sharpen = 0.0f )
+		float near, float far, int colour, int normals, int depth, int velocity, float sharpen = 0.0f, bool lumaAlpha = false )
 	{
 		var span = into[..128];
 		span.Clear();
@@ -191,6 +191,7 @@ internal static class CorePostBlit
 
 		floats[16] = source.x;
 		floats[17] = source.y;
+		floats[18] = lumaAlpha ? 1.0f : 0.0f;
 		floats[19] = sharpen;
 
 		floats[31] = chain;

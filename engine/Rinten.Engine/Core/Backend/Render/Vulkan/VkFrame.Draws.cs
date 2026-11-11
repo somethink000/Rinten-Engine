@@ -1213,8 +1213,9 @@ internal static unsafe partial class VkFrame
 
 	private static bool resolvingWorld;
 
-	//Opens the world's picture for the resolve; the handle of the samples and their count, nought where it would not open
-	internal static (ulong Handle, int Samples) WorldResolveBegin()
+	//Opens the world's picture for the resolve; the handle of the samples, their count and the picture's size, nought where
+	//it would not open. Unopened, the samples are only made readable and WorldResolveOpen opens the picture after
+	internal static (ulong Handle, int Samples, int Width, int Height) WorldResolveBegin( bool open = true )
 	{
 		lock ( VkDevice.renderLock )
 		{
@@ -1225,11 +1226,22 @@ internal static unsafe partial class VkFrame
 			MoveTo( CurrentFrame.Commands, p.WorldSampledColourImage, ref p.WorldSampledColourLayout,
 				ImageLayout.ShaderReadOnlyOptimal, ImageAspectFlags.ColorBit );
 
+			if ( !open ) return (p.WorldSampledHandle, (int)p.WorldSamples, (int)p.Extent.Width, (int)p.Extent.Height);
+
+			return WorldResolveOpen() ? (p.WorldSampledHandle, (int)p.WorldSamples, (int)p.Extent.Width, (int)p.Extent.Height) : (0ul, 0, 0, 0);
+		}
+	}
+
+	/// <summary>Opens the world's picture for what the resolve draws into it.</summary>
+	internal static bool WorldResolveOpen()
+	{
+		lock ( VkDevice.renderLock )
+		{
 			resolvingWorld = true;
 			var began = TargetBegin( VkDevice.TargetSceneColour, 0.0f, 0.0f, 0.0f, 0.0f, 2 );
 			resolvingWorld = false;
 
-			return began != 0 ? (p.WorldSampledHandle, (int)p.WorldSamples) : (0ul, 0);
+			return began != 0;
 		}
 	}
 

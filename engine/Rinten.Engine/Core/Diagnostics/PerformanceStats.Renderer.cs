@@ -20,13 +20,15 @@ public static partial class PerformanceStats
 		}
 	}
 
-	/// <summary>How the world's edges are smoothed now: SMAA, MSAA, a temporal upscaler, or "off".</summary>
+	/// <summary>How the world's edges are smoothed now: SMAA, FXAA, MSAA, a temporal upscaler, or "off".</summary>
 	public static string AntiAliasing
 	{
 		get
 		{
 			//SMAA is the portable frame's only anti-aliasing
-			if ( CoreRenderDevice.PortableFrame ) return CoreSmaa.Asked ? "SMAA" : "off";
+			var post = CoreSmaa.S2x ? ( CoreSmaa.T2x ? "SMAA 4x" : "SMAA S2x" ) : CoreSmaa.T2x ? "SMAA T2x" : CoreSmaa.Smaa ? "SMAA" : CoreSmaa.Cmaa ? "CMAA2" : CoreSmaa.Fxaa ? "FXAA" : null;
+
+			if ( CoreRenderDevice.PortableFrame ) return post ?? "off";
 
 			var temporal = Rinten.Rendering.DrawSettings.Upscaler switch
 			{
@@ -40,7 +42,8 @@ public static partial class PerformanceStats
 
 			var sampled = VkFrame.WorldSamples > 1 ? $"MSAA {VkFrame.WorldSamples}x" : null;
 
-			return CoreSmaa.Asked ? ( sampled is null ? "SMAA" : sampled + " + SMAA" ) : sampled ?? "off";
+			//S2x and 4x already name their MSAA 2x
+			return post is null ? sampled ?? "off" : sampled is null || CoreSmaa.S2x ? post : $"{sampled} + {post}";
 		}
 	}
 }

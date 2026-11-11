@@ -1807,6 +1807,10 @@ internal sealed partial class CoreSceneDrawer
 	//SMAA's pictures for this view - see CoreSmaa
 	private readonly CoreSmaa smaa = new();
 
+	//T2x: frames drawn since it went on, whose parity picks the half pixel, and this frame's clip space into last frame's
+	private int t2xFrame;
+	private System.Numerics.Matrix4x4 t2xToBefore = System.Numerics.Matrix4x4.Identity;
+
 	//Drawn aside with nothing to add: the world finishes itself, and the finish writes it out as it is
 	private bool asideFinished;
 
@@ -2409,7 +2413,13 @@ internal sealed partial class CoreSceneDrawer
 			(int)worldPictures.x, (int)worldPictures.y, pixels.Width, pixels.Height,
 			position, eyeView.Rotation, camera.RenderFieldOfView( aspect ) );
 
-		var drawnProjection = upscaler.Temporal ? projection * upscaler.JitterMatrix : projection;
+		//SMAA T2x draws each frame a half pixel off the last, the other way - see CoreSmaa.T2x
+		var t2x = CoreSmaa.T2x && !upscaler.Temporal && Eye is null && !overlayOnly;
+		if ( t2x ) t2xFrame++;
+
+		var drawnProjection = upscaler.Temporal ? projection * upscaler.JitterMatrix
+			: t2x ? projection * CoreUpscale.JitterMatrix( CoreSmaa.T2xJitter( t2xFrame ), (int)worldPictures.x, (int)worldPictures.y )
+			: projection;
 		var drawnViewProjection = view * drawnProjection;
 
 		//The world's shading size (its pictures' size when upscaled), so screen-position lookups match it
@@ -2453,6 +2463,11 @@ internal sealed partial class CoreSceneDrawer
 		//Last frame's matrix with this frame's jitter, so still things read as still in motion vectors
 		var previousJittered = ( hasPrevious ? previousViewProjection : viewProjection ) * upscaler.JitterMatrix;
 		CoreSceneRenderer.SetPrevious( frame, previousJittered );
+
+		//T2x reads last frame where the camera alone put it, unjittered both ways: still things read the same pixel, which
+		//last frame drew from the other half pixel
+		if ( t2x && System.Numerics.Matrix4x4.Invert( viewProjection, out var plainToWorld ) )
+			t2xToBefore = plainToWorld * ( hasPrevious ? previousViewProjection : viewProjection );
 
 		if ( System.Numerics.Matrix4x4.Invert( drawnViewProjection, out var drawnToWorld ) )
 		{
@@ -3198,7 +3213,7 @@ internal sealed partial class CoreSceneDrawer
 
 			//SMAA before what comes after lays a HUD over the picture; never over the blocks of a pixelation
 			var smoothed = smoothing && !CorePointChain.Moves( CollectionsMarshal.AsSpan( composeChain ) ) &&
-				smaa.Ready( pixels.Width, pixels.Height );
+				smaa.Ready( pixels.Width, pixels.Height, pictures: CoreSmaa.Smaa );
 
 			//The compose then writes a picture for SMAA to read - the other one where SMAA itself writes Final
 			var offWindow = after || smoothed;
@@ -3240,7 +3255,7 @@ internal sealed partial class CoreSceneDrawer
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 1 ) ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) ),
 				Indexed( CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Velocity ) ),
-				upscaled != 0 ? upscaler.ComposeSharpening : 0.0f );
+				upscaled != 0 ? upscaler.ComposeSharpening : 0.0f, lumaAlpha: smoothed );
 
 			var finishing = offWindow && CoreRenderDevice.BeginTarget( composeInto, Color.Transparent,
 				clearFirst: false, discard: true );
@@ -3263,7 +3278,9 @@ internal sealed partial class CoreSceneDrawer
 			{
 				var into = after ? CoreRender.TargetKind.Final : CoreRender.TargetKind.Screen;
 
-				if ( !smaa.Run( CoreRenderDevice.TargetTexture( viewport, composeInto ), into ) )
+				var t2xDepth = CoreSmaa.T2x ? CoreRenderDevice.TargetTexture( viewport, CoreRender.TargetKind.Scene, 2 ) : 0ul;
+
+				if ( !smaa.Run( CoreRenderDevice.TargetTexture( viewport, composeInto ), into, t2xDepth, t2xToBefore ) )
 					CopyOnto( composeInto, into, near, far );
 			}
 
@@ -4115,7 +4132,9 @@ internal sealed partial class CoreSceneDrawer
 		if ( camera?.PostProcess is null ) return;
 		if ( !Hung( camera, stage ) ) return;
 
+		CoreWorldResolve.Interim = true;
 		CoreRenderDevice.EndTarget();
+		CoreWorldResolve.Interim = false;
 
 		RunStage( camera, stage, CoreRender.TargetKind.Scene, near, far );
 

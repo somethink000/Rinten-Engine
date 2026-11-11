@@ -2,19 +2,33 @@
 
 public static class SettingsMenus
 {
-	//One kind at a time: SMAA over the finished picture, TAA through the engine's temporal upscaler, or MSAA
+	//One kind at a time: SMAA T2x, CMAA2 or FXAA over the finished picture, TAA through the engine's temporal upscaler, or MSAA
 	[Menu( "Editor", "Settings/Anti-Aliasing/Off" )]
 	public static bool AntiAliasOff
 	{
-		get => !Smaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) < 2;
+		get => !Smaa && !Cmaa && !Fxaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) < 2;
 		set => AntiAlias( smaa: false, taa: false, msaa: 0 );
 	}
 
-	[Menu( "Editor", "Settings/Anti-Aliasing/SMAA" )]
+	[Menu( "Editor", "Settings/Anti-Aliasing/SMAA T2x" )]
 	public static bool Smaa
 	{
 		get => ConsoleSystem.GetValueInt( "r_smaa" ) != 0;
 		set => AntiAlias( smaa: true, taa: false, msaa: 0 );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/CMAA2" )]
+	public static bool Cmaa
+	{
+		get => ConsoleSystem.GetValueInt( "r_cmaa" ) != 0 && !Smaa;
+		set => AntiAlias( smaa: false, taa: false, msaa: 0, cmaa: true );
+	}
+
+	[Menu( "Editor", "Settings/Anti-Aliasing/FXAA" )]
+	public static bool Fxaa
+	{
+		get => ConsoleSystem.GetValueInt( "r_fxaa" ) != 0 && !Smaa && !Cmaa;
+		set => AntiAlias( smaa: false, taa: false, msaa: 0, fxaa: true );
 	}
 
 	[Menu( "Editor", "Settings/Anti-Aliasing/TAA" )]
@@ -47,11 +61,13 @@ public static class SettingsMenus
 
 	//A temporal upscaler replaces MSAA while it is on, so a count shows only without one
 	private static bool Multisampled( int samples )
-		=> !Smaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) == samples;
+		=> !Smaa && !Cmaa && !Fxaa && !Taa && ConsoleSystem.GetValueInt( "r_msaa" ) == samples;
 
-	private static void AntiAlias( bool smaa, bool taa, int msaa )
+	private static void AntiAlias( bool smaa, bool taa, int msaa, bool fxaa = false, bool cmaa = false )
 	{
 		ConsoleSystem.SetValue( "r_smaa", smaa ? "1" : "0" );
+		ConsoleSystem.SetValue( "r_cmaa", cmaa ? "1" : "0" );
+		ConsoleSystem.SetValue( "r_fxaa", fxaa ? "1" : "0" );
 		ConsoleSystem.SetValue( "r_msaa", msaa.ToString() );
 
 		//Leaving TAA goes back to drawing at the window's size; another upscaler is left as it was

@@ -968,6 +968,7 @@ internal static class EngineShaders
 	internal const string Compose = "shaders/engine/compose.slang";
 	internal const string MsaaResolve = "shaders/engine/msaa_resolve.slang";
 	internal const string Smaa = "shaders/engine/smaa.slang";
+	internal const string Cmaa = "shaders/engine/cmaa2.slang";
 
 	internal const string MeshCull = "shaders/engine/mesh_cull.slang";
 	internal const string MeshRaster = "shaders/engine/mesh_raster.slang";
@@ -1054,10 +1055,20 @@ internal static class EngineShaders
 	[
 		("MainVs", CoreShaderCompiler.Stage.Vertex), ("EdgesPs", CoreShaderCompiler.Stage.Pixel),
 		("WeightsPs", CoreShaderCompiler.Stage.Pixel), ("BlendPs", CoreShaderCompiler.Stage.Pixel),
+		("FxaaPs", CoreShaderCompiler.Stage.Pixel),
+		("ResolvePs", CoreShaderCompiler.Stage.Pixel),
 	];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] SmaaRuns =
-		[("EdgesCs", CoreShaderCompiler.Stage.Compute), ("WeightsCs", CoreShaderCompiler.Stage.Compute)];
+		[("EdgesCs", CoreShaderCompiler.Stage.Compute), ("WeightsCs", CoreShaderCompiler.Stage.Compute),
+		("EdgesS2xCs", CoreShaderCompiler.Stage.Compute), ("WeightsS2xCs", CoreShaderCompiler.Stage.Compute),
+		("S2xBlendPs", CoreShaderCompiler.Stage.Pixel), ("CmaaPs", CoreShaderCompiler.Stage.Pixel)];
+
+	private static readonly (string, CoreShaderCompiler.Stage)[] CmaaRuns =
+	[
+		("EdgesColor2x2CS", CoreShaderCompiler.Stage.Compute), ("ComputeDispatchArgsCS", CoreShaderCompiler.Stage.Compute),
+		("ProcessCandidatesCS", CoreShaderCompiler.Stage.Compute), ("DeferredColorApply2x2CS", CoreShaderCompiler.Stage.Compute),
+	];
 
 	//Every pass variant a bake compiles; Everywhere means the portable frame has it too
 	internal static IReadOnlyList<(string File, string Defines, (string Entry, CoreShaderCompiler.Stage Stage)[] Stages, bool Everywhere)> All =>
@@ -1077,6 +1088,7 @@ internal static class EngineShaders
 		//SMAA's passes: drawn in the portable frame, edges and weights in compute in the full one - see CoreSmaa
 		( Smaa, "", SmaaDraws, true ),
 		( Smaa, CoreSmaa.ComputeDefines, SmaaRuns, false ),
+		( Cmaa, "", CmaaRuns, false ),
 		( Velocity, "", VelocityDraws, false ),
 		( Compose, "", Draws, false ),
 		( Compose, Carry, Draws, false ),

@@ -20,6 +20,9 @@ float2 ChainWhere( float2 uv ) { return uv; }
 //written. Nothing means they are the same size and there is nothing to carry up.
 float2 SourceSize() { return g_vPostSlots[0].xy; }
 
+//Whether alpha carries the finished pixel's luma for the edge filter after - see smaa.slang
+bool LumaAlpha() { return g_vPostSlots[0].z > 0.5; }
+
 //How far RCAS sharpens what an upscaler gathered (CoreUpscale.RcasStrength), nought none
 float Sharpening() { return g_vPostSlots[0].w; }
 
@@ -260,5 +263,10 @@ float4 MainPs( PostV2F i ) : SV_Target0
 	float3 result = Sharpening() > 0.0 ? ChainBefore( Sharpened( ChainWhere( uv ) ), uv ) : Shaded( uv );
 
 	//And what comes after the curve, once, over the finished picture.
-	return float4( ChainAfter( result, i.uv ), 1.0 );
+	float3 finished = ChainAfter( result, i.uv );
+
+	//Square root of linear light: near the gamma the edge filters' thresholds are for, as smaa.slang's Luma
+	if ( !LumaAlpha() ) return float4( finished, 1.0 );
+
+	return float4( finished, dot( sqrt( saturate( finished ) ), float3( 0.2126, 0.7152, 0.0722 ) ) );
 }

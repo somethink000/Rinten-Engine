@@ -201,7 +201,7 @@ public static class ExportToolchain
 			{
 				//The engine's Android project, which knows which SDK packages its build asks for
 				var project = Path.GetFullPath( Path.Combine( Environment.CurrentDirectory, "..", "engine", "Launcher", "RintenAndroid", "Rinten-Android.csproj" ) );
-				var arguments = $"build \"{project}\" -t:InstallAndroidDependencies -f net10.0-android " +
+				var arguments = $"build \"{project}\" -t:InstallAndroidDependencies -f net11.0-android " +
 					$"-p:AndroidSdkDirectory=\"{AndroidSdk ?? AndroidSdkInstall}\" -p:JavaSdkDirectory=\"{JavaSdk ?? JavaSdkInstall}\" " +
 					"-p:AcceptAndroidSDKLicenses=True";
 

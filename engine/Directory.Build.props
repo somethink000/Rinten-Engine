@@ -1,15 +1,17 @@
 <Project>
 
-	<!-- Every project under engine/ that does not have a Directory.Build.props of its own - which is all of them but Tests and Launcher. -->
+	<!-- Every project under engine/ without a Directory.Build.props of its own - all but Tests and Launcher. -->
 
 	<PropertyGroup>
-		<!-- Release unless somebody asks for Debug by name. Rinten.Engine writes to a fixed OutputPath - game/bin/managed, the folder the editor runs from - in every configuration. So anything that builds it builds the editor's engine, and the SDK's default of Debug meant a stray `dotnet build` left the editor running with the JIT optimiser off. That was read as a 940 -> 684 fps regression from the core port for most of an evening; the perfreport's conditions block had been saying "build Debug, jit optimiser OFF - this is not a performance measurement" the whole time. Setting it on the
-		     referencing project is not enough: the SDK unsets Configuration and Platform for projects reached through a ProjectReference (ShouldUnsetParentConfigurationAndPlatform), so a Release test project still built a Debug engine. It has to be here, beside the project that owns the output. And it has to be in a props file rather than the csproj: the SDK gives Configuration its Debug default before a project's own body is read, so a condition in the csproj is already false by the time it runs. Directory.Build.props is imported first. `dotnet build -c Debug` still does exactly what it says. -->
+		<!-- Release unless asked: the engine writes into the editor's game/bin/managed, and a stray Debug build left the editor's JIT optimiser off.
+		     It has to be here, not in a csproj: the SDK sets Debug before a project's body is read, and unsets it on referenced projects. -->
 		<Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
 
-		<!-- English only. Roslyn ships its diagnostics translated into thirteen languages, and a restore copies every one of them: fourteen folders of satellite assemblies beside the engine, seven megabytes, for messages that
-		     are printed into a log nobody reads in Korean. Rinten.Engine already said this; the projects that write to the same folder - Rinten.Tools, Rinten.Server, PackageBuild - did not, so the folders came back anyway. -->
+		<!-- English only: Roslyn's thirteen translated satellite folders are seven megabytes beside the engine. -->
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+		<!-- .NET 11 runtime async: the runtime suspends awaits, not a compiler state machine - fewer allocations, cheaper completed awaits. -->
+		<Features>$(Features);runtime-async=on</Features>
 	</PropertyGroup>
 
 </Project>

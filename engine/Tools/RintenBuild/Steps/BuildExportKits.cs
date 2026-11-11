@@ -14,7 +14,7 @@ internal class BuildExportKits( string output )
 	[
 		new( "RintenWeb", "RintenWeb.csproj", "Rinten-Web", "-r browser-wasm",
 			[ "RintenWeb.csproj", "Directory.Build.props", "nuget.config", "wwwroot/index.html" ] ),
-		new( "RintenAndroid", "Rinten-Android.csproj", "Rinten-Android", "-f net10.0-android",
+		new( "RintenAndroid", "Rinten-Android.csproj", "Rinten-Android", "-f net11.0-android",
 			[ "Rinten-Android.csproj", "Directory.Build.props", "Properties/AndroidManifest.xml", "Properties/AndroidManifest.Vr.xml" ] ),
 	];
 

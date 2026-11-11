@@ -4,7 +4,7 @@
 	
 	<PropertyGroup>
 		<VersionPrefix>1.0.1</VersionPrefix>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net11.0</TargetFramework>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -13,7 +13,7 @@
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<NoWarn>1701;1702;1591;CA1416</NoWarn>
 		<OutputPath>../../game/bin/managed</OutputPath>
-		<LangVersion>14</LangVersion>
+		<LangVersion>15</LangVersion>
 		<AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
 	</PropertyGroup>
 
@@ -59,10 +59,10 @@
 
 	<ItemGroup>
 		<PackageReference Include="Facepunch.ActionGraphs" Version="1.9.27" />
-		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.12.0-beta1.25218.8" />
-		<PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.0" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
+		<PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="11.0.0" />
 		<PackageReference Include="Svg.Skia" Version="2.0.0.4" />
-		<PackageReference Include="System.Numerics.Tensors" Version="10.0.0" />
+		<PackageReference Include="System.Numerics.Tensors" Version="11.0.0" />
 		<!-- Opus, for voice chat (Utility/VoiceManager). A C# port of the reference codec, BSD licensed like it, so the same code runs on every
 		     platform including the web and Android and there is no native library to ship. Only the managed codec is used - see VoiceCodec. -->
 		<PackageReference Include="Concentus" Version="2.2.2" />
@@ -100,7 +100,7 @@
 		<PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.1" />
 		<!-- The package rather than ThirdParty/System.Speech.dll, which was never committed - so this reference resolved only on a machine that already had the file, and a fresh clone
 		     could not build on any platform. The package restores everywhere; the API stays Windows-only at runtime, which is what the [SupportedOSPlatform] on Rinten.Speech says. -->
-		<PackageReference Include="System.Speech" Version="10.0.0" />
+		<PackageReference Include="System.Speech" Version="11.0.0" />
 	</ItemGroup>
 
 	<Target Name="_ResolveCopyLocalNuGetPkgXmls" AfterTargets="ResolveReferences">

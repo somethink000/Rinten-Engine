@@ -14,7 +14,7 @@ internal partial class Project
 		sb.AppendLine( "" );
 
 		sb.AppendLine( $"	<PropertyGroup>" );
-		sb.AppendLine( $"		<TargetFramework>net10.0</TargetFramework>" );
+		sb.AppendLine( $"		<TargetFramework>net11.0</TargetFramework>" );
 		sb.AppendLine( $"		<GenerateDocumentationFile>true</GenerateDocumentationFile>" );
 		sb.AppendLine( $"		<AssemblyName>{ProjectName}</AssemblyName>" );
 		sb.AppendLine( $"		<PackageId>{ProjectName}</PackageId>" );

@@ -29,7 +29,7 @@ partial class Compiler
 	{
 		var generatedCode = GeneratedCode.ToString();
 
-		generatedCode += $"{Environment.NewLine}[assembly: System.Runtime.Versioning.TargetFramework( \".NETCoreApp,Version=v9.0\", FrameworkDisplayName = \".NET 9.0\" )]";
+		generatedCode += $"{Environment.NewLine}[assembly: System.Runtime.Versioning.TargetFramework( \".NETCoreApp,Version=v11.0\", FrameworkDisplayName = \".NET 11.0\" )]";
 		generatedCode += $"{Environment.NewLine}[assembly: global::System.Reflection.AssemblyMetadata( \"CompileTime\", {DateTime.UtcNow.ToString( "O" ).QuoteSafe()} )]";
 
 		if ( version != null )

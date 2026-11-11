@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AssemblyName>Rinten.Hotload</AssemblyName>
     <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
@@ -21,7 +21,7 @@
     <ProjectReference Include="..\Rinten.System\Rinten.System.csproj" />
   </ItemGroup>
 
-  <PropertyGroup Condition="$(TargetFramework.Contains('net10.0')) Or $(TargetFramework.Contains('net9.0')) Or $(TargetFramework.Contains('net7.0')) Or $(TargetFramework.Contains('net6.0')) Or $(TargetFramework.Contains('net5.0')) Or $(TargetFramework.Contains('netstandard')) Or $(TargetFramework.Contains('netcoreapp')) ">
+  <PropertyGroup Condition="$(TargetFramework.Contains('net11.0')) Or $(TargetFramework.Contains('net10.0')) Or $(TargetFramework.Contains('net9.0')) Or $(TargetFramework.Contains('net7.0')) Or $(TargetFramework.Contains('net6.0')) Or $(TargetFramework.Contains('net5.0')) Or $(TargetFramework.Contains('netstandard')) Or $(TargetFramework.Contains('netcoreapp')) ">
     <DefineConstants>$(DefineConstants);NET_CORE</DefineConstants>
   </PropertyGroup>
 

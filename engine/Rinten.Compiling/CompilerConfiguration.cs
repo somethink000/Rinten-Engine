@@ -99,8 +99,9 @@ partial class Compiler
 		/// <summary>Returns the CSharpParseOptions for this configuration, which includes the preprocessor symbols defined in <see cref="DefineConstants"/>.</summary>
 		public CSharpParseOptions GetParseOptions()
 		{
+			//The newest finished version this Roslyn knows: C# 14 on 5.9, 15 once a Roslyn with it is referenced
 			return CSharpParseOptions.Default
-				.WithLanguageVersion( LanguageVersion.CSharp14 )
+				.WithLanguageVersion( LanguageVersion.Latest )
 				.WithPreprocessorSymbols( GetPreprocessorSymbols() );
 		}
 	}

@@ -5,7 +5,7 @@
 
   <PropertyGroup>
     <VersionPrefix>1.0.1</VersionPrefix>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -30,9 +30,9 @@
     <ProjectReference Include="..\Rinten.Engine\Rinten.Engine.csproj" />
     <ProjectReference Include="..\Rinten.Compiling\Rinten.Compiling.csproj" />
     <ProjectReference Include="..\Rinten.SolutionGenerator\Rinten.SolutionGenerator.csproj" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0-2.final" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <!-- The editor's fast hotload patches method bodies with it - see ILHotload. -->
-    <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
+    <PackageReference Include="MonoMod.RuntimeDetour" Version="25.4.0-prerelease.2" />
   </ItemGroup>
 
 </Project>

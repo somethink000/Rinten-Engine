@@ -8,7 +8,7 @@
 		     the core port for most of an evening; the perfreport's conditions block had been saying "build Debug, jit optimiser OFF - this is not a performance measurement" the whole time. It has to be here rather than in the csproj: the SDK gives Configuration its Debug default before a project's own body is read, so a condition in the csproj is already false by the time it runs. Directory.Build.props is imported first. -->
 		<Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
 
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFramework>net11.0</TargetFramework>
 		<NoWarn>1701;1702;1591;CS0612</NoWarn>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<IsPublishable>false</IsPublishable>

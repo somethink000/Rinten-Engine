@@ -124,7 +124,7 @@ partial class StandaloneExporter
 		//A fresh folder each time: the apk is found by looking in here, and one left over from a build that has since failed is not this build's.
 		if ( Directory.Exists( output ) ) Directory.Delete( output, true );
 
-		var arguments = $"build \"{project}\" -c Release -f net10.0-android " +
+		var arguments = $"build \"{project}\" -c Release -f net11.0-android " +
 			$"-p:RintenPayloadZip=\"{payload}\" " +
 			$"-p:ApplicationId={ApplicationId()} " +
 			//Each its own property - see the csproj, which makes the manifest's placeholders out of them.

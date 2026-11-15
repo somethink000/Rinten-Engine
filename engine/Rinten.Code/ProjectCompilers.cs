@@ -1,5 +1,7 @@
 using Rinten.Engine;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Rinten;
 
@@ -25,43 +27,75 @@ internal sealed class ProjectCompilers : ProjectCode
 	//These package types should reference package.base
 	private static HashSet<string> BaseReferencingTypes { get; } = new HashSet<string> { "game", "addon", "library", "tool" };
 
-	//Cache compiled built-in assemblies in the editor; EngineBuiltAt guards against a stale engine
+	//Cache compiled built-in assemblies in the editor; EngineFingerprint guards against a stale engine
 	private bool CacheAssemblies => project.IsBuiltIn && Application.IsEditor;
 
-	//When engine assemblies were last written, so caches built against an older engine are rejected
-	private static DateTime EngineBuiltAt
+	//What the engine assemblies the built-in projects compile against contain, so a cache is only refused when one of
+	//them actually changed. Their timestamps move on every build - a no-op build rewrites Rinten.Engine.dll byte for
+	//byte - so a time cannot answer this without discarding every built-in project's cache, and the fifteen seconds
+	//recompiling them costs on the next start.
+	internal static string EngineFingerprint => engineFingerprint ??= Fingerprint();
+
+	private static string engineFingerprint;
+
+	private static string Fingerprint()
 	{
-		get
+		try
 		{
-			if ( engineBuiltAt is { } known ) return known;
+			var beside = Path.GetDirectoryName( typeof( Project ).Assembly.Location );
 
-			var newest = DateTime.MinValue;
+			if ( string.IsNullOrEmpty( beside ) || !Directory.Exists( beside ) )
+				return Guid.NewGuid().ToString( "N" );
 
-			try
+			var names = Directory.EnumerateFiles( beside, "*.dll" )
+				.Select( Path.GetFileName )
+				.Where( IsEngineAssembly )
+				.OrderBy( x => x, StringComparer.OrdinalIgnoreCase )
+				.ToArray();
+
+			using var hash = IncrementalHash.CreateHash( HashAlgorithmName.SHA256 );
+			var buffer = new byte[1 << 16];
+
+			foreach ( var name in names )
 			{
-				var beside = Path.GetDirectoryName( typeof( Project ).Assembly.Location );
+				hash.AppendData( Encoding.UTF8.GetBytes( name ) );
 
-				if ( !string.IsNullOrEmpty( beside ) )
-				{
-					foreach ( var file in Directory.EnumerateFiles( beside, "*.dll" ) )
-					{
-						var written = File.GetLastWriteTimeUtc( file );
-						if ( written > newest ) newest = written;
-					}
-				}
-			}
-			catch
-			{
-				//Nothing to read means nothing can be trusted: a cache that cannot be checked is a cache that is not used.
-				newest = DateTime.MaxValue;
+				//Read-write behind a share that lets the editor keep the assembly open: it is loaded from this folder.
+				using var stream = new FileStream( Path.Combine( beside, name ), FileMode.Open, FileAccess.Read,
+					FileShare.ReadWrite | FileShare.Delete );
+
+				int read;
+				while ( ( read = stream.Read( buffer, 0, buffer.Length ) ) > 0 )
+					hash.AppendData( buffer, 0, read );
 			}
 
-			engineBuiltAt = newest;
-			return newest;
+			return Convert.ToHexString( hash.GetHashAndReset() );
+		}
+		catch
+		{
+			//Nothing to read means nothing can be trusted: a cache that cannot be checked is a cache that is not used.
+			//Unique per process, so it can never match what a previous one wrote into a cached assembly.
+			return Guid.NewGuid().ToString( "N" );
 		}
 	}
 
-	private static DateTime? engineBuiltAt;
+	//The assemblies a built-in project compiles against. The engine's own, and the few it hands to a tool project
+	//directly - Roslyn, Skia, ActionGraphs and the components its generated code imports. The host's own assemblies are
+	//left out: nothing a built-in project compiles against lives in them, and a build rewrites them whether or not their
+	//code changed, which would move this fingerprint and throw the caches away for no reason.
+	private static bool IsEngineAssembly( string name )
+	{
+		if ( name.Equals( "Rinten.AppSystem.dll", StringComparison.OrdinalIgnoreCase )
+			|| name.Equals( "Rinten.CodeUpgrader.dll", StringComparison.OrdinalIgnoreCase )
+			|| name.Equals( "Rinten.NetCore.dll", StringComparison.OrdinalIgnoreCase ) )
+			return false;
+
+		return name.StartsWith( "Rinten.", StringComparison.OrdinalIgnoreCase )
+			|| name.StartsWith( "Microsoft.AspNetCore.Components", StringComparison.OrdinalIgnoreCase )
+			|| name.StartsWith( "Microsoft.CodeAnalysis", StringComparison.OrdinalIgnoreCase )
+			|| name.Equals( "SkiaSharp.dll", StringComparison.OrdinalIgnoreCase )
+			|| name.Equals( "Facepunch.ActionGraphs.dll", StringComparison.OrdinalIgnoreCase );
+	}
 
 	internal ProjectCompilers( Project project )
 	{
@@ -168,6 +202,7 @@ internal sealed class ProjectCompilers : ProjectCode
 			Game.GeneratedCode.AppendLine( $"[assembly: global::System.Reflection.AssemblyMetadata( \"Ident\", {project.Config.FullIdent.QuoteSafe()} )]" );
 			Game.GeneratedCode.AppendLine( $"[assembly: global::System.Reflection.AssemblyMetadata( \"EngineVersion\", {Engine.Protocol.Api.ToString().QuoteSafe()} )]" );
 			Game.GeneratedCode.AppendLine( $"[assembly: global::System.Reflection.AssemblyMetadata( \"EngineMinorVersion\", {1.ToString().QuoteSafe()} )]" );
+			Game.GeneratedCode.AppendLine( $"[assembly: global::System.Reflection.AssemblyMetadata( \"EngineFingerprint\", {EngineFingerprint.QuoteSafe()} )]" );
 
 			foreach ( var reference in project.PackageReferences() )
 			{
@@ -258,9 +293,10 @@ internal sealed class ProjectCompilers : ProjectCode
 
 			//And against the engine it was compiled with, which in a build nobody shipped moves without the version moving. Code
 			//compiled against a signature that has since changed loads without a complaint and throws somewhere else entirely.
-			if ( EngineBuiltAt > compileTime )
+			//By content, not by timestamp: a build that wrote the same assemblies again changes nothing that matters here.
+			if ( metadata.TryGetValue( "EngineFingerprint", out var fingerprint ) == false || fingerprint != EngineFingerprint )
 			{
-				Log.Info( $"{compiler.Name}: the engine was rebuilt after the cached assembly. Forcing recompile." );
+				Log.Info( $"{compiler.Name}: the engine assemblies changed after the cached assembly. Forcing recompile." );
 				return false;
 			}
 
@@ -367,6 +403,7 @@ internal sealed class ProjectCompilers : ProjectCode
 
 		Editor.GeneratedCode.AppendLine( $"global using static Rinten.Internal.GlobalToolsNamespace;" );
 		Editor.GeneratedCode.AppendLine( $"global using static Rinten.Internal.GlobalGameNamespace;" );
+		Editor.GeneratedCode.AppendLine( $"[assembly: global::System.Reflection.AssemblyMetadata( \"EngineFingerprint\", {EngineFingerprint.QuoteSafe()} )]" );
 
 		foreach ( var reference in project.PackageReferences() )
 		{

@@ -224,7 +224,17 @@ float4 FxaaPs( V2F i ) : SV_Target
 	float2 t = g_metrics.xy;
 
 	//Luma is in alpha (the compose's): a gather at the corner after the pixel is it, east, south and south-east; one at
-	//the corner before is north-west, north, west and it again
+	//the corner before is north-west, north, west and it again. The portable frame's GLSL ES 3.00 has no gather - and it
+	//bakes every pass, even the ones it never picks - so there the same seven neighbours are read one at a time.
+#ifdef PORTABLE
+	float lumaM = LumaOf( uv );
+	float lumaE = LumaOf( uv + float2( t.x, 0.0 ) );
+	float lumaS = LumaOf( uv + float2( 0.0, t.y ) );
+	float lumaSE = LumaOf( uv + t );
+	float lumaNW = LumaOf( uv - t );
+	float lumaN = LumaOf( uv - float2( 0.0, t.y ) );
+	float lumaW = LumaOf( uv - float2( t.x, 0.0 ) );
+#else
 	float4 after = g_color.GatherAlpha( uv + 0.5 * t );
 	float4 before = g_color.GatherAlpha( uv - 0.5 * t );
 
@@ -235,6 +245,7 @@ float4 FxaaPs( V2F i ) : SV_Target
 	float lumaNW = before.w;
 	float lumaN = before.z;
 	float lumaW = before.x;
+#endif
 
 	float rangeMax = max( max( max( lumaN, lumaW ), max( lumaE, lumaS ) ), lumaM );
 	float rangeMin = min( min( min( lumaN, lumaW ), min( lumaE, lumaS ) ), lumaM );

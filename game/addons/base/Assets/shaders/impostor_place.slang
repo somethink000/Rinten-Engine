@@ -1,6 +1,11 @@
 //Where an impostor plane's corner goes, for impostor.shader and impostor_surface.slang: near, a box of the six baked
 //sides, each facing the eye left where it was baked; far, one side, the nearest the eye's view, turned to face it
 
+//impostor.shader reaches this twice - its own include, and again through frame.slang's cluster pass when IMPOSTOR is
+//defined - and a second copy is a redeclaration of everything below rather than the same file twice.
+#ifndef ENGINE_IMPOSTOR_PLACE_INCLUDED
+#define ENGINE_IMPOSTOR_PLACE_INCLUDED
+
 //Pixels across on the screen below which the model is the one turned side rather than the box
 static const float ImpostorBillboardPixels = 48.0;
 
@@ -46,3 +51,5 @@ bool ImpostorPlace( inout float3 position, float3 normal, float4 sphere, row_maj
 
 	return dot( normal, chosen ) >= 0.5;
 }
+
+#endif

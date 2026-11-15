@@ -71,15 +71,15 @@ case "${1:-all}" in
     done
     ;;
   managed)
-    dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build --skip-native
+    ./engine/Tools/RintenBuild/rintenbuild.sh build --skip-native
     ;;
   shaders)
-    dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build-shaders
+    ./engine/Tools/RintenBuild/rintenbuild.sh build-shaders
     ;;
   all)
     ./engine/Core/build-linux.sh
-    dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build
-    dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build-shaders
+    ./engine/Tools/RintenBuild/rintenbuild.sh build
+    ./engine/Tools/RintenBuild/rintenbuild.sh build-shaders
     ;;
   *)
     echo "Unknown target: $1" >&2
@@ -89,5 +89,5 @@ case "${1:-all}" in
 esac
 
 if [ "$steam" = 1 ]; then
-	dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- steam-upload
+	./engine/Tools/RintenBuild/rintenbuild.sh steam-upload
 fi

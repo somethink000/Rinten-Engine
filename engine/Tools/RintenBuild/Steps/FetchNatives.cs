@@ -12,7 +12,7 @@ internal class FetchNatives( bool force = false, string platformOverride = null 
 	private readonly Platform platform = Platform.Create();
 
 	//One archive somebody else publishes, and what to take out of it.
-	private sealed class Package
+	internal sealed class Package
 	{
 		public string Name { get; set; } = "";
 		public string Version { get; set; } = "";
@@ -38,13 +38,6 @@ internal class FetchNatives( bool force = false, string platformOverride = null 
 		public bool Strip { get; set; }
 	}
 
-	private static readonly JsonSerializerOptions JsonOptions = new()
-	{
-		PropertyNameCaseInsensitive = true,
-		ReadCommentHandling = JsonCommentHandling.Skip,
-		AllowTrailingCommas = true,
-	};
-
 	internal ExitCode Run()
 	{
 		var root = Directory.GetCurrentDirectory();
@@ -60,7 +53,7 @@ internal class FetchNatives( bool force = false, string platformOverride = null 
 
 		try
 		{
-			manifest = JsonSerializer.Deserialize<Dictionary<string, Package[]>>( File.ReadAllText( manifestPath ), JsonOptions );
+			manifest = JsonSerializer.Deserialize( File.ReadAllText( manifestPath ), BuildJson.Default.NativeManifest );
 		}
 		catch ( JsonException ex )
 		{

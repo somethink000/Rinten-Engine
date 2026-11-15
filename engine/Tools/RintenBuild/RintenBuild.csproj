@@ -6,6 +6,8 @@
 	<OutputPath>bin</OutputPath>
 	<ImplicitUsings>enable</ImplicitUsings>
 
+	<PublishAot>true</PublishAot>
+
 	<PackAsTool>true</PackAsTool>
 	<ToolCommandName>rintenbuild</ToolCommandName>
 	<PackageId>rintenbuild</PackageId>

@@ -68,6 +68,9 @@ internal class BuildManaged( bool clean = false )
 			Log.Info( "Step 6: Install the restored native assets" );
 			InstallRestoredNatives( rootDir );
 
+			Log.Info( "Step 7: Compile the engine's assemblies ahead of time" );
+			AheadOfTime( engineDir, rootDir );
+
 			Log.Info( "Build completed successfully!" );
 			return ExitCode.Success;
 		}
@@ -76,6 +79,97 @@ internal class BuildManaged( bool clean = false )
 			Log.Error( $"Build failed with error: {ex}" );
 			return ExitCode.Failure;
 		}
+	}
+
+	//Publishes the editor's assembly closure with ReadyToRun and copies it over the IL in game/bin/managed. The runtime then
+	//runs precompiled code for the engine and Roslyn at startup instead of compiling it on every launch. Non-fatal: an IL build
+	//is a correct build that pays the JIT, which is the only thing this saves.
+	private static void AheadOfTime( string engineDir, string rootDir )
+	{
+		//The editor's top assembly, so the publish carries everything it loads: the engine, its compiler, the tools and the UI.
+		var project = Path.Combine( engineDir, "Rinten.Tools", "Rinten.Tools.csproj" );
+		var rid = Platform.Create().RuntimeIdentifiers[0];
+		var staged = Path.Combine( engineDir, "bin", "obj", "r2r" );
+		var building = Path.Combine( staged, "build" );
+		var published = Path.Combine( staged, "out" );
+		var stamp = Path.Combine( staged, ".stamp" );
+
+		Directory.CreateDirectory( staged );
+
+		//The publish is not incremental: it compiles its whole closure again even when nothing changed. A stamp of the
+		//engine's sources is what decides, so the minute it costs is only paid by a build that changed something. The
+		//copy below still runs either way: step 5 wrote IL over game/bin/managed, and this is what puts the precompiled
+		//code back. It is the same bytes the last publish made, so the cache fingerprint in the editor does not move.
+		if ( File.Exists( stamp ) && File.Exists( Path.Combine( published, "Rinten.Engine.dll" ) )
+			&& !AnySourceNewer( engineDir, File.GetLastWriteTimeUtc( stamp ) ) )
+		{
+			Log.Info( "  using the assemblies compiled ahead of time by the last build" );
+		}
+		else
+		{
+			//Framework-dependent, as the editor is: the runtime is the machine's, only our assemblies are precompiled.
+			var arguments = $"publish \"{project}\" -c Release -r {rid} --self-contained false " +
+				$"-p:PublishReadyToRun=true -p:PublishSingleFile=false " +
+				$"-p:OutputPath=\"{building}{Path.DirectorySeparatorChar}\" " +
+				$"-p:PublishDir=\"{published}{Path.DirectorySeparatorChar}\" " +
+				$"-p:SolutionDir=\"{engineDir}{Path.DirectorySeparatorChar}\"";
+
+			Log.Info( $"  ReadyToRun for {rid}" );
+
+			if ( !Utility.RunProcess( "dotnet", arguments, engineDir ) )
+			{
+				Log.Warning( "  the engine could not be compiled ahead of time - keeping the IL build; startup pays the JIT" );
+				return;
+			}
+
+			File.WriteAllText( stamp, DateTime.UtcNow.ToString( "O" ) );
+		}
+
+		var managed = Path.Combine( rootDir, "game", "bin", "managed" );
+		var copied = 0;
+
+		foreach ( var file in Directory.EnumerateFiles( published, "*.dll" ) )
+		{
+			try
+			{
+				File.Copy( file, Path.Combine( managed, Path.GetFileName( file ) ), overwrite: true );
+				copied++;
+			}
+			catch ( IOException ex )
+			{
+				//Held open by an editor that is running. The assembly already there is the same one, so the build goes on.
+				Log.Warning( $"  {Path.GetFileName( file )} could not be replaced - {ex.Message}" );
+			}
+		}
+
+		Log.Info( $"  {copied} assemblies compiled ahead of time into game/bin/managed" );
+	}
+
+	//Whether any source under engine/ is newer than the stamp. Build output and fetched natives are skipped: they are
+	//rewritten by the build and say nothing about what the assembly will contain.
+	private static bool AnySourceNewer( string directory, DateTime stamp )
+	{
+		foreach ( var file in Directory.EnumerateFiles( directory ) )
+		{
+			if ( Path.GetExtension( file ) is not (".cs" or ".razor" or ".csproj" or ".props" or ".targets" or ".resx" or ".scss" or ".bin") )
+				continue;
+
+			if ( File.GetLastWriteTimeUtc( file ) > stamp )
+				return true;
+		}
+
+		foreach ( var child in Directory.EnumerateDirectories( directory ) )
+		{
+			//The build tool, the tests and the benchmarks are not part of the editor's assembly closure.
+			if ( Path.GetFileName( child ) is "bin" or "obj" or "Natives" or "TestResults" or ".git"
+				or "RintenBuild" or "Tests" or "Benchmark" )
+				continue;
+
+			if ( AnySourceNewer( child, stamp ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	//Copies NuGet native libraries (Skia, HarfBuzz) from runtimes/<rid>/native next to engine libs

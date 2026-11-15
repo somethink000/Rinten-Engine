@@ -3,6 +3,12 @@
 #ifndef ENGINE_SURFACE_SHADING_INCLUDED
 #define ENGINE_SURFACE_SHADING_INCLUDED
 
+//A leaf's or thin cloth's light through it, which only the shaders that have it define before including this file.
+//Nought here so the preprocessor has a value in every other shader rather than a warning and an assumed zero.
+#ifndef SURFACE_TRANSMITS
+#define SURFACE_TRANSMITS 0
+#endif
+
 //What the light loop needs of roughness, worked out once since it is the same for every light
 struct Rough
 {

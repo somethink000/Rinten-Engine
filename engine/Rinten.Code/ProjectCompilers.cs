@@ -80,16 +80,12 @@ internal sealed class ProjectCompilers : ProjectCode
 	}
 
 	//The assemblies a built-in project compiles against. The engine's own, and the few it hands to a tool project
-	//directly - Roslyn, Skia, ActionGraphs and the components its generated code imports. The host's own assemblies are
-	//left out: nothing a built-in project compiles against lives in them, and a build rewrites them whether or not their
-	//code changed, which would move this fingerprint and throw the caches away for no reason.
+	//directly - Roslyn, Skia, ActionGraphs and the components its generated code imports. The host's too: a tool
+	//project's generated solution references Rinten.AppSystem and Rinten.CodeUpgrader, so leaving them out would let a
+	//cached editor assembly outlive an API it was compiled against. Nothing is gained by guessing which of them are
+	//stable - a no-op build writes the same bytes, so a fingerprint over all of them does not move for one either.
 	private static bool IsEngineAssembly( string name )
 	{
-		if ( name.Equals( "Rinten.AppSystem.dll", StringComparison.OrdinalIgnoreCase )
-			|| name.Equals( "Rinten.CodeUpgrader.dll", StringComparison.OrdinalIgnoreCase )
-			|| name.Equals( "Rinten.NetCore.dll", StringComparison.OrdinalIgnoreCase ) )
-			return false;
-
 		return name.StartsWith( "Rinten.", StringComparison.OrdinalIgnoreCase )
 			|| name.StartsWith( "Microsoft.AspNetCore.Components", StringComparison.OrdinalIgnoreCase )
 			|| name.StartsWith( "Microsoft.CodeAnalysis", StringComparison.OrdinalIgnoreCase )

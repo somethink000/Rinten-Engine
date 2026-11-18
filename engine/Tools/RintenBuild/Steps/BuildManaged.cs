@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Xml.Linq;
 using static Rinten.Build.Constants;
 
 namespace Rinten.Build.Steps;
@@ -62,8 +64,17 @@ internal class BuildManaged( bool clean = false, bool aot = true )
 			}
 
 			Log.Info( "Step 5: Build Managed" );
-			if ( !Utility.RunDotnetCommand( engineDir, "build -c Release Rinten-Engine.slnx -p:TreatWarningsAsErrors=true" ) )
-				return ExitCode.Failure;
+			var solution = FilteredSolution( engineDir );
+
+			try
+			{
+				if ( !Utility.RunDotnetCommand( engineDir, $"build -c Release \"{solution}\" -p:TreatWarningsAsErrors=true" ) )
+					return ExitCode.Failure;
+			}
+			finally
+			{
+				File.Delete( solution );
+			}
 
 			Log.Info( "Step 6: Install the restored native assets" );
 			InstallRestoredNatives( rootDir );
@@ -86,6 +97,40 @@ internal class BuildManaged( bool clean = false, bool aot = true )
 		}
 	}
 
+	//The solution's projects without the ones only a test run builds. `dotnet build` has no way to leave a project out
+	//of a solution, and a filter checked in beside it would have to be kept in step by hand - a project added to the
+	//solution and forgotten there would silently stop being built. So the list is read from the real solution each
+	//time and written to obj/, which git ignores, and a build interrupted before its finally leaves nothing in the way.
+	private static string FilteredSolution( string engineDir )
+	{
+		var original = Path.Combine( engineDir, "Rinten-Engine.slnx" );
+		var folder = Path.Combine( engineDir, "obj" );
+		var generated = Path.Combine( folder, $"Rinten-Engine.Build.{Environment.ProcessId}.slnx" );
+
+		Directory.CreateDirectory( folder );
+
+		var named = XDocument.Load( original ).Descendants( "Project" )
+			.Select( element => (string) element.Attribute( "Path" ) )
+			.Where( path => !string.IsNullOrEmpty( path ) )
+			.ToList();
+
+		//Nothing here writes into game/ or game/bin/managed; rintenbuild test builds them itself.
+		var built = named
+			.Where( path => !path.StartsWith( "Tests/", StringComparison.OrdinalIgnoreCase )
+				&& !path.StartsWith( "Benchmark/", StringComparison.OrdinalIgnoreCase ) )
+			.ToList();
+
+		var projects = built
+			//One folder down, so every path in it is relative to obj/ rather than to engine/.
+			.Select( path => new XElement( "Project", new XAttribute( "Path", $"../{path}" ) ) );
+
+		new XDocument( new XElement( "Solution", projects ) ).Save( generated );
+
+		Log.Info( $"  building {built.Count} projects, leaving out the {named.Count - built.Count} a test run needs" );
+
+		return generated;
+	}
+
 	//Publishes the editor's assembly closure with ReadyToRun and copies it over the IL in game/bin/managed. The runtime then
 	//runs precompiled code for the engine and Roslyn at startup instead of compiling it on every launch. Non-fatal: an IL build
 	//is a correct build that pays the JIT, which is the only thing this saves.
@@ -103,10 +148,11 @@ internal class BuildManaged( bool clean = false, bool aot = true )
 
 		Directory.CreateDirectory( staged );
 
-		//The publish is not incremental: it compiles its whole closure again even when nothing changed. A stamp of the
-		//engine's sources is what decides, so the minute it costs is only paid by a build that changed something. The
-		//copy below still runs either way: step 5 wrote IL over game/bin/managed, and this is what puts the precompiled
-		//code back. It is the same bytes the last publish made, so the cache fingerprint in the editor does not move.
+		//The publish's compile is incremental: it rebuilds only what step 5 left changed, into this path, in a couple of
+		//seconds. crossgen2 is not - it compiles the whole closure again every time, about sixteen seconds warm on this
+		//machine - so a stamp of the engine's sources is what decides, and that price is only paid by a build that changed
+		//something. The copy below still runs either way: step 5 wrote IL over game/bin/managed, and this is what puts the
+		//precompiled code back. It is the same bytes the last publish made, so the cache fingerprint in the editor does not move.
 		if ( File.Exists( stamp ) && File.Exists( Path.Combine( published, "Rinten.Engine.dll" ) )
 			&& !AnySourceNewer( engineDir, File.GetLastWriteTimeUtc( stamp ) ) )
 		{
@@ -122,12 +168,15 @@ internal class BuildManaged( bool clean = false, bool aot = true )
 				$"-p:SolutionDir=\"{engineDir}{Path.DirectorySeparatorChar}\"";
 
 			Log.Info( $"  ReadyToRun for {rid}" );
+			var started = Stopwatch.StartNew();
 
 			if ( !Utility.RunProcess( "dotnet", arguments, engineDir ) )
 			{
 				Log.Warning( "  the engine could not be compiled ahead of time - keeping the IL build; startup pays the JIT" );
 				return;
 			}
+
+			Log.Info( $"  compiled ahead of time in {started.Elapsed.TotalSeconds:0.0}s" );
 
 			//A publish that reported success but left no engine assembly would copy a half-written closure over the IL.
 			//No stamp is written, so the next build tries again rather than reusing it.

@@ -3,7 +3,7 @@ using static Rinten.Build.Constants;
 
 namespace Rinten.Build.Steps;
 
-internal class Test( bool noBuild = true, string filter = null )
+internal class Test( bool noBuild = false, string filter = null )
 {
 	//Filter for pull request runs: everything except tests that talk to the live backend, so
 	//a backend hiccup can't fail an unrelated PR. The full suite still runs on release builds.
@@ -51,7 +51,8 @@ internal class Test( bool noBuild = true, string filter = null )
 	{
 		var csproj = Path.Combine( "Tests", project.Name, $"{project.Name}.csproj" );
 
-		//--no-build: BuildManaged already compiled all projects in Rinten-Engine.slnx (including test projects).
+		//--no-build skips the build this run would otherwise do. A normal managed build leaves the test projects out
+		//- they write nothing a build or a game reads - so it is only right after something else has built them.
 		var noBuildFlag = noBuild ? " --no-build" : string.Empty;
 		var filterFlag = string.IsNullOrEmpty( filter ) ? string.Empty : $" --filter \"{filter}\"";
 		var testArgs = $"test {csproj} --logger \"console;verbosity=normal;consoleLoggerParameters=ErrorsOnly\" -c Release{noBuildFlag}{filterFlag}";

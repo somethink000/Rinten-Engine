@@ -362,7 +362,7 @@ internal class EditorControl
 
 		try
 		{
-			return content.Deserialize<EditorStatus>( new JsonSerializerOptions { PropertyNameCaseInsensitive = true } );
+			return content.Deserialize( BuildJson.Default.EditorStatus );
 		}
 		catch ( JsonException )
 		{
@@ -421,7 +421,7 @@ internal class EditorControl
 	}
 
 	//The part of editor_status this tool reads. Named as the editor writes it.
-	private sealed class EditorStatus
+	internal sealed class EditorStatus
 	{
 		public int ProcessId { get; set; }
 		public string Project { get; set; }

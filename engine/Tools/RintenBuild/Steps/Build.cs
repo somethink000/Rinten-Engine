@@ -7,7 +7,8 @@ internal static class Build
 	internal static ExitCode Run(
 		bool clean = false,
 		bool skipNative = false,
-		bool skipManaged = false )
+		bool skipManaged = false,
+		bool aot = true )
 	{
 		//Somebody else's libraries - Slang, SDL - which the repository does not carry and nothing here builds. Before the
 		//core, because the shader step that follows the build asks the core for a compiler and the core opens Slang by name.
@@ -23,7 +24,7 @@ internal static class Build
 		if ( !skipNative && new BuildNative( clean ).Run() != ExitCode.Success )
 			return ExitCode.Failure;
 
-		if ( !skipManaged && new BuildManaged( clean ).Run() != ExitCode.Success )
+		if ( !skipManaged && new BuildManaged( clean, aot ).Run() != ExitCode.Success )
 			return ExitCode.Failure;
 
 		//The desktop entry last, because it names the binaries the build has just written. Linux only, skipped

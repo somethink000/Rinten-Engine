@@ -8,6 +8,8 @@ cd "$(dirname "$0")"
 
 # Builds the native core then the managed engine; --skip-native keeps the rintencore an earlier build put in game/bin
 # Add --clean to remove stale obj/.generated output before rebuilding
-dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build "$@"
+# Add --no-aot to skip compiling the editor's assemblies ahead of time - a publish of the whole closure, worth it to
+# measure or play, worth skipping while editing C# in a loop
+./engine/Tools/RintenBuild/rintenbuild.sh build "$@"
 
-dotnet run --project ./engine/Tools/RintenBuild/RintenBuild.csproj -- build-shaders
+./engine/Tools/RintenBuild/rintenbuild.sh build-shaders

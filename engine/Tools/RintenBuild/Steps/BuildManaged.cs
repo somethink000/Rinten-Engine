@@ -1,8 +1,10 @@
+using System.Diagnostics;
+using System.Xml.Linq;
 using static Rinten.Build.Constants;
 
 namespace Rinten.Build.Steps;
 
-internal class BuildManaged( bool clean = false )
+internal class BuildManaged( bool clean = false, bool aot = true )
 {
 	internal ExitCode Run()
 	{
@@ -62,11 +64,28 @@ internal class BuildManaged( bool clean = false )
 			}
 
 			Log.Info( "Step 5: Build Managed" );
-			if ( !Utility.RunDotnetCommand( engineDir, "build -c Release Rinten-Engine.slnx -p:TreatWarningsAsErrors=true" ) )
-				return ExitCode.Failure;
+			var solution = FilteredSolution( engineDir );
+
+			try
+			{
+				if ( !Utility.RunDotnetCommand( engineDir, $"build -c Release \"{solution}\" -p:TreatWarningsAsErrors=true" ) )
+					return ExitCode.Failure;
+			}
+			finally
+			{
+				File.Delete( solution );
+			}
 
 			Log.Info( "Step 6: Install the restored native assets" );
 			InstallRestoredNatives( rootDir );
+
+			//Skipped by --no-aot: a publish compiles the editor's whole closure a second time, so somebody editing
+			//C# in a loop can leave it to the builds that will be measured or played.
+			if ( aot )
+			{
+				Log.Info( "Step 7: Compile the engine's assemblies ahead of time" );
+				AheadOfTime( engineDir, rootDir );
+			}
 
 			Log.Info( "Build completed successfully!" );
 			return ExitCode.Success;
@@ -76,6 +95,145 @@ internal class BuildManaged( bool clean = false )
 			Log.Error( $"Build failed with error: {ex}" );
 			return ExitCode.Failure;
 		}
+	}
+
+	//The solution's projects without the ones only a test run builds. `dotnet build` has no way to leave a project out
+	//of a solution, and a filter checked in beside it would have to be kept in step by hand - a project added to the
+	//solution and forgotten there would silently stop being built. So the list is read from the real solution each
+	//time and written to obj/, which git ignores, and a build interrupted before its finally leaves nothing in the way.
+	private static string FilteredSolution( string engineDir )
+	{
+		var original = Path.Combine( engineDir, "Rinten-Engine.slnx" );
+		var folder = Path.Combine( engineDir, "obj" );
+		var generated = Path.Combine( folder, $"Rinten-Engine.Build.{Environment.ProcessId}.slnx" );
+
+		Directory.CreateDirectory( folder );
+
+		var named = XDocument.Load( original ).Descendants( "Project" )
+			.Select( element => (string) element.Attribute( "Path" ) )
+			.Where( path => !string.IsNullOrEmpty( path ) )
+			.ToList();
+
+		//Nothing here writes into game/ or game/bin/managed; rintenbuild test builds them itself.
+		var built = named
+			.Where( path => !path.StartsWith( "Tests/", StringComparison.OrdinalIgnoreCase )
+				&& !path.StartsWith( "Benchmark/", StringComparison.OrdinalIgnoreCase ) )
+			.ToList();
+
+		var projects = built
+			//One folder down, so every path in it is relative to obj/ rather than to engine/.
+			.Select( path => new XElement( "Project", new XAttribute( "Path", $"../{path}" ) ) );
+
+		new XDocument( new XElement( "Solution", projects ) ).Save( generated );
+
+		Log.Info( $"  building {built.Count} projects, leaving out the {named.Count - built.Count} a test run needs" );
+
+		return generated;
+	}
+
+	//Publishes the editor's assembly closure with ReadyToRun and copies it over the IL in game/bin/managed. The runtime then
+	//runs precompiled code for the engine and Roslyn at startup instead of compiling it on every launch. Non-fatal: an IL build
+	//is a correct build that pays the JIT, which is the only thing this saves.
+	private static void AheadOfTime( string engineDir, string rootDir )
+	{
+		//The editor's top assembly, so the publish carries what it references: the engine, its compiler, the tools and the UI.
+		//The few the editor loads beside it rather than through it - Rinten.AppSystem, the upgrader, NetCore, MonoMod.Iced - are
+		//not in that closure and stay as step 5 left them: IL. They are small; the engine and Roslyn are what this is for.
+		var project = Path.Combine( engineDir, "Rinten.Tools", "Rinten.Tools.csproj" );
+		var rid = Platform.Create().RuntimeIdentifiers[0];
+		var staged = Path.Combine( engineDir, "bin", "obj", "r2r" );
+		var building = Path.Combine( staged, "build" );
+		var published = Path.Combine( staged, "out" );
+		var stamp = Path.Combine( staged, ".stamp" );
+
+		Directory.CreateDirectory( staged );
+
+		//The publish's compile is incremental: it rebuilds only what step 5 left changed, into this path, in a couple of
+		//seconds. crossgen2 is not - it compiles the whole closure again every time, about sixteen seconds warm on this
+		//machine - so a stamp of the engine's sources is what decides, and that price is only paid by a build that changed
+		//something. The copy below still runs either way: step 5 wrote IL over game/bin/managed, and this is what puts the
+		//precompiled code back. It is the same bytes the last publish made, so the cache fingerprint in the editor does not move.
+		if ( File.Exists( stamp ) && File.Exists( Path.Combine( published, "Rinten.Engine.dll" ) )
+			&& !AnySourceNewer( engineDir, File.GetLastWriteTimeUtc( stamp ) ) )
+		{
+			Log.Info( "  using the assemblies compiled ahead of time by the last build" );
+		}
+		else
+		{
+			//Framework-dependent, as the editor is: the runtime is the machine's, only our assemblies are precompiled.
+			var arguments = $"publish \"{project}\" -c Release -r {rid} --self-contained false " +
+				$"-p:PublishReadyToRun=true -p:PublishSingleFile=false " +
+				$"-p:OutputPath=\"{building}{Path.DirectorySeparatorChar}\" " +
+				$"-p:PublishDir=\"{published}{Path.DirectorySeparatorChar}\" " +
+				$"-p:SolutionDir=\"{engineDir}{Path.DirectorySeparatorChar}\"";
+
+			Log.Info( $"  ReadyToRun for {rid}" );
+			var started = Stopwatch.StartNew();
+
+			if ( !Utility.RunProcess( "dotnet", arguments, engineDir ) )
+			{
+				Log.Warning( "  the engine could not be compiled ahead of time - keeping the IL build; startup pays the JIT" );
+				return;
+			}
+
+			Log.Info( $"  compiled ahead of time in {started.Elapsed.TotalSeconds:0.0}s" );
+
+			//A publish that reported success but left no engine assembly would copy a half-written closure over the IL.
+			//No stamp is written, so the next build tries again rather than reusing it.
+			if ( !File.Exists( Path.Combine( published, "Rinten.Engine.dll" ) ) )
+			{
+				Log.Warning( "  the publish left no engine assembly - keeping the IL build; startup pays the JIT" );
+				return;
+			}
+
+			File.WriteAllText( stamp, DateTime.UtcNow.ToString( "O" ) );
+		}
+
+		var managed = Path.Combine( rootDir, "game", "bin", "managed" );
+		var copied = 0;
+
+		foreach ( var file in Directory.EnumerateFiles( published, "*.dll" ) )
+		{
+			try
+			{
+				File.Copy( file, Path.Combine( managed, Path.GetFileName( file ) ), overwrite: true );
+				copied++;
+			}
+			catch ( IOException ex )
+			{
+				//Held open by an editor that is running. The assembly already there is the same one, so the build goes on.
+				Log.Warning( $"  {Path.GetFileName( file )} could not be replaced - {ex.Message}" );
+			}
+		}
+
+		Log.Info( $"  {copied} assemblies compiled ahead of time into game/bin/managed" );
+	}
+
+	//Whether any source under engine/ is newer than the stamp. Build output and fetched natives are skipped: they are
+	//rewritten by the build and say nothing about what the assembly will contain.
+	private static bool AnySourceNewer( string directory, DateTime stamp )
+	{
+		foreach ( var file in Directory.EnumerateFiles( directory ) )
+		{
+			if ( Path.GetExtension( file ) is not (".cs" or ".razor" or ".csproj" or ".props" or ".targets" or ".resx" or ".scss" or ".bin") )
+				continue;
+
+			if ( File.GetLastWriteTimeUtc( file ) > stamp )
+				return true;
+		}
+
+		foreach ( var child in Directory.EnumerateDirectories( directory ) )
+		{
+			//The build tool, the tests and the benchmarks are not part of the editor's assembly closure.
+			if ( Path.GetFileName( child ) is "bin" or "obj" or "Natives" or "TestResults" or ".git"
+				or "RintenBuild" or "Tests" or "Benchmark" )
+				continue;
+
+			if ( AnySourceNewer( child, stamp ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	//Copies NuGet native libraries (Skia, HarfBuzz) from runtimes/<rid>/native next to engine libs

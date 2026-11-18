@@ -6,6 +6,10 @@
 	<OutputPath>bin</OutputPath>
 	<ImplicitUsings>enable</ImplicitUsings>
 
+	<!-- No PublishAot here: rintenbuild.sh asks for it when - and only when - it publishes the binary. In the project it
+	     would also load the compiler into a plain build, run or pack of the tool, which is what CI does and what never
+	     publishes one. -->
+
 	<PackAsTool>true</PackAsTool>
 	<ToolCommandName>rintenbuild</ToolCommandName>
 	<PackageId>rintenbuild</PackageId>

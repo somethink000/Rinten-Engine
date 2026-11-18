@@ -47,16 +47,18 @@ internal class Program
 		var cleanOption = new Option<bool>( "--clean", getDefaultValue: () => false );
 		var skipNativeOption = new Option<bool>( "--skip-native", getDefaultValue: () => false );
 		var skipManagedOption = new Option<bool>( "--skip-managed", getDefaultValue: () => false );
+		var noAotOption = new Option<bool>( "--no-aot", getDefaultValue: () => false );
 
 		cmd.AddOption( cleanOption );
 		cmd.AddOption( skipNativeOption );
 		cmd.AddOption( skipManagedOption );
+		cmd.AddOption( noAotOption );
 
-		cmd.SetHandler( ( bool clean, bool skipNative, bool skipManaged ) =>
+		cmd.SetHandler( ( bool clean, bool skipNative, bool skipManaged, bool noAot ) =>
 		{
 			//Qualified: this tool's namespace is Rinten.Build, so a bare `Build` binds to the namespace rather than to the step class in it.
-			Environment.ExitCode = (int)Steps.Build.Run( clean, skipNative, skipManaged );
-		}, cleanOption, skipNativeOption, skipManagedOption );
+			Environment.ExitCode = (int)Steps.Build.Run( clean, skipNative, skipManaged, !noAot );
+		}, cleanOption, skipNativeOption, skipManagedOption, noAotOption );
 
 		rootCommand.Add( cmd );
 	}

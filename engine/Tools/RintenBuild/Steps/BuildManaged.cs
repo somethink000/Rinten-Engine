@@ -2,7 +2,7 @@ using static Rinten.Build.Constants;
 
 namespace Rinten.Build.Steps;
 
-internal class BuildManaged( bool clean = false )
+internal class BuildManaged( bool clean = false, bool aot = true )
 {
 	internal ExitCode Run()
 	{
@@ -68,8 +68,13 @@ internal class BuildManaged( bool clean = false )
 			Log.Info( "Step 6: Install the restored native assets" );
 			InstallRestoredNatives( rootDir );
 
-			Log.Info( "Step 7: Compile the engine's assemblies ahead of time" );
-			AheadOfTime( engineDir, rootDir );
+			//Skipped by --no-aot: a publish compiles the editor's whole closure a second time, so somebody editing
+			//C# in a loop can leave it to the builds that will be measured or played.
+			if ( aot )
+			{
+				Log.Info( "Step 7: Compile the engine's assemblies ahead of time" );
+				AheadOfTime( engineDir, rootDir );
+			}
 
 			Log.Info( "Build completed successfully!" );
 			return ExitCode.Success;
@@ -86,7 +91,9 @@ internal class BuildManaged( bool clean = false )
 	//is a correct build that pays the JIT, which is the only thing this saves.
 	private static void AheadOfTime( string engineDir, string rootDir )
 	{
-		//The editor's top assembly, so the publish carries everything it loads: the engine, its compiler, the tools and the UI.
+		//The editor's top assembly, so the publish carries what it references: the engine, its compiler, the tools and the UI.
+		//The few the editor loads beside it rather than through it - Rinten.AppSystem, the upgrader, NetCore, MonoMod.Iced - are
+		//not in that closure and stay as step 5 left them: IL. They are small; the engine and Roslyn are what this is for.
 		var project = Path.Combine( engineDir, "Rinten.Tools", "Rinten.Tools.csproj" );
 		var rid = Platform.Create().RuntimeIdentifiers[0];
 		var staged = Path.Combine( engineDir, "bin", "obj", "r2r" );
@@ -119,6 +126,14 @@ internal class BuildManaged( bool clean = false )
 			if ( !Utility.RunProcess( "dotnet", arguments, engineDir ) )
 			{
 				Log.Warning( "  the engine could not be compiled ahead of time - keeping the IL build; startup pays the JIT" );
+				return;
+			}
+
+			//A publish that reported success but left no engine assembly would copy a half-written closure over the IL.
+			//No stamp is written, so the next build tries again rather than reusing it.
+			if ( !File.Exists( Path.Combine( published, "Rinten.Engine.dll" ) ) )
+			{
+				Log.Warning( "  the publish left no engine assembly - keeping the IL build; startup pays the JIT" );
 				return;
 			}
 

@@ -44,7 +44,11 @@ for script in ./engine/Core/build-linux.sh ./engine/Core/build-macos.sh ./engine
 	fi
 done
 
-case "${1:-all}" in
+# The first argument names a target; anything after it is a flag for the build tool (--no-aot, --clean).
+target="${1:-all}"
+if [ $# -gt 0 ]; then shift; fi
+
+case "$target" in
   native|linux)
     ./engine/Core/build-linux.sh
     ;;
@@ -71,19 +75,20 @@ case "${1:-all}" in
     done
     ;;
   managed)
-    ./engine/Tools/RintenBuild/rintenbuild.sh build --skip-native
+    ./engine/Tools/RintenBuild/rintenbuild.sh build --skip-native "$@"
     ;;
   shaders)
     ./engine/Tools/RintenBuild/rintenbuild.sh build-shaders
     ;;
   all)
     ./engine/Core/build-linux.sh
-    ./engine/Tools/RintenBuild/rintenbuild.sh build
+    # --skip-native: build-linux.sh just built the core this would build again.
+    ./engine/Tools/RintenBuild/rintenbuild.sh build --skip-native "$@"
     ./engine/Tools/RintenBuild/rintenbuild.sh build-shaders
     ;;
   *)
-    echo "Unknown target: $1" >&2
-    echo "Usage: ./build.sh [linux|macos|web|android|android-ffmpeg|natives|managed|shaders|all] [--steam]" >&2
+    echo "Unknown target: $target" >&2
+    echo "Usage: ./build.sh [linux|macos|web|android|android-ffmpeg|natives|managed|shaders|all] [--steam] [--no-aot]" >&2
     exit 1
     ;;
 esac

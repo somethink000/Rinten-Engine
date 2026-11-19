@@ -8,41 +8,54 @@ public class SpritesheetImportSettings
 	public Action OnFrameCountChanged;
 
 	[Header( "Frame Count" )]
-	[Property, Range( 1, 128, true, false ), Step( 1 )]
+	[Property, MinMax( 1, 128 ), Step( 1 )]
 	public int HorizontalFrames
 	{
 		get => _horizontalFrames;
-		set { if ( _horizontalFrames == value ) return; _horizontalFrames = value; OnFrameCountChanged?.Invoke(); }
+		set { value = Math.Max( 1, value ); if ( _horizontalFrames == value ) return; _horizontalFrames = value; OnFrameCountChanged?.Invoke(); }
 	}
 	[Hide] private int _horizontalFrames = 8;
 
-	[Property, Range( 1, 128, true, false ), Step( 1 )]
+	[Property, MinMax( 1, 128 ), Step( 1 )]
 	public int VerticalFrames
 	{
 		get => _verticalFrames;
-		set { if ( _verticalFrames == value ) return; _verticalFrames = value; OnFrameCountChanged?.Invoke(); }
+		set { value = Math.Max( 1, value ); if ( _verticalFrames == value ) return; _verticalFrames = value; OnFrameCountChanged?.Invoke(); }
 	}
 	[Hide] private int _verticalFrames = 8;
 
 	[Header( "Padding" )]
-	[Property, Title( "Left" )]
+	[Property, Title( "Left" ), MinMax( 0, 8192 )]
 	public int PaddingLeft { get; set; } = 0;
 
-	[Property, Title( "Top" )]
+	[Property, Title( "Top" ), MinMax( 0, 8192 )]
 	public int PaddingTop { get; set; } = 0;
 
-	[Property, Title( "Right" )]
+	[Property, Title( "Right" ), MinMax( 0, 8192 )]
 	public int PaddingRight { get; set; } = 0;
 
-	[Property, Title( "Bottom" )]
+	[Property, Title( "Bottom" ), MinMax( 0, 8192 )]
 	public int PaddingBottom { get; set; } = 0;
 
 	[Header( "Separation" )]
-	[Property, Range( 0, 99999, true, false ), Step( 1 )]
+	[Property, MinMax( 0, 8192 ), Step( 1 )]
 	public int HorizontalSeparation { get; set; } = 0;
 
-	[Property, Range( 0, 99999, true, false ), Step( 1 )]
+	[Property, MinMax( 0, 8192 ), Step( 1 )]
 	public int VerticalSeparation { get; set; } = 0;
+
+	/// <summary>Takes another's values without telling anyone the frame count moved.</summary>
+	public void CopyFrom( SpritesheetImportSettings other )
+	{
+		_horizontalFrames = Math.Max( 1, other.HorizontalFrames );
+		_verticalFrames = Math.Max( 1, other.VerticalFrames );
+		PaddingLeft = other.PaddingLeft;
+		PaddingTop = other.PaddingTop;
+		PaddingRight = other.PaddingRight;
+		PaddingBottom = other.PaddingBottom;
+		HorizontalSeparation = other.HorizontalSeparation;
+		VerticalSeparation = other.VerticalSeparation;
+	}
 
 	/// <summary>Calculates the list of each frame's pixel rects given the size of the source image</summary>
 	public List<Rect> GetFrames( int textureWidth, int textureHeight )

@@ -93,8 +93,7 @@
 		if ( _wired || !_sheet.IsValid() || !_view.IsValid() ) return;
 		_wired = true;
 
-		//The settings the last import used, where there was one.
-		_settings = EditorCookie.Get<SpritesheetImportSettings>( SettingsCookie, null ) ?? new SpritesheetImportSettings();
+		_settings = new SpritesheetImportSettings();
 
 		_view.Settings = _settings;
 		_view.Selection = _selection;
@@ -102,7 +101,6 @@
 
 		_selection.Changed += StateHasChanged;
 
-		BindSettings();
 		LoadSheet();
 	}
 
@@ -115,32 +113,33 @@
 
 	//The settings
 
-	//Points the sheet at the settings, and hears the frame count change through them.
+	//Each sheet remembers how it was cut, so reopening it shows what was set rather than a guess.
+	string CookieKey => $"{SettingsCookie}.{ImagePath}";
+
+	void Remember() => EditorCookie.Set( CookieKey, _settings );
+
+	//Points the sheet at the settings; every edit is remembered as it is made, not only on import.
 	void BindSettings()
 	{
 		_settings.OnFrameCountChanged = _selection.Clear;
 
-		_sheet.Target = _settings.GetSerialized();
+		var target = _settings.GetSerialized();
+		target.OnPropertyChanged += _ => Remember();
+
+		_sheet.Target = target;
 		_sheet.Rebuild();
 	}
 
+	//Back to what the sheet itself suggests, forgetting what was set for it.
 	void ResetSettings()
 	{
 		_settings.OnFrameCountChanged = null;
-
-		//The view reads the settings object it was given, so the new values go into that object rather than replacing it.
-		var fresh = new SpritesheetImportSettings();
-
-		_settings.HorizontalFrames = fresh.HorizontalFrames;
-		_settings.VerticalFrames = fresh.VerticalFrames;
-		_settings.PaddingLeft = fresh.PaddingLeft;
-		_settings.PaddingTop = fresh.PaddingTop;
-		_settings.PaddingRight = fresh.PaddingRight;
-		_settings.PaddingBottom = fresh.PaddingBottom;
-		_settings.HorizontalSeparation = fresh.HorizontalSeparation;
-		_settings.VerticalSeparation = fresh.VerticalSeparation;
-
 		_selection.Clear();
+
+		var size = _view.TextureSize;
+		Guess( (int)size.x, (int)size.y );
+
+		Remember();
 		BindSettings();
 	}
 
@@ -148,62 +147,97 @@
 
 	//The sheet
 
+	//A cell size asked for wins, unless this sheet's saved cut already has it; then the saved cut; then a guess.
 	void LoadSheet()
 	{
 		var texture = Texture.LoadFromFileSystem( ImagePath, FileSystem.Mounted );
-		if ( texture is null ) return;
 
-		_view.SetTexture( texture );
+		if ( texture is not null )
+		{
+			_view.SetTexture( texture );
 
-		if ( CellSize is { x: > 0, y: > 0 } cell ) CutInto( texture.Width, texture.Height, cell );
-		else TryAutoDetect( texture.Width, texture.Height );
+			var saved = EditorCookie.Get<SpritesheetImportSettings>( CookieKey, null );
+
+			if ( CellSize is { x: > 0, y: > 0 } cell && !Cuts( saved, texture.Width, texture.Height, cell ) )
+				CutInto( texture.Width, texture.Height, cell );
+			else if ( saved is not null )
+				_settings.CopyFrom( saved );
+			else
+				Guess( texture.Width, texture.Height );
+		}
+
+		BindSettings();
+	}
+
+	//Whether saved settings cut the sheet into cells of this size.
+	static bool Cuts( SpritesheetImportSettings saved, int width, int height, Vector2Int cell )
+	{
+		if ( saved is null ) return false;
+
+		var first = saved.GetFrames( width, height ).FirstOrDefault();
+
+		return (int)first.Width == cell.x && (int)first.Height == cell.y;
 	}
 
 	//A sheet cut into cells of one size edge to edge - what a frame that is already
 	//one cell of it was cut from. Nothing is picked: the cell is the one to choose.
-	void CutInto( int width, int height, Vector2Int cell )
+	void CutInto( int width, int height, Vector2Int cell ) => Lay( width, height, cell, default, default );
+
+	//Cells of a size from a margin with gaps between, the leftover on the right and bottom.
+	void Lay( int width, int height, Vector2Int cell, Vector2Int margin, Vector2Int spacing )
 	{
-		_settings.OnFrameCountChanged = null;
+		var columns = Math.Max( 1, ( width - margin.x + spacing.x ) / Math.Max( 1, cell.x + spacing.x ) );
+		var rows = Math.Max( 1, ( height - margin.y + spacing.y ) / Math.Max( 1, cell.y + spacing.y ) );
 
-		_settings.HorizontalFrames = Math.Max( 1, width / cell.x );
-		_settings.VerticalFrames = Math.Max( 1, height / cell.y );
-		_settings.PaddingLeft = _settings.PaddingTop = 0;
-		_settings.PaddingRight = width - _settings.HorizontalFrames * cell.x;
-		_settings.PaddingBottom = height - _settings.VerticalFrames * cell.y;
-		_settings.HorizontalSeparation = _settings.VerticalSeparation = 0;
-
-		BindSettings();
+		_settings.CopyFrom( new SpritesheetImportSettings
+		{
+			HorizontalFrames = columns,
+			VerticalFrames = rows,
+			PaddingLeft = margin.x,
+			PaddingTop = margin.y,
+			PaddingRight = Math.Max( 0, width - margin.x - columns * cell.x - ( columns - 1 ) * spacing.x ),
+			PaddingBottom = Math.Max( 0, height - margin.y - rows * cell.y - ( rows - 1 ) * spacing.y ),
+			HorizontalSeparation = spacing.x,
+			VerticalSeparation = spacing.y,
+		} );
 	}
 
-	//A strip - a picture at least twice as long as it is tall, or as tall as it is long - is cut into squares along its length, and every one picked.
-	void TryAutoDetect( int width, int height )
+	//A strip - at least twice as long as it is tall, or as tall as it is long - is cut into squares along its length,
+	//every one picked. Anything else is cut the way a tile sheet is guessed: a size in its name, gaps, or seams.
+	void Guess( int width, int height )
 	{
+		_settings.CopyFrom( new SpritesheetImportSettings() );
+
+		if ( width <= 0 || height <= 0 ) return;
+
 		var longSide = Math.Max( width, height );
 		var shortSide = Math.Min( width, height );
 
-		if ( longSide < 2 * shortSide ) return;
-
-		var count = longSide / shortSide;
-		var exact = longSide % shortSide == 0;
-
-		_settings.OnFrameCountChanged = null;
-
-		_settings.HorizontalFrames = width >= height ? count : 1;
-		_settings.VerticalFrames = width >= height ? 1 : count;
-
-		if ( exact )
+		if ( longSide >= 2 * shortSide )
 		{
-			_settings.PaddingLeft = 0;
-			_settings.PaddingRight = 0;
-			_settings.PaddingTop = 0;
-			_settings.PaddingBottom = 0;
-			_settings.HorizontalSeparation = 0;
-			_settings.VerticalSeparation = 0;
+			var square = new Vector2Int( shortSide, shortSide );
+			Lay( width, height, square, default, default );
+
+			_selection.SelectAll( _settings.HorizontalFrames, _settings.VerticalFrames );
+			return;
 		}
 
-		BindSettings();
+		try
+		{
+			using var bitmap = Bitmap.CreateFromBytes( FileSystem.Mounted.ReadAllBytes( ImagePath ).ToArray() );
+			if ( bitmap is null ) return;
 
-		_selection.SelectAll( _settings.HorizontalFrames, _settings.VerticalFrames );
+			var grid = Editor.Tiles.TileSheetGuess.Guess( bitmap, System.IO.Path.GetFileNameWithoutExtension( ImagePath ) );
+
+			//No evidence in the picture: the class's own grid is as good a start as a common tile size
+			if ( grid.How.Contains( "common size" ) ) return;
+
+			Lay( width, height, grid.Size, grid.Margin, grid.Spacing );
+		}
+		catch ( Exception e )
+		{
+			Log.Warning( $"Spritesheet importer: could not read {ImagePath} to guess its grid: {e.Message}" );
+		}
 	}
 
 	//The picked cells
@@ -222,7 +256,7 @@
 			.Select( index => cells[index] )
 			.ToList();
 
-		EditorCookie.Set( SettingsCookie, _settings );
+		Remember();
 
 		OnImport?.Invoke( picked );
 	}

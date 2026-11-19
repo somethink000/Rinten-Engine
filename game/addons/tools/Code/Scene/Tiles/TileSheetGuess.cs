@@ -38,6 +38,10 @@ internal static class TileSheetGuess
 		{
 			x = Spaced( columns.Blank ) ?? Packed( columns.Seam, columns.Clear );
 			y = Spaced( rows.Blank ) ?? Packed( rows.Seam, rows.Clear );
+
+			//Blank gaps between tiles run both ways: lines blank one way and none the other are background between strokes
+			if ( x is null && FromBlanks( y ) && !columns.Blank.Contains( true ) ) y = null;
+			if ( y is null && FromBlanks( x ) && !rows.Blank.Contains( true ) ) x = null;
 		}
 
 		//An axis that showed nothing borrows from the other - tiles are mostly square
@@ -314,4 +318,7 @@ internal static class TileSheetGuess
 	}
 
 	private static int Gcd( int a, int b ) => b == 0 ? a : Gcd( b, a % b );
+
+	//Whether a cut came from blank lines rather than from seams
+	private static bool FromBlanks( Cut? cut ) => cut is { How: "blank edges" or "blank lines between tiles" };
 }

@@ -265,8 +265,9 @@
 				platforms.Add( id );
 		}
 
-		//Beside the project rather than in a folder nobody can find.
-		BuildFolder = config.GetMetaOrDefault( "Build.Folder", Path.Combine( project.GetRootPath(), "Builds" ) );
+		//Beside the project rather than in a folder nobody can find; kept relative to it, as the project file is shared
+		var folder = config.GetMetaOrDefault<string>( "Build.Folder", null );
+		BuildFolder = Path.GetFullPath( string.IsNullOrWhiteSpace( folder ) ? "Builds" : folder, project.GetRootPath() );
 		SplashPicture = config.GetMetaOrDefault<string>( "Build.SplashPicture", null );
 
 		executableName = config.GetMetaOrDefault( "Build.ExecutableName", project.Package?.Ident ?? config.Ident ?? "game" );
@@ -284,7 +285,7 @@
 		if ( !IsGame || Project?.Config is not { } config ) return;
 
 		config.SetMeta( "Build.Platforms", string.Join( ",", ExportPlatform.Offered.Where( x => platforms.Contains( x.Id ) ).Select( x => x.Id ) ) );
-		config.SetMeta( "Build.Folder", BuildFolder );
+		config.SetMeta( "Build.Folder", InProject( BuildFolder ) );
 		config.SetMeta( "Build.SplashPicture", SplashPicture );
 		config.SetMeta( "Build.Zip", createZip );
 		config.SetMeta( "Build.Debug", exportDebug );
@@ -292,6 +293,15 @@
 		config.SetMeta( "Build.LoadingScreen", loadingScreen );
 		config.SetMeta( "Build.Orientation", orientation );
 		config.SetMeta( "Build.Microphone", microphone );
+	}
+
+	//A folder inside the project as a path from its root; anywhere else as it is
+	string InProject( string folder )
+	{
+		if ( string.IsNullOrWhiteSpace( folder ) || Project is null ) return folder;
+
+		var relative = Path.GetRelativePath( Project.GetRootPath(), folder );
+		return relative.StartsWith( ".." ) || Path.IsPathRooted( relative ) ? folder : relative.Replace( '\\', '/' );
 	}
 
 	public override void OnSave()

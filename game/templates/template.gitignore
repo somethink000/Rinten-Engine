@@ -9,11 +9,18 @@
 # Rebuilt on open, and no two people want each other's.
 .rinten/
 
-# Compiled resources: everything beside its definition with _c on the end, and the sidecars beside those - picture.png.tex_c, picture.png.tex_c.bc, thing.mdl_c, thing.mdl_c.baked, scenes/main.scene_c. The editor compiles whatever it finds uncompiled when it scans, so a fresh clone builds its own. One exception,
-# and it matters: a model with no art file behind it - one built in the model editor, or ported - has nothing to be rebuilt from, so its _c is the only copy there is. Keep those: git add -f the/model.mdl_c By these three shapes rather than *_c.* - a picture of yours called shield_c.png is not a compiled anything.
+# Compiled resources: anything with _c on the end and the sidecars beside it - picture.png.tex_c and
+# its .bc and .ktx2, thing.mdl_c and its .baked, scenes/main.scene_c. The editor compiles what it finds
+# uncompiled when it scans, so a fresh clone builds its own.
+#
+# Kept on purpose: a model with no art file behind it (built in the model editor, or ported) has only
+# its _c - git add -f the/model.mdl_c. And x.terrain_c.chunks, which a game ships to start unbaked.
+#
+# By these shapes rather than *_c.* - a picture of yours called shield_c.png is not a compiled anything.
 *_c
 *_c.bc
 *_c.baked
+*_c.ktx2
 
 # On purpose NOT ignored: *.scene_d, the scene's binary half. It is written by the scene
 # itself when you save, not compiled from anything, and a scene without it opens empty.

@@ -1,5 +1,6 @@
 ﻿using System;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using Rinten;
 using System.Collections.Generic;
@@ -66,18 +67,18 @@ public class LibraryNodeType : INodeType
 		} );
 	}
 
-	protected static IReadOnlyList<Menu.PathElement> LibraryPath( NodeBinding binding, IReadOnlyDictionary<string, object?>? properties = null )
+	protected static IReadOnlyList<GraphMenu.PathElement> LibraryPath( NodeBinding binding, IReadOnlyDictionary<string, object?>? properties = null )
 	{
-		var path = new List<Menu.PathElement>();
+		var path = new List<GraphMenu.PathElement>();
 
 		if ( binding.Inputs.FirstOrDefault( x => x.IsTarget ) is { } targetInput && TypeLibrary.TryGetType( targetInput.Type, out var targetDesc ) )
 		{
 			path.AddRange( MemberPath( targetDesc,
 				binding.Kind is NodeKind.Expression
-					? new Menu.PathElement( "Expressions",
+					? new GraphMenu.PathElement( "Expressions",
 						Order: MethodNodeType.ExpressionsOrder,
 						IsHeading: true )
-					: new Menu.PathElement( "Actions",
+					: new GraphMenu.PathElement( "Actions",
 						Order: MethodNodeType.ActionsOrder,
 						IsHeading: true ) ) );
 		}
@@ -94,14 +95,14 @@ public class LibraryNodeType : INodeType
 			Name = display.Title,
 			Group = display.Group,
 			Icon = display.Icon
-		} ) );
+		} ).ToGraphPath() );
 
 		return path;
 	}
 
-	protected static IReadOnlyList<Menu.PathElement> MemberPath( TypeDescription declaringType, params Menu.PathElement[] subPath )
+	protected static IReadOnlyList<GraphMenu.PathElement> MemberPath( TypeDescription declaringType, params GraphMenu.PathElement[] subPath )
 	{
-		var path = new List<Menu.PathElement>
+		var path = new List<GraphMenu.PathElement>
 		{
 			new( "Type Library", Order: 200, IsHeading: true ),
 			new( declaringType.Title, declaringType.Icon ?? "data_object", declaringType.Description, Order: GetTypeOrder( declaringType.TargetType ) )
@@ -122,7 +123,7 @@ public class LibraryNodeType : INodeType
 	public IReadOnlyDictionary<string, object?> Properties { get; }
 	public IReadOnlyDictionary<string, object?> Inputs { get; }
 
-	public Menu.PathElement[] Path { get; }
+	public GraphMenu.PathElement[] Path { get; }
 
 	public virtual bool IsCommon => TargetInput is null && IsCommonWithTarget;
 	public virtual bool IsCommonWithTarget => true;
@@ -133,7 +134,7 @@ public class LibraryNodeType : INodeType
 
 	}
 
-	protected LibraryNodeType( NodeDefinition definition, IReadOnlyList<Menu.PathElement>? path = null,
+	protected LibraryNodeType( NodeDefinition definition, IReadOnlyList<GraphMenu.PathElement>? path = null,
 		IReadOnlyDictionary<string, object?>? properties = null,
 		IReadOnlyDictionary<string, object?>? inputs = null )
 	{

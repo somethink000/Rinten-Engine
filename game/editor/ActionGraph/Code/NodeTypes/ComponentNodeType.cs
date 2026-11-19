@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Rinten.ActionGraphs;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 
 namespace Editor.ActionGraphs;
 
@@ -56,7 +57,7 @@ public class ComponentNodeType : LibraryNodeType
 
 		if ( node.GetSceneReference( hostObject.Scene ) is not { } sceneRefNode ) return;
 
-		var typeTitle = DisplayInfo.ForType( node.Outputs.Result.Type ).Name;
+		var typeTitle = Rinten.DisplayInfo.ForType( node.Outputs.Result.Type ).Name;
 
 		foreach ( var component in sceneRefNode.TargetObject.Components.GetAll<Component>( FindMode.EverythingInSelf ) )
 		{
@@ -81,18 +82,18 @@ public class ComponentNodeType : LibraryNodeType
 
 	public override bool IsCommonWithTarget => KnownToExist;
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( TypeDescription type, string? gameObjectName )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( TypeDescription type, string? gameObjectName )
 	{
 		if ( gameObjectName is not null )
 		{
 			return MemberPath( TypeLibrary.GetType<IComponentLister>(),
-				new Menu.PathElement( $"From Object ({gameObjectName})", Order: -100, IsHeading: true ),
-				new Menu.PathElement( type.Title, type.Icon, type.Description ) );
+				new GraphMenu.PathElement( $"From Object ({gameObjectName})", Order: -100, IsHeading: true ),
+				new GraphMenu.PathElement( type.Title, type.Icon, type.Description ) );
 		}
 
 		return MemberPath( type,
-			new Menu.PathElement( "Expressions", Order: MethodNodeType.ExpressionsOrder, IsHeading: true ),
-			new Menu.PathElement( "Get", type.Icon, type.Description ) );
+			new GraphMenu.PathElement( "Expressions", Order: MethodNodeType.ExpressionsOrder, IsHeading: true ),
+			new GraphMenu.PathElement( "Get", type.Icon, type.Description ) );
 	}
 
 	public ComponentNodeType( TypeDescription type, string? gameObjectName = null )

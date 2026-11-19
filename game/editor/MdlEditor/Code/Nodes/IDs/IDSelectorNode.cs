@@ -81,9 +81,9 @@ public class IDSelectorNode : Node
 		return compiler.Builder.IdSelect( cases, DefaultId );
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "ID Selector" );
+		var menu = new GraphMenu( "ID Selector" );
 		menu.AddOption( "Add Option", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 0 )

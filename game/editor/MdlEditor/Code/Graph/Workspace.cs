@@ -340,7 +340,7 @@ internal sealed class Workspace : EditorPanel
 
 	private void RestorePrimarySelection()
 	{
-		if ( !_rebuilding && !_secondaryView.SelectedItems.OfType<NodeEditor.NodeUI>().Any() )
+		if ( !_rebuilding && !_secondaryView.SelectedItems.OfType<Rinten.UI.NodeGraph.NodeUI>().Any() )
 			_window.RestorePrimarySelection();
 	}
 
@@ -403,7 +403,7 @@ internal sealed class Workspace : EditorPanel
 			|| _secondaryView.Box.Rect.Height <= 0 )
 			return;
 
-		var nodes = _secondaryView.Items.OfType<NodeEditor.NodeUI>().ToArray();
+		var nodes = _secondaryView.Items.OfType<Rinten.UI.NodeGraph.NodeUI>().ToArray();
 		if ( nodes.Length == 0 )
 		{
 			_pendingFrameGraph = null;

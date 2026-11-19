@@ -418,7 +418,7 @@ internal sealed class VariationNodeList : PooledRowList<VariationNodeRow>
 				|| entry.Node.DisplayInfo.Name.Contains( filter, StringComparison.OrdinalIgnoreCase )
 				|| ( entry.Path?.Contains( filter, StringComparison.OrdinalIgnoreCase ) ?? false ) )
 			.OrderBy( entry => entry.Path, StringComparer.OrdinalIgnoreCase )
-			.ThenBy( entry => DisplayInfo.ForType( entry.Node.GetType() ).Name, StringComparer.OrdinalIgnoreCase )
+			.ThenBy( entry => Rinten.DisplayInfo.ForType( entry.Node.GetType() ).Name, StringComparer.OrdinalIgnoreCase )
 			.ThenBy( entry => entry.Node.Identifier, StringComparer.OrdinalIgnoreCase ) );
 
 		Invalidate();
@@ -487,7 +487,7 @@ internal sealed class VariationNodeRow : PanelPooledRow
 		//than per class, so it cannot come from a sheet - this is the one thing here still written from code.
 		Style.BackgroundColor = node.PrimaryColor.WithAlpha( _window.IsSelected( node ) ? 0.25f : 0.1f );
 
-		PanelText.Set( _icon, node.DisplayInfo.Icon ?? DisplayInfo.ForType( node.GetType() ).Icon ?? "account_tree" );
+		PanelText.Set( _icon, node.DisplayInfo.Icon ?? Rinten.DisplayInfo.ForType( node.GetType() ).Icon ?? "account_tree" );
 		PanelText.Set( _name, node.DisplayInfo.Name );
 		PanelText.Set( _path, path );
 

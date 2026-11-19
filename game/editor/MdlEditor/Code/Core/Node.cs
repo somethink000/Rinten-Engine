@@ -30,7 +30,7 @@ public abstract class Node : INode, INodeHighlight, IAttachableNode
 	public event Action Changed;
 
 	[JsonIgnore, Hide, Browsable( false )]
-	public virtual DisplayInfo DisplayInfo { get; }
+	public virtual NodeDisplay DisplayInfo { get; }
 
 	[JsonIgnore, Hide, Browsable( false )]
 	public IGraph Graph { get; set; }
@@ -107,7 +107,7 @@ public abstract class Node : INode, INodeHighlight, IAttachableNode
 	public bool HasTitleBar => true;
 
 	[JsonIgnore, Hide, Browsable( false )]
-	public virtual Pixmap Thumbnail => null;
+	public virtual ITexture Thumbnail => null;
 
 	[JsonIgnore, Hide, Browsable( false )]
 	public virtual Color PrimaryColor { get; } = Color.Lerp( new Color( 0.7f, 0.7f, 0.7f ), Theme.Blue, 0.1f );
@@ -192,7 +192,7 @@ public abstract class Node : INode, INodeHighlight, IAttachableNode
 	public Node()
 	{
 		Identifier = Guid.NewGuid().ToString();
-		DisplayInfo = DisplayInfo.For( this );
+		DisplayInfo = Rinten.DisplayInfo.For( this );
 		DiscoverPlugs();
 	}
 
@@ -234,7 +234,7 @@ public abstract class Node : INode, INodeHighlight, IAttachableNode
 
 	public virtual void OnDoubleClick() { }
 	public virtual void OnFrame() { }
-	public virtual Menu CreateContextMenu( NodeUI node ) => null;
+	public virtual GraphMenu CreateContextMenu( NodeUI node ) => null;
 
 	protected void ReorderInput<T>( IPlugIn input, IPlugIn target, List<T> values, List<IPlugIn> plugs )
 	{
@@ -434,11 +434,11 @@ public class AnimPlugInfo
 	private readonly Func<Node, NodeInput> _getInput;
 	private readonly Action<Node, NodeInput> _setInput;
 
-	public DisplayInfo DisplayInfo
+	public NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.ForMember( Type );
+			var info = Rinten.DisplayInfo.ForMember( Type );
 			info.Name = _title();
 			return info;
 		}
@@ -491,7 +491,7 @@ public record AnimPlug( Node Node, AnimPlugInfo Info, Type Type ) : IPlug
 {
 	INode IPlug.Node => Node;
 	public string Identifier => Info.Name;
-	public virtual DisplayInfo DisplayInfo => Info.DisplayInfo;
+	public virtual NodeDisplay DisplayInfo => Info.DisplayInfo;
 	public virtual bool ShowLabel => true;
 	public bool AllowStretch => true;
 
@@ -503,7 +503,7 @@ public record AnimPlug( Node Node, AnimPlugInfo Info, Type Type ) : IPlug
 	public string ErrorMessage => null;
 
 	public ValueEditor CreateEditor( NodeUI node, Plug plug ) => null;
-	public virtual Menu CreateContextMenu( NodeUI node, Plug plug ) => null;
+	public virtual GraphMenu CreateContextMenu( NodeUI node, Plug plug ) => null;
 	public void OnDoubleClick( NodeUI node, Plug plug ) { }
 }
 
@@ -514,7 +514,7 @@ public record AnimPlugIn( Node Node, AnimPlugInfo Info, Type Type ) : AnimPlug( 
 	public override bool ShowConnection => ( (IPlugIn)this ).ConnectedOutput?.Node is not Node { Attached: true };
 
 	/// <summary>Input right-click menu: create something that feeds this plug, attached directly to it</summary>
-	public override Menu CreateContextMenu( NodeUI node, Plug plug )
+	public override GraphMenu CreateContextMenu( NodeUI node, Plug plug )
 	{
 		if ( !Info.CanConnect || Node.Graph is not Data graph ) return null;
 
@@ -526,7 +526,7 @@ public record AnimPlugIn( Node Node, AnimPlugInfo Info, Type Type ) : AnimPlug( 
 
 		if ( answers.Count == 0 ) return null;
 
-		var menu = new Menu( DisplayInfo.Name );
+		var menu = new GraphMenu( DisplayInfo.Name );
 
 		foreach ( var answer in answers )
 		{
@@ -635,7 +635,7 @@ public record AnimPlugOut( Node Node, AnimPlugInfo Info, Type Type ) : AnimPlug(
 	/// <summary>The label goes with it: the node's own name already says this.</summary>
 	public override bool ShowLabel => !Node.Attached;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,10 +18,9 @@ public record ActionGraphEditorEvent( ActionGraphView View )
 
 public record PopulateNodeMenuEvent(
 	ActionGraphView View,
-	Menu Menu,
+	GraphMenu Menu,
 	Vector2 ClickPos,
-	Plug TargetPlug,
-	string Filter ) : ActionGraphEditorEvent( View )
+	Plug TargetPlug ) : ActionGraphEditorEvent( View )
 {
 	public const string EventName = "actiongraph.nodemenu";
 }
@@ -28,7 +28,7 @@ public record PopulateNodeMenuEvent(
 public record PopulateInputPlugMenuEvent(
 	ActionGraphView View,
 	ActionInputPlug Plug,
-	Menu Menu ) : ActionGraphEditorEvent( View )
+	GraphMenu Menu ) : ActionGraphEditorEvent( View )
 {
 	public const string EventName = "actiongraph.inputplugmenu";
 }
@@ -36,14 +36,14 @@ public record PopulateInputPlugMenuEvent(
 public record PopulateOutputPlugMenuEvent(
 	ActionGraphView View,
 	ActionOutputPlug Plug,
-	Menu Menu ) : ActionGraphEditorEvent( View )
+	GraphMenu Menu ) : ActionGraphEditorEvent( View )
 {
 	public const string EventName = "actiongraph.outputplugmenu";
 }
 
 public record PopulateCreateSubGraphMenuEvent(
 	ActionGraphView View,
-	Menu Menu,
+	GraphMenu Menu,
 	IReadOnlyList<(NodeUI NodeUI, Node ActionNode)> Nodes ) : ActionGraphEditorEvent( View )
 {
 	public const string EventName = "actiongraph.createsubgraphmenu";

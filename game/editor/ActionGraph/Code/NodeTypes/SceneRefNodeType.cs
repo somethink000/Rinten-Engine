@@ -2,6 +2,7 @@
 using Rinten;
 using System.Collections.Generic;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Rinten.ActionGraphs;
 
 namespace Editor.ActionGraphs;
@@ -59,7 +60,7 @@ public class SceneRefNodeType : LibraryNodeType
 	public object Value { get; }
 	public string PrefabPath { get; }
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( object value, GameObject root = null )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( object value, GameObject root = null )
 	{
 		var (go, comp) = value switch
 		{
@@ -72,33 +73,33 @@ public class SceneRefNodeType : LibraryNodeType
 
 		root ??= go.Scene;
 
-		var path = new List<Menu.PathElement>();
+		var path = new List<GraphMenu.PathElement>();
 
 		if ( comp is not null )
 		{
-			var display = DisplayInfo.For( comp );
+			var display = Rinten.DisplayInfo.For( comp );
 
-			path.Add( new Menu.PathElement( display.Name, display.Icon, display.Description ) );
-			path.Add( new Menu.PathElement( "Components", IsHeading: true, Order: 200 ) );
+			path.Add( new GraphMenu.PathElement( display.Name, display.Icon, display.Description ) );
+			path.Add( new GraphMenu.PathElement( "Components", IsHeading: true, Order: 200 ) );
 		}
 		else
 		{
-			path.Add( new Menu.PathElement( go.Name, "radio_button_unchecked", Description: $"Guid: {go.Id}" ) );
-			path.Add( new Menu.PathElement( "Game Object", IsHeading: true, Order: 100 ) );
+			path.Add( new GraphMenu.PathElement( go.Name, "radio_button_unchecked", Description: $"Guid: {go.Id}" ) );
+			path.Add( new GraphMenu.PathElement( "Game Object", IsHeading: true, Order: 100 ) );
 		}
 
 		while ( go is not null )
 		{
-			path.Add( new Menu.PathElement( go.Name, "layers" ) );
+			path.Add( new GraphMenu.PathElement( go.Name, "layers" ) );
 
 			if ( go == root ) break;
 
-			path.Add( new Menu.PathElement( "Children", IsHeading: true, Order: 300 ) );
+			path.Add( new GraphMenu.PathElement( "Children", IsHeading: true, Order: 300 ) );
 
 			go = go.Parent;
 		}
 
-		path.Add( new Menu.PathElement( "Scene Reference", IsHeading: true ) );
+		path.Add( new GraphMenu.PathElement( "Scene Reference", IsHeading: true ) );
 
 		path.Reverse();
 

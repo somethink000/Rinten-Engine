@@ -1,4 +1,5 @@
 ﻿using System;
+using Editor.NodeEditor;
 using System.Collections.Generic;
 using System.Linq;
 using Facepunch.ActionGraphs;
@@ -44,20 +45,20 @@ public class MethodNodeType : LibraryNodeType
 	public override bool AutoExpand { get; }
 	public override bool IsCommon => false;
 
-	private static IReadOnlyList<Menu.PathElement> GetStaticPath( MethodDescription method )
+	private static IReadOnlyList<GraphMenu.PathElement> GetStaticPath( MethodDescription method )
 	{
 		var isPure = method.IsPure( EditorNodeLibrary );
-		var path = new List<Menu.PathElement>();
+		var path = new List<GraphMenu.PathElement>();
 
 		path.AddRange( MemberPath( method.TypeDescription ) );
 		path.Add( isPure
-			? new Menu.PathElement( "Static Expressions",
+			? new GraphMenu.PathElement( "Static Expressions",
 				Order: ExpressionsOrder - 50,
 				IsHeading: true )
-			: new Menu.PathElement( "Static Actions",
+			: new GraphMenu.PathElement( "Static Actions",
 				Order: ActionsOrder - 50,
 				IsHeading: true ) );
-		path.AddRange( Menu.GetSplitPath( method ) );
+		path.AddRange( Menu.GetSplitPath( method ).ToGraphPath() );
 
 		return path;
 	}

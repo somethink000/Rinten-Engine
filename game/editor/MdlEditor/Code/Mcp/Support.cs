@@ -224,14 +224,14 @@ public static partial class McpTools
 		var exact = types.FirstOrDefault( type =>
 			string.Equals( type.Name, name, StringComparison.OrdinalIgnoreCase )
 			|| string.Equals( type.FullName, name, StringComparison.OrdinalIgnoreCase )
-			|| string.Equals( DisplayInfo.ForType( type.TargetType ).Name, name, StringComparison.OrdinalIgnoreCase ) );
+			|| string.Equals( Rinten.DisplayInfo.ForType( type.TargetType ).Name, name, StringComparison.OrdinalIgnoreCase ) );
 
 		if ( exact is not null )
 			return exact;
 
 		var matches = types.Where( type =>
 			type.Name.Contains( name, StringComparison.OrdinalIgnoreCase )
-			|| DisplayInfo.ForType( type.TargetType ).Name.Contains( name, StringComparison.OrdinalIgnoreCase ) ).ToArray();
+			|| Rinten.DisplayInfo.ForType( type.TargetType ).Name.Contains( name, StringComparison.OrdinalIgnoreCase ) ).ToArray();
 
 		return matches.Length switch
 		{

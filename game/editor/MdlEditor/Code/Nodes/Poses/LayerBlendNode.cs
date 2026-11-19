@@ -62,9 +62,9 @@ public class LayerBlendNode : Node, IReorderableInputNode
 	bool IReorderableInputNode.CanReorderInput( IPlugIn input ) => _layerPlugs.Count > 1 && _layerPlugs.Contains( input );
 	void IReorderableInputNode.ReorderInput( IPlugIn input, IPlugIn target ) => ReorderInput( input, target, Layers, _layerPlugs );
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Layer Blend" );
+		var menu = new GraphMenu( "Layer Blend" );
 		menu.AddOption( "Add Layer", "add", () => { Layers.Add( default ); Update(); } );
 
 		if ( Layers.Count > 1 )

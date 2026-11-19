@@ -76,9 +76,9 @@ public class SelectorNode : Node
 		}
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( DisplayInfo.Name );
+		var menu = new GraphMenu( DisplayInfo.Name );
 		menu.AddOption( "Add Option", "add", () =>
 		{
 			Options.Add( new Option() );

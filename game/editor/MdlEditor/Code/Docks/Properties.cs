@@ -281,7 +281,7 @@ internal sealed class PropertiesPanel : EditorPanel
 		if ( type is null )
 			return;
 
-		var description = DisplayInfo.ForType( type ).Description;
+		var description = Rinten.DisplayInfo.ForType( type ).Description;
 		if ( string.IsNullOrWhiteSpace( description ) )
 			return;
 
@@ -513,7 +513,7 @@ internal sealed class PropertiesPanel : EditorPanel
 				_header.Accent = Theme.Green;
 				break;
 			case Node node:
-				var type = DisplayInfo.ForType( node.GetType() );
+				var type = Rinten.DisplayInfo.ForType( node.GetType() );
 				SetHeader( type.Name ?? node.GetType().Name, node.DisplayInfo.Name );
 				_header.Icon = node.DisplayInfo.Icon ?? type.Icon ?? "account_tree";
 				_header.Accent = node.PrimaryColor;

@@ -29,11 +29,11 @@ public class BoneMaskWeightsNode : Node
 
 	public override Color PrimaryColor => Color.Parse( "#d19a66" ).Value;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( MaskName ) )
 				info.Name = MaskName;
 			return info;

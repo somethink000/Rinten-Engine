@@ -56,11 +56,11 @@ public class AnimationPoseNode : VariationDataNode<AnimationPoseNode.Data>
 
 	public override Color PrimaryColor => Theme.Green;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( AnimationName ) )
 				info.Name = $"Pose: {AnimationName}";
 			return info;

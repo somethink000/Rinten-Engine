@@ -104,7 +104,7 @@ internal sealed class SearchPopup : Popup
 			var title = SearchTitle( node );
 			var path = _window.GetNodePath( node );
 			var searchText = SearchableText( node, title, path, node.DisplayInfo.Description );
-			var display = DisplayInfo.ForType( node.GetType() );
+			var display = Rinten.DisplayInfo.ForType( node.GetType() );
 			var nodeType = new SearchType( $"node:{node.GetType().FullName}", display.Name,
 				string.IsNullOrWhiteSpace( display.Group ) ? "Nodes" : display.Group,
 				display.Icon ?? node.DisplayInfo.Icon ?? "account_tree", node.PrimaryColor );

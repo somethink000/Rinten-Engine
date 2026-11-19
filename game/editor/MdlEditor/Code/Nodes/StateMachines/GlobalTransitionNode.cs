@@ -12,11 +12,11 @@ public class GlobalTransitionNode : TransitionNode
 	public override bool CanClone => false;
 	public override bool CanRemove => false;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			info.Name = $"Global → {StateName}";
 			return info;
 		}

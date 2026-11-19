@@ -61,11 +61,11 @@ public class TransitionNode : Node
 
 	public override Color PrimaryColor => Theme.Pink;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( TransitionName ) )
 				info.Name = TransitionName;
 			return info;

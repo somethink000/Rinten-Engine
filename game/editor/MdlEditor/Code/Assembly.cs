@@ -1,5 +1,6 @@
 global using Editor;
 global using Editor.NodeEditor;
+global using Rinten.UI.NodeGraph;
 global using Editor.MdlEditor;
 global using Editor.MdlEditor.Nodes;
 global using System;

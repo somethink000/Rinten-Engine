@@ -1,4 +1,5 @@
 ﻿using Facepunch.ActionGraphs;
+using Editor.NodeEditor;
 using Rinten;
 using System;
 using System.Collections.Generic;
@@ -53,9 +54,9 @@ public class PropertyNodeType : LibraryNodeType
 	public override bool AutoExpand { get; }
 	public override bool IsCommon => false;
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( TypeDescription declaringType, Type propertyType, bool isStatic, bool canRead, bool canWrite, string name, string? group, string? icon, string? desc )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( TypeDescription declaringType, Type propertyType, bool isStatic, bool canRead, bool canWrite, string name, string? group, string? icon, string? desc )
 	{
-		var path = new List<Menu.PathElement>();
+		var path = new List<GraphMenu.PathElement>();
 
 		path.AddRange( MemberPath( declaringType ) );
 
@@ -80,15 +81,15 @@ public class PropertyNodeType : LibraryNodeType
 			order -= 50;
 		}
 
-		path.Add( new Menu.PathElement( heading, Order: order, IsHeading: true ) );
+		path.Add( new GraphMenu.PathElement( heading, Order: order, IsHeading: true ) );
 
 		if ( !string.IsNullOrEmpty( group ) )
 		{
-			path.AddRange( Menu.GetSplitPath( group )! );
+			path.AddRange( Menu.GetSplitPath( group ).ToGraphPath() );
 		}
 
-		path.Add( new Menu.PathElement( name,
-			Icon: icon ?? DisplayInfo.ForType( propertyType ).Icon ?? "storage",
+		path.Add( new GraphMenu.PathElement( name,
+			Icon: icon ?? Rinten.DisplayInfo.ForType( propertyType ).Icon ?? "storage",
 			Description: desc ) );
 
 		return path;

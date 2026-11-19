@@ -42,14 +42,14 @@ public class InternalReferencedGraphNode : VariationDataNode<InternalReferencedG
 
 	public override Color PrimaryColor => Color.Parse( "#9575cd" ).Value;
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
 		if ( node.Graph is not IInternalGraphEditorActions editor )
 			return null;
 
-		var menu = new Menu( "Internal Graph" );
-		var option = menu.AddOption( "Reflect Child Parameters to Parent", "arrow_back", () => editor.ReflectChildParametersToParent( this ) );
-		option.Enabled = !string.IsNullOrWhiteSpace( GraphPath );
+		var menu = new GraphMenu( "Internal Graph" );
+		menu.AddOption( "Reflect Child Parameters to Parent", "arrow_back", () => editor.ReflectChildParametersToParent( this ),
+			enabled: !string.IsNullOrWhiteSpace( GraphPath ) );
 		return menu;
 	}
 

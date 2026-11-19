@@ -1,6 +1,7 @@
 ﻿using Editor.TreeBrowser;
 using Rinten.UI;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using System;
 using System.Collections.Generic;
@@ -13,14 +14,22 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Rinten;
 using Rinten.ActionGraphs;
-using Connection = Editor.NodeEditor.Connection;
+using Connection = Rinten.UI.NodeGraph.Connection;
 
 namespace Editor.ActionGraphs;
 
 /// <summary>Graph view widget for an <see cref="ActionGraph"/>.</summary>
 [StyleSheet( "ActionGraphView.cs.scss" )]
-public partial class ActionGraphView : GraphView, AssetSystem.IEventListener
+public partial class ActionGraphView : EditorGraphView, AssetSystem.IEventListener
 {
+	//Action graphs' own types as their plugs name them: a union as its parts, a signal in white
+	static ActionGraphView()
+	{
+		TypeNameFormatter.Special = type => Either.TryUnwrap( type, out var types )
+			? string.Join( " | ", types.Select( TypeNameFormatter.ToRichText ) )
+			: type == typeof( Signal ) ? type.Name.WithColor( "#FFFFFF" ) : null;
+	}
+
 	private static Action<ActionGraphResource> ResourceSaved;
 
 	private record struct ActionGraphKey( Guid Guid, ISourceLocation Source )
@@ -725,7 +734,7 @@ public partial class ActionGraphView : GraphView, AssetSystem.IEventListener
 		return result.Value.NewGraph;
 	}
 
-	protected override void OnOpenContextMenu( Menu menu, Plug targetPlug )
+	protected override void OnOpenContextMenu( GraphMenu menu, Plug targetPlug )
 	{
 		if ( targetPlug.IsValid() )
 		{

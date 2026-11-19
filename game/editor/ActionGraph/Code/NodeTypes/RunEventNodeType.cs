@@ -29,9 +29,9 @@ public class RunEventNodeType : LibraryNodeType
 		return typeDesc.IsInterface && typeDesc.Interfaces.Any( x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof( ISceneEvent<> ) );
 	}
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( MethodDescription method )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( MethodDescription method )
 	{
-		return new Menu.PathElement[]
+		return new GraphMenu.PathElement[]
 		{
 			new( "Common Nodes", IsHeading: true ),
 			new( "Scene" ),

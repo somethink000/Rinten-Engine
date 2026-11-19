@@ -44,11 +44,11 @@ public class LookAtNode : Node
 
 	public override Color PrimaryColor => Color.Parse( "#56b6c2" ).Value;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( Chain ) )
 				info.Name = $"Look At: {Chain}";
 			return info;

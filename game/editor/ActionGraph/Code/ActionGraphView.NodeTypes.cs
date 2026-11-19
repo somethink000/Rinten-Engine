@@ -1,4 +1,5 @@
 ﻿using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using Rinten;
 using Rinten.ActionGraphs;
@@ -63,11 +64,9 @@ partial class ActionGraphView
 			.Where( x => x.Inner.IsExpansionOption() );
 	}
 
-	protected override void OnPopulateNodeMenuSpecialOptions( Menu menu, Vector2 clickPos, Plug targetPlug, string filter )
+	protected override void OnPopulateNodeMenuSpecialOptions( GraphMenu menu, Vector2 clickPos, Plug targetPlug )
 	{
-		base.OnPopulateNodeMenuSpecialOptions( menu, clickPos, targetPlug, filter );
-
-		if ( !string.IsNullOrWhiteSpace( filter ) ) return;
+		base.OnPopulateNodeMenuSpecialOptions( menu, clickPos, targetPlug );
 
 		if ( targetPlug.IsValid() && targetPlug.PropertyType != typeof( Signal ) )
 		{
@@ -102,10 +101,11 @@ partial class ActionGraphView
 			addVarMenu.AboutToShow += () =>
 			{
 				addVarMenu.Clear();
-				var lineEdit = addVarMenu.AddLineEdit( "Name", autoFocus: true );
-				var typeMenu = TypeMenu.Create( action: ( type ) =>
+				var typed = "";
+				addVarMenu.AddLineEdit( "Name", autoFocus: true, onChange: value => typed = value );
+				addVarMenu.AddOption( "Select Type", "category", () => TypeMenu.Create( action: type =>
 				{
-					var name = lineEdit.Text;
+					var name = typed;
 					if ( string.IsNullOrWhiteSpace( name ) ) name = "newVariable";
 					var ogName = name;
 					int varIndex = 0;
@@ -122,13 +122,11 @@ partial class ActionGraphView
 
 					var nodeType = new VariableNodeType( variable );
 					CreateNewNode( nodeType, clickPos, null );
-				} );
-				typeMenu.Title = "Select Type";
-				addVarMenu.AddMenu( typeMenu );
+				} ).OpenAtCursor() );
 			};
 		}
 
-		EditorEvent.Run( PopulateNodeMenuEvent.EventName, new PopulateNodeMenuEvent( this, menu, clickPos, targetPlug, filter ) );
+		EditorEvent.Run( PopulateNodeMenuEvent.EventName, new PopulateNodeMenuEvent( this, menu, clickPos, targetPlug ) );
 	}
 
 	protected override INodeType NodeTypeFromDragEvent( Widget.DragEvent ev )

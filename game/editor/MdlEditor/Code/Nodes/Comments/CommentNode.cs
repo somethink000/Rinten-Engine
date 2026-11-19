@@ -24,11 +24,11 @@ public sealed class CommentNode : Node, ICommentNode
 	public int Layer { get; set; } = 5;
 
 	[JsonIgnore, Hide, Browsable( false )]
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 
 			info.Name = Title;
 			info.Description = Description;

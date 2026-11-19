@@ -24,7 +24,7 @@ public static partial class McpTools
 
 		var types = EditorTypeLibrary.GetTypes<Node>()
 			.Where( type => !type.IsAbstract && !type.HasAttribute<HideAttribute>() )
-			.Select( type => (Type: type, Node: type.Create<Node>(), Info: DisplayInfo.ForType( type.TargetType )) )
+			.Select( type => (Type: type, Node: type.Create<Node>(), Info: Rinten.DisplayInfo.ForType( type.TargetType )) )
 			.Where( item => item.Node.CanClone && item.Node.CanRemove )
 			.Where( item => string.IsNullOrWhiteSpace( search )
 				|| item.Type.Name.Contains( search, StringComparison.OrdinalIgnoreCase )

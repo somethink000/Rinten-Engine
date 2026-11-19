@@ -20,11 +20,11 @@ public class VariableNodeType : LibraryNodeType
 
 	public Variable Variable { get; }
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( Variable variable )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( Variable variable )
 	{
 		var typeDesc = TypeLibrary.GetType( variable.Type );
 
-		return new Menu.PathElement[]
+		return new GraphMenu.PathElement[]
 		{
 			new( "Graph", IsHeading: true ),
 			new( "Variables", "Storage for values, scoped to each time the graph runs." ),

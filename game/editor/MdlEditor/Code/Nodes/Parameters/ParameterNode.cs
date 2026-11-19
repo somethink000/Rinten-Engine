@@ -22,11 +22,11 @@ public abstract class ParameterNode : Node
 
 	internal override AnimGraphBuilder.Node Compile( Compiler compiler ) => compiler.EmitParameterReference( this );
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( ParameterName ) )
 				info.Name = ParameterName;
 			return info;

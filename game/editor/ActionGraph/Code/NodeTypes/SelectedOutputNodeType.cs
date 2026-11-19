@@ -1,5 +1,6 @@
 ﻿using System;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,7 +24,7 @@ public class SelectedOutputNodeType : INodeType
 			return;
 		}
 
-		var targetTypeTitle = DisplayInfo.ForType( targetType ).Name;
+		var targetTypeTitle = Rinten.DisplayInfo.ForType( targetType ).Name;
 
 		Parallel.ForEach( ev.GlobalNodeTypes, x =>
 		{
@@ -37,7 +38,7 @@ public class SelectedOutputNodeType : INodeType
 	}
 
 	public LibraryNodeType Inner { get; }
-	public Menu.PathElement[] Path { get; }
+	public GraphMenu.PathElement[] Path { get; }
 
 	public bool IsCommon => Inner.IsCommonWithTarget;
 
@@ -46,7 +47,7 @@ public class SelectedOutputNodeType : INodeType
 		Inner = inner;
 		Path = inner.Path.ToArray();
 
-		Path[0] = new Menu.PathElement( $"Selected Output ({typeTitle})", Order: -200, IsHeading: true );
+		Path[0] = new GraphMenu.PathElement( $"Selected Output ({typeTitle})", Order: -200, IsHeading: true );
 	}
 
 	public bool TryGetInput( Type valueType, [NotNullWhen( true )] out string? name )

@@ -1,5 +1,6 @@
 using Editor.Inspectors;
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using Rinten;
 using Rinten.Internal;

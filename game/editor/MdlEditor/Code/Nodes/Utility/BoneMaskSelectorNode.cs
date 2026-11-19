@@ -89,9 +89,9 @@ public class BoneMaskSelectorNode : Node
 			} );
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Bone Mask Selector" );
+		var menu = new GraphMenu( "Bone Mask Selector" );
 		menu.AddOption( "Add Mask", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 0 )

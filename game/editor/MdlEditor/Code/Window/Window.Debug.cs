@@ -444,7 +444,7 @@ public partial class Window
 
 		foreach ( var item in graphView.Items )
 		{
-			if ( item is not NodeEditor.NodeUI ui || ui.Node is not Node node )
+			if ( item is not Rinten.UI.NodeGraph.NodeUI ui || ui.Node is not Node node )
 				continue;
 
 			var nodeIndex = -1;

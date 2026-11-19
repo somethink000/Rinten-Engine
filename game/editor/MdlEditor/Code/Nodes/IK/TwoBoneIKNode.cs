@@ -54,11 +54,11 @@ public class TwoBoneIKNode : VariationDataNode<TwoBoneIKNode.Data>
 
 	public override Color PrimaryColor => Color.Parse( "#56b6c2" ).Value;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			var chain = SelectedData?.Chain;
 
 			if ( !string.IsNullOrWhiteSpace( chain ) )

@@ -4,6 +4,10 @@ namespace Editor.NodeEditor;
 
 public static class MenuExtensions
 {
+	/// <summary>An editor menu path as a graph menu path.</summary>
+	public static Rinten.UI.NodeGraph.GraphMenu.PathElement[] ToGraphPath( this Menu.PathElement[] path ) =>
+		path.Select( x => new Rinten.UI.NodeGraph.GraphMenu.PathElement( x.Name, x.Icon, x.Description, x.Order, x.IsHeading ) ).ToArray();
+
 	public static LineEdit AddLineEdit( this Menu menu, string label,
 		string value = null, string placeholder = null, bool autoFocus = false,
 		Action<string> onChange = null, Action<string> onSubmit = null )

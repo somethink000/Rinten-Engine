@@ -4,7 +4,7 @@ namespace Editor.MdlEditor;
 
 /// <summary>Graph view for the AnimGraph editor.</summary>
 [StyleSheet( "View.cs.scss" )]
-public class View : GraphView, Nodes.IInternalGraphEditorActions
+public class View : EditorGraphView, Nodes.IInternalGraphEditorActions
 {
 	protected override string ClipboardIdent => "animgraph";
 
@@ -295,7 +295,7 @@ public class View : GraphView, Nodes.IInternalGraphEditorActions
 			.Filter( query );
 	}
 
-	protected override void OnOpenContextMenu( Menu menu, Plug targetPlug )
+	protected override void OnOpenContextMenu( GraphMenu menu, Plug targetPlug )
 	{
 		base.OnOpenContextMenu( menu, targetPlug );
 
@@ -382,7 +382,7 @@ file class AnimClipDropNodeType : INodeType
 
 	public bool IsCommon => false;
 
-	public Menu.PathElement[] Path => [new() { Name = "Animation", Icon = "movie" }, new() { Name = _animationName }];
+	public GraphMenu.PathElement[] Path => [new() { Name = "Animation", Icon = "movie" }, new() { Name = _animationName }];
 
 	public bool TryGetInput( Type valueType, [System.Diagnostics.CodeAnalysis.NotNullWhen( true )] out string name )
 	{
@@ -420,7 +420,7 @@ file class ParameterDropNodeType : INodeType
 
 	public bool IsCommon => true;
 
-	public Menu.PathElement[] Path =>
+	public GraphMenu.PathElement[] Path =>
 	[
 		new() { Name = "Parameters", Icon = "tune" },
 		new() { Name = "Existing Parameters", Icon = "list", Order = -100 },

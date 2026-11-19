@@ -124,6 +124,18 @@ internal static partial class UiPlatform
 	internal static partial bool OnWeb { get => Application.OnWeb; }
 
 	internal static partial void SetClipboard( string text ) => EnginePlatform.SetClipboardText( text );
+	internal static partial string GetClipboard() => EnginePlatform.GetClipboardText();
+
+	internal static partial Panel CreatePanel( Type type ) => type is null ? null : Game.TypeLibrary.GetType( type )?.Create<Panel>();
+
+	internal static partial (Type Type, string Url)? FindRoute( string url, string parentUrl )
+		=> Microsoft.AspNetCore.Components.RouteAttribute.FindValidTarget( url, parentUrl ) is { } found ? (found.Type.TargetType, found.Attribute.Url) : null;
+
+	internal static partial IEnumerable<(string Title, string Icon, object Value)> EnumOptions( Type type )
+		=> Game.TypeLibrary.GetEnumDescription( type ).Select( x => (x.Title, x.Icon, x.ObjectValue) );
+
+	internal static partial T Kept<T>( string key, T fallback ) => Game.Cookies.Get( key, fallback );
+	internal static partial void Keep<T>( string key, T value ) => Game.Cookies.Set( key, value );
 
 	//The engine's own textures, made and loaded the way the rest of the engine makes and loads them
 	private sealed class EngineTextures : ITextureHost

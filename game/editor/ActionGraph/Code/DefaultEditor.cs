@@ -1,4 +1,5 @@
 using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using System;
 using Facepunch.ActionGraphs;
 using Rinten;
@@ -240,7 +241,7 @@ public static class InputLabels
 		if ( eventArgs.Link.Source.Node.Parent != eventArgs.Plug.Node.Node ) return;
 		if ( eventArgs.Link.Source.Node.Definition.Identifier != "scene.get" ) return;
 
-		var displayInfo = DisplayInfo.ForType( eventArgs.Link.Source.Type );
+		var displayInfo = Rinten.DisplayInfo.ForType( eventArgs.Link.Source.Type );
 
 		eventArgs.Text = displayInfo.Name;
 		eventArgs.Icon = displayInfo.Icon ?? "category";

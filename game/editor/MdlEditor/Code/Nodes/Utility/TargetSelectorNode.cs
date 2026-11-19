@@ -72,9 +72,9 @@ public class TargetSelectorNode : Node
 		}
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Target Selector" );
+		var menu = new GraphMenu( "Target Selector" );
 		menu.AddOption( "Add Option", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 0 )

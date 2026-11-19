@@ -31,18 +31,18 @@ public class NewInstanceNodeType : LibraryNodeType
 
 	public override bool IsCommon => false;
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( ConstructorInfo ctor )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( ConstructorInfo ctor )
 	{
-		var path = new List<Menu.PathElement>();
+		var path = new List<GraphMenu.PathElement>();
 
 		var typeDesc = TypeLibrary.GetType( ctor.DeclaringType );
-		var ctorDesc = DisplayInfo.ForMember( ctor );
+		var ctorDesc = Rinten.DisplayInfo.ForMember( ctor );
 
 		path.AddRange( MemberPath( typeDesc ) );
-		path.Add( new Menu.PathElement( "Static Expressions",
+		path.Add( new GraphMenu.PathElement( "Static Expressions",
 			Order: MethodNodeType.ExpressionsOrder - 50,
 			IsHeading: true ) );
-		path.Add( new Menu.PathElement( "New", "add_circle_outline", ctorDesc.Description ?? typeDesc.Description, Order: -1 ) );
+		path.Add( new GraphMenu.PathElement( "New", "add_circle_outline", ctorDesc.Description ?? typeDesc.Description, Order: -1 ) );
 
 		return path;
 	}

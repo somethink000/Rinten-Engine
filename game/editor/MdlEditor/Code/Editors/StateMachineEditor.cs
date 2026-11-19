@@ -105,7 +105,7 @@ internal sealed class StateMachineCanvas : CanvasPanel
 			_label = AddChild<UILabel>( "label" );
 			_label.Tokenize = false;
 
-			Tooltip = DisplayInfo.ForType( selection.DocumentationType ).Description;
+			Tooltip = Rinten.DisplayInfo.ForType( selection.DocumentationType ).Description;
 		}
 
 		/// <summary>How much is wired up in there, and whether it is the selection.</summary>
@@ -842,8 +842,8 @@ internal sealed class StateMachineCanvas : CanvasPanel
 
 		Tooltip = (hoverState, hoverConduit) switch
 		{
-			(not null, _) => DisplayInfo.ForType( typeof( StateMachineNode.State ) ).Description,
-			(_, not null) => DisplayInfo.ForType( typeof( StateMachineNode.Conduit ) ).Description,
+			(not null, _) => Rinten.DisplayInfo.ForType( typeof( StateMachineNode.State ) ).Description,
+			(_, not null) => Rinten.DisplayInfo.ForType( typeof( StateMachineNode.Conduit ) ).Description,
 			_ => null
 		};
 

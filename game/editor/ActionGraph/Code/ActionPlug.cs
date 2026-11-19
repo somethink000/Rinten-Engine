@@ -1,4 +1,5 @@
 ﻿using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using Rinten.ActionGraphs;
 using System;
@@ -6,7 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Nodes;
 using System.Threading;
-using static Editor.NodeEditor.GraphView;
+using static Rinten.UI.NodeGraph.GraphView;
 using DisplayInfo = Facepunch.ActionGraphs.DisplayInfo;
 
 namespace Editor.ActionGraphs;
@@ -51,7 +52,7 @@ public abstract class ActionPlug<T> : IActionPlug where T : Node.IParameter
 		return title;
 	}
 
-	public Rinten.DisplayInfo DisplayInfo => new()
+	public NodeDisplay DisplayInfo => new()
 	{
 		Name = !IsArrayElement && Index == 0
 			? Title
@@ -106,12 +107,12 @@ public abstract class ActionPlug<T> : IActionPlug where T : Node.IParameter
 		return null;
 	}
 
-	public virtual Menu CreateContextMenu( NodeUI node, Plug plug )
+	public virtual GraphMenu CreateContextMenu( NodeUI node, Plug plug )
 	{
 		return null;
 	}
 
-	protected Menu CreateDisplayInfoMenu( Menu menu, Action<DisplayInfo> changed )
+	protected GraphMenu CreateDisplayInfoMenu( GraphMenu menu, Action<DisplayInfo> changed )
 	{
 		var display = Parameter.Display;
 		var edit = menu.AddMenu( "Edit", "edit" );
@@ -237,7 +238,7 @@ public class ActionOutputPlug : ActionPlug<Node.Output>, IPlugOut
 		return new DefaultOutputEditor( node, (PlugOut)plug );
 	}
 
-	public override Menu CreateContextMenu( NodeUI node, Plug plug )
+	public override GraphMenu CreateContextMenu( NodeUI node, Plug plug )
 	{
 		if ( Parameter.Node.Definition == EditorNodeLibrary.NoOperation )
 		{
@@ -248,7 +249,7 @@ public class ActionOutputPlug : ActionPlug<Node.Output>, IPlugOut
 		var actionGraph = editorActionGraph!.Graph;
 
 		var type = Type;
-		var menu = new Menu( plug.Title );
+		var menu = new GraphMenu( plug.Title );
 
 		menu.AddLineEdit( "Label", Label,
 			autoFocus: true,
@@ -482,7 +483,7 @@ public class ActionOutputPlug : ActionPlug<Node.Output>, IPlugOut
 		nodeUi.Graph?.PushRedo();
 	}
 
-	private static void PopulateExpandedOutputMenu( ActionOutputPlug plug, NodeUI nodeUi, Menu menu )
+	private static void PopulateExpandedOutputMenu( ActionOutputPlug plug, NodeUI nodeUi, GraphMenu menu )
 	{
 		var nodeTypes = ((ActionGraphView)nodeUi.Graph)
 			.GetExpansionOptions( plug )
@@ -621,7 +622,7 @@ public class ActionInputPlug : ActionPlug<Node.Input>, IPlugIn
 		return new DefaultInputEditor( node, (PlugIn)plug );
 	}
 
-	public override Menu CreateContextMenu( NodeUI node, Plug plug )
+	public override GraphMenu CreateContextMenu( NodeUI node, Plug plug )
 	{
 		if ( Node.Definition == EditorNodeLibrary.NoOperation )
 		{
@@ -646,7 +647,7 @@ public class ActionInputPlug : ActionPlug<Node.Input>, IPlugIn
 			.Where( x => !Parameter.IsSignal && x.IsAssignableToExtended( type ) )
 			.ToArray();
 
-		var menu = new Menu( plug.Title );
+		var menu = new GraphMenu( plug.Title );
 
 		var agNode = Parameter.Node;
 

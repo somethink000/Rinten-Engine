@@ -13,11 +13,11 @@ public class ConstBoneTargetNode : Node
 	[JsonIgnore]
 	public object Target => default;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( Bone ) )
 				info.Name = $"Bone Target: {Bone}";
 			return info;

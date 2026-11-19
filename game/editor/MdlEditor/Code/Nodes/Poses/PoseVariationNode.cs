@@ -61,9 +61,9 @@ public class PoseVariationNode : Node, IReorderableInputNode
 	bool IReorderableInputNode.CanReorderInput( IPlugIn input ) => _optionPlugs.Count > 1 && _optionPlugs.Contains( input );
 	void IReorderableInputNode.ReorderInput( IPlugIn input, IPlugIn target ) => ReorderInput( input, target, Options, _optionPlugs );
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Variation" );
+		var menu = new GraphMenu( "Variation" );
 		menu.AddOption( "Add Option", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 1 )

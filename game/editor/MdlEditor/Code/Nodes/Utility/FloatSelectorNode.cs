@@ -72,9 +72,9 @@ public class FloatSelectorNode : Node
 		return string.IsNullOrWhiteSpace( Options[i].Name ) ? $"Option {i + 1}" : Options[i].Name;
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Float Selector" );
+		var menu = new GraphMenu( "Float Selector" );
 		menu.AddOption( "Add Option", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 0 )

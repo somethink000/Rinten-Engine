@@ -55,9 +55,9 @@ public class VelocityBlendNode : Node, IReorderableInputNode
 	bool IReorderableInputNode.CanReorderInput( IPlugIn input ) => _inputPlugs.Count > 1 && _inputPlugs.Contains( input );
 	void IReorderableInputNode.ReorderInput( IPlugIn input, IPlugIn target ) => ReorderInput( input, target, Options, _inputPlugs );
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Blend 1D (Velocity)" );
+		var menu = new GraphMenu( "Blend 1D (Velocity)" );
 		menu.AddOption( "Add Input", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 2 )

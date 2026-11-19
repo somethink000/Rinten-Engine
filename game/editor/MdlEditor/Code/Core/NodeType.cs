@@ -16,14 +16,14 @@ public class NodeType : INodeType
 	public string Identifier => TypeDescription.FullName;
 	public TypeDescription TypeDescription { get; }
 	public DisplayInfo DisplayInfo { get; }
-	public Menu.PathElement[] Path => Menu.GetSplitPath( DisplayInfo );
+	public GraphMenu.PathElement[] Path => Menu.GetSplitPath( DisplayInfo ).ToGraphPath();
 	public bool IsCommon => true;
 
 	public NodeType( TypeDescription type )
 	{
 		TypeDescription = type;
 		DisplayInfo = type is not null
-			? DisplayInfo.ForType( type.TargetType )
+			? Rinten.DisplayInfo.ForType( type.TargetType )
 			: new DisplayInfo();
 	}
 

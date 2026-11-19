@@ -19,11 +19,11 @@ public class ExternalReferencedGraphNode : Node
 	[JsonIgnore]
 	public object Result => default;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			if ( !string.IsNullOrWhiteSpace( SlotName ) )
 				info.Name = $"External Graph: {SlotName}";
 			return info;

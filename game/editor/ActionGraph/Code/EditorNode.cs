@@ -1,4 +1,5 @@
 ﻿using Editor.NodeEditor;
+using Rinten.UI.NodeGraph;
 using Facepunch.ActionGraphs;
 using Rinten;
 using Rinten.ActionGraphs;
@@ -67,7 +68,7 @@ public class EditorNode : INode
 	}
 
 	[Hide]
-	public virtual Rinten.DisplayInfo DisplayInfo => OverrideTitle is null ? Node.GetDisplayInfo() : Node.GetDisplayInfo() with { Name = OverrideTitle };
+	public virtual NodeDisplay DisplayInfo => OverrideTitle is null ? Node.GetDisplayInfo() : Node.GetDisplayInfo() with { Name = OverrideTitle };
 
 	[Hide]
 	public bool CanClone => Node.Definition != EditorNodeLibrary.Input && Node.Definition != EditorNodeLibrary.Output;
@@ -176,11 +177,18 @@ public class EditorNode : INode
 		}
 	}
 
-	[Hide] public Pixmap Thumbnail { get; private set; }
+	//The picture as the editor makes it, and as the graph draws it: uploaded once a change, not once a frame
+	private Pixmap _thumbnailPixmap;
+
+	[Hide] public ITexture Thumbnail { get; private set; }
 
 	private void UpdateThumbnail()
 	{
-		Thumbnail = GetNodeThumbnail( Node );
+		var pixmap = GetNodeThumbnail( Node );
+		if ( ReferenceEquals( pixmap, _thumbnailPixmap ) ) return;
+
+		_thumbnailPixmap = pixmap;
+		Thumbnail = pixmap?.picture?.ToTexture( false );
 	}
 
 	[Hide]
@@ -403,12 +411,12 @@ public class EditorNode : INode
 		return new NodeUI( view, this );
 	}
 
-	public Menu CreateContextMenu( NodeUI node )
+	public GraphMenu CreateContextMenu( NodeUI node )
 	{
 		if ( Node.Definition == EditorNodeLibrary.Property
 			&& Node.Properties.TryGetValue( ParameterNames.Kind, out var kindProperty ) )
 		{
-			var menu = new Menu( "Assignment Kind" ) { Icon = "login" };
+			var menu = new GraphMenu( "Assignment Kind" ) { Icon = "login" };
 
 			menu.AddOptions( Enum.GetValues<AssignmentKind>(), x =>
 			{
@@ -420,7 +428,7 @@ public class EditorNode : INode
 				var icon = member.GetCustomAttribute<Facepunch.ActionGraphs.IconAttribute>()?.Value;
 				var desc = member.GetCustomAttribute<Facepunch.ActionGraphs.DescriptionAttribute>()?.Value;
 
-				return new Menu.PathElement[]
+				return new GraphMenu.PathElement[]
 				{
 					new ( group, IsHeading: true, Order: (int) x ),
 					new( title, icon, desc, Order: (int) x )
@@ -438,7 +446,7 @@ public class EditorNode : INode
 			&& Node.Properties.TryGetValue( ParameterNames.Variable, out var varProperty )
 			&& varProperty.Value is Variable variable )
 		{
-			var menu = new Menu( "Edit Variable" ) { Icon = "storage" };
+			var menu = new GraphMenu( "Edit Variable" ) { Icon = "storage" };
 
 			menu.AddMenu( "Rename", "label" )
 				.AddLineEdit( "Name", variable.Name, autoFocus: true, onSubmit: name =>
@@ -456,15 +464,8 @@ public class EditorNode : INode
 				}
 			} );
 
-			var typeMenu = TypeMenu.Create( action: type =>
-			{
-				variable.Type = type;
-			} );
-
-			typeMenu.Title = "Change Type";
-			typeMenu.Icon = "edit";
-
-			menu.AddMenu( typeMenu );
+			//The type picker is the editor's searchable menu, opened on its own
+			menu.AddOption( "Change Type", "edit", () => TypeMenu.Create( action: type => variable.Type = type ).OpenAtCursor() );
 
 			return menu;
 		}
@@ -669,7 +670,7 @@ public class CommentEditorNode : EditorNode, ICommentNode
 	private readonly UserDataProperty<string> _description;
 
 	[Hide]
-	public override Rinten.DisplayInfo DisplayInfo => new()
+	public override NodeDisplay DisplayInfo => new()
 	{
 		Name = Title,
 		Description = Description,

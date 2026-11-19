@@ -19,11 +19,11 @@ public class VariationFloatNode : VariationDataNode<VariationFloatNode.Data>
 
 	public override Color PrimaryColor => Color.Parse( "#c678dd" ).Value;
 
-	public override DisplayInfo DisplayInfo
+	public override NodeDisplay DisplayInfo
 	{
 		get
 		{
-			var info = DisplayInfo.For( this );
+			var info = Rinten.DisplayInfo.For( this );
 			info.Name = $"Variation Float: {((Data)SelectedVariationData).Value:0.###}";
 			return info;
 		}

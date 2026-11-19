@@ -96,9 +96,9 @@ public class ParameterizedSelectorNode : VariationDataNode<ParameterizedSelector
 		}
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "Parameterized Selector" );
+		var menu = new GraphMenu( "Parameterized Selector" );
 		menu.AddOption( "Add Option", "add", () => { Options.Add( new Option() ); Update(); } );
 
 		if ( Options.Count > 0 )

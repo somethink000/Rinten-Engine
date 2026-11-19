@@ -22,13 +22,13 @@ public class GraphInputNodeType : LibraryNodeType
 
 	public InputDefinition Input { get; }
 
-	private static IReadOnlyList<Menu.PathElement> GetPath( InputDefinition input )
+	private static IReadOnlyList<GraphMenu.PathElement> GetPath( InputDefinition input )
 	{
-		var display = DisplayInfo.ForType( input.Type );
+		var display = Rinten.DisplayInfo.ForType( input.Type );
 		var title = input.IsTarget ? "This" : input.Display.Title;
 		var icon = input.IsTarget ? "person" : display.Icon ?? "check_box_outline_blank";
 
-		return new Menu.PathElement[]
+		return new GraphMenu.PathElement[]
 		{
 			new( "Graph", IsHeading: true ),
 			new( "Inputs", "Inputs for the current graph." ),

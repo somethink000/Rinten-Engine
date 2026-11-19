@@ -1470,6 +1470,8 @@ $viewport-bar-control: 26px;
 textentry,
 .textentry
 {
+	//The placeholder overlay is absolute; without this it is placed against the window instead of the field
+	position: relative;
 	cursor: text;
 	flex-direction: row;
 	align-items: center;

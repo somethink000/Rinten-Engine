@@ -91,9 +91,9 @@ public class AndNode : Node, IReorderableInputNode
 		Update();
 	}
 
-	public override Menu CreateContextMenu( NodeUI node )
+	public override GraphMenu CreateContextMenu( NodeUI node )
 	{
-		var menu = new Menu( "And" );
+		var menu = new GraphMenu( "And" );
 		menu.AddOption( "Add Input", "add", () => { Conditions.Add( new() ); Update(); } );
 
 		if ( Conditions.Count > 0 )

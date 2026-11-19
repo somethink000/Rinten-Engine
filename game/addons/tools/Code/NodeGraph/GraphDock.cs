@@ -4,9 +4,9 @@ namespace Editor.NodeEditor;
 /// <summary>The dock slot a graph is shown in.</summary>
 public class GraphDock : PanelDockHost
 {
-	public GraphView View { get; }
+	public EditorGraphView View { get; }
 
-	public GraphDock( GraphView view, string name, string icon = null ) : base( null )
+	public GraphDock( EditorGraphView view, string name, string icon = null ) : base( null )
 	{
 		View = view;
 

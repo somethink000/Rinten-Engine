@@ -12,12 +12,24 @@ public static class SBoxPorter
 	//Compiled output is never copied; it gets rebuilt (see PortPaths.IsCompiled)
 	private static bool IsCompiled( string extension ) => PortPaths.IsCompiled( extension );
 
+	//Source files, and everything under a Code or Editor folder (razor styles live beside their markup)
+	private static bool IsCode( string extension, string relative )
+	{
+		if ( PortNames.IsCode( extension ) || extension is ".sln" or ".slnx" or ".user" ) return true;
+
+		return relative.Split( '/', '\\' ).SkipLast( 1 )
+			.Any( x => x.Equals( "Code", StringComparison.OrdinalIgnoreCase ) || x.Equals( "Editor", StringComparison.OrdinalIgnoreCase ) );
+	}
+
 	//s&box formats nothing here can read; counted in the report, not copied. .vmap is a fallback
 	private static readonly string[] SourceFormats =
 	{
 		".vmdl_prefab", ".vanmgrph", ".vanim", ".vtex", ".vsurf", ".vpcf",
 		".vsnd", ".vsndevts", ".vsndstck", ".vmap", ".vphys", ".vmesh",
 		".vsmart", ".vpost", ".vrman", ".vents",
+
+		//Their tools' crash dumps
+		".mdmp",
 	};
 
 	//Directories that hold nothing worth taking: build output, editor state, version control, and the asset compiler's own cache.
@@ -78,14 +90,8 @@ public static class SBoxPorter
 		var files = PortPaths.Walk( sourceRoot );
 		var seen = 0;
 
-		//What the last port worked out about its project is not true of this one. The editor stays open
-		//across ports and this table is static, so two games in a session would otherwise share a schema.
-		SceneUnits.Learned.Clear();
-		SceneUnits.Owned.Clear();
-
-		//Scenes wait until all code is read, since SceneUnits.Learned comes from the game's source
+		//Scenes are converted after the walk, once every model and material they name is across
 		var scenes = new List<(string Path, string Named, string Source)>();
-		var code = new List<(string Path, string Named)>();
 
 		foreach ( var file in files )
 		{
@@ -122,23 +128,9 @@ public static class SBoxPorter
 			var ownAssets = inAssets ? Beside( destination, sourceRoot, ownSource ) : assets;
 
 			PortWalkedFile( file, relative, inAssets, ownSource ?? sourceAssets, ownAssets,
-				destination, report, scenes, code );
+				destination, report, scenes );
 		}
 
-		//Whole-project code passes; axes first, since units wraps values the axes pass must recognise
-		PortCodeAxes.RewriteProject( code, ForeignBasis.Quake, report );
-
-		report.CodeNumbersConverted += PortCodeUnits.RewriteProject( code, PortUnits.SBox, report );
-
-		//And what the code names that this engine does not have, so the report says it rather than the compiler.
-		SBoxGoneTypes.Report( code, report );
-
-		//And the names this engine kept but changed the type of since the code was
-		//written against it, rewritten in the project's own copy - see SBoxMovedNames.
-		SBoxMovedNames.Apply( code, report );
-
-		//Now the scenes, with every component's own class already read. This is what lets a ported game work without anybody writing its property
-		//names down anywhere: the class says JumpForce is a speed, and the prefab holding that component is converted by what the class said.
 		foreach ( var (scene, named, source) in scenes )
 		{
 			try
@@ -148,6 +140,8 @@ public static class SBoxPorter
 
 				//Embeds mesh blobs into the scene, from the component or the _d sidecar (see SBoxSceneBlobs)
 				Blobs( scene, source, named, report );
+
+				Terrains( scene, source, named, report );
 
 				//And a terrain painted whole with a material whose shader did not come across,
 				//which otherwise draws as nothing at all rather than as the layers underneath it.
@@ -205,6 +199,18 @@ public static class SBoxPorter
 	private static string Beside( string destination, string sourceRoot, string folder )
 		=> Path.Combine( destination, Path.GetRelativePath( sourceRoot, folder ) );
 
+	//Terrain maps inlined and transposed, and terrain objects turned to match - see SBoxTerrains
+	private static void Terrains( string file, string source, string named, PortReport report )
+	{
+		if ( file.EndsWith( ".terrain", StringComparison.OrdinalIgnoreCase ) )
+		{
+			if ( source is not null ) SBoxTerrains.ConvertStorage( file, source, named, report );
+			return;
+		}
+
+		SBoxTerrains.TurnObjects( file );
+	}
+
 	//Writes referenced mesh blobs into the ported scene as base64; missing ones are reported
 	private static void Blobs( string scene, string source, string named, PortReport report )
 	{
@@ -223,10 +229,16 @@ public static class SBoxPorter
 	}
 
 	private static void PortWalkedFile( string file, string relative, bool inAssets, string sourceAssets,
-		string assets, string destination, PortReport report, List<(string Path, string Named, string Source)> scenes,
-		List<(string Path, string Named)> code )
+		string assets, string destination, PortReport report, List<(string Path, string Named, string Source)> scenes )
 	{
 		var extension = Path.GetExtension( file ).ToLowerInvariant();
+
+		//Code is ported by hand: its units, axes and API cannot be rewritten mechanically
+		if ( IsCode( extension, relative ) )
+		{
+			report.LeftBehind[extension] = report.LeftBehind.GetValueOrDefault( extension ) + 1;
+			return;
+		}
 
 		try
 		{
@@ -238,6 +250,10 @@ public static class SBoxPorter
 
 				case ".vmat" when inAssets:
 					PortMaterial( file, relative, sourceAssets, assets, report );
+					break;
+
+				case ".tmat" when inAssets:
+					PortTerrainLayer( file, relative, sourceAssets, assets, report );
 					break;
 
 				//A graph comes across inside every model that names it, and nowhere else - see
@@ -269,27 +285,14 @@ public static class SBoxPorter
 					//Where it lands, which is what everything below reopens.
 					var to = Copy( file, Path.Combine( inAssets ? assets : destination, relative ) );
 
-					//Everything else comes across untouched: code, shaders, art in open formats, settings, localisation,
-					//readmes. None of it is s&box's, and converting it would only be a chance to lose something.
+					//Everything else comes across untouched: shaders, art in open formats, settings, localisation, readmes
 					++report.FilesCopied;
 
 					var named = relative.Replace( '\\', '/' );
 
-					//Code and scenes need the engine name rewritten (using Sandbox, Sandbox.ModelRenderer)
-					if ( PortNames.IsCode( extension ) )
+					//One measured object of a known type, converted with the scenes
+					if ( PortNames.IsResource( extension ) )
 					{
-						if ( PortNames.RewriteCodeFile( to, named, report ) )
-							++report.CodeFilesRenamed;
-
-						//And the measurements a project keeps in its code rather than in its scenes - but not one file at a time. Whether a number is
-						//already in metres is answered by code that is usually in another file, so the whole project is converted at once after the walk.
-						if ( extension == ".cs" )
-							code.Add( (to, named) );
-					}
-					else if ( PortNames.IsResource( extension ) )
-					{
-						//One measured object of a known type. Same list as the scenes, for the same reason:
-						//what its numbers mean can depend on a class the code pass has not read yet.
 						scenes.Add( (to, named, file) );
 					}
 					else if ( PortNames.IsScene( extension ) )
@@ -352,6 +355,10 @@ public static class SBoxPorter
 							PortMaterial( file, relative, ownSource, ownAssets, report );
 							break;
 
+						case ".tmat":
+							PortTerrainLayer( file, relative, ownSource, ownAssets, report );
+							break;
+
 						case ".vanmgrph":
 							report.GraphsSeen.Add( relative.Replace( '\\', '/' ) );
 							break;
@@ -367,7 +374,6 @@ public static class SBoxPorter
 		if ( !Directory.Exists( sourceRoot ) ) return;
 
 		var scenes = new List<(string Path, string Named, string Source)>();
-		var code = new List<(string Path, string Named)>();
 
 		foreach ( var file in PortPaths.Walk( sourceRoot ) )
 		{
@@ -392,15 +398,8 @@ public static class SBoxPorter
 			//Same reason as the first port: the new project already has its own, and a library's is what lets its own code compile.
 			if ( extension == ".sbproj" && !fromRoot.Contains( Path.DirectorySeparatorChar ) ) continue;
 
-			PortWalkedFile( file, fromRoot, false, sourceAssets, assets, destination, report, scenes, code );
+			PortWalkedFile( file, fromRoot, false, sourceAssets, assets, destination, report, scenes );
 		}
-
-		//Axes then units, as the first port does.
-		PortCodeAxes.RewriteProject( code, ForeignBasis.Quake, report );
-
-		report.CodeNumbersConverted += PortCodeUnits.RewriteProject( code, PortUnits.SBox, report );
-
-		SBoxGoneTypes.Report( code, report );
 
 		foreach ( var (scene, named, source) in scenes )
 		{
@@ -411,6 +410,8 @@ public static class SBoxPorter
 
 				//And its geometry - see the first port, above.
 				Blobs( scene, source, named, report );
+
+				Terrains( scene, source, named, report );
 
 				//And a terrain painted whole with a material whose shader did not come across,
 				//which otherwise draws as nothing at all rather than as the layers underneath it.
@@ -426,7 +427,7 @@ public static class SBoxPorter
 	//Writes the list of numbers still in old units into the project, to work through over time
 	private static void WriteUnitsNote( string destination, PortReport report )
 	{
-		if ( report.Unconverted.Count == 0 && report.CodeNumbersConverted == 0 &&
+		if ( report.Unconverted.Count == 0 &&
 			report.CustomShaders.Count == 0 && report.Graphs.Count == 0 &&
 			report.EmbeddedAnimations.Count == 0 && report.Notes.Count == 0 &&
 			report.Skipped.Count == 0 && report.MapsPorted == 0 ) return;
@@ -553,9 +554,7 @@ public static class SBoxPorter
 		text.AppendLine( "This project measured in inches. This engine measures in metres." );
 		text.AppendLine();
 		text.AppendLine( $"The port converted every number it could name: {report.ScenesConverted} scene(s) and " +
-			$"prefab(s), {report.MapsPorted} map(s), and {report.CodeNumbersConverted} number(s) in code, which " +
-			"were multiplied where they stand so the conversion is in the diff. Deleting one of those expressions " +
-			"and writing the metre value in its place is what finishing that number looks like." );
+			$"prefab(s) and {report.MapsPorted} map(s). Code is not ported: it is rewritten by hand, in metres." );
 		text.AppendLine();
 
 		if ( report.Unconverted.Count == 0 )
@@ -646,8 +645,9 @@ public static class SBoxPorter
 		return values;
 	}
 
+	//A value is quoted, or a bare word as features are written: F_ALPHA 1 // On
 	private static readonly System.Text.RegularExpressions.Regex AuthoredValue = new(
-		"^\\s*\"?(?<key>[A-Za-z_][A-Za-z0-9_]*)\"?\\s*=?\\s*\"(?<value>[^\"]*)\"",
+		"^\\s*\"?(?<key>[A-Za-z_][A-Za-z0-9_]*)\"?\\s*=?\\s*(?:\"(?<value>[^\"]*)\"|(?<value>[^\\s\"/{}]+))",
 		System.Text.RegularExpressions.RegexOptions.Compiled );
 
 	internal static string Authored( List<KeyValuePair<string, string>> values, string key )
@@ -782,6 +782,9 @@ public static class SBoxPorter
 		var path = Path.Combine( destination, $"{safe}{Project.Extension}" );
 		File.WriteAllText( path, JsonSerializer.Serialize( config, new JsonSerializerOptions { WriteIndented = true } ) );
 
+		//Startup scene, compiler settings and the rest come from theirs, same as for a file the creator made
+		CarryOverSettings( source, path );
+
 		return path;
 	}
 
@@ -804,7 +807,7 @@ public static class SBoxPorter
 			}
 
 			//Their compiler's, and wrong here in a way nothing would report: every type the library declares would
-			//land under their root namespace, and the code that was rewritten to ours would not find any of it.
+			//land under their root namespace rather than ours.
 			OursToCompileWith( config["Metadata"]?["Compiler"] as JsonObject );
 
 			Directory.CreateDirectory( Path.GetDirectoryName( to ) );
@@ -946,8 +949,11 @@ public static class SBoxPorter
 		{
 			if ( hull is not ModelDefinition.RenderHull { HasFile: true } shape ) continue;
 
-			var art = Path.Combine( assets, shape.File.Replace( '/', Path.DirectorySeparatorChar ) );
+			//Read where it is now: an export inside their assets is copied across only after the models
+			var named = shape.File.Replace( '/', Path.DirectorySeparatorChar );
+			var art = Path.Combine( sourceAssets, named );
 
+			if ( !File.Exists( art ) ) art = Path.Combine( assets, named );
 			if ( !File.Exists( art ) ) continue;
 
 			shape.Scale = SBoxMeshes.ScaleFor( shape.Scale, art );
@@ -2077,6 +2083,66 @@ public static class SBoxPorter
 	//-- materials ------------------------------------------------------------
 
 	//How s&box's standard shader names its parameters. Taken from the materials in a real project rather than from documentation.
+	//Their terrain layer resource as a material on our terrain layer shader, beside where it was
+	internal static void PortTerrainLayer( string file, string relative, string sourceAssets, string assets, PortReport report )
+	{
+		if ( JsonNode.Parse( File.ReadAllText( file ) ) is not JsonObject layer ) return;
+
+		var resource = relative.Replace( '\\', '/' );
+
+		string Picture( string key, string what )
+			=> Carried( sourceAssets, layer[key]?.GetValue<string>(), resource, what, report );
+
+		float Value( string key, float otherwise )
+			=> layer[key] is JsonValue v && v.TryGetValue<double>( out var d ) ? (float)d : otherwise;
+
+		static string Four( float x ) => $"{x.ToString( System.Globalization.CultureInfo.InvariantCulture )},0,0,0";
+
+		var textures = new JsonObject();
+
+		void Texture( string slot, string key, string what )
+		{
+			if ( Picture( key, what ) is { Length: > 0 } found ) textures[slot] = found;
+		}
+
+		Texture( "g_tRoughness", "RoughnessImage", "its roughness map" );
+		Texture( "g_tHeight", "HeightImage", "its height map" );
+		Texture( "g_tOcclusion", "AOImage", "its occlusion map" );
+
+		var noTiling = layer["NoTiling"] is JsonValue t && t.TryGetValue<bool>( out var b ) && b;
+
+		var material = new JsonObject
+		{
+			["Shader"] = "shaders/terrain_layer.shader",
+			["Features"] = new JsonObject(),
+			["Numbers"] = new JsonObject
+			{
+				["g_flUvScale"] = Four( Value( "UVScale", 1.0f ) ),
+				["g_flNormalStrength"] = Four( Value( "NormalStrength", 1.0f ) ),
+				["g_flHeightBlend"] = Four( Value( "HeightBlendStrength", 1.0f ) ),
+
+				//Theirs is in inches like everything else
+				["g_flDisplacement"] = Four( Value( "DisplacementScale", 0.0f ) * PortUnits.SBoxUnit ),
+				["g_bNoTiling"] = Four( noTiling ? 1.0f : 0.0f ),
+			},
+			["Textures"] = textures,
+			["Tint"] = "1,1,1,1",
+			["ColorMap"] = Picture( "AlbedoImage", "its colour map" ) ?? "",
+			["Normal"] = Picture( "NormalImage", "its normal map" ) ?? "",
+			["Roughness"] = 1.0f,
+			["Metalness"] = Value( "Metalness", 0.0f ),
+			["EmissionStrength"] = 0.0f,
+			["PhysicsSurface"] = layer["Surface"]?.GetValue<string>() ?? "",
+			["AlphaCutoff"] = 0.5f,
+		};
+
+		var target = Path.Combine( assets, Path.ChangeExtension( relative, ".mat" ) );
+		Directory.CreateDirectory( Path.GetDirectoryName( target ) );
+		File.WriteAllText( target, material.ToJsonString( new JsonSerializerOptions { WriteIndented = true } ) );
+
+		++report.MaterialsPorted;
+	}
+
 	internal static void PortMaterial( string file, string relative, string sourceAssets, string assets,
 		PortReport report )
 	{
@@ -2184,6 +2250,12 @@ public static class SBoxPorter
 			AlphaCutoff = Clamp01( Number( authored, "g_flAlphaTestReference" ), 0.5f ),
 		};
 
+		if ( !isStandard && !string.IsNullOrEmpty( shader ) )
+		{
+			SBoxShaderParameters.Carry( definition, authored, Beside( sourceAssets, shader ),
+				path => Carried( sourceAssets, path, resource, "a picture its shader reads", report ) );
+		}
+
 		var target = Path.Combine( assets, Path.ChangeExtension( relative, ".mat" ) );
 		Directory.CreateDirectory( Path.GetDirectoryName( target ) );
 
@@ -2202,6 +2274,62 @@ public static class SBoxPorter
 			else
 				report.CustomShaders.Add( shader );
 		}
+	}
+
+	/// <summary>Ports a material an install ships only compiled: its numbers read out of the .vmat_c, its generated pictures unpacked to png in the project.</summary>
+	internal static bool PortCompiledMaterial( string compiled, string relative, string sourceRoot, string assets, PortReport report )
+	{
+		var values = CoreImportedMaterial.CompiledValues( compiled );
+		if ( values is null ) return false;
+
+		var text = new System.Text.StringBuilder( "Layer0\n{\n" );
+
+		foreach ( var (key, value) in values )
+		{
+			var written = value;
+
+			//A picture their compiler generated has no source; the compiled one is unpacked into the project as the source it stands for
+			if ( written.EndsWith( ".vtex", StringComparison.OrdinalIgnoreCase ) )
+			{
+				written = "";
+
+				var picture = PortPaths.FindFile( Path.Combine( sourceRoot, value + "_c" ) );
+
+				if ( picture is not null && CoreImportedTexture.Load( picture ) is { } bitmap )
+				{
+					using ( bitmap )
+					{
+						var image = Path.ChangeExtension( value, ".png" ).Replace( '\\', '/' );
+						var to = Path.Combine( assets, image );
+
+						Directory.CreateDirectory( Path.GetDirectoryName( to ) );
+						File.WriteAllBytes( to, bitmap.ToPng() );
+
+						written = image;
+					}
+				}
+			}
+
+			text.Append( '"' ).Append( key ).Append( "\" \"" ).Append( written ).Append( "\"\n" );
+		}
+
+		text.Append( "}\n" );
+
+		//Ported as the text material it was compiled from, its pictures now standing in the project rather than in the install
+		var document = Path.Combine( assets, relative );
+		Directory.CreateDirectory( Path.GetDirectoryName( document ) );
+		File.WriteAllText( document, text.ToString() );
+
+		try
+		{
+			PortMaterial( document, relative, assets, assets, report );
+		}
+		finally
+		{
+			File.Delete( document );
+		}
+
+		return true;
 	}
 
 	//Our shader with the same name if one has been written (a rewritten port), else null
@@ -2245,8 +2373,9 @@ public static class SBoxPorter
 	//Colour multiplier: slot constant, else tint, else white; an all-zero tint means unset
 	private static Color Tint( Material material, Color? constant )
 	{
-		if ( constant is { } authored && authored.a > 0.0f )
-			return authored;
+		//A colour map given as a constant is that colour; its alpha nought is how their tools write "[0 0 0 0]" black glass
+		if ( constant is { } authored )
+			return authored.a > 0.0f ? authored : authored.WithAlpha( 1.0f );
 
 		if ( material is null ) return Color.White;
 
@@ -2330,7 +2459,9 @@ public static class SBoxPorter
 	{
 		if ( string.IsNullOrWhiteSpace( path ) ) return path;
 
-		if ( Beside( sourceAssets, path ) is { } full && File.Exists( full ) ) return path;
+		//Their file system ignores case and their materials were written on one that does
+		if ( PortPaths.FindFile( Beside( sourceAssets, path ) ) is { } full )
+			return Path.GetRelativePath( sourceAssets, full ).Replace( '\\', '/' );
 
 		report.Notes.Add( $"{resource}: {what} is {path}, which the project it was ported from does not " +
 			"contain - left empty, so the material draws plainly rather than as the missing texture." );

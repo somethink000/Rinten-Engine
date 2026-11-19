@@ -48,42 +48,7 @@ public class ProjectPorterTest
 		}
 	}
 
-	//A re-port into a filled destination still copies code added since the last port
-	[TestMethod]
-	public void FillsInCodeAddedSinceTheLastPort()
-	{
-		var source = TempDirectory( "source" );
-		var destination = TempDirectory( "destination" );
-
-		try
-		{
-			Directory.CreateDirectory( Path.Combine( destination, "Assets" ) );
-			File.WriteAllText( Path.Combine( destination, "Assets", "already-here.txt" ), "already ported" );
-
-			var libraryCode = Path.Combine( source, "Libraries", "someone.tool", "Code", "Tool.cs" );
-			Directory.CreateDirectory( Path.GetDirectoryName( libraryCode ) );
-			File.WriteAllText( libraryCode, "public class Tool {}" );
-
-			var editorCode = Path.Combine( source, "Editor", "Panel.cs" );
-			Directory.CreateDirectory( Path.GetDirectoryName( editorCode ) );
-			File.WriteAllText( editorCode, "public class Panel {}" );
-
-			var report = SBoxPorter.Port( source, destination );
-
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Libraries", "someone.tool", "Code", "Tool.cs" ) ),
-				"a library the first port never saw should still come across" );
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Editor", "Panel.cs" ) ),
-				"and so should editor-only code" );
-			Assert.IsTrue( report.FilesCopied > 0, "the report should say something was written" );
-		}
-		finally
-		{
-			Directory.Delete( source, true );
-			Directory.Delete( destination, true );
-		}
-	}
-
-	//A destination that has a project file but no assets is the normal case - the project creator makes one
+//A destination that has a project file but no assets is the normal case - the project creator makes one
 	//and then asks for the port. That must be allowed, and the project file it wrote must be left alone.
 	[TestMethod]
 	public void PortsIntoAFreshlyCreatedProject()
@@ -433,7 +398,7 @@ public class ProjectPorterTest
 			var assets = Path.Combine( destination, "Assets" );
 
 			Assert.IsTrue( File.Exists( Path.Combine( assets, "textures", "brick.png" ) ), "art comes across" );
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Code", "Player.cs" ) ), "and code" );
+			Assert.IsFalse( File.Exists( Path.Combine( destination, "Code", "Player.cs" ) ), "code is ported by hand" );
 
 			Assert.IsFalse( File.Exists( Path.Combine( assets, "textures", "brick.vtex" ) ),
 				"a s&box texture description has nothing to open it" );
@@ -523,9 +488,9 @@ public class ProjectPorterTest
 			Assert.IsTrue( File.Exists( Path.Combine( destination, "Assets", "shaders", "water.shader" ) ),
 				"the project's own shaders are its own code and come across" );
 
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Code", "Player", "Movement.cs" ) ),
-				"code should come across" );
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Editor", "Tool.cs" ) ) );
+			Assert.IsFalse( File.Exists( Path.Combine( destination, "Code", "Player", "Movement.cs" ) ),
+				"code is ported by hand" );
+			Assert.IsFalse( File.Exists( Path.Combine( destination, "Editor", "Tool.cs" ) ) );
 			Assert.IsTrue( File.Exists( Path.Combine( destination, "ProjectSettings", "Input.json" ) ) );
 
 			Assert.IsFalse( File.Exists( Path.Combine( destination, "Code", "obj", "Debug", "Movement.dll" ) ),
@@ -553,9 +518,9 @@ public class ProjectPorterTest
 					?["Type"]?.GetValue<string>(),
 				"and it is still a library, so Project.Libraries picks it up" );
 
-			Assert.IsTrue( File.Exists( Path.Combine( destination, "Libraries", "someone.tool", "Code", "Tool.cs" ) ) );
+			Assert.IsFalse( File.Exists( Path.Combine( destination, "Libraries", "someone.tool", "Code", "Tool.cs" ) ) );
 
-			Assert.AreEqual( 7, report.FilesCopied, "seven files, and none of the four that were skipped" );
+			Assert.AreEqual( 4, report.FilesCopied, "four files, and none of the code or the four that were skipped" );
 		}
 		finally
 		{
@@ -648,166 +613,7 @@ public class ProjectPorterTest
 		}
 	}
 
-	//Types renamed (not just moved) by this engine get renamed in ported code, or it won't build
-	[TestMethod]
-	public void ATypeThisEngineRenamedIsRenamedInCode()
-	{
-		var directory = TempDirectory( "renamed-types" );
-
-		try
-		{
-			var path = Path.Combine( directory, "IconEditor.cs" );
-
-			File.WriteAllText( path, """
-				using Sandbox;
-				using Editor;
-
-				public class IconEditor : Widget
-				{
-					void Build()
-					{
-						var renderer = Layout.Add( new NativeRenderingWidget( this )
-						{
-							Camera = _camera,
-							TranslucentBackground = true,
-						}, 1 );
-					}
-				}
-				""" );
-
-			var report = new PortReport();
-
-			Assert.IsTrue( PortNames.RewriteCodeFile( path, "Editor/IconEditor.cs", report ) );
-
-			var text = File.ReadAllText( path );
-
-			Assert.IsTrue( text.Contains( "new SceneRenderingWidget( this )" ),
-				"the widget this engine has under its own name: " + text );
-
-			Assert.IsFalse( text.Contains( "NativeRenderingWidget" ), text );
-
-			//And what it was being given still applies - ours has both.
-			Assert.IsTrue( text.Contains( "Camera = _camera" ) );
-			Assert.IsTrue( text.Contains( "TranslucentBackground = true" ) );
-
-			Assert.IsTrue( text.Contains( "using Rinten;" ), "the namespace is still rewritten too" );
-		}
-		finally
-		{
-			Directory.Delete( directory, true );
-		}
-	}
-
-
-	//Ported code and scenes drop the Sandbox namespace; scenes would otherwise silently lose components
-	[TestMethod]
-	public void RenamesTheSourceEngineOutOfWhatItCopies()
-	{
-		var source = TempDirectory( "named" );
-		var destination = Path.Combine( TempDirectory( "renamed" ), "new-project" );
-
-		try
-		{
-			void Write( string relative, string content )
-			{
-				var path = Path.Combine( source, relative );
-				Directory.CreateDirectory( Path.GetDirectoryName( path ) );
-				File.WriteAllText( path, content );
-			}
-
-			Write( @"Code\Player.cs", """
-				using Sandbox;
-				using Sandbox.Diagnostics;
-
-				namespace MyGame.Sandboxed;
-
-				public sealed class Player : Sandbox.Component
-				{
-					// Written against Sandbox, and MySandboxHelper is not ours.
-					private MySandboxHelper helper;
-				}
-				""" );
-
-			//A library's own project file comes with it, and its root namespace is what every type in it lands in.
-			Write( @"Libraries\someone.tool\tool.csproj", """
-				<Project Sdk="Microsoft.NET.Sdk">
-				  <PropertyGroup>
-				    <RootNamespace>Sandbox</RootNamespace>
-				  </PropertyGroup>
-				  <ItemGroup>
-				    <Using Include="Sandbox.Internal.GlobalGameNamespace" Static="true" />
-				  </ItemGroup>
-				</Project>
-				""" );
-
-			Write( @"Assets\scenes\level.scene", """
-				{
-					"GameObjects": [
-						{
-							"Name": "Prop",
-							"Position": "0,0,39.3701",
-							"Components": [
-								{ "__type": "Sandbox.ModelRenderer", "Tint": "1,1,1,1" },
-								{ "__type": "Sandbox.BoxCollider", "Scale": "39.3701,39.3701,39.3701" }
-							]
-						}
-					]
-				}
-				""" );
-
-			var report = SBoxPorter.Port( source, destination );
-
-			var code = File.ReadAllText( Path.Combine( destination, "Code", "Player.cs" ) );
-
-			StringAssert.Contains( code, "using Rinten;", "the root namespace moves" );
-			StringAssert.Contains( code, "using Rinten.Diagnostics;", "and so do the ones under it" );
-			StringAssert.Contains( code, "Rinten.Component", "including qualified type names" );
-
-			StringAssert.Contains( code, "namespace MyGame.Sandboxed;",
-				"but not a name that merely starts the same way" );
-			StringAssert.Contains( code, "MySandboxHelper",
-				"nor somebody else's identifier that contains it" );
-			StringAssert.Contains( code, "// Written against Sandbox,",
-				"nor the word in a comment - the porter cannot tell prose from the engine" );
-
-			var csproj = File.ReadAllText( Path.Combine( destination, "Libraries", "someone.tool", "tool.csproj" ) );
-
-			StringAssert.Contains( csproj, "<RootNamespace>Rinten</RootNamespace>",
-				"the root namespace is an element's whole text, which neither of the other two forms sees" );
-			StringAssert.Contains( csproj, "Rinten.Internal.GlobalGameNamespace" );
-
-			var scene = File.ReadAllText( Path.Combine( destination, "Assets", "scenes", "level.scene" ) );
-
-			StringAssert.Contains( scene, "Rinten.ModelRenderer", "component types are renamed" );
-			StringAssert.Contains( scene, "Rinten.BoxCollider" );
-			Assert.IsFalse( scene.Contains( "Sandbox." ), "and none of the old ones are left" );
-
-			Assert.AreEqual( 2, report.CodeFilesRenamed, "the source file and the project file" );
-			Assert.AreEqual( 2, report.TypeNamesRenamed, "the two components in the scene" );
-
-			//The rename has to land before the units pass, which is keyed by this engine's
-			//type names. One metre where there were 39.3701 inches is what says it did.
-			Assert.AreEqual( 1, report.ScenesConverted, "the scene should also have been rescaled" );
-
-			var converted = System.Text.Json.Nodes.JsonNode.Parse( scene );
-			var collider = converted["GameObjects"][0]["Components"][1];
-
-			//39.3701 inches is a metre to within what a float's worth of the port's own inch can say, which is the point - not the digits.
-			foreach ( var axis in collider["Scale"].GetValue<string>().Split( ',' ) )
-			{
-				Assert.AreEqual( 1.0, double.Parse( axis, System.Globalization.CultureInfo.InvariantCulture ), 0.0001,
-					"a length known only by its component's type name - so the rename came first" );
-			}
-		}
-		finally
-		{
-			Directory.Delete( source, true );
-			Directory.Delete( Path.GetDirectoryName( destination ), true );
-		}
-	}
-
-	//Their model document says what a model is collided with. Every ported model used to be handed the same made-up
-	//answer - "hulls the artist made" - which is not a thing their editor has and not a thing this one could build.
+	//Their model document says what a model is collided with: each ported model takes the shapes it names
 	[TestMethod]
 	public void ReadsTheShapesTheirDocumentNames()
 	{

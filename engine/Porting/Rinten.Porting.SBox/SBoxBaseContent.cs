@@ -244,6 +244,55 @@ public static class SBoxBaseContent
 			}
 
 			var (from, source) = Find( roots, path );
+
+			//What an install ships of a material is often only the compiled file: ported from that, its generated pictures unpacked beside it
+			if ( source is null && path.EndsWith( ".vmat", StringComparison.OrdinalIgnoreCase ) )
+			{
+				var (compiledFrom, compiled) = FindCompiled( roots, path + "_c" );
+
+				if ( compiled is not null )
+				{
+					try
+					{
+						if ( SBoxPorter.PortCompiledMaterial( compiled, path, compiledFrom, assets, report ) ) ++copied;
+					}
+					catch ( Exception e )
+					{
+						report.Skipped.Add( $"{path}: came over from s&box compiled and would not port - {e.Message}" );
+					}
+				}
+
+				continue;
+			}
+
+			//A picture the install ships only compiled - core's particle sprites - is unpacked to the picture it was made from,
+			//under the name asked for: a .vtex name finds its .png here
+			if ( source is null && path.EndsWith( ".vtex", StringComparison.OrdinalIgnoreCase ) )
+			{
+				//Core too, for pictures only - its materials stay skipped (see Roots)
+				var (_, compiledPicture) = FindCompiled( [.. roots, Path.Combine( install, "core" )], path + "_c" );
+
+				if ( compiledPicture is not null && CoreImportedTexture.Load( compiledPicture ) is { } bitmap )
+				{
+					try
+					{
+						using ( bitmap )
+						{
+							var unpacked = Path.Combine( assets, Path.ChangeExtension( path, ".png" ) );
+							Directory.CreateDirectory( Path.GetDirectoryName( unpacked ) );
+							File.WriteAllBytes( unpacked, bitmap.ToPng() );
+							++copied;
+						}
+					}
+					catch ( Exception e )
+					{
+						report.Skipped.Add( $"{path}: came over from s&box compiled and would not unpack - {e.Message}" );
+					}
+				}
+
+				continue;
+			}
+
 			if ( source is null ) continue;
 
 			//Named as the file on the shelf is named, not as whatever asked for it spelled it. The port writes the resolved name into the
@@ -371,6 +420,19 @@ public static class SBoxBaseContent
 
 			//Only the source document; compiled files are old build output (see PortPaths.IsCompiled)
 			if ( !PortPaths.IsCompiled( candidate ) ) return (root, candidate);
+		}
+
+		return (null, null);
+	}
+
+	//A compiled file and its root, for what an install ships only compiled - see PortCompiledMaterial.
+	private static (string Root, string File) FindCompiled( List<string> roots, string path )
+	{
+		var relative = path.Replace( '/', Path.DirectorySeparatorChar );
+
+		foreach ( var root in roots )
+		{
+			if ( PortPaths.FindFile( Path.Combine( root, relative ) ) is { } candidate ) return (root, candidate);
 		}
 
 		return (null, null);

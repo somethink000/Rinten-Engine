@@ -71,17 +71,33 @@ internal static class SBoxMaterialSlots
 
 			if ( candidate.Path is not null )
 			{
-				if ( picture is null || candidate.Layer < picture.Value.Layer ) picture = candidate;
+				if ( picture is null || Rank( candidate ) < Rank( picture.Value ) ) picture = candidate;
 				continue;
 			}
 
-			if ( number is null || candidate.Layer < number.Value.Layer ) number = candidate;
+			if ( number is null || Rank( candidate ) < Rank( number.Value ) ) number = candidate;
 		}
 
 		if ( picture is { } best ) return best.Path;
 
 		constant = number?.Constant;
 		return "";
+	}
+
+	//Earlier layer first, then the plainer name: g_tColor is the colour, g_tAgeColor a detail laid over it
+	private static int Rank( Candidate candidate ) => candidate.Layer * 1000 + Stripped( candidate.Key ).Length;
+
+	//A name without its decoration prefix
+	private static string Stripped( string key )
+	{
+		var name = key.ToLowerInvariant();
+
+		foreach ( var prefix in Prefixes )
+		{
+			if ( name.StartsWith( prefix, StringComparison.Ordinal ) ) return name[prefix.Length..];
+		}
+
+		return name;
 	}
 
 	//The number a slot was given, where it was given one rather than a picture - a roughness of one, a metalness of nothing.

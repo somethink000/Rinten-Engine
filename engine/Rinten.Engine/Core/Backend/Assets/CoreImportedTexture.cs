@@ -69,8 +69,8 @@ internal static class CoreImportedTexture
 		var extraOffset = at + 32 + (int)BitConverter.ToUInt32( bytes, at + 32 );
 		var extraCount = (int)BitConverter.ToUInt32( bytes, at + 36 );
 
-		//How long each mip is once unpacked, where it was packed at all. Their compiler LZ4s a mip when that comes out smaller.
-		var compressed = CompressedMipSizes( bytes, extraOffset, extraCount, mipCount );
+		//How long each mip is stored, where it was packed at all: LZ4 or zstd, when that comes out smaller
+		var compressed = CompressedMipSizes( bytes, extraOffset, extraCount, mipCount, out var zstd );
 
 		//The pixels start where the block ends, smallest mip first.
 		var payload = data.Offset + data.Size;
@@ -102,7 +102,7 @@ internal static class CoreImportedTexture
 			{
 				var unpacked = new byte[size];
 
-				if ( Rinten.Compression.LZ4.DecompressBlock( mipBytes, unpacked ) != size )
+				if ( !Unpack( mipBytes, unpacked, zstd ) )
 				{
 					log.Warning( $"{Path.GetFileName( path )}: mip {mip} did not unpack" );
 					return null;
@@ -157,7 +157,7 @@ internal static class CoreImportedTexture
 		var extraOffset = at + 32 + (int)BitConverter.ToUInt32( bytes, at + 32 );
 		var extraCount = (int)BitConverter.ToUInt32( bytes, at + 36 );
 
-		var compressed = CompressedMipSizes( bytes, extraOffset, extraCount, mipCount );
+		var compressed = CompressedMipSizes( bytes, extraOffset, extraCount, mipCount, out var zstd );
 
 		//Theirs are stored smallest first and ours largest first, so the levels are gathered as they come and turned round at the end.
 		var levels = new byte[mipCount][];
@@ -180,8 +180,7 @@ internal static class CoreImportedTexture
 			{
 				Array.Copy( bytes, payload, block, 0, size );
 			}
-			else if ( Rinten.Compression.LZ4.DecompressBlock(
-				new ReadOnlySpan<byte>( bytes, payload, length ), block ) != size )
+			else if ( !Unpack( new ReadOnlySpan<byte>( bytes, payload, length ), block, zstd ) )
 			{
 				log.Warning( $"{Path.GetFileName( fullPath )}: mip {mip} did not unpack" );
 				return false;
@@ -263,10 +262,28 @@ internal static class CoreImportedTexture
 		return unpacked;
 	}
 
+	//One packed mip into its full length
+	private static bool Unpack( ReadOnlySpan<byte> packed, byte[] into, bool zstd )
+	{
+		if ( !zstd ) return Rinten.Compression.LZ4.DecompressBlock( packed, into ) == into.Length;
+
+		try
+		{
+			using var decompressor = new ZstdSharp.Decompressor();
+			return decompressor.Unwrap( packed, into ) == into.Length;
+		}
+		catch ( ZstdSharp.ZstdException )
+		{
+			return false;
+		}
+	}
+
 	//The per-mip lengths, where the file says its mips are compressed, or null where they are stored as they are.
-	private static int[] CompressedMipSizes( byte[] bytes, int extraOffset, int extraCount, int mipCount )
+	private static int[] CompressedMipSizes( byte[] bytes, int extraOffset, int extraCount, int mipCount, out bool zstd )
 	{
 		const int compressedMipSize = 4;
+
+		zstd = false;
 
 		for ( var i = 0; i < extraCount; i++ )
 		{
@@ -280,6 +297,9 @@ internal static class CoreImportedTexture
 			var at = entry + 4 + (int)BitConverter.ToUInt32( bytes, entry + 4 );
 
 			if ( at + 12 > bytes.Length ) return null;
+
+			//Method first: 1 LZ4, 2 zstd
+			zstd = BitConverter.ToUInt32( bytes, at ) == 2;
 
 			var mips = (int)BitConverter.ToUInt32( bytes, at + 8 );
 			if ( mips <= 0 || mips > 32 ) return null;

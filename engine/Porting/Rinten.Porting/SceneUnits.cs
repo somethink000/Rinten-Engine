@@ -7,12 +7,6 @@ namespace Rinten.Porting;
 /// <summary>Rewrites the measurements in a scene or a prefab from another engine's units into ours.</summary>
 public static class SceneUnits
 {
-	/// <summary>Dimensions of the project's own component properties (Type.Property), learnt from its code first</summary>
-	public static Dictionary<string, PortDimension> Learned { get; } = new( StringComparer.OrdinalIgnoreCase );
-
-	/// <summary>Types the project declares; their properties stay in game units since code converts at the boundary</summary>
-	public static HashSet<string> Owned { get; } = new( StringComparer.OrdinalIgnoreCase );
-
 	//Seeded from the components a real scene actually contains. Entries of PortDimension.None are as important as the others: they are what stops a frame count or a fraction being reported over and over as something a person needs to look at.
 	/// <summary>What a component's property measures, by <c>Type.Property</c>.</summary>
 	public static Dictionary<string, PortDimension> Dimensions { get; } = new( StringComparer.OrdinalIgnoreCase )
@@ -439,6 +433,9 @@ public static class SceneUnits
 		["Rinten.ParticleEffect.OrbitalPull"] = PortDimension.Acceleration,
 		["Rinten.ParticleEffect.CollisionRadius"] = PortDimension.Length,
 
+		//A particle's size, which a sprite draws in world units: a smoke puff of 140 came across as 140 metres
+		["Rinten.ParticleEffect.Scale"] = PortDimension.Length,
+
 		["Rinten.ParticleEffect.ForceScale"] = PortDimension.None,
 		["Rinten.ParticleEffect.Damping"] = PortDimension.None,
 		["Rinten.ParticleEffect.Bounce"] = PortDimension.None,
@@ -790,8 +787,15 @@ public static class SceneUnits
 
 		if ( go["Components"] is JsonArray components )
 		{
+			var asModels = components.Any( x => x?["__type"]?.GetValue<string>() == "Rinten.ParticleModelRenderer" );
+
 			foreach ( var node in components )
-				changed += ConvertComponent( node as JsonObject, units, axes, $"{file} > {name}", report );
+			{
+				var type = node?["__type"]?.GetValue<string>() ?? "";
+				if ( asModels && type == "Rinten.ParticleEffect" ) type += DrawnAsModels;
+
+				changed += ConvertComponent( node as JsonObject, type, units, axes, $"{file} > {name}", report );
+			}
 		}
 
 		if ( go["Children"] is JsonArray children )
@@ -961,10 +965,20 @@ public static class SceneUnits
 		var changed = TurnFields( parts, axes );
 		var vector = changed > 0;
 
+		//A spline point, the engine's or a game's copy of one: its tangents are offsets from it and its up only turns
+		var spline = IsSplinePoint( parts );
+		if ( spline )
+		{
+			changed += ConvertValue( parts, "In", PortDimension.Length, units, axes );
+			changed += ConvertValue( parts, "Out", PortDimension.Length, units, axes );
+			changed += TurnDirection( parts, "Up", axes );
+		}
+
 		foreach ( var (key, value) in parts.ToList() )
 		{
 			if ( NeverMeasured.Contains( key ) ) continue;
 			if ( vector && ( key == "X" || key == "Y" || key == "Z" ) ) continue;
+			if ( spline && key is "In" or "Out" or "Up" ) continue;
 
 			var dimension = Dimension( type, key );
 
@@ -1013,16 +1027,19 @@ public static class SceneUnits
 	}
 
 	/// <summary>What a property measures: the exact entry, then the wildcard by name, then unknown.</summary>
+	//A particle effect beside a model renderer: its Scale sizes the models by a factor, not a length
+	private const string DrawnAsModels = " (drawn as models)";
+
 	public static PortDimension Dimension( string type, string property )
 	{
+		if ( type.EndsWith( DrawnAsModels, StringComparison.Ordinal ) )
+		{
+			if ( property == "Scale" ) return PortDimension.None;
+
+			type = type[..^DrawnAsModels.Length];
+		}
+
 		if ( Dimensions.TryGetValue( $"{type}.{property}", out var exact ) ) return exact;
-
-		//A type the game declares keeps the game's units, whatever this engine happens to call a property
-		//of that name. Asked before the wildcards below, which are what would otherwise convert it.
-		if ( Owns( type ) ) return PortDimension.Unknown;
-
-		//Then dimensions learnt from the project's own code, ahead of name wildcards
-		if ( Learned.TryGetValue( $"{type}.{property}", out var read ) ) return read;
 
 		if ( Dimensions.TryGetValue( $"*.{property}", out var byName ) ) return byName;
 
@@ -1031,16 +1048,6 @@ public static class SceneUnits
 		if ( property.Contains( "Tint", StringComparison.OrdinalIgnoreCase ) ) return PortDimension.None;
 
 		return PortDimension.Unknown;
-	}
-
-	//Whether this is one of the project's own types.
-	private static bool Owns( string type )
-	{
-		if ( Owned.Count == 0 || type.Length == 0 ) return false;
-
-		var dot = type.LastIndexOf( '.' );
-
-		return Owned.Contains( dot < 0 ? type : type[( dot + 1 )..] );
 	}
 
 	//Multiplies whatever is under key, in place. Three shapes turn up: a bare number, a vector written as a comma string -
@@ -1079,6 +1086,9 @@ public static class SceneUnits
 						changed += Turn( nested, childKey, axes );
 						continue;
 					}
+
+					//A curve's x is its time along the life or the seed, never the quantity
+					if ( string.Equals( childKey, "rangex", StringComparison.OrdinalIgnoreCase ) ) continue;
 
 					changed += ConvertValue( nested, childKey, dimension, units, axes );
 				}
@@ -1498,6 +1508,21 @@ public static class SceneUnits
 		}
 
 		return changed;
+	}
+
+	//Position and two tangents beside it, which is what a spline point is in any of its spellings
+	private static bool IsSplinePoint( JsonObject parts )
+		=> ( parts.ContainsKey( "Pos" ) || parts.ContainsKey( "Position" ) ) && parts.ContainsKey( "In" ) && parts.ContainsKey( "Out" );
+
+	//A unit triple that points somewhere, turned and never scaled
+	private static int TurnDirection( JsonObject owner, string key, ForeignBasis axes )
+	{
+		if ( axes.IsIdentity ) return 0;
+		if ( owner[key] is not JsonValue value || !value.TryGetValue<string>( out var text ) ) return 0;
+		if ( ConvertCommaVector( text, 1.0, axes, AxisKind.Vector ) is not { } turned ) return 0;
+
+		owner[key] = JsonValue.Create( turned );
+		return 1;
 	}
 
 	//The turn onto our axes with no scaling: what a rotation or a ratio needs.

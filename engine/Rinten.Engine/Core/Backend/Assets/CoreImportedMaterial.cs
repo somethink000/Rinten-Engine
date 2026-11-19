@@ -108,6 +108,10 @@ internal static class CoreImportedMaterial
 
 	//Reads a compiled material; old and compiled names share one table so the mapping is defined once
 	private static Fields ReadCompiled( string path )
+		=> CompiledValues( path ) is { } values ? FromValues( values ) : null;
+
+	/// <summary>A compiled material's parameters as the text one would write them, by name, the shader under "shader"; null where it will not read.</summary>
+	internal static Dictionary<string, string> CompiledValues( string path )
 	{
 		var resource = CoreImportedResource.Open( path );
 
@@ -150,7 +154,7 @@ internal static class CoreImportedMaterial
 			Add( values, parameter, $"[{written}]" );
 		}
 
-		return FromValues( values );
+		return values;
 	}
 
 	private static void Add( Dictionary<string, string> values, CoreImportedKeyValues3 parameter, string value )

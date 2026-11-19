@@ -25,12 +25,8 @@ public sealed class PortReport
 	/// <summary>Models whose clips were read out of the compiled file itself, and how many came out of each.</summary>
 	public List<(string Model, int Clips)> EmbeddedAnimations { get; } = new();
 
-	/// <summary>Code files with namespace rewritten, and type names renamed in scenes/prefabs</summary>
-	public int CodeFilesRenamed { get; set; }
+	/// <summary>Type names renamed in scenes and prefabs</summary>
 	public int TypeNamesRenamed { get; set; }
-
-	/// <summary>Numbers in code converted to our units in place; meant to be reviewed in the diff</summary>
-	public int CodeNumbersConverted { get; set; }
 
 	/// <summary>Files the port read but could not bring across, and why.</summary>
 	public List<string> Skipped { get; } = new();
@@ -68,7 +64,6 @@ public sealed class PortReport
 	public override string ToString()
 		=> $"{FilesCopied} files, {ModelsPorted} models, {MaterialsPorted} materials, " +
 			$"{AnimationsPorted} animations, {ScenesConverted} scenes, {MapsPorted} maps, " +
-			$"{CodeFilesRenamed} sources renamed, {TypeNamesRenamed} type names renamed, " +
-			$"{CodeNumbersConverted} numbers in code converted, " +
+			$"{TypeNamesRenamed} type names renamed, " +
 			$"{Skipped.Count} skipped, {Unconverted.Count} numbers left alone";
 }

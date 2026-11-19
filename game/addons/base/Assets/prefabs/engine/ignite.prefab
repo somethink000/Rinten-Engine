@@ -229,7 +229,7 @@
               "Type": "Curve",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "10,30",
+                "rangey": "0.254,0.762",
                 "frames": [
                   {
                     "x": 0,
@@ -474,7 +474,7 @@
                       "x": 0.5329141,
                       "y": 0.5080645,
                       "in": 0,
-                      "out": -0,
+                      "out": 0,
                       "mode": "Mirrored"
                     },
                     {
@@ -524,13 +524,13 @@
                 "CollisionPrefabRotation": 0,
                 "CollisionRadius": 0.0254,
                 "ConstantMovement": {
-                  "X": -0,
+                  "X": 0,
                   "Y": {
                     "Type": "Range",
                     "Evaluation": "Seed",
                     "Constants": "0.508,0.254,0,0"
                   },
-                  "Z": -0
+                  "Z": 0
                 },
                 "Damping": 0,
                 "DieOnCollisionChance": 0,
@@ -621,7 +621,7 @@
                 "Scale": {
                   "Type": "Range",
                   "Evaluation": "Seed",
-                  "Constants": "100,40,0,0"
+                  "Constants": "2.54,1.016,0,0"
                 },
                 "SequenceId": 0,
                 "SequenceSpeed": {
@@ -930,7 +930,7 @@
             "Scale": {
               "Type": "Range",
               "Evaluation": "Seed",
-              "Constants": "5,12,0,0"
+              "Constants": "0.127,0.3048,0,0"
             },
             "SequenceId": 0,
             "SequenceSpeed": {

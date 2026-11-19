@@ -43,8 +43,8 @@
             {
               "x": 0,
               "y": 1,
-              "in": -0,
-              "out": -0,
+              "in": 0,
+              "out": 0,
               "mode": "Mirrored"
             },
             {
@@ -134,7 +134,7 @@
           "Type": "CurveRange",
           "Evaluation": "Life",
           "CurveA": {
-            "rangey": "0,15",
+            "rangey": "0,0.381",
             "frames": [
               {
                 "x": 0,
@@ -160,7 +160,7 @@
             ]
           },
           "CurveB": {
-            "rangey": "0,15",
+            "rangey": "0,0.381",
             "frames": [
               {
                 "x": 0,

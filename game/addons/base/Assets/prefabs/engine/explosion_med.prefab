@@ -88,7 +88,7 @@
                   "x": 0.10375877,
                   "y": 0.9838709,
                   "in": 0,
-                  "out": -0,
+                  "out": 0,
                   "mode": "Mirrored"
                 },
                 {
@@ -138,13 +138,13 @@
             "CollisionPrefabRotation": 0,
             "CollisionRadius": 0.0254,
             "ConstantMovement": {
-              "X": -0,
+              "X": 0,
               "Y": {
                 "Type": "Range",
                 "Evaluation": "Seed",
                 "Constants": "0,1.016,0,0"
               },
-              "Z": -0
+              "Z": 0
             },
             "Damping": 3,
             "DieOnCollisionChance": 0,
@@ -213,7 +213,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "200,400",
+                "rangey": "5.08,10.16",
                 "frames": [
                   {
                     "x": 0,
@@ -239,7 +239,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "200,400",
+                "rangey": "5.08,10.16",
                 "frames": [
                   {
                     "x": 0,
@@ -432,8 +432,8 @@
                 {
                   "x": 0,
                   "y": 1,
-                  "in": -0,
-                  "out": -0,
+                  "in": 0,
+                  "out": 0,
                   "mode": "Mirrored"
                 },
                 {
@@ -446,8 +446,8 @@
                 {
                   "x": 1,
                   "y": 0,
-                  "in": -0,
-                  "out": -0,
+                  "in": 0,
+                  "out": 0,
                   "mode": "Mirrored"
                 }
               ],
@@ -552,7 +552,7 @@
               "Type": "Curve",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,500",
+                "rangey": "0,12.7",
                 "frames": [
                   {
                     "x": 0,
@@ -799,8 +799,8 @@
                 {
                   "x": 0,
                   "y": 1,
-                  "in": -0,
-                  "out": -0,
+                  "in": 0,
+                  "out": 0,
                   "mode": "Mirrored"
                 },
                 {
@@ -813,8 +813,8 @@
                 {
                   "x": 1,
                   "y": 0,
-                  "in": -0,
-                  "out": -0,
+                  "in": 0,
+                  "out": 0,
                   "mode": "Mirrored"
                 }
               ],
@@ -968,7 +968,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,100",
+                "rangey": "0,2.54",
                 "frames": [
                   {
                     "x": 0,
@@ -994,7 +994,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,100",
+                "rangey": "0,2.54",
                 "frames": [
                   {
                     "x": 0,

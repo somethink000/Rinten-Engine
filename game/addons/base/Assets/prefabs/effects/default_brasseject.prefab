@@ -136,7 +136,7 @@
         "Scale": {
           "Type": "Range",
           "Evaluation": "Seed",
-          "Constants": "0.800000012,1,0,0"
+          "Constants": "0.02032,0.0254,0,0"
         },
         "SequenceId": {
           "Type": "Range",

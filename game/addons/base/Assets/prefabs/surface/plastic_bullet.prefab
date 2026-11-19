@@ -187,7 +187,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,10",
+                "rangey": "0,0.254",
                 "frames": [
                   {
                     "x": 0,
@@ -213,7 +213,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,10",
+                "rangey": "0,0.254",
                 "frames": [
                   {
                     "x": 0,
@@ -493,13 +493,13 @@
             "Friction": 1,
             "Gradient": "1,1,1,1",
             "InitialVelocity": {
-              "X": -0,
+              "X": 0,
               "Y": {
                 "Type": "Range",
                 "Evaluation": "Seed",
                 "Constants": "1.27,3.81,0,0"
               },
-              "Z": -0
+              "Z": 0
             },
             "Lifetime": {
               "Type": "Range",
@@ -562,7 +562,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,25",
+                "rangey": "0,0.635",
                 "frames": [
                   {
                     "x": 0,
@@ -588,7 +588,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,25",
+                "rangey": "0,0.635",
                 "frames": [
                   {
                     "x": 0,
@@ -890,7 +890,7 @@
             "Scale": {
               "Type": "Range",
               "Evaluation": "Seed",
-              "Constants": "0.200000003,0.5,0,0"
+              "Constants": "0.00508,0.0127,0,0"
             },
             "SequenceId": {
               "Type": "Range",

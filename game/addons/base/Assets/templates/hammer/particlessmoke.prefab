@@ -148,7 +148,7 @@
         "Scale": {
           "Type": "Range",
           "Evaluation": "Seed",
-          "Constants": "50,60,0,0"
+          "Constants": "1.27,1.524,0,0"
         },
         "SequenceId": 0,
         "SequenceSpeed": 0.5,

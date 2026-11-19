@@ -190,7 +190,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,15",
+                "rangey": "0,0.381",
                 "frames": [
                   {
                     "x": 0,
@@ -216,7 +216,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,15",
+                "rangey": "0,0.381",
                 "frames": [
                   {
                     "x": 0,
@@ -539,7 +539,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,8",
+                "rangey": "0,0.2032",
                 "frames": [
                   {
                     "x": 0,
@@ -558,7 +558,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,8",
+                "rangey": "0,0.2032",
                 "frames": [
                   {
                     "x": 0,

@@ -154,7 +154,7 @@
             "Scale": {
               "Type": "Range",
               "Evaluation": "Seed",
-              "Constants": "0.200000003,0.5,0,0"
+              "Constants": "0.00508,0.0127,0,0"
             },
             "SequenceId": {
               "Type": "Range",
@@ -427,7 +427,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,20",
+                "rangey": "0,0.508",
                 "frames": [
                   {
                     "x": 0,
@@ -453,7 +453,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,20",
+                "rangey": "0,0.508",
                 "frames": [
                   {
                     "x": 0,
@@ -801,7 +801,7 @@
               "Type": "CurveRange",
               "Evaluation": "Life",
               "CurveA": {
-                "rangey": "0,50",
+                "rangey": "0,1.27",
                 "frames": [
                   {
                     "x": 0,
@@ -827,7 +827,7 @@
                 ]
               },
               "CurveB": {
-                "rangey": "0,50",
+                "rangey": "0,1.27",
                 "frames": [
                   {
                     "x": 0,

@@ -89,16 +89,32 @@ public partial class ModelRenderer : MaterialAccessor.ITarget
 		return Model.Materials[index];
 	}
 
+	//Overrides by the model's material index (one a mesh), as the scene table reads them; null while there are none
+	internal Dictionary<int, Material> SlotOverrides { get; private set; }
+
 	void MaterialAccessor.ITarget.SetOverride( int index, Material material )
 	{
-		if ( !_sceneObject.IsValid() ) return;
+		if ( material is null )
+		{
+			if ( SlotOverrides is null || !SlotOverrides.Remove( index ) ) return;
+			if ( SlotOverrides.Count == 0 ) SlotOverrides = null;
+		}
+		else
+		{
+			SlotOverrides ??= new();
+			if ( SlotOverrides.TryGetValue( index, out var had ) && had == material ) return;
+			SlotOverrides[index] = material;
+		}
 
+		DrawChanged();
 	}
 
 	void MaterialAccessor.ITarget.ClearOverrides()
 	{
-		if ( !_sceneObject.IsValid() ) return;
+		if ( SlotOverrides is null ) return;
 
+		SlotOverrides = null;
+		DrawChanged();
 	}
 
 }

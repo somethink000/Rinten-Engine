@@ -48,6 +48,9 @@ internal static class CoreResources
 		public string Combo;
 		public bool Masked, Translucent, TwoSided;
 
+		//What its shader takes from the drawing scene's RenderAttributes, null for nothing - see FeedScene.
+		public CoreShaderParams.Parameter[] Fed;
+
 		//The finalizer thread may not touch the device; the handle is queued for the main thread instead.
 		~LiveEntry()
 		{
@@ -261,7 +264,40 @@ internal static class CoreResources
 			if ( live != 0 ) return live;
 		}
 
+		//A material whose shader takes numbers from the scene - wetness, the time of day - is drawn live, so FeedScene
+		//keeps them current; from the file alone it would hold the shader's default for good
+		if ( FedMaterial( materialPath ) is { } fedOne )
+		{
+			var live = Live( fedOne );
+
+			if ( live != 0 ) return live;
+		}
+
 		return CoreSceneRenderer.ResolveMaterial( materialPath, materials, textures, Fallback );
+	}
+
+	/// <summary>The live GPU material for a file material whose shader takes numbers from the scene, else nought.</summary>
+	internal static ulong SceneFed( string materialPath ) => FedMaterial( materialPath ) is { } fedOne ? Live( fedOne ) : 0;
+
+	//The loaded material at a path if its shader declares scene attributes, else null; asked once a path
+	private static readonly Dictionary<string, Material> fedByPath = new( System.StringComparer.OrdinalIgnoreCase );
+
+	private static Material FedMaterial( string materialPath )
+	{
+		if ( string.IsNullOrWhiteSpace( materialPath ) ) return null;
+
+		lock ( fedByPath )
+		{
+			if ( fedByPath.TryGetValue( materialPath, out var known ) ) return known;
+		}
+
+		Material found = null;
+
+		if ( Rinten.Material.Load( materialPath ) is { core: { } core } loaded && FedOf( core.Shader ) is not null ) found = loaded;
+
+		lock ( fedByPath ) fedByPath[materialPath] = found;
+
+		return found;
 	}
 
 	/// <summary>A GPU material from an in-memory Material, rebuilt when its Revision changes.</summary>
@@ -297,14 +333,27 @@ internal static class CoreResources
 
 		//And whatever its shader declared for itself, a slot each, in the order it declared them -
 		//see CoreShaderParams. A number the material never set is what the shader said it should be.
-		var third = 0ul;
+		var source = new MaterialNumbers( core );
+		CoreShaderParams.Into( numbers, Declared( core.Shader ), ref source );
 
-		CoreShaderParams.Into( numbers, Declared( core.Shader ),
-			//By declared name or without its prefix (g_vTileArea or TileArea), as CorePostBlit reads them
-			name => core.Values.TryGetValue( name, out var value ) || core.Values.TryGetValue( CoreShaderParams.Bare( name ), out value ) ? value : null,
-			name => PictureNumber( Device( core, name, CoreShaderParams.Bare( name ) ), ref third ) );
+		return source.Third;
+	}
 
-		return third;
+	//A material's numbers and pictures by declared name or without its prefix (g_vTileArea or TileArea), as CorePostBlit reads them
+	private struct MaterialNumbers( CoreMaterial core ) : CoreShaderParams.ISource
+	{
+		public ulong Third;
+
+		public Vector4? Value( string name )
+			=> core.Values.TryGetValue( name, out var value ) || core.Values.TryGetValue( CoreShaderParams.Bare( name ), out value ) ? value : null;
+
+		public uint Picture( string name )
+		{
+			var handle = core.Texture( name )?.core?.Device() ?? 0;
+			if ( handle == 0 ) handle = core.Texture( CoreShaderParams.Bare( name ) )?.core?.Device() ?? 0;
+
+			return PictureNumber( handle, ref Third );
+		}
 	}
 
 	//Live materials with a number set on them since their numbers were last written - see WriteNumbers.
@@ -440,7 +489,69 @@ internal static class CoreResources
 		entry.Translucent = flags.Translucent;
 		entry.TwoSided = flags.TwoSided;
 
+		var hadFed = entry.Fed is not null;
+		entry.Fed = FedOf( core.Shader );
+
+		if ( entry.Fed is not null && !hadFed ) lock ( fed ) fed.Add( new WeakReference<Material>( material ) );
+
 		return made;
+	}
+
+	//Live materials whose shader declares SceneAttribute numbers.
+	private static readonly List<WeakReference<Material>> fed = new();
+
+	//The parameters a shader takes from the scene, by shader, null where it takes none.
+	private static readonly Dictionary<string, CoreShaderParams.Parameter[]> fedByShader = new();
+
+	private static CoreShaderParams.Parameter[] FedOf( string shader )
+	{
+		var key = shader ?? "";
+
+		lock ( fedByShader )
+		{
+			if ( fedByShader.TryGetValue( key, out var known ) ) return known;
+
+			var declared = Declared( shader );
+			var found = declared?.Where( x => x.SceneAttribute is not null ).ToArray();
+
+			return fedByShader[key] = found is { Length: > 0 } ? found : null;
+		}
+	}
+
+	/// <summary>Sets every live material's SceneAttribute numbers from the scene being drawn; written in place before the next frame.</summary>
+	internal static void FeedScene( Scene scene )
+	{
+		var attributes = scene?.RenderAttributes;
+		if ( attributes is null ) return;
+
+		lock ( fed )
+		{
+			for ( var i = fed.Count - 1; i >= 0; i-- )
+			{
+				if ( !fed[i].TryGetTarget( out var material ) || material.core is not { } core ||
+					!liveByMaterial.TryGetValue( material, out var entry ) || entry.Fed is null )
+				{
+					fed.RemoveAt( i );
+					continue;
+				}
+
+				var changed = false;
+
+				foreach ( var parameter in entry.Fed )
+				{
+					if ( !attributes.TryGetDeclared( parameter.SceneAttribute, out var value ) ) continue;
+					if ( core.Values.TryGetValue( parameter.Name, out var had ) && had == value ) continue;
+
+					core.Values[parameter.Name] = value;
+					changed = true;
+				}
+
+				if ( !changed ) continue;
+
+				core.ValuesRevision++;
+				NumbersChanged( material );
+			}
+		}
 	}
 
 	//A pass's materials with a picture of the frame in the colour slot, by material and picture - see LiveReading
@@ -912,6 +1023,9 @@ internal static class CoreResources
 	//Whether a material's shader draws sprites, i.e. includes sprite/sprite.slang
 	internal static bool IsSpriteShader( string shaderPath )
 		=> Marked( shaderPath, SpriteMarker, sprites, spritesAsked );
+
+	//The same asked of a file on disk, as IsSurface is - what a bake walks
+	internal static bool IsSprite( string onDisk ) => Mentions( onDisk, 0, SpriteMarker );
 
 	//What a sprite shader says - see sprite/sprite.slang, which says it for it.
 	private const string SpriteMarker = "#define ENGINE_SPRITE";
@@ -1440,7 +1554,12 @@ internal static class CoreResources
 
 			//And its numbers' place in a full-screen pass's push block, worked out from the same declaration
 			CorePostBlit.Forget( key );
+
+			//And which of them it takes from the scene, and so which file materials are drawn live for it - see FedMaterial
+			lock ( fedByShader ) fedByShader.Remove( key );
 		}
+
+		if ( redeclared.Count > 0 ) lock ( fedByPath ) fedByPath.Clear();
 
 		//And the pictures its compute pass stores into, read out of the same block of the same file - see Stored.
 		foreach ( var key in Naming( stored, path ) ) stored.Remove( key );
@@ -1639,6 +1758,8 @@ internal static class CoreResources
 		Generation++;
 		Cleared++;
 
+		lock ( fedByPath ) fedByPath.Clear();
+
 		ForgetLastPipeline();
 
 		foreach ( var baked in pipelines.Values ) CoreRenderDevice.DestroyPipeline( baked );
@@ -1693,6 +1814,7 @@ internal static class CoreResources
 		CoreMaterialTable.ForgetPipelines();
 		shaders.Clear();
 		declared.Clear();
+		lock ( fedByShader ) fedByShader.Clear();
 		entries.Clear();
 		states.Clear();
 		CorePostBlit.Forget( null );

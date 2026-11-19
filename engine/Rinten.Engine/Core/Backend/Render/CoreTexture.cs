@@ -474,9 +474,33 @@ internal sealed class CoreTexture
 
 	private static bool saidMissing;
 
+	/// <summary>A rectangle of four-byte texels straight onto the card, past the copy here - for a picture whose writer keeps no copy of its own; false where it has no device picture yet.</summary>
+	internal bool WriteThrough( ReadOnlySpan<byte> pixels, int stride, int x, int y, int width, int height )
+	{
+		var handle = Device();
+		if ( handle == 0 ) return false;
+
+		if ( !CoreRenderDevice.UpdateTextureRgbaRegion( handle, pixels, stride, x, y, width, height ) ) return false;
+
+		Uploads++;
+		UploadedPixels += width * height;
+
+		return true;
+	}
+
+	/// <summary>Lets go of the pixels here once the card holds them, for a picture written only through WriteThrough from now on.</summary>
+	internal void ShedData()
+	{
+		if ( Device() == 0 || deviceVersion != Version ) return;
+
+		Data = Array.Empty<byte>();
+	}
+
 	internal ulong Device()
 	{
 		if ( borrowed ) return device;
+
+		if ( Stored ) return StorageDevice();
 
 		if ( Data is null ) return 0;
 
@@ -543,6 +567,48 @@ internal sealed class CoreTexture
 		device = replacement;
 		deviceVersion = Version;
 		Uploaded();
+
+		return device;
+	}
+
+	//Made WithUAVBinding (not a render target) for a compute pass to store into: backed by a storage picture of the device's rather
+	//than uploaded pixels. One level, 2D only; the portable frame has no storage pictures.
+	private bool Stored => ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_UAV ) == RuntimeTextureSpecificationFlags.TSPEC_UAV
+		&& ( Desc.m_nFlags & RuntimeTextureSpecificationFlags.TSPEC_RENDER_TARGET ) == 0
+		&& !CoreRenderDevice.PortableFrame && Mips <= 1 && Depth == 1 && !Desc.IsCube && !Desc.IsArray;
+
+	//The storage picture behind a Stored texture, nought until it is first asked for - see ComputeShader.DispatchIntoTextures.
+	private ulong storage;
+
+	internal ulong StoragePicture
+	{
+		get
+		{
+			if ( Stored ) StorageDevice();
+			return storage;
+		}
+	}
+
+	//Made once and kept: what compute stored into it is the point. It starts cleared, not with the pixels it was created with.
+	private ulong StorageDevice()
+	{
+		if ( storage != 0 ) return device;
+
+		var (width, height, _) = MipSize( 0 );
+		if ( width <= 0 || height <= 0 ) return 0;
+
+		storage = CoreRenderDevice.AcquirePicture( Rinten.Rendering.CommandList.PictureKindOf( Format ), width, height, 1, storage: true );
+
+		if ( storage == 0 )
+		{
+			Missing( $"the device would not make a {width}x{height} {Format} picture to store into" );
+			return 0;
+		}
+
+		device = CoreRenderDevice.PictureTexture( storage );
+		deviceVersion = Version;
+
+		CoreRenderDevice.ClearTexture( device, Color.Transparent );
 
 		return device;
 	}
@@ -766,8 +832,11 @@ internal sealed class CoreTexture
 	{
 		if ( device == 0 ) return;
 
-		//A borrowed picture is the viewport's, and the viewport is still using it. Letting go of it here means only forgetting where it was.
-		if ( !borrowed ) CoreRenderDevice.DestroyTexture( device );
+		//A storage picture goes back to the device's pool; a borrowed one is the viewport's, still in use, and is only forgotten.
+		if ( storage != 0 ) CoreRenderDevice.ReleasePicture( storage );
+		else if ( !borrowed ) CoreRenderDevice.DestroyTexture( device );
+
+		storage = 0;
 
 		device = 0;
 		deviceVersion = -1;

@@ -249,6 +249,12 @@ public partial class RenderAttributes
 				value = new Vector4( held.Integers.x, 0, 0, 0 );
 				return true;
 
+			//A picture asked for as a number is its place in the table a shader indexes - a ping-pong pass reads its last
+			//step this way (float g_flPrev < Attribute( "PrevTex" ) >)
+			case HeldKind.Reference when held.Reference is Texture { IsValid: true } picture && picture.core?.Device() is { } handle && handle != 0:
+				value = new Vector4( CoreSceneDrawer.Indexed( handle ), 0, 0, 0 );
+				return true;
+
 			default:
 				return false;
 		}

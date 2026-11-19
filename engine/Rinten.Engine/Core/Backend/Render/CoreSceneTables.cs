@@ -564,18 +564,31 @@ internal sealed class CoreSceneTables
 			morphable.RemoveRange( shaped, morphable.Count - shaped );
 		}
 
-		//Re-resolve entries wearing a material edited at runtime, or only its first value would be drawn
+		//Re-resolve entries wearing a material edited at runtime, or only its first value would be drawn. A game sets values
+		//every frame, so only the slots wearing an edited material are looked at; all of them only when a new one is edited
 		if ( Rinten.Material.EditCount != editsSeen )
 		{
 			editsSeen = Rinten.Material.EditCount;
+			markOfMesh.Clear();
 
-			for ( var i = 0; i < used; i++ )
+			var everyEdited = Rinten.Material.EditedMaterials;
+
+			if ( everyEdited != editedMaterialsSeen )
 			{
-				var entry = entries[i];
-				if ( entry is null || !entry.Live || entry.Mesh is null ) continue;
+				editedMaterialsSeen = everyEdited;
+				wearsEdited.Clear();
 
-				if ( EditedMark( entry ) != entry.EditedSeen ) Resolve( i );
+				for ( var i = 0; i < used; i++ ) LookAgainIfEdited( i );
 			}
+			else
+			{
+				wearing.Clear();
+				wearing.AddRange( wearsEdited );
+
+				foreach ( var slot in wearing ) LookAgainIfEdited( slot );
+			}
+
+			markOfMesh.Clear();
 		}
 
 		CoreRenderDevice.ZoneEnd();
@@ -633,14 +646,14 @@ internal sealed class CoreSceneTables
 
 		goneRenderers.Clear();
 
-		for ( var i = 0; i < used; i++ )
+		//Only the renderers' own slots, not every slot: copies scattered by the card fill most of the table
+		foreach ( var (renderer, slot) in byRenderer )
 		{
-			var entry = entries[i];
+			var entry = (uint)slot < (uint)used ? entries[slot] : null;
 
-			if ( entry is null || !entry.Live || entry.Renderer is null ) continue;
-			if ( entry.SeenBy == stamp ) continue;
+			if ( entry is { Live: true } && ReferenceEquals( entry.Renderer, renderer ) && entry.SeenBy == stamp ) continue;
 
-			goneRenderers.Add( entry.Renderer );
+			goneRenderers.Add( renderer );
 		}
 
 		foreach ( var renderer in goneRenderers )
@@ -1305,13 +1318,74 @@ internal sealed class CoreSceneTables
 	//How many material edits the tables had caught up with - see Material.EditCount.
 	private int editsSeen;
 
-	//Where the materials of an entry's parts that code has set values on stand now: which material
-	//and how many times it has been set on, run together. Nought where none of them has been.
+	//Slots whose mesh wears a material something set values on, and how many such materials there were when they were gathered
+	private readonly HashSet<int> wearsEdited = new();
+	private readonly List<int> wearing = new();
+	private int editedMaterialsSeen = -1;
+
+	private void LookAgainIfEdited( int slot )
+	{
+		var entry = slot < used ? entries[slot] : null;
+		if ( entry is null || !entry.Live || entry.Mesh is null ) { wearsEdited.Remove( slot ); return; }
+
+		//Every copy of a mesh comes to the same mark, and asking a material path costs a lock and a lookup
+		//Slot overrides are the renderer's own, so such an entry's mark is not its mesh's
+		int mark;
+		if ( entry.Renderer?.SlotOverrides is not null ) mark = EditedMark( entry );
+		else if ( !markOfMesh.TryGetValue( entry.Mesh, out mark ) ) markOfMesh[entry.Mesh] = mark = EditedMark( entry );
+
+		if ( mark == 0 ) { wearsEdited.Remove( slot ); return; }
+
+		wearsEdited.Add( slot );
+
+		if ( mark != entry.EditedSeen ) Resolve( slot );
+	}
+
+	//A part as an override material draws it: the material's own shader, flags and tint in place of the model's
+	private static CoreSceneRenderer.MeshDraw Overridden( CoreSceneRenderer.MeshDraw drawn, Material over )
+	{
+		if ( over?.core is null ) return drawn;
+
+		var live = CoreResources.Live( over );
+		if ( live == 0 ) return drawn;
+
+		var flags = CoreResources.LiveFlags( over );
+		var named = over.ShaderName;
+
+		return drawn with
+		{
+			Texture = live,
+			TwoSided = flags.TwoSided,
+			Translucent = flags.Translucent,
+			Masked = flags.Masked,
+			Cutoff = CoreResources.LiveCutoff( over ),
+			Shader = !string.IsNullOrWhiteSpace( named ) && named != "invalid" ? named : drawn.Shader,
+			Combo = CoreResources.LiveCombo( over ),
+			Material = over.ResourcePath ?? drawn.Material,
+			Tint = CoreResources.LiveTint( over ),
+		};
+	}
+
+	//Each mesh's edited mark during one pass over the table - see Sync.
+	private readonly Dictionary<CoreSceneRenderer.SceneMesh, int> markOfMesh = new( ReferenceEqualityComparer.Instance );
+
+	//Where the materials of an entry's parts that code has set values on stand now - which material and how many
+	//times it has been set on, run together - and its slot overrides' revisions. Nought where nothing has been set.
 	private static int EditedMark( Entry entry )
 	{
-		if ( Rinten.Material.EditCount == 0 || entry.Mesh is null ) return 0;
+		if ( entry.Mesh is null ) return 0;
 
 		var mark = 0;
+
+		//A slot override is a material code holds and keeps setting: its revision moves the record as an edit does
+		if ( entry.Renderer?.SlotOverrides is { } slots )
+		{
+			foreach ( var (index, material) in slots )
+				mark = HashCode.Combine( mark, index, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode( material ), material.core?.Revision ?? 0 );
+		}
+
+		if ( Rinten.Material.EditCount == 0 ) return mark;
+
 		var parts = entry.Mesh.Meshes;
 
 		for ( var i = 0; i < parts.Count; i++ )
@@ -1440,6 +1514,7 @@ internal sealed class CoreSceneTables
 
 		//The materials being driven from code as they stand now - see the sweep in Sync, which asks this again to know when that has moved.
 		entry.EditedSeen = EditedMark( entry );
+		if ( entry.EditedSeen != 0 ) wearsEdited.Add( slot );
 		var groupIndex = CoreSceneRenderer.MaterialGroupIndex( mesh, materialGroup );
 
 		var overTexture = 0ul;
@@ -1538,6 +1613,9 @@ internal sealed class CoreSceneTables
 
 			var drawn = groupIndex < 0 ? part : CoreResources.WithGroupMaterial( part, groupIndex );
 
+			if ( overTexture == 0 && entry.Renderer?.SlotOverrides is { } slotOverrides && slotOverrides.TryGetValue( i, out var slotOver ) )
+				drawn = Overridden( drawn, slotOver );
+
 			if ( overTexture != 0 )
 			{
 				drawn = drawn with
@@ -1562,6 +1640,11 @@ internal sealed class CoreSceneTables
 				//The material as code has set it, rather than as the file was read when the mesh was
 				//built. The same material otherwise: its shader, its features and its tint are the file's.
 				drawn = drawn with { Texture = live };
+			}
+			else if ( CoreResources.SceneFed( drawn.Material ) is var fedLive && fedLive != 0 )
+			{
+				//Its shader takes numbers from the scene, which only a live material is kept up with - see CoreResources.Material
+				drawn = drawn with { Texture = fedLive };
 			}
 
 			var partTint = drawn.Tint * tint;
@@ -2177,7 +2260,8 @@ internal sealed class CoreSceneTables
 			var bytes = MemoryMarshal.AsBytes( records.AsSpan( 0, used ) );
 
 			//What is written here over a run's slots wipes what the card placed in them.
-			if ( allDirty || dirty.Count * 2 >= used ) unplaced.UnionWith( runs );
+			//One by one: UnionWith into an empty set takes a table-copying path that throws on a churned run set
+			if ( allDirty || dirty.Count * 2 >= used ) foreach ( var head in runs ) unplaced.Add( head );
 			else foreach ( var slot in dirty ) if ( runs.Contains( slot ) ) unplaced.Add( slot );
 
 			if ( allDirty )

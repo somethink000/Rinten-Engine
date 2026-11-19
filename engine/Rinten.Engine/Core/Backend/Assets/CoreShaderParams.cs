@@ -33,7 +33,7 @@ internal static class CoreShaderParams
 	//One declared material number; Fold(id) bakes a spec constant to whether it is non-zero
 	internal sealed record Parameter( string Name, string Title, string Group, Kind Kind,
 		Vector4 Default, float Least, float Most, string Attribute = null, string Feature = null,
-		string Format = null, int Fold = -1 )
+		string Format = null, int Fold = -1, string SceneAttribute = null )
 	{
 		/// <summary>A picture a compute pass stores into - see Kind.Storage.</summary>
 		public bool IsStorage => Kind == Kind.Storage;
@@ -259,7 +259,12 @@ internal static class CoreShaderParams
 		if ( Call( notes, "Fold" ) is { } folds && Numbers( folds ) is { Length: >= 1 } ids )
 			fold = (int)ids[0];
 
-		return new Parameter( name, Pretty( name ), group, shown, value, least, most, attribute, feature, stored, fold );
+		//And which of the drawing scene's RenderAttributes it follows, frame by frame - a material number the engine keeps up to date, see CoreResources.FeedScene.
+		var scene = Call( notes, "SceneAttribute" )?.Trim().Trim( '"' );
+
+		if ( string.IsNullOrWhiteSpace( scene ) ) scene = null;
+
+		return new Parameter( name, Pretty( name ), group, shown, value, least, most, attribute, feature, stored, fold, scene );
 	}
 
 	//What is inside Name( … ) , or null where it is not there.
@@ -947,8 +952,28 @@ internal static class CoreShaderParams
 		return string.Join( ", ", names );
 	}
 
+	//Where Into finds a material's numbers and pictures; a struct, so writing a material's block every frame makes nothing
+	internal interface ISource
+	{
+		Vector4? Value( string name );
+		uint Picture( string name );
+	}
+
+	//Delegates as a source, for callers that run rarely
+	private readonly struct Asked( Func<string, Vector4?> asked, Func<string, uint> pictures ) : ISource
+	{
+		public Vector4? Value( string name ) => asked?.Invoke( name );
+		public uint Picture( string name ) => pictures?.Invoke( name ) ?? 0u;
+	}
+
 	internal static void Into( Span<float> numbers, Parameter[] parameters,
 		Func<string, Vector4?> asked, Func<string, uint> pictures = null )
+	{
+		var source = new Asked( asked, pictures );
+		Into( numbers, parameters, ref source );
+	}
+
+	internal static void Into<T>( Span<float> numbers, Parameter[] parameters, ref T source ) where T : struct, ISource
 	{
 		if ( parameters is null ) return;
 
@@ -970,9 +995,9 @@ internal static class CoreShaderParams
 			if ( parameter.IsTexture )
 			{
 				//Where the picture is in the device's table, or nought where the material named none and the shader's own default stands in for it - see Kind.Texture.
-				numbers[at] = pictures?.Invoke( parameter.Name ) ?? 0u;
+				numbers[at] = source.Picture( parameter.Name );
 
-				var instead = asked?.Invoke( parameter.Name ) ?? parameter.Default;
+				var instead = source.Value( parameter.Name ) ?? parameter.Default;
 
 				numbers[at + 4] = instead.x;
 				numbers[at + 5] = instead.y;
@@ -982,7 +1007,7 @@ internal static class CoreShaderParams
 				continue;
 			}
 
-			var value = asked?.Invoke( parameter.Name ) ?? parameter.Default;
+			var value = source.Value( parameter.Name ) ?? parameter.Default;
 
 			numbers[at] = value.x;
 			numbers[at + 1] = value.y;

@@ -334,6 +334,12 @@ public class ComputeShader
 
 		if ( built == 0 ) return;
 
+		if ( pass )
+		{
+			DispatchIntoTextures( built, attributes, threadsX, threadsY, threadsZ );
+			return;
+		}
+
 		//The buffers it works over, in the order their names sort - a dictionary has none of its own, and a pass whose bindings move between frames is
 		//a pass nobody can write a shader for. An append buffer's counter takes the binding after it. The rest of what the attributes hold is numbers.
 		Span<ulong> buffers = stackalloc ulong[DispatchBuffers];
@@ -342,7 +348,7 @@ public class ComputeShader
 
 		if ( count == 0 )
 		{
-			Log.Warning( $"{path} was dispatched with no buffer to work over" );
+			Say( $"{path} was dispatched with no buffer to work over" );
 			return;
 		}
 
@@ -364,6 +370,86 @@ public class ComputeShader
 		}
 		finally
 		{
+			CoreGpuWork.End( own );
+		}
+	}
+
+	//A pass dispatched on its own, outside any camera: it stores into the textures its attributes name, each made
+	//WithUAVBinding, and reads anything else it is given through the table - ping-pong simulations are made this way
+	private void DispatchIntoTextures( ulong built, RenderAttributes attributes, int threadsX, int threadsY, int threadsZ )
+	{
+		var outputs = CoreResources.Stored( resource );
+
+		Span<ulong> pictures = stackalloc ulong[8];
+		Span<int> levels = stackalloc int[8];
+
+		var count = 0;
+		var width = 0;
+		var height = 0;
+
+		foreach ( var output in outputs )
+		{
+			if ( count >= pictures.Length ) break;
+
+			var key = output.IsAttribute ? output.Attribute : CoreShaderParams.Bare( output.Name );
+			var texture = attributes?.GetTexture( key );
+			var picture = texture?.core?.StoragePicture ?? 0;
+
+			if ( picture == 0 )
+			{
+				Say( $"{path}: its output {output.Name} is not set to a texture made WithUAVBinding() - set it with Attributes.Set( \"{key}\", texture )" );
+				return;
+			}
+
+			var declared = output.Format ?? CoreShaderParams.DefaultStorageFormat;
+			var wanted = CoreRenderDevice.StorageFormat( declared );
+
+			if ( wanted != 0 && CoreRenderDevice.PictureShape( picture, out _, out _, out _, out var made ) && made != wanted )
+			{
+				Say( $"{path}: its output {output.Name} is declared {declared} and the texture given was made in another format - nothing is stored" );
+				return;
+			}
+
+			pictures[count] = picture;
+			levels[count] = 0;
+
+			if ( count == 0 )
+			{
+				width = texture.Width;
+				height = texture.Height;
+			}
+
+			count++;
+		}
+
+		if ( count == 0 )
+		{
+			Say( $"{path}: a pass dispatched on its own needs a texture to store into" );
+			return;
+		}
+
+		if ( !CoreGpuWork.Begin( out var own ) )
+		{
+			Say( $"{path}: there is no device to dispatch it on" );
+			return;
+		}
+
+		CoreRenderDevice.ZoneBegin( zone );
+
+		try
+		{
+			var push = CorePostBlit.ApartPush( resource, attributes, width, height );
+
+			Span<ulong> buffers = stackalloc ulong[4];
+			var bufferCount = Buffers( attributes, buffers );
+
+			CoreRenderDevice.DispatchPass( built, CoreSceneDrawer.WhiteTexture, pictures[..count], levels[..count],
+				buffers[..bufferCount], push,
+				Groups( threadsX, group.X ), Groups( threadsY, group.Y ), Groups( threadsZ, group.Z ) );
+		}
+		finally
+		{
+			CoreRenderDevice.ZoneEnd();
 			CoreGpuWork.End( own );
 		}
 	}
@@ -418,7 +504,7 @@ public class ComputeShader
 
 		if ( count == 0 )
 		{
-			Log.Warning( $"{path} was dispatched with no buffer to work over" );
+			Say( $"{path} was dispatched with no buffer to work over" );
 			return;
 		}
 

@@ -23,6 +23,9 @@ PARAMETERS
 	//And the tile the mask's table starts at, x then z, and how many tiles it is across and deep - see Terrain.Mask.
 	float4 g_vMask < Attribute( "TerrainMask" ); Default4( 0.0, 0.0, 0.0, 0.0 ); >;
 
+	//How wet the ground is, nought to one, from the scene's own "Wetness" attribute: soaked ground darkens and shines
+	float g_flWetness < SceneAttribute( "Wetness" ); Default( 0.0 ); Range( 0, 1 ); >;
+
 }
 
 #include "depth_id.slang"
@@ -255,9 +258,11 @@ Out Shade( V2F i, bool front )
 	surface.world = i.world;
 	surface.normal = normal;
 	surface.geometric = geometric;
-	surface.albedo = albedo * g_tint.rgb;
+	float wet = saturate( g_flWetness );
+
+	surface.albedo = albedo * g_tint.rgb * lerp( 1.0, 0.62, wet );
 	surface.alpha = 1.0;
-	surface.roughness = clamp( roughness, 0.04, 1.0 );
+	surface.roughness = clamp( roughness * lerp( 1.0, 0.7, wet ), 0.04, 1.0 );
 	surface.metalness = saturate( metalness );
 	surface.occlusion = occlusion;
 	surface.emission = float3( 0.0, 0.0, 0.0 );

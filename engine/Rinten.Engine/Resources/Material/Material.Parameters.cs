@@ -55,6 +55,12 @@ public partial class Material
 	//know when a material being driven from code has moved, see CoreSceneTables.EditedMark.
 	internal static int EditCount => edits;
 
+	//How many materials something has set values on - grows only when one is set on for the first time
+	internal static int EditedMaterials
+	{
+		get { lock ( keys ) return editedKeys.Count; }
+	}
+
 	/// <summary>Get texture parameter, by name</summary>
 	public Texture GetTexture( string name ) => core.Texture( name );
 
@@ -100,6 +106,10 @@ public partial class Material
 		}
 
 			texture.UsedOutsidePanels = true;
+
+			//The same picture again changes nothing - a game that sets its target every frame would otherwise rebuild it every frame
+			if ( core.Edited && core.Textures.TryGetValue( param, out var had ) && ReferenceEquals( had, texture ) ) return true;
+
 			core.Textures[param] = texture;
 			MarkEdited();
 			core.Revision++;

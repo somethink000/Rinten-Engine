@@ -474,6 +474,9 @@ internal static unsafe class CoreSceneRenderer
 		var block = sceneScratch;
 		System.Array.Clear( block );
 
+		//Materials following the scene's RenderAttributes take this scene's; written before the next frame
+		CoreResources.FeedScene( scene );
+
 		//Seconds since engine start, written even without a scene; float precision is fine for animation
 		block[TimeAt + 0] = RealTime.Now;
 		block[TimeAt + 1] = RealTime.Delta;

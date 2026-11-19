@@ -46,6 +46,14 @@ internal static class CoreShaderFeatures
 	{
 		if ( string.IsNullOrWhiteSpace( path ) || !File.Exists( path ) ) return None;
 
+		//Asked on every material rebuild in play; read again only when the file is written
+		var written = File.GetLastWriteTimeUtc( path );
+
+		lock ( known )
+		{
+			if ( known.TryGetValue( path, out var had ) && had.Written == written ) return had.Features;
+		}
+
 		try
 		{
 			var found = new List<Feature>();
@@ -53,13 +61,18 @@ internal static class CoreShaderFeatures
 
 			Gather( path, CompiledFile.TextOf( path ), found, seen );
 
-			return found.Count == 0 ? None : found.ToArray();
+			var features = found.Count == 0 ? None : found.ToArray();
+			lock ( known ) known[path] = (written, features);
+
+			return features;
 		}
 		catch ( IOException )
 		{
 			return None;
 		}
 	}
+
+	private static readonly Dictionary<string, (DateTime Written, Feature[] Features)> known = new( StringComparer.Ordinal );
 
 	//The same, for source already in hand.
 	internal static Feature[] Of( string source, string directory )

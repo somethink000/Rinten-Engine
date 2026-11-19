@@ -182,6 +182,21 @@ internal static class PerfReport
 		fixed ( byte* data = pixels ) return CoreRender.WindowRead( handle, data, pixels.Length );
 	}
 
+	/// <summary>What the window last presented, with the world's layer laid in at its place, as RGBA; null while the window keeps no copy.</summary>
+	internal static byte[] ReadPresented( out int wide, out int tall )
+	{
+		var handle = CoreUiWindow.MainSwapchain;
+		(wide, tall) = CoreRender.WindowReadSize( handle );
+
+		if ( wide <= 0 || tall <= 0 ) return null;
+
+		var pixels = new byte[wide * tall * 4];
+		if ( ReadWindowPixels( handle, pixels ) != pixels.Length ) return null;
+
+		PasteLayer( pixels, wide, tall );
+		return pixels;
+	}
+
 	//The world's layer, where there is one, into a window's pixels at its place - see CoreUiWindow.MainLayer.
 	private static void PasteLayer( byte[] pixels, int wide, int tall )
 	{

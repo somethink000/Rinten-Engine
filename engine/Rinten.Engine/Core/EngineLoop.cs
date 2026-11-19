@@ -488,6 +488,7 @@ internal static class EngineLoop
 	{
 		PerformanceStats.Frame();
 		PerfReport.Frame();
+		ScreenshotService.Frame();
 
 		//Not Api.Performance.Frame: it gathered stats for a backend report that is never sent
 	}

@@ -23,7 +23,57 @@ internal static class ScreenshotService
 
 		_pendingRequests.Enqueue( new ScreenshotRequest( filePath ) );
 
+		//The window keeps a copy of what it presents only while asked; the first frames after asking have none yet.
+		if ( !CoreRender.KeepsWindowCopy )
+		{
+			CoreRender.KeepsWindowCopy = true;
+			releaseCopy = true;
+		}
+
+		framesToWait = 2;
+
 		return filePath;
+	}
+
+	//Frames left before the window's copy holds a frame drawn since the request.
+	private static int framesToWait;
+
+	//Whether the copy was turned on for screenshots alone, and goes off once they are taken.
+	private static bool releaseCopy;
+
+	/// <summary>Writes waiting screenshots from what the window presented; once a frame.</summary>
+	internal static void Frame()
+	{
+		if ( _pendingRequests.IsEmpty ) return;
+		if ( framesToWait-- > 0 ) return;
+
+		var pixels = PerfReport.ReadPresented( out var wide, out var tall );
+
+		while ( _pendingRequests.TryDequeue( out var request ) )
+		{
+			if ( pixels is null )
+			{
+				Log.Warning( "Screenshot: the window has no picture to read" );
+				continue;
+			}
+
+			//The window's alpha is whatever the desktop would show through; a picture of it is opaque.
+			for ( var i = 3; i < pixels.Length; i += 4 ) pixels[i] = 255;
+
+			var bitmap = new Bitmap( wide, tall );
+			bitmap.SetPixelsRgba( pixels );
+
+			Directory.CreateDirectory( Path.GetDirectoryName( request.FilePath ) );
+			File.WriteAllBytes( request.FilePath, bitmap.ToPng() );
+
+			Log.Info( $"Screenshot saved to: {request.FilePath} ({wide}x{tall})" );
+		}
+
+		if ( releaseCopy )
+		{
+			CoreRender.KeepsWindowCopy = false;
+			releaseCopy = false;
+		}
 	}
 
 	public static void TakeHighResScreenshot( Scene scene, int width, int height )

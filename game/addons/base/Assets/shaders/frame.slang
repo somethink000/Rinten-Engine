@@ -921,13 +921,43 @@ bool SkyTableAt( float3 direction, out float3 colour )
 #endif
 }
 
-//The ambient factor the frame laid: a quarter of the procedural sky, tuned to be seen, all of a panorama's
+//The ambient factor the frame laid; SkyAmbient is the mean radiance about the normal (irradiance over pi) whatever it reads
 float SkyAmbientScale()
 {
-	return g_frame[0].skyLight.w > 0.0 ? g_frame[0].skyLight.w : 0.25;
+	return g_frame[0].skyLight.w > 0.0 ? g_frame[0].skyLight.w : 1.0;
 }
 
-//Sky ambient for a normal: the capture's irradiance where the frame made one (CoreSkyLight), else the sky table
+//The sky's radiance one way: its table, else the scene's sky colours (a preview, a bake, or a sky that never drew)
+float3 SkyRadiance( float3 direction )
+{
+	float3 held;
+
+	if ( SkyTableAt( direction, held ) ) return held;
+
+	return SkyGradientOf( direction.y );
+}
+
+//Mean radiance over the cosine lobe about n: six cosine-distributed ways, equal weights - the capture's irradiance from the table
+float3 SkyMeanAbout( float3 n )
+{
+	//Frisvad's basis; the sign keeps it whole for a normal straight down
+	float s = n.z >= 0.0 ? 1.0 : -1.0;
+	float a = -1.0 / ( s + n.z );
+	float b = n.x * n.y * a;
+	float3 t = float3( 1.0 + ( s * n.x * n.x * a ), s * b, -s * n.x );
+	float3 u = float3( b, s + ( n.y * n.y * a ), -n.y );
+
+	float3 sum = SkyRadiance( ( t * 0.2887 ) + ( n * 0.9574 ) );
+	sum += SkyRadiance( ( t * -0.3687 ) + ( u * 0.3377 ) + ( n * 0.8660 ) );
+	sum += SkyRadiance( ( t * 0.0564 ) + ( u * -0.6430 ) + ( n * 0.7638 ) );
+	sum += SkyRadiance( ( t * 0.4647 ) + ( u * 0.6061 ) + ( n * 0.6455 ) );
+	sum += SkyRadiance( ( t * -0.8528 ) + ( u * -0.1508 ) + ( n * 0.5000 ) );
+	sum += SkyRadiance( ( t * 0.8078 ) + ( u * -0.5139 ) + ( n * 0.2887 ) );
+
+	return sum / 6.0;
+}
+
+//Sky ambient for a normal: the capture's irradiance where the frame made one (CoreSkyLight), else worked out from the table
 float3 SkyAmbient( float3 normal )
 {
 #ifndef PORTABLE
@@ -935,12 +965,10 @@ float3 SkyAmbient( float3 normal )
 	if ( irradiance != 0u ) return g_textures[irradiance].SampleLevel( SkyLightUv( normal ), 0.0 ).rgb;
 #endif
 
-	float3 held;
+	//A portable panorama's table is its light already - see LayPanorama
+	if ( kPanoramaOn != 0 && g_frame[0].panorama.w > 0.5 ) return SkyRadiance( normal );
 
-	if ( SkyTableAt( normal, held ) ) return held;
-
-	//The scene's sky colours alone: a frame without a table is a preview, a bake, or a sky that never drew
-	return SkyGradientOf( normal.y );
+	return SkyMeanAbout( normal );
 }
 
 //Sky and flat ambient as a surface facing way gets them now - what a baked point's sky visibility scales

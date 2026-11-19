@@ -49,13 +49,13 @@ internal sealed class BakeSky
 
 	private Vec3 Read3( int at ) => new( block[at], block[at + 1], block[at + 2] );
 
-	/// <summary>Sky plus flat ambient from one direction, scaled as frame.slang's SkyAmbientScale. Any thread.</summary>
+	/// <summary>Sky plus flat ambient from one direction, at the strength frame.slang's SkyRadiance has. Any thread.</summary>
 	public Vec3 Radiance( Vec3 direction )
 	{
 		var around = !hasSky ? Vec3.Zero
 			: panorama is not null ? panorama.Radiance( direction, panoramaTurn ) * panoramaLight
 			: CoreSkyTable.ColourOf( new CoreSkyTable.Air( zenith, horizon, ground, sunDirection, sunLight, night, hasSun ),
-				direction.Y, BakeMath.Saturate( Vec3.Dot( direction, sunDirection ) ) ) * 0.25f;
+				direction.Y, BakeMath.Saturate( Vec3.Dot( direction, sunDirection ) ) );
 
 		return BakeMath.Lerp( around, new Vec3( ambient.X, ambient.Y, ambient.Z ), ambient.W );
 	}

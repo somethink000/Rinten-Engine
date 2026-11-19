@@ -621,14 +621,15 @@ internal sealed class CoreSmaa
 	{
 		vertex = CoreShaderCache.Pass( EngineShaders.Smaa, "MainVs", CoreShaderCompiler.Stage.Vertex );
 		var blend = CoreShaderCache.Pass( EngineShaders.Smaa, "BlendPs", CoreShaderCompiler.Stage.Pixel );
-		var fxaa = CoreShaderCache.Pass( EngineShaders.Smaa, "FxaaPs", CoreShaderCompiler.Stage.Pixel );
 		var resolve = CoreShaderCache.Pass( EngineShaders.Smaa, "ResolvePs", CoreShaderCompiler.Stage.Pixel );
 
 		blendScreenPipeline = Screen( blend, CoreRender.TargetKind.Screen );
-		fxaaScreenPipeline = Screen( fxaa, CoreRender.TargetKind.Screen );
 
+		//FXAA is the full frame's only (see Fxaa): its gather is not in WebGL2, so a page has no words for it
 		if ( !CoreRenderDevice.PortableFrame )
 		{
+			var fxaa = CoreShaderCache.Pass( EngineShaders.Smaa, "FxaaPs", CoreShaderCompiler.Stage.Pixel );
+			fxaaScreenPipeline = Screen( fxaa, CoreRender.TargetKind.Screen );
 			blendFinalPipeline = Screen( blend, CoreRender.TargetKind.Final );
 			fxaaFinalPipeline = Screen( fxaa, CoreRender.TargetKind.Final );
 			resolveScreenPipeline = Screen( resolve, CoreRender.TargetKind.Screen );

@@ -158,8 +158,8 @@ partial class StandaloneExporter
 		{
 			if ( CoreShaderFile.IsForeign( file ) ) continue;
 
-			//Neither a surface nor a pass over the frame, which the portable frame draws between two pictures - see CorePostBlit.
-			if ( portable && !CoreResources.IsSurface( file ) && !CoreShaderFile.IncludesFile( file, "postprocess.slang" ) ) continue;
+			//What the portable frame draws, and the passes it draws between two pictures (CorePostBlit)
+			if ( portable && !CoreShaderCache.DrawnInPortable( file ) && !CoreShaderFile.IncludesFile( file, "postprocess.slang" ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( file ) is { } doubt ) Logger.Warning( doubt );

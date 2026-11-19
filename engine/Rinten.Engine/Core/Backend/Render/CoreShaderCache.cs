@@ -398,7 +398,7 @@ internal static class CoreShaderCache
 			try
 			{
 				Directory.CreateDirectory( Path.GetDirectoryName( path ) );
-				File.WriteAllBytes( temporary, Serialise( all ) );
+				using ( var file = File.Create( temporary ) ) SerialiseTo( file, all );
 				File.Move( temporary, path, overwrite: true );
 			}
 			catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
@@ -506,6 +506,15 @@ internal static class CoreShaderCache
 	//Serialises a table with each distinct stage stored once, then packs it; see Read
 	private static byte[] Serialise( Dictionary<string, byte[]> all, bool small = false, bool stored = false )
 	{
+		using var packed = new MemoryStream();
+		SerialiseTo( packed, all, small, stored );
+		return packed.ToArray();
+	}
+
+	//The same written to a stream through pooled buffers: a save in play would otherwise make two arrays the size of the
+	//whole cache, and their collection stops every thread, the frame's among them
+	private static void SerialiseTo( Stream packed, Dictionary<string, byte[]> all, bool small = false, bool stored = false )
+	{
 		//The distinct stages, and which one each key is.
 		var stages = new List<byte[]>();
 		var which = new Dictionary<byte[], int>( Same.Words );
@@ -527,58 +536,63 @@ internal static class CoreShaderCache
 
 		foreach ( var words in stages ) total += 4 + words.Length;
 
-		var body = new byte[total];
+		var body = System.Buffers.ArrayPool<byte>.Shared.Rent( total );
+		byte[] room = null;
 
-		BitConverter.GetBytes( stages.Count ).CopyTo( body, 0 );
-		BitConverter.GetBytes( keys.Count ).CopyTo( body, 4 );
-
-		var into = 8;
-
-		foreach ( var words in stages )
+		try
 		{
-			BitConverter.GetBytes( words.Length ).CopyTo( body, into );
-			into += 4;
+			BitConverter.GetBytes( stages.Count ).CopyTo( body, 0 );
+			BitConverter.GetBytes( keys.Count ).CopyTo( body, 4 );
 
-			words.CopyTo( body, into );
-			into += words.Length;
+			var into = 8;
+
+			foreach ( var words in stages )
+			{
+				BitConverter.GetBytes( words.Length ).CopyTo( body, into );
+				into += 4;
+
+				words.CopyTo( body, into );
+				into += words.Length;
+			}
+
+			foreach ( var (key, at) in keys )
+			{
+				Encoding.ASCII.GetBytes( key, 0, 64, body, into );
+				BitConverter.GetBytes( at ).CopyTo( body, into + 64 );
+				into += 68;
+			}
+
+			packed.Write( BitConverter.GetBytes( Magic ) );
+			packed.Write( BitConverter.GetBytes( Version ) );
+			packed.Write( BitConverter.GetBytes( (int)( stored ? Packing.Stored : Packing.Brotli ) ) );
+			packed.Write( BitConverter.GetBytes( total ) );
+
+			if ( stored )
+			{
+				packed.Write( body, 0, total );
+				return;
+			}
+
+			//Brotli quality 9 normally (fast); 11 only for the shipped file, where size matters
+			var quality = small ? 11 : 9;
+			room = System.Buffers.ArrayPool<byte>.Shared.Rent( total + 1024 );
+
+			if ( BrotliEncoder.TryCompress( body.AsSpan( 0, total ), room, out var written, quality, 22 ) )
+			{
+				packed.Write( room, 0, written );
+			}
+			else
+			{
+				using var packing = new BrotliStream( packed, CompressionLevel.Optimal, leaveOpen: true );
+
+				packing.Write( body, 0, total );
+			}
 		}
-
-		foreach ( var (key, at) in keys )
+		finally
 		{
-			Encoding.ASCII.GetBytes( key, 0, 64, body, into );
-			BitConverter.GetBytes( at ).CopyTo( body, into + 64 );
-			into += 68;
+			System.Buffers.ArrayPool<byte>.Shared.Return( body );
+			if ( room is not null ) System.Buffers.ArrayPool<byte>.Shared.Return( room );
 		}
-
-		using var packed = new MemoryStream();
-
-		packed.Write( BitConverter.GetBytes( Magic ) );
-		packed.Write( BitConverter.GetBytes( Version ) );
-		packed.Write( BitConverter.GetBytes( (int)( stored ? Packing.Stored : Packing.Brotli ) ) );
-		packed.Write( BitConverter.GetBytes( body.Length ) );
-
-		if ( stored )
-		{
-			packed.Write( body );
-			return packed.ToArray();
-		}
-
-		//Brotli quality 9 normally (fast); 11 only for the shipped file, where size matters
-		var quality = small ? 11 : 9;
-		var room = new byte[body.Length + 1024];
-
-		if ( BrotliEncoder.TryCompress( body, room, out var written, quality, 22 ) )
-		{
-			packed.Write( room, 0, written );
-		}
-		else
-		{
-			using var packing = new BrotliStream( packed, CompressionLevel.Optimal, leaveOpen: true );
-
-			packing.Write( body, 0, body.Length );
-		}
-
-		return packed.ToArray();
 	}
 
 	//One array of bytes is the same stage as another when it says the same thing.
@@ -845,8 +859,8 @@ internal static class CoreShaderCache
 				continue;
 			}
 
-			//Neither a surface nor a pass over the frame that is more than a point effect, which the portable frame carries
-			if ( portable && !CoreResources.IsSurface( shader ) && !PortablePass( shader ) ) continue;
+			//Surfaces, sprites, skies, and passes that are more than a point effect: what the portable frame draws
+			if ( portable && !DrawnInPortable( shader ) && !PortablePass( shader ) ) continue;
 
 			//A surface that is not one draws nothing, and nothing else would say so.
 			if ( !portable && CoreShaderFile.SurfaceDoubt( shader ) is { } doubt ) log.Warning( doubt );
@@ -860,8 +874,7 @@ internal static class CoreShaderCache
 
 				if ( CoreShaderFile.Compile( shader ) is null )
 				{
-					//Not a failure in the portable frame: a surface that reads the table of pictures - the terrain's,
-					//a sprite's - cannot be said without one, and is a thing that frame does not draw yet.
+					//Not a failure in the portable frame: a surface that reads the table of pictures cannot be said without one
 					if ( portable )
 					{
 						log.Warning( $"{shader} is not in the portable frame: {CoreRenderDevice.ShaderError}" );
@@ -914,6 +927,10 @@ internal static class CoreShaderCache
 
 		return true;
 	}
+
+	//Whether a shader file draws in the portable frame as a surface, a sprite or a sky
+	internal static bool DrawnInPortable( string onDisk )
+		=> CoreResources.IsSurface( onDisk ) || CoreResources.IsSprite( onDisk ) || CoreResources.IsSky( onDisk );
 
 	//Whether a shipped shader is a pass over the frame the portable frame draws as one, rather than a point effect it carries
 	private static bool PortablePass( string shader )
@@ -1055,9 +1072,11 @@ internal static class EngineShaders
 	[
 		("MainVs", CoreShaderCompiler.Stage.Vertex), ("EdgesPs", CoreShaderCompiler.Stage.Pixel),
 		("WeightsPs", CoreShaderCompiler.Stage.Pixel), ("BlendPs", CoreShaderCompiler.Stage.Pixel),
-		("FxaaPs", CoreShaderCompiler.Stage.Pixel),
 		("ResolvePs", CoreShaderCompiler.Stage.Pixel),
 	];
+
+	//FXAA reads with a gather, which WebGL2's ESSL 300 has not got; the portable frame never runs it (CoreSmaa.Fxaa)
+	private static readonly (string, CoreShaderCompiler.Stage)[] FxaaDraws = [("FxaaPs", CoreShaderCompiler.Stage.Pixel)];
 
 	private static readonly (string, CoreShaderCompiler.Stage)[] SmaaRuns =
 		[("EdgesCs", CoreShaderCompiler.Stage.Compute), ("WeightsCs", CoreShaderCompiler.Stage.Compute),
@@ -1087,6 +1106,7 @@ internal static class EngineShaders
 		( Glow, "", GlowDraws, true ),
 		//SMAA's passes: drawn in the portable frame, edges and weights in compute in the full one - see CoreSmaa
 		( Smaa, "", SmaaDraws, true ),
+		( Smaa, "", FxaaDraws, false ),
 		( Smaa, CoreSmaa.ComputeDefines, SmaaRuns, false ),
 		( Cmaa, "", CmaaRuns, false ),
 		( Velocity, "", VelocityDraws, false ),

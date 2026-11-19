@@ -12,9 +12,10 @@ internal class BuildExportKits( string output )
 
 	private static readonly Kit[] Kits =
 	[
-		new( "RintenWeb", "RintenWeb.csproj", "Rinten-Web", "-r browser-wasm",
+		//The web host builds its engine references for .NET 10 itself (RintenWebModule); Android uses the editor's
+		new( "RintenWeb", "RintenWeb.csproj", "Rinten-Web", "-r browser-wasm -p:RintenWebModule=true",
 			[ "RintenWeb.csproj", "Directory.Build.props", "nuget.config", "wwwroot/index.html" ] ),
-		new( "RintenAndroid", "Rinten-Android.csproj", "Rinten-Android", "-f net11.0-android",
+		new( "RintenAndroid", "Rinten-Android.csproj", "Rinten-Android", "-f net11.0-android -p:BuildProjectReferences=false",
 			[ "Rinten-Android.csproj", "Directory.Build.props", "Properties/AndroidManifest.xml", "Properties/AndroidManifest.Vr.xml" ] ),
 	];
 
@@ -39,7 +40,7 @@ internal class BuildExportKits( string output )
 
 			//Into its own bin/: -o would move the engine projects' outputs too, which are referenced where they already are
 			var ok = Utility.RunProcess( "dotnet",
-				$"build \"{Path.Combine( source, kit.Project )}\" -c Release {kit.Arguments} -p:BuildProjectReferences=false -nologo -v q",
+				$"build \"{Path.Combine( source, kit.Project )}\" -c Release {kit.Arguments} -nologo -v q",
 				root );
 
 			var built = ok ? Output( source, kit.Host ) : null;

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <VersionPrefix>1.0.1</VersionPrefix>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFramework>$(RintenFramework)</TargetFramework>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

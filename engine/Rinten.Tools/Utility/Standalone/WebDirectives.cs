@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Security;
 using System.Text;
 
@@ -11,7 +14,7 @@ namespace Editor;
 internal static class WebDirectives
 {
 	//An rd.xml for these closed generic types.
-	internal static string For( IEnumerable<Type> made, ISet<string> inModule )
+	internal static string For( IEnumerable<Type> made, ISet<string> inModule, Framework framework )
 	{
 		var byAssembly = new SortedDictionary<string, SortedSet<string>>( StringComparer.Ordinal );
 		var accessors = new SortedSet<string>( StringComparer.Ordinal );
@@ -24,7 +27,7 @@ internal static class WebDirectives
 
 		foreach ( var type in made )
 		{
-			if ( !Valued( type ) || !Within( type, inModule ) ) continue;
+			if ( !Valued( type ) || !Within( type, inModule, framework ) ) continue;
 
 			var definition = type.GetGenericTypeDefinition();
 			Want( definition.Assembly.GetName().Name, $"   <Type Name=\"{Escape( Name( type ) )}\"><Method Name=\".ctor\" Dynamic=\"Required\" /></Type>" );
@@ -73,11 +76,11 @@ internal static class WebDirectives
 	}
 
 	//An ILLink descriptor keeping types made by name (type library, serializer) as far as reflection reads them
-	internal static string Descriptor( IEnumerable<Type> kept, ISet<string> inModule )
+	internal static string Descriptor( IEnumerable<Type> kept, ISet<string> inModule, Framework framework )
 	{
 		var text = new StringBuilder( "<linker>\n" );
 
-		foreach ( var assembly in kept.Where( x => !x.ContainsGenericParameters && x.FullName is not null && !x.FullName.Contains( '<' ) && Within( x, inModule ) )
+		foreach ( var assembly in kept.Where( x => !x.ContainsGenericParameters && x.FullName is not null && !x.FullName.Contains( '<' ) && Within( x, inModule, framework ) )
 			.GroupBy( x => x.Assembly.GetName().Name ).OrderBy( x => x.Key, StringComparer.Ordinal ) )
 		{
 			text.AppendLine( $" <assembly fullname=\"{Escape( assembly.Key )}\">" );
@@ -140,12 +143,56 @@ internal static class WebDirectives
 		return text.Append( "</type>" ).ToString();
 	}
 
-	//Whether every assembly the type names - its own, its arguments' at any depth - is in the module.
-	private static bool Within( Type type, ISet<string> inModule )
+	//Whether every type it names - itself, its arguments at any depth - is in the module, framework types included
+	private static bool Within( Type type, ISet<string> inModule, Framework framework )
 	{
-		if ( type.IsArray ) return Within( type.GetElementType(), inModule );
-		if ( !inModule.Contains( type.Assembly.GetName().Name ) ) return false;
-		return !type.IsGenericType || type.GetGenericArguments().All( a => Within( a, inModule ) );
+		if ( type.IsArray ) return Within( type.GetElementType(), inModule, framework );
+		if ( !inModule.Contains( type.Assembly.GetName().Name ) || !framework.Has( type ) ) return false;
+		return !type.IsGenericType || type.GetGenericArguments().All( a => Within( a, inModule, framework ) );
+	}
+
+	/// <summary>The types of the framework the module is compiled against, by assembly.</summary>
+	internal sealed class Framework
+	{
+		readonly Dictionary<string, HashSet<string>> types = new( StringComparer.OrdinalIgnoreCase );
+
+		//The editor runs on .NET 11 and the module on 10: a type 11 added is in the editor's serializer but not the module's
+		internal Framework( IEnumerable<string> folders )
+		{
+			foreach ( var dll in folders.Where( Directory.Exists ).SelectMany( x => Directory.GetFiles( x, "*.dll" ) ) )
+			{
+				using var stream = File.OpenRead( dll );
+				using var pe = new PEReader( stream );
+				if ( !pe.HasMetadata ) continue;
+
+				var metadata = pe.GetMetadataReader();
+				if ( !metadata.IsAssembly ) continue;
+
+				var names = new HashSet<string>( StringComparer.Ordinal );
+				foreach ( var handle in metadata.TypeDefinitions ) names.Add( FullName( metadata, handle ) );
+				types[metadata.GetString( metadata.GetAssemblyDefinition().Name )] = names;
+			}
+		}
+
+		//Whether a framework type exists there; types outside the framework always pass
+		internal bool Has( Type type )
+		{
+			var definition = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+			return !types.TryGetValue( definition.Assembly.GetName().Name, out var names ) || names.Contains( definition.FullName );
+		}
+
+		//Namespace.Outer+Inner, as Type.FullName writes it
+		static string FullName( MetadataReader metadata, TypeDefinitionHandle handle )
+		{
+			var type = metadata.GetTypeDefinition( handle );
+			var name = metadata.GetString( type.Name );
+			var outer = type.GetDeclaringType();
+
+			if ( !outer.IsNil ) return FullName( metadata, outer ) + "+" + name;
+
+			var space = metadata.GetString( type.Namespace );
+			return space.Length == 0 ? name : space + "." + name;
+		}
 	}
 
 	//Whether a value type is among the arguments, at any depth.

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <VersionPrefix>1.0.1</VersionPrefix>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFramework>$(RintenFramework)</TargetFramework>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -10,7 +10,7 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <NoWarn>1701;1702;1591</NoWarn>
-    <OutputPath>..\..\game\bin\managed</OutputPath>
+    <OutputPath Condition="'$(RintenWebModule)' != 'true'">..\..\game\bin\managed</OutputPath>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 

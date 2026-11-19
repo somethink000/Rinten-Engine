@@ -10,8 +10,22 @@
 		<!-- English only: Roslyn's thirteen translated satellite folders are seven megabytes beside the engine. -->
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 
-		<!-- .NET 11 runtime async: the runtime suspends awaits, not a compiler state machine - fewer allocations, cheaper completed awaits. -->
+		<!-- What the engine's projects target; the web module's build sets RintenWebModule and gets the other one below. -->
+		<RintenFramework>net11.0</RintenFramework>
+	</PropertyGroup>
+
+	<!-- .NET 11 runtime async: the runtime suspends awaits, not a compiler state machine - fewer allocations, cheaper completed awaits. -->
+	<PropertyGroup Condition="'$(RintenWebModule)' != 'true'">
 		<Features>$(Features);runtime-async=on</Features>
+	</PropertyGroup>
+
+	<!-- The web module: NativeAOT-LLVM exists only for .NET 10 and cannot compile runtime async, so the engine is built for it
+	     a second time, into obj/web and bin/web, leaving the editor's net11 build alone. -->
+	<PropertyGroup Condition="'$(RintenWebModule)' == 'true'">
+		<RintenFramework>net10.0</RintenFramework>
+		<BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj/web/</BaseIntermediateOutputPath>
+		<BaseOutputPath>$(MSBuildProjectDirectory)/bin/web/</BaseOutputPath>
+		<DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
 	</PropertyGroup>
 
 </Project>

@@ -14,7 +14,7 @@
 	</Target>
 
 	<ItemGroup>
-		<ProjectReference Include="../Tools/CodeGen/CodeGen.csproj" OutputItemType="CodeGenTool" ReferenceOutputAssembly="false" Private="true" />
+		<ProjectReference Include="../Tools/CodeGen/CodeGen.csproj" OutputItemType="CodeGenTool" ReferenceOutputAssembly="false" Private="true" GlobalPropertiesToRemove="RintenWebModule" SkipGetTargetFrameworkProperties="true" />
 
 		<!-- What the generator reads, captured before the generated copies replace it below. -->
 		<CodeGenSource Include="@(Compile)" />

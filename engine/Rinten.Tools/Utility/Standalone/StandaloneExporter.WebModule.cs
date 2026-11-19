@@ -45,6 +45,9 @@ partial class StandaloneExporter
 		var descriptor = Path.Combine( work, "kept.xml" );
 		HashSet<string> inModule = null;
 
+		var framework = await ModuleFramework( project );
+		if ( framework is null ) return false;
+
 		await OnMainThread( () =>
 		{
 			//Only what the module will hold: the editor's library has its tools in it too.
@@ -61,8 +64,8 @@ partial class StandaloneExporter
 			var kept = types.Concat( described )
 				.Where( x => !x.IsGenericType && !x.IsArray && inModule.Contains( x.Assembly.GetName().Name ) && Ours( x.Assembly.GetName().Name ) )
 				.Distinct().ToList();
-			File.WriteAllText( directives, WebDirectives.For( made, inModule ) );
-			File.WriteAllText( descriptor, WebDirectives.Descriptor( kept, inModule ) );
+			File.WriteAllText( directives, WebDirectives.For( made, inModule, framework ) );
+			File.WriteAllText( descriptor, WebDirectives.Descriptor( kept, inModule, framework ) );
 			Logger.Info( $"web module: {made.Count} serializer generics from {types.Count} types" );
 		} );
 
@@ -83,8 +86,9 @@ partial class StandaloneExporter
 		var ceiling = Math.Clamp( (int)( ( AvailableMemoryGB() ?? MaxCeilingGB ) - 0.5 ), ModuleMemoryGB, MaxCeilingGB );
 		var compiles = Math.Clamp( ( ceiling - 1 ) / LlvmCompileGB, 1, Math.Max( 1, Environment.ProcessorCount / 2 ) );
 
+		//RintenWebModule builds the engine again for .NET 10 into its own obj/web and bin/web - see engine/Directory.Build.props
 		var arguments = $"publish \"{project}\" -r browser-wasm -c Release -m:{compiles} -p:IlcSingleThreaded=true " +
-			"-p:BuildProjectReferences=false " +
+			"-p:RintenWebModule=true " +
 			$"-p:RintenGameBin=\"{gameBin}\" -p:RintenRdXml=\"{directives}\" -p:RintenDescriptor=\"{descriptor}\" " +
 			$"-p:RintenWasmBin=\"{WasmBin}{Path.DirectorySeparatorChar}\" " +
 			$"-p:NativeIntermediateOutputPath=\"{native}{Path.DirectorySeparatorChar}\" -p:NativeOutputPath=\"{output}{Path.DirectorySeparatorChar}\"";
@@ -121,6 +125,36 @@ partial class StandaloneExporter
 		{
 			Problem( "no web module: it would not compile - see the log" );
 			Logger.Warning( $"the web module did not build:\n{log}" );
+			return false;
+		}
+	}
+
+	//The .NET 10 framework the module compiles against, out of the compiler's package - restored first where it is not yet
+	private async Task<WebDirectives.Framework> ModuleFramework( string project )
+	{
+		var version = System.Text.RegularExpressions.Regex.Match( File.ReadAllText( project ), "<IlcLlvmVersion>([^<]+)<" ).Groups[1].Value;
+		var packages = Environment.GetEnvironmentVariable( "NUGET_PACKAGES" ) is { Length: > 0 } set ? set
+			: Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.UserProfile ), ".nuget", "packages" );
+		var runtime = Path.Combine( packages, "runtime.browser-wasm.microsoft.dotnet.ilcompiler.llvm", version, "runtimes", "browser-wasm" );
+		string[] folders = [Path.Combine( runtime, "native-hidden" ), Path.Combine( runtime, "lib" )];
+
+		if ( !Directory.Exists( folders[0] ) )
+		{
+			var restored = await Task.Run( () => RunDotnet( $"restore \"{project}\" -r browser-wasm -p:RintenWebModule=true", [], MaxCeilingGB, out var log )
+				|| Failed( log ) );
+
+			if ( !restored || !Directory.Exists( folders[0] ) )
+			{
+				Problem( $"no web module: the compiler's framework is not at {runtime}" );
+				return null;
+			}
+		}
+
+		return new WebDirectives.Framework( folders );
+
+		static bool Failed( string log )
+		{
+			Logger.Warning( $"the web module's packages did not restore:\n{log}" );
 			return false;
 		}
 	}
@@ -260,6 +294,9 @@ partial class StandaloneExporter
 		return names;
 	}
 
+	//The Emscripten NativeAOT-LLVM 10 and the Skia archives are built with; SDK 11's own wasm-tools brings a newer one
+	private const string EmscriptenVersion = "3.1.56";
+
 	//The SDK's Emscripten pack, as the module's build reads it: the tools folder, and the
 	//environment the pack's own config expects. Null where the workload is not installed.
 	private static Dictionary<string, string> EmscriptenTools()
@@ -271,7 +308,7 @@ partial class StandaloneExporter
 		{
 			foreach ( var root in roots.Where( Directory.Exists ) )
 			{
-				var newest = Directory.GetDirectories( root, $"Microsoft.NET.Runtime.Emscripten.*.{kind}.{host}" )
+				var newest = Directory.GetDirectories( root, $"Microsoft.NET.Runtime.Emscripten.{EmscriptenVersion}.{kind}.{host}" )
 					.SelectMany( Directory.GetDirectories )
 					.OrderByDescending( x => x, StringComparer.Ordinal )
 					.FirstOrDefault();
@@ -362,7 +399,9 @@ partial class StandaloneExporter
 	//keeps what it needs and the build swaps rather than being killed
 	private static bool RunDotnet( string arguments, Dictionary<string, string> environment, int ceilingGB, out string log )
 	{
-		var capped = OperatingSystem.IsLinux() && File.Exists( "/usr/bin/systemd-run" );
+		//$XDG_RUNTIME_DIR/systemd is made by systemd --user; without one (iva-init, OpenRC) a --user scope cannot start
+		var capped = OperatingSystem.IsLinux() && File.Exists( "/usr/bin/systemd-run" )
+			&& Directory.Exists( Path.Combine( Environment.GetEnvironmentVariable( "XDG_RUNTIME_DIR" ) ?? "/nonexistent", "systemd" ) );
 		var dotnet = ExportToolchain.Dotnet ?? "dotnet";
 		var start = new ProcessStartInfo( capped ? "/usr/bin/systemd-run" : dotnet,
 			capped ? $"--user --scope --quiet -p MemoryMax={ceilingGB}G \"{dotnet}\" {arguments}" : arguments )

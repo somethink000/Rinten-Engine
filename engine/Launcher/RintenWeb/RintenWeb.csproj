@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	<!-- Engine, base and game AOT-compiled into one wasm module by NativeAOT-LLVM; published by the web export, never built alone -->
+	<!-- Engine, base and game AOT-compiled into one wasm module by NativeAOT-LLVM; published by the web export with RintenWebModule=true, never built alone.
+	     net10.0: NativeAOT-LLVM has no .NET 11 build, so the engine is compiled for 10 too (engine/Directory.Build.props) -->
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
-		<TargetFramework>net11.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>disable</Nullable>
 		<ImplicitUsings>disable</ImplicitUsings>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>

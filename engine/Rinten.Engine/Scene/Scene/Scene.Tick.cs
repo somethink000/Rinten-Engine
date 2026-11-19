@@ -305,7 +305,11 @@ public partial class Scene : GameObject
 		if ( HostTimeScale <= 0.0f && HostTime > 0.0f ) TimeNow = HostTime;
 	}
 
-	public void GameTick( double timeDelta = 0.1 )
+	public void GameTick( double timeDelta = 0.1 ) => GameTick( timeDelta, resumeAwaits: true );
+
+	//A scene drawn in a panel or a thumbnail ticks without resuming Task.Frame awaits: those belong to the game's
+	//scene, and resumed here they ran with this one pushed - a lobby made from one found no listeners in it
+	internal void GameTick( double timeDelta, bool resumeAwaits )
 	{
 		UpdateTime( timeDelta );
 
@@ -323,9 +327,12 @@ public partial class Scene : GameObject
 		using var timeScope = Time.ScopeInternal( TimeNow, TimeDelta );
 		using var gizmoScope = gizmoInstance?.PushInternal();
 
-		using ( PerformanceStats.Timings.Async.Scope() )
+		if ( resumeAwaits )
 		{
-			SyncContext.FrameStage.Update.Trigger();
+			using ( PerformanceStats.Timings.Async.Scope() )
+			{
+				SyncContext.FrameStage.Update.Trigger();
+			}
 		}
 
 		if ( IsLoading )
@@ -340,7 +347,7 @@ public partial class Scene : GameObject
 		//to immediately finish the load and be ready to render propertly on the next render!
 		if ( IsLoading )
 		{
-			GameTick();
+			GameTick( 0.1, resumeAwaits );
 		}
 
 	}

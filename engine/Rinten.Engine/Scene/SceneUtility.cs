@@ -215,7 +215,7 @@ public static class SceneUtility
 			//tick tick
 			for ( int i = 0; i < 8; i++ )
 			{
-				scene.GameTick( 0.1f );
+				scene.GameTick( 0.1f, resumeAwaits: false );
 			}
 
 			//place the camera
@@ -231,7 +231,7 @@ public static class SceneUtility
 
 			//render twice, for any temporal shit to kick in
 			camera.RenderToBitmap( bitmap );
-			scene.GameTick( 0.1f );
+			scene.GameTick( 0.1f, resumeAwaits: false );
 			camera.RenderToBitmap( bitmap );
 
 			scene.Destroy();

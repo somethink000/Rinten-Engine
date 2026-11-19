@@ -312,7 +312,12 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 	/// <summary>Writes the scene where it came from, or asks where when there is nowhere.</summary>
 	public void Save( bool saveAs ) => Save( saveAs, background: false );
 
-	public void Save( bool saveAs, bool background )
+	public void Save( bool saveAs, bool background ) => Save( saveAs, background, null );
+
+	/// <summary>Writes the scene to this absolute path inside the project's Assets, without asking.</summary>
+	public void SaveTo( string path ) => Save( false, false, path );
+
+	private void Save( bool saveAs, bool background, string path )
 	{
 		//Mounted scenes live at a read-only mount:// path - they can't be saved or saved as.
 		if ( IsMounted )
@@ -323,7 +328,11 @@ public partial class SceneEditorSession : Scene.ISceneEditorSession
 		string fileType = isPrefab ? "Prefab" : "Scene";
 
 		var saveLocation = string.Empty;
-		if ( !saveAs && Scene.Source is not null && AssetSystem.FindByPath( Scene.Source.ResourcePath ) is Asset sourceAsset )
+		if ( path is not null )
+		{
+			saveLocation = path;
+		}
+		else if ( !saveAs && Scene.Source is not null && AssetSystem.FindByPath( Scene.Source.ResourcePath ) is Asset sourceAsset )
 		{
 			saveLocation = sourceAsset.AbsolutePath;
 		}

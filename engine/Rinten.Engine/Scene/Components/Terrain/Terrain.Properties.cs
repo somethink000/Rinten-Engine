@@ -91,14 +91,14 @@ public partial class Terrain
 		}
 	}
 
-	/// <summary>Side length in metres of one baked chunk; larger draws cheaper, smaller rebakes faster</summary>
-	[Property, Category( "Mesh" ), Range( 16, 128 ), Step( 16 )]
+	/// <summary>Side length in metres of one baked chunk; larger draws cheaper, smaller rebakes faster. Ground only seen from afar takes kilometres.</summary>
+	[Property, Category( "Mesh" ), Range( 16, 2048 ), Step( 16 )]
 	public int ChunkSize
 	{
 		get => field;
 		set
 		{
-			value = Math.Clamp( value, 16, 128 );
+			value = Math.Clamp( value, 16, 2048 );
 			if ( field == value ) return;
 
 			field = value;

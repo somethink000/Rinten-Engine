@@ -27,6 +27,9 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 //The copies' record, the model's sphere, the run, the rules, six a triangle - see TerrainClutter.Placed
 [[vk::binding( 12, 2 )]] StructuredBuffer<uint4> g_patch;
 
+//Patches share pages: this one's fours of words start where the Clutter attribute's second number says
+#define PATCH( i ) g_patch[uint( g_vClutter.y + 0.5 ) + ( i )]
+
 //The scene's instance table, a record of 256 bytes a slot - see CoreSceneTables.InstanceRecord.
 [[vk::binding( 13, 2 )]] RWByteAddressBuffer g_instances;
 
@@ -100,19 +103,19 @@ void Store( uint slot, uint4 words, uint at )
 [numthreads( 64, 1, 1 )]
 void MainCs( uint3 id : SV_DispatchThreadID )
 {
-	uint4 run = g_patch[RunAt];
+	uint4 run = PATCH( RunAt );
 
 	if ( id.x >= run.z ) return;
 
 	uint head = run.x;
 	uint at = TrianglesAt + ( id.x * TriangleWords );
 
-	uint4 t0 = g_patch[at];
-	uint4 t1 = g_patch[at + 1u];
-	uint4 t2 = g_patch[at + 2u];
-	uint4 t3 = g_patch[at + 3u];
-	uint4 t4 = g_patch[at + 4u];
-	uint4 t5 = g_patch[at + 5u];
+	uint4 t0 = PATCH( at );
+	uint4 t1 = PATCH( at + 1u );
+	uint4 t2 = PATCH( at + 2u );
+	uint4 t3 = PATCH( at + 3u );
+	uint4 t4 = PATCH( at + 4u );
+	uint4 t5 = PATCH( at + 5u );
 
 	float3 a = asfloat( t0.xyz );
 	float3 b = asfloat( t1.xyz );
@@ -124,17 +127,17 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 	uint count = t2.w;
 	uint bits = t3.w;
 
-	uint4 rules = g_patch[RulesAt];
+	uint4 rules = PATCH( RulesAt );
 	uint wanted = rules.x;
 	float scaleLeast = asfloat( rules.z );
 	float scaleMost = asfloat( rules.w );
-	float sink = asfloat( g_patch[RulesAt + 1u].x );
-	float3 framePlace = asfloat( g_patch[RulesAt + 2u].xyz );
-	float4 frameTurn = asfloat( g_patch[RulesAt + 3u] );
-	float3 frameScale = asfloat( g_patch[RulesAt + 4u].xyz );
+	float sink = asfloat( PATCH( RulesAt + 1u ).x );
+	float3 framePlace = asfloat( PATCH( RulesAt + 2u ).xyz );
+	float4 frameTurn = asfloat( PATCH( RulesAt + 3u ) );
+	float3 frameScale = asfloat( PATCH( RulesAt + 4u ).xyz );
 
-	float4 bound = asfloat( g_patch[BoundAt] );
-	uint4 drawn = g_patch[TemplateAt + 9u];
+	float4 bound = asfloat( PATCH( BoundAt ) );
+	uint4 drawn = PATCH( TemplateAt + 9u );
 
 	//Stood square to the ground: the turn that takes up to where the triangle faces.
 	float4 tilt = float4( 0.0, 0.0, 0.0, 1.0 );
@@ -243,7 +246,7 @@ void MainCs( uint3 id : SV_DispatchThreadID )
 		Store( slot, uint4( drawn.x, drawn.y, drawn.z | InstanceDrawnBit, drawn.w ), 9u );
 
 		[unroll]
-		for ( uint k = 10u; k < 16u; k++ ) Store( slot, g_patch[TemplateAt + k], k );
+		for ( uint k = 10u; k < 16u; k++ ) Store( slot, PATCH( TemplateAt + k ), k );
 	}
 }
 #endif

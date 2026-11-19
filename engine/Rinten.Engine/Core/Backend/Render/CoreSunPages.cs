@@ -125,6 +125,14 @@ internal sealed class CoreSunPages : IDisposable
 	private int cellsX, cellsY, cellX0, cellY0;
 	private int[] cellStart = [], cellFeet = [];
 	private readonly List<int> wideFeet = new();
+
+	//Feet wider than a cell but no wider than a coarse cell - terrain chunks, patches of scattered copies - filed on a coarse grid,
+	//so a bake's square visits the few near it rather than all of them; wider still stay in wideFeet
+	private const float WideCell = 128.0f;
+	private int[] coarseStart = new int[1];
+	private int[] coarseFeet = [];
+	private int[] coarseFill = [];
+	private int coarseX0, coarseY0, coarseX, coarseY;
 	private int[] cellFill = [];
 
 	//The most cells the grid is made of, four bytes each twice over
@@ -740,6 +748,23 @@ internal sealed class CoreSunPages : IDisposable
 		foreach ( var i in wideFeet )
 			if ( !Loose( i ) ) sum += Under( i, x0, y0, x1, y1 );
 
+		if ( coarseX > 0 )
+		{
+			var wx0 = Math.Max( (int)MathF.Floor( ( x0 - WideCell ) / WideCell ) - coarseX0, 0 );
+			var wx1 = Math.Min( (int)MathF.Floor( ( x1 + WideCell ) / WideCell ) - coarseX0, coarseX - 1 );
+			var wy0 = Math.Max( (int)MathF.Floor( ( y0 - WideCell ) / WideCell ) - coarseY0, 0 );
+			var wy1 = Math.Min( (int)MathF.Floor( ( y1 + WideCell ) / WideCell ) - coarseY0, coarseY - 1 );
+
+			for ( var wy = wy0; wy <= wy1; wy++ )
+				for ( var wx = wx0; wx <= wx1; wx++ )
+				{
+					var cell = ( wy * coarseX ) + wx;
+
+					for ( var k = coarseStart[cell]; k < coarseStart[cell + 1]; k++ )
+						if ( !Loose( coarseFeet[k] ) ) sum += Under( coarseFeet[k], x0, y0, x1, y1 );
+				}
+		}
+
 		sum += LooseUnder( looseHead[cellsX * cellsY], x0, y0, x1, y1 );
 
 		if ( cellsX == 0 ) return sum;
@@ -795,15 +820,13 @@ internal sealed class CoreSunPages : IDisposable
 		var count = Math.Min( footR.Length, casters.Count );
 		int lowX = int.MaxValue, lowY = int.MaxValue, highX = int.MinValue, highY = int.MinValue;
 
+		BucketWide( count );
+
 		for ( var i = 0; i < count; i++ )
 		{
 			if ( footR[i] < 0.0f ) continue;
 
-			if ( footR[i] > FootCell )
-			{
-				wideFeet.Add( i );
-				continue;
-			}
+			if ( footR[i] > FootCell ) continue;
 
 			var cx = (int)MathF.Floor( footX[i] / FootCell );
 			var cy = (int)MathF.Floor( footY[i] / FootCell );
@@ -853,6 +876,64 @@ internal sealed class CoreSunPages : IDisposable
 
 			var cell = CellOf( i );
 			cellFeet[cellStart[cell] + fill[cell]++] = i;
+		}
+	}
+
+	//Files the wide feet: the widest in wideFeet, the rest by coarse cell, counted, summed into starts and filled
+	private void BucketWide( int count )
+	{
+		coarseX = coarseY = 0;
+		int lowX = int.MaxValue, lowY = int.MaxValue, highX = int.MinValue, highY = int.MinValue;
+
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( footR[i] <= FootCell ) continue;
+			if ( footR[i] > WideCell ) { wideFeet.Add( i ); continue; }
+
+			var cx = (int)MathF.Floor( footX[i] / WideCell );
+			var cy = (int)MathF.Floor( footY[i] / WideCell );
+			lowX = Math.Min( lowX, cx ); highX = Math.Max( highX, cx );
+			lowY = Math.Min( lowY, cy ); highY = Math.Max( highY, cy );
+		}
+
+		if ( lowX > highX ) return;
+
+		//Spread past a grid's worth: each visited one by one
+		if ( ( (long)highX - lowX + 1 ) * ( (long)highY - lowY + 1 ) > MostCells )
+		{
+			for ( var i = 0; i < count; i++ )
+				if ( footR[i] > FootCell && footR[i] <= WideCell ) wideFeet.Add( i );
+
+			return;
+		}
+
+		coarseX0 = lowX;
+		coarseY0 = lowY;
+		coarseX = highX - lowX + 1;
+		coarseY = highY - lowY + 1;
+
+		var cells = coarseX * coarseY;
+		if ( coarseStart.Length < cells + 1 ) coarseStart = new int[cells + 1];
+		else Array.Clear( coarseStart, 0, cells + 1 );
+
+		int CoarseOf( int i ) => ( ( (int)MathF.Floor( footY[i] / WideCell ) - coarseY0 ) * coarseX ) + (int)MathF.Floor( footX[i] / WideCell ) - coarseX0;
+
+		for ( var i = 0; i < count; i++ )
+			if ( footR[i] > FootCell && footR[i] <= WideCell ) coarseStart[CoarseOf( i ) + 1]++;
+
+		for ( var c = 0; c < cells; c++ ) coarseStart[c + 1] += coarseStart[c];
+
+		if ( coarseFeet.Length < coarseStart[cells] ) coarseFeet = new int[coarseStart[cells]];
+
+		if ( coarseFill.Length < cells ) coarseFill = new int[cells];
+		else Array.Clear( coarseFill, 0, cells );
+
+		for ( var i = 0; i < count; i++ )
+		{
+			if ( footR[i] <= FootCell || footR[i] > WideCell ) continue;
+
+			var cell = CoarseOf( i );
+			coarseFeet[coarseStart[cell] + coarseFill[cell]++] = i;
 		}
 	}
 

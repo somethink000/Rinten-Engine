@@ -18,8 +18,12 @@ public sealed class TerrainClutterLayer
 	public float Density { get; set; } = 0.5f;
 
 	/// <summary>How far from the eye they are kept, in metres. The card culls and coarsens what is nearer than this; beyond it there is nothing to cull.</summary>
-	[Property, Range( 8.0f, 2048.0f )]
+	[Property, Range( 8.0f, 16384.0f )]
 	public float Distance { get; set; } = 96.0f;
+
+	/// <summary>Metres out to which they stand as thick as asked; past it they thin with the square of the distance, so the screen holds as many. Nought never thins.</summary>
+	[Property, Range( 0.0f, 4096.0f )]
+	public float ThinFrom { get; set; }
 
 	/// <summary>Which of the terrain's painted layers they grow on, as places in its list of materials. Where two layers blend they thin out with the blend. Empty for everywhere.</summary>
 	[Property]
@@ -65,6 +69,7 @@ public sealed class TerrainClutterLayer
 		hash.Add( Model );
 		hash.Add( Density );
 		hash.Add( Distance );
+		hash.Add( ThinFrom );
 		hash.Add( Scale.Min );
 		hash.Add( Scale.Max );
 		hash.Add( MinSlope );
@@ -115,6 +120,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public Placed Placed;
 		public bool Checked;
 
+		/// <summary>How far its middle was from the eye when scattered, and since when it has not been wanted.</summary>
+		public float Away;
+		public double UnwantedSince;
+
 		public void Drop()
 		{
 			Set?.Dispose();
@@ -142,8 +151,17 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	private Terrain terrain;
 	private readonly Dictionary<long, Patch> patches = new();
 	private readonly ConcurrentQueue<Scattered> scattered = new();
-	private readonly List<long> standing = new();
+	private readonly HashSet<long> standing = new();
 	private readonly List<long> gone = new();
+
+	//Patches each look asks for, by layer; the standing ones it no longer asks for wait in retiring until what replaces them stands
+	private readonly List<HashSet<long>> wanted = new();
+	private readonly HashSet<long> retiring = new();
+
+	//The few patches with copies still to stand up or a run still to check, so a frame does not walk every standing patch
+	private readonly HashSet<long> toStand = new();
+	private readonly HashSet<long> toCheck = new();
+	private readonly List<long> finished = new();
 
 	private int version;
 	private int settings;
@@ -186,7 +204,6 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		{
 			terrain.ChunkBaked -= OnChunkBaked;
 			terrain.Transform.OnTransformChanged -= Again;
-			terrain.KeepWhole( this, 0.0f );
 		}
 
 		terrain = null;
@@ -201,23 +218,44 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		patches.Clear();
 		byHand.Clear();
 		standing.Clear();
+		toStand.Clear();
+		toCheck.Clear();
+		retiring.Clear();
 		version++;
 		lookAgain = true;
 	}
 
 	private void OnChunkBaked( int x, int z )
 	{
+		var top = TopLevel();
+
 		for ( var layer = 0; layer < Layers.Count; layer++ )
 		{
-			if ( !patches.TryGetValue( KeyOf( layer, x, z ), out var patch ) ) continue;
+			for ( var level = 0; level <= top; level++ )
+			{
+				if ( !patches.TryGetValue( KeyOf( layer, level, ( x >> level ) << level, ( z >> level ) << level ), out var patch ) ) continue;
 
-			//Left standing until the new scatter is ready to take its place.
-			patch.Stale = true;
-			lookAgain = true;
+				//Left standing until the new scatter is ready to take its place.
+				patch.Stale = true;
+				lookAgain = true;
+			}
 		}
 	}
 
-	private static long KeyOf( int layer, int x, int z ) => ( (long)layer << 40 ) | ( (long)z << 20 ) | (uint)x;
+	//A patch is a square of chunks 2^level a side, keyed by its first chunk
+	private static long KeyOf( int layer, int level, int x, int z ) => ( (long)layer << 40 ) | ( (long)level << 36 ) | ( (long)z << 18 ) | (uint)x;
+
+	private static (int Layer, int Level, int X, int Z) Unkey( long key ) =>
+		( (int)( key >> 40 ), (int)( ( key >> 36 ) & 0xF ), (int)( ( key >> 18 ) & 0x3FFFF ), (int)( key & 0x3FFFF ) );
+
+	//The level whose one patch covers the whole terrain
+	private int TopLevel()
+	{
+		var most = Math.Max( terrain?.ChunksWide ?? 1, terrain?.ChunksDeep ?? 1 );
+		var level = 0;
+		while ( ( 1 << level ) < most && level < 15 ) level++;
+		return level;
+	}
 
 	protected override void OnUpdate()
 	{
@@ -239,11 +277,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		Stand();
 		Check();
 
-		//Patches stand on the ground of whole chunks only: kept whole as far out as one is taken away - see Look.
-		var most = 0.0f;
-		foreach ( var layer in Layers ) if ( layer?.Model is not null && layer.Density > 0.0f ) most = MathF.Max( most, layer.Distance );
+		//The terrain can go while patches are stood up, when its scene is being unloaded
+		if ( !terrain.IsValid() ) return;
 
-		terrain.KeepWhole( this, most > 0.0f ? ( most * 1.15f ) + ( terrain.ChunkSpan * 0.7072f ) : 0.0f );
+		Retire();
 
 		//Where the frame is being looked at from - see CoreDetail, which is told once a tick and is
 		//the one place that knows whether it is the scene's camera, the editor's or a headset's.
@@ -264,53 +301,131 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		lookAgain = false;
 
 		Look( local, span );
+
+		//Not held past the look: the workers took what they need
+		groundRead.Clear();
 	}
 
-	//Which patches should stand for an eye here: the missing are sent to be scattered, the far are taken away.
+	//Each chunk's ground read once for a look, however many layers scatter on it - see Terrain.GroundOf
+	private readonly Dictionary<long, TerrainSoup> groundRead = new();
+
+	private TerrainSoup GroundOf( int x, int z )
+	{
+		var key = ( (long)z << 20 ) | (uint)x;
+		if ( groundRead.TryGetValue( key, out var soup ) ) return soup;
+
+		return groundRead[key] = terrain.GroundOf( x, z );
+	}
+
+	//Which patches should stand for an eye here: a tree of squares, each as coarse as its distance lets a thinning layer be,
+	//the missing sent to be scattered; what is no longer asked for retires once its replacements stand.
 	private void Look( Vector3 eye, float span )
 	{
-		var reach = span * 0.7072f;
+		groundRead.Clear();
+
+		var top = TopLevel();
+
+		while ( wanted.Count < Layers.Count ) wanted.Add( new() );
 
 		for ( var l = 0; l < Layers.Count; l++ )
 		{
+			wanted[l].Clear();
+
 			var layer = Layers[l];
 			if ( layer?.Model is null || layer.Density <= 0.0f ) continue;
 
-			var x0 = Math.Clamp( (int)MathF.Floor( ( eye.x - layer.Distance ) / span ), 0, terrain.ChunksWide - 1 );
-			var x1 = Math.Clamp( (int)MathF.Floor( ( eye.x + layer.Distance ) / span ), 0, terrain.ChunksWide - 1 );
-			var z0 = Math.Clamp( (int)MathF.Floor( ( eye.z - layer.Distance ) / span ), 0, terrain.ChunksDeep - 1 );
-			var z1 = Math.Clamp( (int)MathF.Floor( ( eye.z + layer.Distance ) / span ), 0, terrain.ChunksDeep - 1 );
-
-			for ( var z = z0; z <= z1; z++ )
-			{
-				for ( var x = x0; x <= x1; x++ )
-				{
-					if ( Away( eye, x, z, span ) > layer.Distance + reach ) continue;
-
-					var key = KeyOf( l, x, z );
-
-					if ( !patches.TryGetValue( key, out var patch ) )
-					{
-						patch = new Patch { Stale = true };
-						patches[key] = patch;
-						standing.Add( key );
-					}
-
-					if ( patch.Stale && !patch.Scattering ) Scatter( key, patch, l, x, z );
-				}
-			}
+			Walk( l, layer, top, 0, 0, eye, span );
 		}
-
-		//Taken away a little further out than they are put up, so an eye pacing a boundary does not scatter the same patch over and over.
-		gone.Clear();
 
 		foreach ( var key in standing )
 		{
-			var l = (int)( key >> 40 );
-			var z = (int)( ( key >> 20 ) & 0xFFFFF );
-			var x = (int)( key & 0xFFFFF );
+			var (l, _, _, _) = Unkey( key );
+			if ( l < wanted.Count && wanted[l].Contains( key ) ) { retiring.Remove( key ); continue; }
 
-			if ( l < Layers.Count && Layers[l] is { } layer && Away( eye, x, z, span ) <= ( layer.Distance * 1.15f ) + reach ) continue;
+			if ( retiring.Add( key ) && patches.TryGetValue( key, out var patch ) ) patch.UnwantedSince = RealTime.Now;
+		}
+
+		Retire();
+	}
+
+	private void Walk( int l, TerrainClutterLayer layer, int level, int x, int z, Vector3 eye, float span )
+	{
+		if ( x >= terrain.ChunksWide || z >= terrain.ChunksDeep ) return;
+
+		var size = 1 << level;
+		var near = BoxAway( eye, x, z, size, span );
+
+		if ( near > layer.Distance ) return;
+
+		//Coarse enough where the nearest of it is far enough that its density has fallen a quarter for each level
+		var thin = layer.ThinFrom;
+		var leaf = level == 0 || ( thin > 0.0f && near >= thin * ( 1 << ( level - 1 ) ) );
+
+		if ( !leaf )
+		{
+			var half = size >> 1;
+			Walk( l, layer, level - 1, x, z, eye, span );
+			Walk( l, layer, level - 1, x + half, z, eye, span );
+			Walk( l, layer, level - 1, x, z + half, eye, span );
+			Walk( l, layer, level - 1, x + half, z + half, eye, span );
+			return;
+		}
+
+		var key = KeyOf( l, level, x, z );
+		wanted[l].Add( key );
+
+		var away = Away( eye, x, z, size, span );
+
+		if ( !patches.TryGetValue( key, out var patch ) )
+		{
+			patch = new Patch { Stale = true };
+			patches[key] = patch;
+			standing.Add( key );
+		}
+		//Thinned for where the eye was: scattered again once it has come a quarter nearer
+		else if ( thin > 0.0f && patch.Away > thin && away < patch.Away * 0.75f ) patch.Stale = true;
+
+		if ( patch.Stale && !patch.Scattering ) Scatter( key, patch, l, level, x, z, eye, away );
+	}
+
+	//Drops what no look asks for once every patch overlapping it stands, or after a few seconds; a patch just outside the
+	//distance with nothing to replace it stays until the eye is a little further, so pacing the edge does not churn it
+	private void Retire()
+	{
+		if ( retiring.Count == 0 ) return;
+
+		gone.Clear();
+
+		var eye = lookedFrom;
+		var span = terrain.ChunkSpan;
+
+		foreach ( var key in retiring )
+		{
+			if ( !patches.TryGetValue( key, out var patch ) ) { gone.Add( key ); continue; }
+
+			var (l, level, x, z) = Unkey( key );
+			if ( l >= Layers.Count || Layers[l] is not { } layer || l >= wanted.Count ) { gone.Add( key ); continue; }
+
+			var size = 1 << level;
+			var overlapped = false;
+			var ready = true;
+
+			foreach ( var other in wanted[l] )
+			{
+				var (_, ol, ox, oz) = Unkey( other );
+				var osize = 1 << ol;
+				if ( ox >= x + size || ox + osize <= x || oz >= z + size || oz + osize <= z ) continue;
+
+				overlapped = true;
+
+				if ( !patches.TryGetValue( other, out var p ) || p.Scattering || p.Stale || toStand.Contains( other ) ) { ready = false; break; }
+			}
+
+			if ( !overlapped )
+			{
+				if ( BoxAway( eye, x, z, size, span ) <= layer.Distance * 1.15f ) continue;
+			}
+			else if ( !ready && RealTime.Now - patch.UnwantedSince < 3.0 ) continue;
 
 			gone.Add( key );
 		}
@@ -319,36 +434,54 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		{
 			if ( patches.Remove( key, out var patch ) ) patch.Drop();
 			standing.Remove( key );
+			toStand.Remove( key );
+			toCheck.Remove( key );
+			retiring.Remove( key );
 		}
 	}
 
-	private static float Away( Vector3 eye, int x, int z, float span )
+	//From the eye to a square's middle, and to its nearest point, across the ground
+	private static float Away( Vector3 eye, int x, int z, int size, float span )
 	{
-		var dx = ( ( x + 0.5f ) * span ) - eye.x;
-		var dz = ( ( z + 0.5f ) * span ) - eye.z;
+		var dx = ( ( x + ( size * 0.5f ) ) * span ) - eye.x;
+		var dz = ( ( z + ( size * 0.5f ) ) * span ) - eye.z;
+
+		return MathF.Sqrt( ( dx * dx ) + ( dz * dz ) );
+	}
+
+	private static float BoxAway( Vector3 eye, int x, int z, int size, float span )
+	{
+		var dx = MathF.Max( MathF.Max( ( x * span ) - eye.x, eye.x - ( ( x + size ) * span ) ), 0.0f );
+		var dz = MathF.Max( MathF.Max( ( z * span ) - eye.z, eye.z - ( ( z + size ) * span ) ), 0.0f );
 
 		return MathF.Sqrt( ( dx * dx ) + ( dz * dz ) );
 	}
 
 	//Sends one patch to be worked out on a worker.
-	private void Scatter( long key, Patch patch, int layerIndex, int x, int z )
+	private void Scatter( long key, Patch patch, int layerIndex, int level, int x, int z, Vector3 eye, float away )
 	{
 		var layer = Layers[layerIndex];
 
 		patch.Scattering = true;
 		patch.Stale = false;
+		patch.Away = away;
 
-		//The chunk's ground as it was last baked: never changed once made, so a worker reads it as it is. None
-		//yet is nothing to grow on yet - the chunk says when it has baked, and the patch is scattered then.
-		var ground = terrain.BakedGround( x, z );
+		//The chunks' own triangles, read from the mesh now and copied, so a worker reads them as they are; a bake of a chunk
+		//says when its ground changed, and the patch is scattered again then
+		var size = 1 << level;
+		var grounds = new List<TerrainSoup>();
+
+		for ( var cz = z; cz < Math.Min( z + size, terrain.ChunksDeep ); cz++ )
+			for ( var cx = x; cx < Math.Min( x + size, terrain.ChunksWide ); cx++ )
+				if ( GroundOf( cx, cz ) is { } one ) grounds.Add( one );
 
 		List<TerrainModifier> near = null;
 		Dictionary<long, TerrainMaskTile> mask = null;
 
-		if ( ground is not null )
+		if ( grounds.Count > 0 )
 		{
 			var min = terrain.ChunkOrigin + ( new Vector2( x, z ) * terrain.ChunkSpan );
-			var max = min + new Vector2( terrain.ChunkSpan, terrain.ChunkSpan );
+			var max = min + new Vector2( terrain.ChunkSpan * size, terrain.ChunkSpan * size );
 
 			foreach ( var modifier in terrain.Modifiers )
 			{
@@ -364,8 +497,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		var ask = new Ask
 		{
-			Ground = ground,
+			Grounds = grounds,
 			Modifiers = near?.ToArray() ?? [],
+			Eye = new Vector2( eye.x + terrain.ChunkOrigin.x, eye.z + terrain.ChunkOrigin.y ),
+			ThinFrom = layer.ThinFrom,
 			Mask = mask,
 			//Not HashCode, whose seed differs every run, scattering the editor's clutter elsewhere in the game
 			Seed = (int)Mix( (uint)Seed, (uint)layerIndex, 0u ),
@@ -425,6 +560,8 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			patch.Waiting = done.Places;
 			patch.Stood = 0;
 
+			if ( patch.Waiting is { Count: > 0 } ) toStand.Add( done.Key );
+
 			//What stood here before goes now; the new ones follow in this frame and the next few - or all at once, by the card.
 			patch.Drop();
 			patch.Set = new StaticInstanceSet( Scene );
@@ -434,28 +571,37 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			if ( patch.Stale ) lookAgain = true;
 		}
 
-		var clock = Stopwatch.StartNew();
+		if ( toStand.Count == 0 ) return;
 
-		foreach ( var key in standing )
+		var clock = Stopwatch.StartNew();
+		finished.Clear();
+
+		foreach ( var key in toStand )
 		{
-			if ( !patches.TryGetValue( key, out var patch ) || patch.Waiting is null ) continue;
+			if ( !patches.TryGetValue( key, out var patch ) || patch.Waiting is null ) { finished.Add( key ); continue; }
 
 			var layer = (int)( key >> 40 );
-			if ( layer >= Layers.Count || Layers[layer]?.Model is not { } model ) { patch.Waiting = null; continue; }
+			if ( layer >= Layers.Count || Layers[layer]?.Model is not { } model ) { patch.Waiting = null; finished.Add( key ); continue; }
 
 			var shadows = Layers[layer].CastShadows;
 			var lod = Layers[layer].LodScale;
 			var lodGroup = Layers[layer].LodGroup;
+			var over = false;
 
 			while ( patch.Stood < patch.Waiting.Count )
 			{
 				patch.Set.Add( model, patch.Waiting[patch.Stood++], shadows, null, lod, lodGroup );
 
-				if ( ( patch.Stood & 63 ) == 0 && clock.Elapsed.TotalMilliseconds > StandBudget ) return;
+				if ( ( patch.Stood & 63 ) == 0 && clock.Elapsed.TotalMilliseconds > StandBudget ) { over = true; break; }
 			}
 
+			if ( over ) break;
+
 			patch.Waiting = null;
+			finished.Add( key );
 		}
+
+		foreach ( var key in finished ) toStand.Remove( key );
 	}
 
 	//A patch's copies to the tables as one run the card places; a layer whose run they refuse is scattered here from then on.
@@ -475,22 +621,30 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		}
 
 		patch.Placed = placed;
+		toCheck.Add( key );
 	}
 
 	//Whether the tables draw the runs handed them since the last look - which they know only once the model is there.
 	private void Check()
 	{
-		foreach ( var key in standing )
+		if ( toCheck.Count == 0 ) return;
+
+		finished.Clear();
+
+		foreach ( var key in toCheck )
 		{
-			if ( !patches.TryGetValue( key, out var patch ) || patch.Placed is null || patch.Checked ) continue;
+			if ( !patches.TryGetValue( key, out var patch ) || patch.Placed is null || patch.Checked ) { finished.Add( key ); continue; }
 
 			var drawn = patch.Set?.RunsDrawn;
 			if ( drawn is null ) continue;
 
 			patch.Checked = true;
+			finished.Add( key );
 
 			if ( drawn == false ) Refuse( (int)( key >> 40 ) );
 		}
+
+		foreach ( var key in finished ) toCheck.Remove( key );
 	}
 
 	private void Refuse( int layer )
@@ -514,8 +668,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	//Everything a worker needs to scatter one patch, and nothing that changes under it.
 	private sealed class Ask
 	{
-		public TerrainSoup Ground;
+		public List<TerrainSoup> Grounds;
 		public TerrainModifier[] Modifiers;
+		public Vector2 Eye;
+		public float ThinFrom;
 		public Dictionary<long, TerrainMaskTile> Mask;
 		public int Seed;
 		public float Density;
@@ -529,97 +685,109 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		public float Reach;
 	}
 
+	//What of the density is left at a triangle's middle: all of it out to ThinFrom, then less with the square of the distance
+	private static float Thinned( Ask ask, Vector3 middle )
+	{
+		if ( ask.ThinFrom <= 0.0f ) return 1.0f;
+
+		var dx = middle.x - ask.Eye.x;
+		var dz = middle.z - ask.Eye.y;
+		var far = ( dx * dx ) + ( dz * dz );
+		var near = ask.ThinFrom * ask.ThinFrom;
+
+		return far <= near ? 1.0f : near / far;
+	}
+
 	//One patch: every triangle of the chunk's ground grows what its area and the density come to, placed by numbers drawn from where the triangle
 	//is - so a patch comes out the same whenever it is asked for, and sculpting one corner of a chunk does not reshuffle the rest of it.
 	private static List<Transform> Work( Ask ask )
 	{
 		var places = new List<Transform>();
-		var ground = ask.Ground;
-
 		Span<float> layers = stackalloc float[Terrain.MostLayers];
 
-		if ( ground is null ) return places;
-
-		for ( var t = 0; t + 2 < ground.Indices.Count; t += 3 )
+		foreach ( var ground in ask.Grounds )
 		{
-			var a = ground.Vertices[ground.Indices[t]];
-			var b = ground.Vertices[ground.Indices[t + 1]];
-			var c = ground.Vertices[ground.Indices[t + 2]];
-
-			var cross = Vector3.Cross( b.Position - a.Position, c.Position - a.Position );
-			var area = cross.Length * 0.5f;
-
-			if ( area < 1e-6f ) continue;
-
-			//Which way the triangle faces, by the normals its corners carry - the winding's cross can point either way depending on who is asked.
-			var facing = ( a.Normal + b.Normal + c.Normal ).Normal;
-
-			if ( facing.y < ask.SteepLeast || facing.y > ask.SteepMost + 1e-5f ) continue;
-
-			var middle = ( a.Position + b.Position + c.Position ) / 3.0f;
-
-			var bits = Mix( (uint)ask.Seed, (uint)(int)MathF.Round( middle.x * 64.0f ),
-				(uint)(int)MathF.Round( middle.z * 64.0f ) ^ ( (uint)(int)MathF.Round( middle.y * 64.0f ) * 0x27D4EB2Fu ) );
-
-			var wanted = area * ask.Density;
-			var count = (int)wanted;
-
-			if ( Unit( ref bits ) < wanted - count ) count++;
-
-			for ( var n = 0; n < count; n++ )
+			for ( var t = 0; t + 2 < ground.Indices.Count; t += 3 )
 			{
-				//A point of the triangle, evenly: two numbers folded back across its diagonal.
-				var u = Unit( ref bits );
-				var v = Unit( ref bits );
+				var a = ground.Vertices[ground.Indices[t]];
+				var b = ground.Vertices[ground.Indices[t + 1]];
+				var c = ground.Vertices[ground.Indices[t + 2]];
 
-				if ( u + v > 1.0f ) { u = 1.0f - u; v = 1.0f - v; }
+				var cross = Vector3.Cross( b.Position - a.Position, c.Position - a.Position );
+				var area = cross.Length * 0.5f;
 
-				var w = 1.0f - u - v;
-				var chance = Unit( ref bits );
-				var sized = Unit( ref bits );
-				var turned = Unit( ref bits );
+				if ( area < 1e-6f ) continue;
 
-				var point = ( a.Position * w ) + ( b.Position * u ) + ( c.Position * v );
+				//Which way the triangle faces, by the normals its corners carry - the winding's cross can point either way depending on who is asked.
+				var facing = ( a.Normal + b.Normal + c.Normal ).Normal;
 
-				//What is painted there: the mask over the top of the ground, the corners' paint for the rest.
-				if ( ask.OnLayers != 0u )
+				if ( facing.y < ask.SteepLeast || facing.y > ask.SteepMost + 1e-5f ) continue;
+
+				var middle = ( a.Position + b.Position + c.Position ) / 3.0f;
+
+				var bits = Mix( (uint)ask.Seed, (uint)(int)MathF.Round( middle.x * 64.0f ),
+					(uint)(int)MathF.Round( middle.z * 64.0f ) ^ ( (uint)(int)MathF.Round( middle.y * 64.0f ) * 0x27D4EB2Fu ) );
+
+				var wanted = area * ask.Density * Thinned( ask, middle );
+				var count = (int)wanted;
+
+				if ( Unit( ref bits ) < wanted - count ) count++;
+
+				for ( var n = 0; n < count; n++ )
 				{
-					layers.Clear();
+					//A point of the triangle, evenly: two numbers folded back across its diagonal.
+					var u = Unit( ref bits );
+					var v = Unit( ref bits );
 
-					var share = 1.0f - TerrainMesh.MaskAt( ask.Mask, point, facing.y, layers );
+					if ( u + v > 1.0f ) { u = 1.0f - u; v = 1.0f - v; }
 
-					a.Paint.AddTo( layers, w * share );
-					b.Paint.AddTo( layers, u * share );
-					c.Paint.AddTo( layers, v * share );
+					var w = 1.0f - u - v;
+					var chance = Unit( ref bits );
+					var sized = Unit( ref bits );
+					var turned = Unit( ref bits );
 
-					var grows = 0.0f;
+					var point = ( a.Position * w ) + ( b.Position * u ) + ( c.Position * v );
 
-					for ( var l = 0; l < layers.Length; l++ )
-						if ( ( ask.OnLayers & ( 1u << l ) ) != 0u ) grows += layers[l];
+					//What is painted there: the mask over the top of the ground, the corners' paint for the rest.
+					if ( ask.OnLayers != 0u )
+					{
+						layers.Clear();
 
-					if ( chance >= grows ) continue;
+						var share = 1.0f - TerrainMesh.MaskAt( ask.Mask, point, facing.y, layers );
+
+						a.Paint.AddTo( layers, w * share );
+						b.Paint.AddTo( layers, u * share );
+						c.Paint.AddTo( layers, v * share );
+
+						var grows = 0.0f;
+
+						for ( var l = 0; l < layers.Length; l++ )
+							if ( ( ask.OnLayers & ( 1u << l ) ) != 0u ) grows += layers[l];
+
+						if ( chance >= grows ) continue;
+					}
+
+					var clear = true;
+
+					foreach ( var modifier in ask.Modifiers )
+					{
+						if ( !modifier.Bounds.Contains( point ) || !modifier.Clears( point ) ) continue;
+
+						clear = false;
+						break;
+					}
+
+					if ( !clear ) continue;
+
+					var scale = ask.ScaleMin + ( ( ask.ScaleMax - ask.ScaleMin ) * sized );
+					var turn = ask.Yaw ? Rotation.FromAxis( Vector3.Up, turned * 360.0f ) : Rotation.Identity;
+
+					if ( ask.Align ) turn = Rotation.FromToRotation( Vector3.Up, facing ) * turn;
+
+					places.Add( ask.World.ToWorld( new Transform( point - ( Vector3.Up * ask.Sink ), turn, scale ) ) );
+
+					if ( places.Count >= MostPerPatch ) return places;
 				}
-
-				var clear = true;
-
-				foreach ( var modifier in ask.Modifiers )
-				{
-					if ( !modifier.Bounds.Contains( point ) || !modifier.Clears( point ) ) continue;
-
-					clear = false;
-					break;
-				}
-
-				if ( !clear ) continue;
-
-				var scale = ask.ScaleMin + ( ( ask.ScaleMax - ask.ScaleMin ) * sized );
-				var turn = ask.Yaw ? Rotation.FromAxis( Vector3.Up, turned * 360.0f ) : Rotation.Identity;
-
-				if ( ask.Align ) turn = Rotation.FromToRotation( Vector3.Up, facing ) * turn;
-
-				places.Add( ask.World.ToWorld( new Transform( point - ( Vector3.Up * ask.Sink ), turn, scale ) ) );
-
-				if ( places.Count >= MostPerPatch ) return places;
 			}
 		}
 
@@ -652,7 +820,6 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	//The same as Work's, so a patch is the same whichever places it
 	private static Laid Lay( Ask ask )
 	{
-		var ground = ask.Ground;
 		var words = new List<uint>( 4096 );
 
 		for ( var i = 0; i < TrianglesAt * 4; i++ ) words.Add( 0u );
@@ -662,7 +829,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		var low = new Vector3( float.MaxValue );
 		var high = new Vector3( float.MinValue );
 
-		if ( ground is not null )
+		foreach ( var ground in ask.Grounds )
 		{
 			for ( var t = 0; t + 2 < ground.Indices.Count; t += 3 )
 			{
@@ -684,7 +851,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 				var bits = Mix( (uint)ask.Seed, (uint)(int)MathF.Round( middle.x * 64.0f ),
 					(uint)(int)MathF.Round( middle.z * 64.0f ) ^ ( (uint)(int)MathF.Round( middle.y * 64.0f ) * 0x27D4EB2Fu ) );
 
-				var wanted = area * ask.Density;
+				var wanted = area * ask.Density * Thinned( ask, middle );
 				var count = (int)wanted;
 
 				if ( Unit( ref bits ) < wanted - count ) count++;
@@ -847,11 +1014,93 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 	}
 
 	//A patch on the card: the buffer the shader reads, filled here but for the record it writes as it places
+	//Patches' words side by side in a few big buffers: standing a patch up while the eye moves takes a slice of one,
+	//not a buffer - and a device allocation - of its own. Counted in fours of words, as the shader reads them
+	private static class Pages
+	{
+		private const int PageQuads = 1 << 18;
+
+		private sealed class Page
+		{
+			public GpuBuffer<uint> Buffer;
+			public int Size;
+			public readonly List<(int At, int Count)> Holes = new();
+		}
+
+		private static readonly List<Page> pages = new();
+
+		public static (GpuBuffer<uint> Buffer, int At) Take( int quads )
+		{
+			foreach ( var page in pages )
+			{
+				for ( var i = 0; i < page.Holes.Count; i++ )
+				{
+					var (at, room) = page.Holes[i];
+					if ( room < quads ) continue;
+
+					if ( room == quads ) page.Holes.RemoveAt( i );
+					else page.Holes[i] = ( at + quads, room - quads );
+
+					return ( page.Buffer, at );
+				}
+			}
+
+			var size = Math.Max( PageQuads, quads );
+			var made = new Page { Buffer = new GpuBuffer<uint>( size * 4, GpuBuffer.UsageFlags.Structured, "terrain clutter" ), Size = size };
+
+			if ( size > quads ) made.Holes.Add( ( quads, size - quads ) );
+			pages.Add( made );
+
+			return ( made.Buffer, 0 );
+		}
+
+		//A slice back, joined to the holes either side of it; a page left empty is freed, but for one ordinary page kept
+		//spare, so an eye pacing a patch's edge does not make and free a buffer each time
+		public static void Give( GpuBuffer<uint> buffer, int at, int quads )
+		{
+			var index = -1;
+
+			for ( var p = 0; p < pages.Count; p++ )
+			{
+				if ( ReferenceEquals( pages[p].Buffer, buffer ) ) { index = p; break; }
+			}
+
+			if ( index < 0 ) return;
+
+			var page = pages[index];
+
+			var holes = page.Holes;
+			var i = 0;
+			while ( i < holes.Count && holes[i].At < at ) i++;
+
+			holes.Insert( i, ( at, quads ) );
+
+			if ( i + 1 < holes.Count && holes[i].At + holes[i].Count == holes[i + 1].At )
+			{
+				holes[i] = ( holes[i].At, holes[i].Count + holes[i + 1].Count );
+				holes.RemoveAt( i + 1 );
+			}
+
+			if ( i > 0 && holes[i - 1].At + holes[i - 1].Count == holes[i].At )
+			{
+				holes[i - 1] = ( holes[i - 1].At, holes[i - 1].Count + holes[i].Count );
+				holes.RemoveAt( i );
+			}
+
+			if ( holes.Count != 1 || holes[0].Count != page.Size ) return;
+			if ( page.Size == PageQuads && pages.Count == 1 ) return;
+
+			page.Buffer.Dispose();
+			pages.RemoveAt( index );
+		}
+	}
+
 	private sealed class Placed : IInstanceRun, IDisposable
 	{
 		private readonly Terrain terrain;
 		private readonly int triangles;
 		private GpuBuffer<uint> buffer;
+		private readonly int at, quads;
 
 		private static ComputeShader Shader => field ??= new ComputeShader( "shaders/engine/terrain_clutter.shader", "MainCs" );
 
@@ -859,8 +1108,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 		{
 			this.terrain = terrain;
 			triangles = laid.Triangles;
-			buffer = new GpuBuffer<uint>( laid.Words.Length, GpuBuffer.UsageFlags.Structured, "terrain clutter" );
-			buffer.SetData( laid.Words.AsSpan() );
+			quads = ( laid.Words.Length + 3 ) / 4;
+
+			( buffer, at ) = Pages.Take( quads );
+			buffer.SetData( laid.Words.AsSpan(), at * 4 );
 		}
 
 		public bool Place( ulong instances, int head, int count, in CoreSceneTables.InstanceRecord template, System.Numerics.Vector4 bound )
@@ -877,10 +1128,10 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 			header[( RunAt * 4 ) + 1] = (uint)count;
 			header[( RunAt * 4 ) + 2] = (uint)triangles;
 
-			if ( !CoreRenderDevice.FrameWrite( buffer.Handle, 0, MemoryMarshal.AsBytes( header ) ) ) return false;
+			if ( !CoreRenderDevice.FrameWrite( buffer.Handle, (long)at * 16, MemoryMarshal.AsBytes( header ) ) ) return false;
 
-			//The numbers picture is where the paint mask is said to be; without one only the corners' paint counts.
-			Shader.Attributes.Set( "Clutter", new Vector4( terrain.IsValid() ? terrain.ParamsMap?.Index ?? 0 : 0, 0.0f, 0.0f, 0.0f ) );
+			//The numbers picture is where the paint mask is said to be; without one only the corners' paint counts. Then where the patch starts in its page.
+			Shader.Attributes.Set( "Clutter", new Vector4( terrain.IsValid() ? terrain.ParamsMap?.Index ?? 0 : 0, at, 0.0f, 0.0f ) );
 
 			Span<ulong> buffers = stackalloc ulong[2] { buffer.Handle, instances };
 
@@ -889,7 +1140,7 @@ public sealed class TerrainClutter : Component, Component.ExecuteInEditor
 
 		public void Dispose()
 		{
-			buffer?.Dispose();
+			if ( buffer is not null ) Pages.Give( buffer, at, quads );
 			buffer = null;
 		}
 	}

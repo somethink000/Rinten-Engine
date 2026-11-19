@@ -381,8 +381,7 @@ internal sealed class CoreMeshRender
 		long wanted = 0;
 		for ( var k = 0; k < 3; k++ ) { kindRun[k] = tables.KindTriangles( k ); wanted += kindRun[k]; }
 
-		if ( wanted > MostListTriangles )
-			for ( var k = 0; k < 3; k++ ) kindRun[k] = kindRun[k] * MostListTriangles / wanted;
+		if ( wanted > MostListTriangles ) ShareListTriangles();
 
 		//Drawn by the mesh stage, the camera's lists have no runs of their own - the bins' run is the same triangles, and it keeps its size.
 		MeshKinds = Rinten.Rendering.DrawSettings.MeshShaders && cameraDepth.PrepassMesh != 0 && lightDepth.PrepassMesh != 0
@@ -726,6 +725,38 @@ internal sealed class CoreMeshRender
 	//Each kind of list's run of the index buffer, in triangles: how long, and where it begins.
 	private readonly long[] kindRun = new long[3];
 	private readonly long[] kindRunAt = new long[3];
+
+	//Splits the list budget between the three kinds fairly: a kind asking less than an even share gets all of it, the rest share
+	//what is left, so a forest of cut-out copies counted at their finest cannot squeeze the ground's one-sided run down to nothing
+	private void ShareListTriangles()
+	{
+		Span<bool> settled = stackalloc bool[3];
+		var left = MostListTriangles;
+		var open = 3;
+
+		while ( open > 0 )
+		{
+			var share = left / open;
+			var any = false;
+
+			for ( var k = 0; k < 3; k++ )
+			{
+				if ( settled[k] || kindRun[k] > share ) continue;
+
+				settled[k] = true;
+				left -= kindRun[k];
+				open--;
+				any = true;
+			}
+
+			if ( any ) continue;
+
+			for ( var k = 0; k < 3; k++ )
+				if ( !settled[k] ) kindRun[k] = share;
+
+			break;
+		}
+	}
 
 	//A list's run of the index buffer - its kind's, for the lists something draws.
 	private readonly long[] listIndexBase = new long[CoreMeshShaders.MaxLists];

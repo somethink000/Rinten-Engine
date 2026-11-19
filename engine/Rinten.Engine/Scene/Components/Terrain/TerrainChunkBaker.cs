@@ -128,9 +128,12 @@ internal static class TerrainChunkBaker
 	public static void Build( TerrainChunkJob job )
 	{
 		var ground = job.Ground;
+		var unshaped = job.Modifiers.Length > 0 ? ground.Vertices.ConvertAll( v => v.Position ) : null;
 
 		foreach ( var modifier in job.Modifiers )
 			modifier.Shape( ground );
+
+		if ( unshaped is not null ) Renormal( ground, unshaped );
 
 		//What this chunk baked to last, shipped or on this machine; almost all the cost below is the model - see TerrainBakeCache
 		var key = TerrainBakeCache.Key( job );
@@ -174,6 +177,54 @@ internal static class TerrainChunkBaker
 		bake.Picture = picture;
 		bake.Key = key;
 		job.Result = bake;
+	}
+
+	//A shape moves vertices but not their normals: every place on a triangle that touches a moved vertex is lit again from all
+	//the triangles round it, summed by place so copies of one vertex in an unwelded soup come out as one
+	private static void Renormal( TerrainSoup ground, List<Vector3> unshaped )
+	{
+		var vertices = ground.Vertices;
+		var indices = ground.Indices;
+		var moved = new bool[vertices.Count];
+		var any = false;
+
+		for ( var i = 0; i < vertices.Count; i++ )
+		{
+			if ( ( vertices[i].Position - unshaped[i] ).LengthSquared <= 1e-10f ) continue;
+			moved[i] = true;
+			any = true;
+		}
+
+		if ( !any ) return;
+
+		var sums = new Dictionary<Vector3, Vector3>();
+
+		for ( var t = 0; t + 2 < indices.Count; t += 3 )
+		{
+			if ( !moved[indices[t]] && !moved[indices[t + 1]] && !moved[indices[t + 2]] ) continue;
+
+			for ( var k = 0; k < 3; k++ ) sums[vertices[indices[t + k]].Position] = Vector3.Zero;
+		}
+
+		for ( var t = 0; t + 2 < indices.Count; t += 3 )
+		{
+			var a = vertices[indices[t]].Position;
+			var b = vertices[indices[t + 1]].Position;
+			var c = vertices[indices[t + 2]].Position;
+			var face = Vector3.Cross( b - a, c - a );
+
+			foreach ( var p in (ReadOnlySpan<Vector3>)[a, b, c] )
+				if ( sums.TryGetValue( p, out var sum ) ) sums[p] = sum + face;
+		}
+
+		for ( var i = 0; i < vertices.Count; i++ )
+		{
+			if ( !sums.TryGetValue( vertices[i].Position, out var sum ) || sum.LengthSquared < 1e-12f ) continue;
+
+			var v = vertices[i];
+			v.Normal = sum.Normal;
+			vertices[i] = v;
+		}
 	}
 
 	/// <summary>Steps along a side of a chunk's picture; its points are one more, the far edge shared with the next chunk.</summary>

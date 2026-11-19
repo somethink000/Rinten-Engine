@@ -643,8 +643,9 @@ Shaded ShadeSurfaceWith( Surface s, float scatter )
 		}
 		else if ( light.colour.w < 0.5 )
 		{
-			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow
-			shadow = SunShadow( s.world, side, side, true );
+			//The sun's static pages and movers map, for cluster and loose draws alike - see SunShadow; light only through
+			//the back of a leaf takes the narrow filter, its softness lost in the scatter, at a fraction of the taps
+			shadow = SunShadow( s.world, side, side, lit.r > 0.0 );
 		}
 		else
 		{

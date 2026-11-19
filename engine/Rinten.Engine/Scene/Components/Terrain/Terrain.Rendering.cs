@@ -87,9 +87,39 @@ public partial class Terrain
 	internal float ChunkSpan => chunkSpan;
 	internal Vector2 ChunkOrigin => chunkOrigin;
 
-	//The ground of one chunk as it was last baked, or null - what the scatter reads.
+	//The ground of one chunk as it was last baked, or null.
 	internal TerrainSoup BakedGround( int x, int z )
 		=> x < 0 || z < 0 || x >= chunksWide || z >= chunksDeep ? null : chunks[( z * chunksWide ) + x].Baked?.Ground;
+
+	//One chunk's own triangles read from the mesh now, for the scatter: copied out, so a worker reads them while the ground is sculpted.
+	//Read when asked rather than kept from the bake, which held every scattered chunk's ground for as long as its copies stood
+	internal TerrainSoup GroundOf( int x, int z )
+	{
+		if ( x < 0 || z < 0 || x >= chunksWide || z >= chunksDeep || Storage?.Mesh is not { } mesh ) return null;
+
+		var min = chunkOrigin + ( new Vector2( x, z ) * chunkSpan );
+		var max = min + new Vector2( chunkSpan, chunkSpan );
+
+		var found = new List<int>();
+		mesh.TrianglesInRect( min, max, found );
+
+		//Only those whose middle is in this chunk, so a copy along a border is grown by one chunk and not both
+		found.RemoveAll( t =>
+		{
+			mesh.GetTriangle( t, out var a, out var b, out var c );
+			var pa = mesh.PositionOf( a ); var pb = mesh.PositionOf( b ); var pc = mesh.PositionOf( c );
+			var cx = ( pa.x + pb.x + pc.x ) / 3.0f;
+			var cz = ( pa.z + pb.z + pc.z ) / 3.0f;
+			return cx < min.x || cz < min.y || cx >= max.x || cz >= max.y;
+		} );
+
+		if ( found.Count == 0 ) return null;
+
+		var soup = new TerrainSoup();
+		TerrainMeshCopy.Triangles( mesh, found, soup, mesh.MaterialOf );
+
+		return soup;
+	}
 
 	//Each chunk's whole ground as the physics holds it, in the terrain's own space: fine wherever the eye is, as the drawn
 	//models are not, and with what was set in - what a light bake traces
@@ -212,7 +242,7 @@ public partial class Terrain
 		//past its old edge, and a triangle past the last chunk would be nobody's.
 		var bounds = mesh.Bounds;
 
-		chunkSpan = Math.Clamp( ChunkSize, 8.0f, 256.0f );
+		chunkSpan = Math.Clamp( ChunkSize, 8.0f, 2048.0f );
 		keptFrom = null;
 		chunkOrigin = new Vector2( MathF.Floor( bounds.Mins.x / chunkSpan ) - 1.0f, MathF.Floor( bounds.Mins.z / chunkSpan ) - 1.0f ) * chunkSpan;
 		chunksWide = Math.Max( 1, (int)MathF.Ceiling( ( bounds.Maxs.x - chunkOrigin.x ) / chunkSpan ) + 1 );
@@ -269,6 +299,7 @@ public partial class Terrain
 		//Nothing of the new layout is standing yet. Left at the old count, PumpChunks took a layout of chunks read back from the bake cache - not
 		//dirty, not building, only waiting to be stood - for one already stood, returned before standing any, and the ground was not drawn at all.
 		standing = 0;
+		layoutStoodOnce = false;
 
 		//Whatever is still out on a worker comes back to a layout that has gone.
 		layoutVersion++;
@@ -374,7 +405,7 @@ public partial class Terrain
 	private const float UnseenPixelsAtAMetre = 1000.0f;
 
 	//Where the ground is seen from, in its metres, and how far chunks are kept whole: by the far models' error through
-	//the air, by what reads the ground (relief, KeepWhole) along it; false where nobody looks yet
+	//the air, by the relief along it; false where nobody looks yet
 	private bool Looked( out Vector3 eye, out float reach, out float along )
 	{
 		eye = default;
@@ -406,19 +437,7 @@ public partial class Terrain
 		reach = chunkSpan * TerrainChunkBaker.FarShare * pixels / MathF.Max( Rendering.DrawSettings.MeshLodPixels, 0.1f );
 		if ( Relieved ) along = ReliefDistance;
 
-		foreach ( var wanted in keptWhole.Values ) along = MathF.Max( along, wanted );
-
 		return true;
-	}
-
-	//How far round the eye whatever reads a chunk's ground wants chunks kept whole, in the terrain's metres, by who asked.
-	private readonly Dictionary<object, float> keptWhole = new();
-
-	//Asks for the chunks within a reach of the eye to be kept whole, or with nought stops asking.
-	internal void KeepWhole( object who, float reach )
-	{
-		if ( reach > 0.0f ) keptWhole[who] = reach;
-		else keptWhole.Remove( who );
 	}
 
 	private Vector3? keptFrom;
@@ -428,7 +447,18 @@ public partial class Terrain
 	//Asked again once the eye moves an eighth of a chunk
 	private void Keep()
 	{
-		if ( chunks.Length == 0 || !Looked( out var eye, out var reach, out var along ) ) return;
+		if ( chunks.Length == 0 ) return;
+
+		if ( !Looked( out var eye, out var reach, out var along ) )
+		{
+			//Nobody has looked yet - a scene loading, an editor scene left behind while the game plays: chunks not yet
+			//baked are laid out far, so none of them bakes whole and holds its finest ground for an eye that never comes
+			if ( keptFrom is null && !Application.IsHeadless )
+				foreach ( var chunk in chunks )
+					if ( chunk.Baked is null && !chunk.Building ) chunk.Whole = false;
+
+			return;
+		}
 
 		if ( keptFrom is { } was && ( eye - was ).Length < chunkSpan * 0.125f && reach == keptReach && along == keptAlong ) return;
 
@@ -692,6 +722,13 @@ public partial class Terrain
 			if ( chunk.Stood ) standing++;
 		}
 
+		//The whole layout stands for the first time: the bakes' arrays are garbage now, a gigabyte and more for a big world
+		if ( standing == chunks.Length && buildingChunks == 0 && !layoutStoodOnce )
+		{
+			layoutStoodOnce = true;
+			if ( chunks.Length >= 1024 ) MemoryRelief.AfterBigWork( $"{GameObject?.Name} baked {chunks.Length} chunks" );
+		}
+
 		if ( dirtyChunks == 0 || Storage?.Mesh is not { } mesh ) return;
 
 		//A quarter of the cores: a flight keeps chunks coming, and more bakes at once take the cores the frame's loops wait on
@@ -742,6 +779,9 @@ public partial class Terrain
 	}
 
 	private int standing;
+
+	//Whether this layout has stood whole once - see PumpChunks
+	private bool layoutStoodOnce;
 
 	//How many milliseconds of a frame go on turning finished bakes into models.
 	private const double BakeBudget = 4.0;

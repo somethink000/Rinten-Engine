@@ -35,7 +35,7 @@ class ClutterLayer
 
 	private int _lastSettingsHash;
 	//Tile bounds height in metres, taller than any terrain so nothing scattered falls outside
-	private const float TileHeight = 1270f;
+	private const float TileHeight = 9000f;
 	private bool _dirty = false;
 
 	public ClutterLayer( ClutterSettings settings, GameObject parentObject, ClutterGridSystem gridSystem )

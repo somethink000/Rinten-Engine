@@ -40,6 +40,11 @@ struct VIn
 	//The vertical radii, the box's corners and then the clip's, as half floats two to a word - top-left and
 	//top-right, bottom-right and bottom-left. Nought is a circle: the vertical radius is the horizontal.
 	[[vk::location(13)]] uint4 vertical;
+
+	//The nearest masked ancestor's mask: where its picture is stretched in window pixels, and which picture -
+	//nought for none, the top bit for luminance rather than alpha
+	[[vk::location(14)]] float4 mask;
+	[[vk::location(15)]] uint maskTexture;
 };
 
 struct V2F
@@ -63,6 +68,8 @@ struct V2F
 
 	float4 clipRadii : TEXCOORD9;
 	nointerpolation uint4 vertical : TEXCOORD10;
+	float4 mask : TEXCOORD11;
+	nointerpolation uint maskTexture : TEXCOORD12;
 };
 
 [[vk::push_constant]]
@@ -70,13 +77,19 @@ cbuffer Push
 {
 	row_major float4x4 g_worldToClip;
 
-	//The target, in pixels: the backdrop copy is the whole of it, so a panel reading it has to know where on it the panel sits. zw is
-	//where the target's corner is on the window - nothing for the window's own frame, the layer's place for a layer the world is drawn on.
+	//xy: the target in device pixels - the backdrop copy is the whole of it. zw: where its corner is on the window in layout
+	//units - nothing for the window's own frame, the layer's place for a layer the world is drawn on.
 	float4 g_screen;
 
-	//x: world panel (own pixel space for clips); y: use the frame's eye view. Only UI_WORLD reads y
+	//x: world panel (own pixel space for clips); y: use the frame's eye view. Only UI_WORLD reads y;
+	//z: device pixels per layout unit, the positions being units and the target pixels (0 reads as 1)
 	float4 g_mode;
 };
+
+float DeviceScale() { return g_mode.z > 0.0 ? g_mode.z : 1.0; }
+
+//Half a device pixel in layout units: the width every edge is antialiased over
+float HalfPixel() { return 0.5 / DeviceScale(); }
 
 [[vk::binding(0,0)]] Sampler2D g_color;
 
@@ -164,6 +177,8 @@ V2F MainVs( VIn i )
 	o.texture = i.texture;
 	o.clipRadii = i.clipRadii;
 	o.vertical = i.vertical;
+	o.mask = i.mask;
+	o.maskTexture = i.maskTexture;
 	return o;
 }
 
@@ -390,7 +405,7 @@ float BorderPattern( int style, float width, BorderContour contour )
 	if ( style == BorderDashed || width < 2.5 )
 	{
 		//A pixel's worth of the pattern, averaged.
-		float footprint = 1.0 / period;
+		float footprint = 2.0 * HalfPixel() / period;
 		float centre = phase + 0.25;
 
 		return saturate( ( Pulse( centre + footprint * 0.5, 0.5 ) - Pulse( centre - footprint * 0.5, 0.5 ) ) / footprint );
@@ -400,7 +415,7 @@ float BorderPattern( int style, float width, BorderContour contour )
 	float2 tangent = float2( -contour.normal.y, contour.normal.x );
 	float2 offset = tangent * along + contour.normal * contour.across;
 
-	return 1.0 - smoothstep( -0.5, 0.5, length( offset ) - width * 0.5 );
+	return 1.0 - smoothstep( -HalfPixel(), HalfPixel(), length( offset ) - width * 0.5 );
 }
 
 //Border side colour per pixel, split at each corner's mitre like the web; zero-width sides never win
@@ -567,14 +582,35 @@ float4 MainPs( V2F i ) : SV_Target
 		if ( !inWorld ) onWindow.y = g_screen.y - onWindow.y;
 #endif
 
-		if ( !inWorld ) onWindow += g_screen.zw;
+		//The target's pixels into layout units, then onto the window the clips are laid out over
+		if ( !inWorld ) onWindow = onWindow / DeviceScale() + g_screen.zw;
 
-		clipped = 1.0 - smoothstep( -0.5, 0.5,
+		clipped = 1.0 - smoothstep( -HalfPixel(), HalfPixel(),
 			RoundedBox( onWindow - ( i.clip.xy + clipHalf ), clipHalf, i.clipRadii,
 				VerticalRadii( i.clipRadii, i.vertical.zw ) ) );
 
 		if ( clipped <= 0.0 ) discard;
 	}
+
+#ifndef PORTABLE
+	//CSS mask: the picture stretched over the masked panel, nothing past its edges
+	if ( i.maskTexture != 0u )
+	{
+		float2 onWindow = pixel;
+		if ( !inWorld ) onWindow = onWindow / DeviceScale() + g_screen.zw;
+
+		float2 size = max( i.mask.zw - i.mask.xy, float2( 1.0, 1.0 ) );
+		float2 maskUv = ( onWindow - i.mask.xy ) / size;
+
+		float4 m = g_textures[NonUniformResourceIndex( i.maskTexture & 0x7fffffffu )].SampleLevel( saturate( maskUv ), 0.0 );
+		float amount = ( i.maskTexture & 0x80000000u ) != 0u ? dot( m.rgb, float3( 0.2126, 0.7152, 0.0722 ) ) * m.a : m.a;
+
+		if ( any( maskUv < 0.0 ) || any( maskUv > 1.0 ) ) amount = 0.0;
+
+		clipped *= amount;
+		if ( clipped <= 0.0 ) discard;
+	}
+#endif
 
 	//Vector shape triangle: antialias edge and cap distances to one screen pixel via derivatives
 	if ( ( int( i.misc.y + 0.5 ) & 15 ) == 10 )
@@ -613,7 +649,7 @@ float4 MainPs( V2F i ) : SV_Target
 		float spread = inset ? -i.filter.z : i.filter.z;
 
 		//Never quite zero: a hard edge still wants its pixel of antialiasing, and dividing by the softness is how it gets it.
-		float softness = max( i.misc.w, 0.5 );
+		float softness = max( i.misc.w, HalfPixel() );
 
 		float2 shadowHalf = max( halfSize + spread, 0.0 );
 		float4 shadowRadii = max( i.radii + spread, 0.0 );
@@ -623,9 +659,9 @@ float4 MainPs( V2F i ) : SV_Target
 
 		//Outer shadow fades outside and is masked from its own panel; inset is the reverse
 		float alpha = inset
-			? smoothstep( -softness, softness, shadowDistance ) * ( 1.0 - smoothstep( -0.5, 0.5, distance ) )
+			? smoothstep( -softness, softness, shadowDistance ) * ( 1.0 - smoothstep( -HalfPixel(), HalfPixel(), distance ) )
 			: ( 1.0 - smoothstep( -softness, softness, shadowDistance ) )
-				* smoothstep( -0.5, 0.5, distance );
+				* smoothstep( -HalfPixel(), HalfPixel(), distance );
 
 		if ( alpha <= 0.0 ) discard;
 
@@ -635,7 +671,7 @@ float4 MainPs( V2F i ) : SV_Target
 	}
 
 	//A pixel of antialiasing across the edge.
-	float coverage = 1.0 - smoothstep( -0.5, 0.5, distance );
+	float coverage = 1.0 - smoothstep( -HalfPixel(), HalfPixel(), distance );
 	if ( coverage <= 0.0 ) discard;
 
 	float4 colour = i.fill;
@@ -644,7 +680,7 @@ float4 MainPs( V2F i ) : SV_Target
 	{
 		//What is behind the panel, filtered, standing in for a background of its own - so
 		//whatever draws next blends over the filtered picture rather than over the raw one.
-		colour.rgb = Filtered( Backdrop( pixel, i.misc.w ), i.filter, i.filter2 );
+		colour.rgb = Filtered( Backdrop( pixel, i.misc.w * DeviceScale() ), i.filter, i.filter2 );
 		colour.a = i.fill.a;
 	}
 	else if ( flags == 1 || flags == 3 || flags == 6 )
@@ -744,7 +780,7 @@ float4 MainPs( V2F i ) : SV_Target
 			float4( innerTL.y, innerTR.y, innerBR.y, innerBL.y ) );
 
 		//Ring as outer minus inner coverage, so zero-width sides leave no smear
-		float insideInner = 1.0 - smoothstep( -0.5, 0.5, innerDistance );
+		float insideInner = 1.0 - smoothstep( -HalfPixel(), HalfPixel(), innerDistance );
 		float ring = saturate( coverage - insideInner );
 
 		if ( ring > 0.0 )

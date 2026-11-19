@@ -48,7 +48,7 @@ public sealed class RotateMode : MoveMode
 		{
 			Gizmo.Draw.IgnoreDepth = true;
 
-			var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var textSize = 22 * Gizmo.Settings.GizmoScale;
 			var cameraDistance = Gizmo.Camera.Position.Distance( origin );
 			var scaledTextSize = textSize * (cameraDistance / 50.0f).Clamp( 0.5f, 1.0f );
 

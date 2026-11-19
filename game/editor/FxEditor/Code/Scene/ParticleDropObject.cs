@@ -30,7 +30,7 @@ partial class ParticleDropObject : BaseDropObject
 		Gizmo.Draw.Sprite( Vector3.Zero, 0.7f * Gizmo.Settings.GizmoScale, "materials/gizmo/particles.png" );
 
 		if ( !string.IsNullOrWhiteSpace( PackageStatus ) )
-			Gizmo.Draw.Text( PackageStatus, new Transform( Vector3.Up * 0.4f ), "Inter", 14 * Application.DpiScale );
+			Gizmo.Draw.Text( PackageStatus, new Transform( Vector3.Up * 0.4f ), "Inter", 14 );
 	}
 
 	public override async Task OnDrop()

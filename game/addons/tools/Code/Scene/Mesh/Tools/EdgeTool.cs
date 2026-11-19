@@ -277,7 +277,7 @@ public sealed partial class EdgeTool( MeshTool tool ) : SelectionTool<MeshEdge>(
 
 			//Draw angle text at midpoint of the arc
 			Gizmo.Draw.Color = Color.White;
-			var textSize = 16 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var textSize = 16 * Gizmo.Settings.GizmoScale;
 			var cameraDistance = Gizmo.Camera.Position.Distance( midPoint );
 			Gizmo.Draw.ScreenText( $"{angle:0.##}°", midPoint + ((vec1 + vec2) / 2).Normal * 7 * (cameraDistance / 100).Clamp( 1, 2f ), 0, size: textSize, flags: TextFlag.Center );
 
@@ -432,7 +432,7 @@ public sealed partial class EdgeTool( MeshTool tool ) : SelectionTool<MeshEdge>(
 					var line = edge.Line;
 					Gizmo.Draw.Line( line );
 
-					var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+					var textSize = 22 * Gizmo.Settings.GizmoScale;
 					var distance = line.Start.Distance( line.End );
 
 					var textScope = new TextRendering.Scope

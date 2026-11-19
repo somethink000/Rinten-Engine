@@ -18,6 +18,7 @@ internal static class SourceEyedropperTool
 	static SourceEyedropperCatcher catcher;
 	static IPanel hoveredPanel;
 	static Vector2 hoveredOffset;
+	static float hoveredFactor = 1.0f;
 	static Rect? hoveredPart;
 	static TitleBarToggle toggleButton;
 
@@ -81,7 +82,7 @@ internal static class SourceEyedropperTool
 
 		catcher?.CoverEverything();
 
-		hoveredPanel = PanelAtCursor( layer, out hoveredOffset );
+		hoveredPanel = PanelAtCursor( layer, out hoveredOffset, out hoveredFactor );
 
 		hoveredPart = PartOf( hoveredPanel );
 
@@ -91,33 +92,36 @@ internal static class SourceEyedropperTool
 			return;
 		}
 
-		highlight?.PointAt( hoveredPanel, layer, hoveredOffset, SourceLabel( hoveredPanel ), hoveredPart );
+		highlight?.PointAt( hoveredPanel, layer, hoveredOffset, hoveredFactor, SourceLabel( hoveredPanel ), hoveredPart );
 	}
 
-	//The panel under the cursor, and where its own space starts in the window's pixels. Over a game
-	//view, pick the game's own UI using the cursor in the picture's pixels
-	internal static IPanel PanelAtCursor( EditorOverlay layer, out Vector2 offset )
+	//The panel under the cursor, and how its space maps into the window's units: window = offset + own * factor. Over a
+	//game view, the game's own UI, laid out in the picture's device pixels, is picked with the cursor in those pixels
+	internal static IPanel PanelAtCursor( EditorOverlay layer, out Vector2 offset, out float factor )
 	{
-		var found = FindPanelAt( Application.CursorPixels, layer );
+		var found = FindPanelAt( Application.CursorPosition, layer );
 
 		offset = default;
+		factor = 1.0f;
 
 		if ( GameViewAt( Application.CursorPosition ) is { } view && OverThePicture( found, view ) )
 		{
-			var corner = view.GetScreenPixelRect().Position;
-			var inside = FindGamePanelAt( Application.CursorPixels - corner );
+			var corner = view.Box.Rect.Position;
+			var device = view.DeviceScale;
+			var inside = FindGamePanelAt( ( Application.CursorPosition - corner ) * device );
 
 			if ( inside.IsValid() )
 			{
 				found = inside;
 				offset = corner;
+				factor = 1.0f / device;
 			}
 		}
 
 		return found;
 	}
 
-	//The widget part under the cursor (e.g. a row via Widget.PartAt), in window pixels
+	//The widget part under the cursor (e.g. a row via Widget.PartAt), in window units
 	static Rect? PartOf( IPanel panel )
 	{
 		if ( !panel.IsValid() ) return null;
@@ -128,10 +132,8 @@ internal static class SourceEyedropperTool
 		if ( widget.PartAt( widget.FromScreen( Application.CursorPosition ) ) is not { } part )
 			return null;
 
-		//The widget answers in its own units, from its own corner
-		var scale = widget.DpiScale;
-
-		return new Rect( ( part.Position + widget.ScreenPosition ) * scale, part.Size * scale );
+		//The widget answers from its own corner
+		return new Rect( part.Position + widget.ScreenPosition, part.Size );
 	}
 
 	//True if the hit is the game picture, not an editor overlay (stats, gizmo, toolbar) over it

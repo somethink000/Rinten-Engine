@@ -48,7 +48,7 @@ public sealed class ResizeMode : MoveMode
 		if ( meshTool?.VertexSnappingEnabled != true || !Gizmo.IsLeftMouseDown )
 			return null;
 
-		var gizmoSize = 0.5f * Gizmo.Settings.GizmoScale * Application.DpiScale;
+		var gizmoSize = 0.5f * Gizmo.Settings.GizmoScale;
 		var closestVertex = tool.MeshTrace.GetClosestVertex( 8 );
 
 		if ( closestVertex.IsValid() )

@@ -42,7 +42,7 @@ public sealed class PositionMode : MoveMode
 
 		if ( meshTool?.VertexSnappingEnabled == true && Gizmo.IsLeftMouseDown )
 		{
-			var gizmoSize = 0.5f * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var gizmoSize = 0.5f * Gizmo.Settings.GizmoScale;
 
 			var closestVertex = tool.MeshTrace.GetClosestVertex( 8 );
 			bool hasSnapTarget = closestVertex.IsValid();
@@ -229,7 +229,7 @@ public sealed class PositionMode : MoveMode
 			Gizmo.Draw.Sprite( end, 8, null, false );
 
 			var midPoint = (start + end) * 0.5f;
-			var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var textSize = 22 * Gizmo.Settings.GizmoScale;
 
 			var cameraDistance = Gizmo.Camera.Position.Distance( midPoint );
 			var scaledTextSize = textSize * (cameraDistance / 50.0f).Clamp( 0.5f, 1.0f );

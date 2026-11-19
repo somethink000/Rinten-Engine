@@ -82,7 +82,7 @@ namespace Rinten.UI
 
 			using ( RenderScene.Push() )
 			{
-				RenderScene.GameTick( RealTime.Delta );
+				RenderScene.GameTick( RealTime.Delta, resumeAwaits: false );
 			}
 
 			if ( Box.RectInner.Size.x <= 0 ) return;
@@ -144,9 +144,6 @@ namespace Rinten.UI
 
 			base.Delete( immediate );
 		}
-
-		//The editor walk draws this itself.
-		internal override bool DrawnByWalk => true;
 
 		public override void OnDraw()
 		{

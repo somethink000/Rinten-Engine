@@ -255,20 +255,16 @@ internal class TitleBar : Widget
 
 		Span<(int X, int Y, int Width, int Height)> next = stackalloc (int, int, int, int)[2];
 
-		//The areas are in interface units; the window system hit-tests in window pixels. At anything above 100% leaving them
-		//unscaled shrinks the strip and slides it left, which put it back over the workspace tabs - so a press there dragged
-		//the window instead of pressing the tab.
-		var scale = DpiScale;
-
+		//In interface units: the window turns them into its pixels, once (CoreUiWindow.DragStrips)
 		for ( var i = 0; i < count; i++ )
 		{
-			var at = ToScreen( new Vector2( areas[i].Left, areas[i].Top ) ) * scale;
+			var at = ToScreen( new Vector2( areas[i].Left, areas[i].Top ) );
 
 			next[i] = (
 				(int)MathF.Round( at.x ),
 				(int)MathF.Round( at.y ),
-				(int)MathF.Round( areas[i].Width * scale ),
-				(int)MathF.Round( areas[i].Height * scale ) );
+				(int)MathF.Round( areas[i].Width ),
+				(int)MathF.Round( areas[i].Height ) );
 		}
 
 		//On the frames something moved - everything under the bar arranging, a menu added by a tool, a workspace tab opened or closed, the

@@ -74,7 +74,7 @@ public partial class Window
 	{
 		if ( shell is null ) return;
 
-		var area = ScreenGeometry;
+		var area = DesktopGeometry;
 
 		//A dialog belongs in the middle of the editor rather than in the middle of a desktop the editor may only be half of.
 		var main = Rinten.Internal.GlobalToolsNamespace.EditorWindow;

@@ -33,7 +33,7 @@ internal sealed class SourceEyedropperHighlight
 	}
 
 	/// <summary>Moves the box onto a panel, given the layer it should be drawn on.</summary>
-	public void PointAt( IPanel target, EditorOverlay onto, Vector2 offset = default, string label = null, Rect? part = null )
+	public void PointAt( IPanel target, EditorOverlay onto, Vector2 offset = default, float factor = 1.0f, string label = null, Rect? part = null )
 	{
 		if ( onto is null || !target.IsValid() )
 		{
@@ -47,17 +47,16 @@ internal sealed class SourceEyedropperHighlight
 			layer.AddChild( box );
 		}
 
-		//Measured in pixels, placed in the overlay's units
-		var rect = part ?? target.OuterRect;
-		var scale = layer.ScaleFromScreen;
+		//A part is already in window units; a panel's rect is in its own tree's, mapped by offset and factor
+		var rect = part ?? new Rect( offset + target.OuterRect.Position * factor, target.OuterRect.Size * factor );
 
-		box.Style.Left = ( rect.Left + offset.x ) * scale;
-		box.Style.Top = ( rect.Top + offset.y ) * scale;
-		box.Style.Width = rect.Width * scale;
-		box.Style.Height = rect.Height * scale;
+		box.Style.Left = rect.Left;
+		box.Style.Top = rect.Top;
+		box.Style.Width = rect.Width;
+		box.Style.Height = rect.Height;
 		box.SetClass( "hidden", false );
 
-		Say( label, ( rect.Top + offset.y ) * scale );
+		Say( label, rect.Top );
 	}
 
 	//Writes the caption above the box, or under it where the box is against the top of the window.

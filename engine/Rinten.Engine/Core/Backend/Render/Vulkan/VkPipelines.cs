@@ -406,7 +406,7 @@ internal static unsafe partial class VkPipelines
 						case VkDevice.VertexUi:
 						{
 							//UI box vertex carries its picture index so boxes with different textures share one draw
-							bindings[0] = new VertexInputBindingDescription( 0, 168, VertexInputRate.Vertex );
+							bindings[0] = new VertexInputBindingDescription( 0, 188, VertexInputRate.Vertex );
 							bindingCount = 1;
 
 							attributes[0] = new VertexInputAttributeDescription( 0, 0, Format.R32G32Sfloat, 0 );          //position
@@ -423,7 +423,9 @@ internal static unsafe partial class VkPipelines
 							attributes[11] = new VertexInputAttributeDescription( 11, 0, Format.R32Uint, 132 );           //which picture in the table, nought for none
 							attributes[12] = new VertexInputAttributeDescription( 12, 0, Format.R32G32B32A32Sfloat, 136 ); //the corners the clip was rounded by
 							attributes[13] = new VertexInputAttributeDescription( 13, 0, Format.R32G32B32A32Uint, 152 );  //vertical radii, box's then clip's, half floats
-							attributeCount = 14;
+							attributes[14] = new VertexInputAttributeDescription( 14, 0, Format.R32G32B32A32Sfloat, 168 ); //where the mask is stretched
+							attributes[15] = new VertexInputAttributeDescription( 15, 0, Format.R32Uint, 184 );           //the mask's picture, nought for none
+							attributeCount = 16;
 							break;
 						}
 

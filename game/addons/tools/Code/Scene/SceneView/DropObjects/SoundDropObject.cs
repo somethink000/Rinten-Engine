@@ -31,7 +31,7 @@ partial class SoundDropObject : BaseDropObject
 
 		if ( !string.IsNullOrWhiteSpace( PackageStatus ) )
 		{
-			Gizmo.Draw.Text( PackageStatus, new Transform( Vector3.Up * 0.4f ), "Inter", 14 * Application.DpiScale );
+			Gizmo.Draw.Text( PackageStatus, new Transform( Vector3.Up * 0.4f ), "Inter", 14 );
 		}
 	}
 

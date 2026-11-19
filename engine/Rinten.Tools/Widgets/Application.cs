@@ -25,23 +25,23 @@ public static class Application
 		Rinten.Engine.IToolsDll.Current?.Spin();
 	}
 
-	/// <summary>Pixels per interface unit of the window the pointer is in - the desktop's scale setting.</summary>
+	/// <summary>Device pixels per interface unit of the window the pointer is in - the desktop's scale setting.</summary>
 	public static float DpiScale => CoreUiWindow.PointerScale;
 
-	/// <summary>Pointer position in its window's interface units, same space as Widget.ScreenPosition</summary>
+	/// <summary>Pointer position in its window's interface units: the space panels, widgets and styles all share.</summary>
 	public static Vector2 CursorPosition
 	{
-		get => CoreUiWindow.Pointer / CoreUiWindow.PointerScale;
+		get => CoreUiWindow.Pointer;
 		set
 		{
-			CoreUiWindow.PutPointer( value * CoreUiWindow.PointerScale );
+			CoreUiWindow.PutPointer( value );
 
 			lastCursorPos = UnscaledCursorPosition;
 		}
 	}
 
-	/// <summary>Pointer position in its window's pixels, the space panels are laid out and hit-tested in</summary>
-	public static Vector2 CursorPixels => CoreUiWindow.Pointer;
+	/// <summary>Pointer position in its window's device pixels, for what is drawn at them - a game's own screen in a view.</summary>
+	public static Vector2 CursorPixels => CoreUiWindow.Pointer * CoreUiWindow.PointerScale;
 
 	/// <summary>The cursor position, not scaled for DPI</summary>
 	public static Vector2 UnscaledCursorPosition

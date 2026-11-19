@@ -8,7 +8,7 @@ public static class DimensionDisplay
 	/// <summary>Draw dimension labels for a bounding box that are always aligned to face the camera Positions each label on the edge closest to the camera for that axis</summary>
 	public static void DrawBounds( BBox box )
 	{
-		var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+		var textSize = 22 * Gizmo.Settings.GizmoScale;
 
 		Gizmo.Draw.IgnoreDepth = true;
 		Gizmo.Draw.LineThickness = 1;

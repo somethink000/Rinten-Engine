@@ -109,7 +109,7 @@ public sealed class ShearMode : MoveMode
 
 	void DrawText( Vector3 origin, string text, Color color )
 	{
-		var textSize = 14 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+		var textSize = 14 * Gizmo.Settings.GizmoScale;
 		var cameraDistance = Gizmo.Camera.Position.Distance( origin );
 		var scaledTextSize = textSize * (cameraDistance / 50.0f).Clamp( 0.5f, 1.0f );
 

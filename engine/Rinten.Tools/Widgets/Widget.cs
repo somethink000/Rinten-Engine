@@ -461,8 +461,8 @@ namespace Editor
 		}
 
 
-		/// <summary>The scale this widget is using (multiplying Size by this value gives the actual native size)</summary>
-		public float DpiScale => Surface is { IsValid: true } surface ? surface.ScaleToScreen : 1.0f;
+		/// <summary>Device pixels per unit where this widget is drawn (multiplying Size by this value gives the actual native size)</summary>
+		public float DpiScale => Surface is { IsValid: true } surface ? surface.DeviceScale : 1.0f;
 
 		public void Focus( bool activateWindow = true )
 		{
@@ -980,17 +980,28 @@ namespace Editor
 			if ( Height > MaximumHeight ) Height = MaximumHeight;
 		}
 
-		/// <summary>Returns the geometry of the screen this widget is currently on.</summary>
+		/// <summary>The area of the window this widget is in, in interface units - the space Position and ScreenPosition count in.</summary>
 		public Rect ScreenGeometry
 		{
 			get
 			{
-				var (x, y, width, height) = Rinten.CoreWindow.UsableDesktop();
+				if ( EditorOverlay.Find( this ) is { } layer && layer.Bounds is { x: > 1, y: > 1 } bounds )
+					return new Rect( 0, bounds );
 
-				//The game's screen is still the answer where there is no window system to ask - a headless run, a test.
-				return width > 1 && height > 1
-					? new Rect( x, y, width, height )
-					: new Rect( 0, Screen.Size );
+				if ( GetWindow() is Window { Shell: { } shell } && shell.InterfaceSize is { x: > 1, y: > 1 } room )
+					return new Rect( 0, room );
+
+				return new Rect( 0, Screen.Size );
+			}
+		}
+
+		//The usable desktop in the window system's units, as Shell.Placement counts; empty without a window system
+		internal static Rect DesktopGeometry
+		{
+			get
+			{
+				var (x, y, width, height) = Rinten.CoreWindow.UsableDesktop();
+				return width > 1 && height > 1 ? new Rect( x, y, width, height ) : default;
 			}
 		}
 
@@ -998,6 +1009,17 @@ namespace Editor
 		public void ConstrainToScreen()
 		{
 			AdjustSize();
+
+			//A window of its own moves on the desktop, not inside itself
+			if ( this is Window { Shell: { } shell } && DesktopGeometry is { Width: > 1 } desktop )
+			{
+				var at = shell.Placement;
+				var x = MathF.Max( desktop.Left, MathF.Min( at.Left, desktop.Right - at.Width ) );
+				var y = MathF.Max( desktop.Top, MathF.Min( at.Top, desktop.Bottom - at.Height ) );
+
+				if ( x != at.Left || y != at.Top ) shell.Placement = new Rect( x, y, at.Width, at.Height );
+				return;
+			}
 
 			ConstrainTo( ScreenGeometry );
 		}

@@ -3391,14 +3391,14 @@ internal sealed partial class CoreSceneDrawer
 			CoreRenderDevice.ZoneEnd();
 
 			CoreRenderDevice.ZoneBegin( "overlay screen" );
-			DrawDebugScreen( gizmoDraws, viewProjection );
+			DrawDebugScreen( gizmoDraws, viewProjection, camera.SceneCamera?.Size ?? default );
 			CoreRenderDevice.ZoneEnd();
 		}
 
 		CoreRenderDevice.ZoneBegin( "overlay dynamic late" );
 		DrawDynamicObjects( scene, viewProjection, overlay: true );
 		DrawDebug( overlayDraws, camera, viewProjection, overlay: true );
-		DrawDebugScreen( overlayDraws, viewProjection );
+		DrawDebugScreen( overlayDraws, viewProjection, camera.SceneCamera?.Size ?? default );
 		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "overlay immediate late" );
@@ -4317,7 +4317,7 @@ internal sealed partial class CoreSceneDrawer
 			using ( Diagnostics.Performance.Scope( "ui record" ) )
 			{
 				//With the world: an editor window is the only kind holding it
-				DrawPanels( editor.Frame.Batches, width, height, world );
+				DrawPanels( editor.Frame.Batches, width, height, world, scale: editor.DeviceScale );
 			}
 
 			return;
@@ -4378,7 +4378,7 @@ internal sealed partial class CoreSceneDrawer
 
 		using ( Diagnostics.Performance.Scope( "ui record" ) )
 		{
-			DrawPanels( editor.Frame.Batches, width, height );
+			DrawPanels( editor.Frame.Batches, width, height, scale: editor.DeviceScale );
 		}
 	}
 
@@ -4391,7 +4391,7 @@ internal sealed partial class CoreSceneDrawer
 
 		using ( Diagnostics.Performance.Scope( "ui record" ) )
 		{
-			DrawPanels( editor.Frame.Batches, width, height, world, origin, fromWorld: true );
+			DrawPanels( editor.Frame.Batches, width, height, world, origin, fromWorld: true, scale: editor.DeviceScale );
 		}
 	}
 
@@ -4407,7 +4407,7 @@ internal sealed partial class CoreSceneDrawer
 				CoreUiRenderer.Recycle( pictureBatches );
 				CoreUiRenderer.Picture( pictureBatches, area, world );
 				DrawPanels( pictureBatches, width, height );
-			}, fromWorld: true );
+			}, fromWorld: true, scale: editor.DeviceScale );
 		}
 	}
 
@@ -4421,11 +4421,14 @@ internal sealed partial class CoreSceneDrawer
 	//game's panels are part of the world. One list for both was cleared under the window's own iteration.
 	private static readonly System.Collections.Generic.List<CoreUiRenderer.UiBatch> windowBatches = new();
 
-	//The batches in order; origin is the target's corner on the window (nothing for a window, the layer's place
-	//for a layer); from the world on, only what follows its marker draws
+	//The batches in order; origin is the target's corner on the window in device pixels (nothing for a window, the layer's
+	//place for a layer); from the world on, only what follows its marker draws. The batches are in layout units, scale
+	//device pixels each; the world is handed its place in device pixels
 	private static void DrawPanels( System.Collections.Generic.List<CoreUiRenderer.UiBatch> batches,
-		int width, int height, System.Action<Rect> world = null, Vector2 origin = default, bool fromWorld = false )
+		int width, int height, System.Action<Rect> world = null, Vector2 origin = default, bool fromWorld = false, float scale = 1.0f )
 	{
+		if ( scale <= 0.0f ) scale = 1.0f;
+
 		if ( uiPipeline == 0 || whiteTexture == 0 ) return;
 		if ( width <= 0 || height <= 0 ) return;
 
@@ -4433,17 +4436,17 @@ internal sealed partial class CoreSceneDrawer
 
 		var ortho = new System.Numerics.Matrix4x4
 		{
-			M11 = 2.0f / width,
-			M22 = 2.0f / height,
+			M11 = 2.0f * scale / width,
+			M22 = 2.0f * scale / height,
 			M33 = 1.0f,
 			M41 = -1.0f - ( 2.0f * origin.x / width ),
 			M42 = -1.0f - ( 2.0f * origin.y / height ),
 			M44 = 1.0f,
 		};
 
-		//The UI shader also needs target size and window offset (clips are in window pixels) and screen mode
+		//The UI shader also needs target size, window offset in units (clips are laid out in them) and the device scale
 		Span<byte> push = stackalloc byte[UiPushSize];
-		UiPush( push, ortho, new System.Numerics.Vector4( width, height, origin.x, origin.y ), inWorld: false );
+		UiPush( push, ortho, new System.Numerics.Vector4( width, height, origin.x / scale, origin.y / scale ), inWorld: false, deviceScale: scale );
 
 		CoreRenderDevice.ZoneBegin( "ui panels" );
 
@@ -4457,7 +4460,8 @@ internal sealed partial class CoreSceneDrawer
 				reached = true;
 
 				CoreRenderDevice.ZoneEnd();
-				world?.Invoke( batch.Area );
+				var area = batch.Area;
+				world?.Invoke( new Rect( area.Position * scale, area.Size * scale ) );
 				CoreRenderDevice.ZoneBegin( "ui panels" );
 				continue;
 			}
@@ -4544,7 +4548,7 @@ internal sealed partial class CoreSceneDrawer
 	}
 
 	//Screen pixels to clip space for labels, profiler and quads; Vulkan clip Y points down like the screen
-	private static System.Numerics.Matrix4x4 ScreenProjection( int width, int height )
+	private static System.Numerics.Matrix4x4 ScreenProjection( float width, float height )
 		=> new()
 		{
 			M11 = 2.0f / width,
@@ -4555,9 +4559,10 @@ internal sealed partial class CoreSceneDrawer
 			M44 = 1.0f,
 		};
 
-	//One owner's debug drawing that is flat on the screen: shapes in pixels - a box select, the camera speed
-	//bar, a picture put on the screen - and the labels, whether at a pixel or over a point in the world.
-	private void DrawDebugScreen( DebugDrawList list, System.Numerics.Matrix4x4 viewProjection )
+	//One owner's debug drawing that is flat on the screen: shapes in the camera's screen units - a box select, the camera speed
+	//bar, a picture put on the screen - and the labels, at a point or over a point in the world. An editor view's camera counts
+	//its screen in interface units while the picture is device pixels; the labels are painted at the pixels to stay sharp.
+	private void DrawDebugScreen( DebugDrawList list, System.Numerics.Matrix4x4 viewProjection, Vector2 screen )
 	{
 		if ( list is null || screenPipeline == 0 ) return;
 		if ( list.Flats.Count == 0 && list.Labels.Count == 0 ) return;
@@ -4565,10 +4570,12 @@ internal sealed partial class CoreSceneDrawer
 		var (width, height) = size;
 		if ( width <= 0 || height <= 0 ) return;
 
-		var push = LinePush( stackalloc byte[80], ScreenProjection( width, height ) );
+		if ( screen.x < 1.0f || screen.y < 1.0f ) screen = new Vector2( width, height );
+
+		var push = LinePush( stackalloc byte[80], ScreenProjection( screen.x, screen.y ) );
 
 		DrawFlats( list.Flats, push );
-		DrawScreenLabels( list.Labels, viewProjection, width, height, push );
+		DrawScreenLabels( list.Labels, viewProjection, screen, width / screen.x, push );
 	}
 
 	//Draws screen shapes in runs sharing a pipeline, push and texture, keeping request order
@@ -4616,8 +4623,12 @@ internal sealed partial class CoreSceneDrawer
 
 	//Draws screen labels at a pixel or over a world point (skipped behind the eye), from the label cache
 	private void DrawScreenLabels( List<DebugDrawList.Label> labels, in System.Numerics.Matrix4x4 viewProjection,
-		int width, int height, ReadOnlySpan<byte> push )
+		Vector2 screen, float pixelsPerUnit, ReadOnlySpan<byte> push )
 	{
+		var (width, height) = (screen.x, screen.y);
+
+		if ( pixelsPerUnit <= 0.0f || !float.IsFinite( pixelsPerUnit ) ) pixelsPerUnit = 1.0f;
+
 		if ( labels.Count == 0 ) return;
 
 		Span<Vertex> corners = stackalloc Vertex[6];
@@ -4648,8 +4659,11 @@ internal sealed partial class CoreSceneDrawer
 
 			textLabels++;
 
-			var text = RasteriseCached( label.Scope );
+			var text = RasteriseCached( pixelsPerUnit != 1.0f ? label.Scope.Scaled( pixelsPerUnit ) : label.Scope );
 			if ( text.Texture == 0 ) continue;
+
+			//Painted at device pixels, laid on the screen at its size in units
+			text.Size /= pixelsPerUnit;
 
 			var (left, top) = Anchored( label.Flags, text.Size );
 
@@ -5029,12 +5043,12 @@ internal sealed partial class CoreSceneDrawer
 	internal static (ulong Texture, Vector2 Size) TextPicture( in TextRendering.Scope scope ) => RasteriseCached( scope );
 
 	private static void UiPush( Span<byte> into, in System.Numerics.Matrix4x4 toClip,
-		in System.Numerics.Vector4 screen, bool inWorld, bool eyeClip = false )
+		in System.Numerics.Vector4 screen, bool inWorld, bool eyeClip = false, float deviceScale = 1.0f )
 	{
 		System.Runtime.InteropServices.MemoryMarshal.Write( into, in toClip );
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[64..], in screen );
 		System.Runtime.InteropServices.MemoryMarshal.Write( into[80..],
-			new System.Numerics.Vector4( inWorld ? 1.0f : 0.0f, eyeClip ? 1.0f : 0.0f, 0, 0 ) );
+			new System.Numerics.Vector4( inWorld ? 1.0f : 0.0f, eyeClip ? 1.0f : 0.0f, deviceScale, 0 ) );
 	}
 
 	//World panel matrix; in a both-eyes pass it's world-only and the shader applies each eye's view

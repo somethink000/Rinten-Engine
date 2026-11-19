@@ -119,7 +119,7 @@ public class SceneRenderingPanel : EditorPanel, ISceneRenderHost, IPlaySurface, 
 	bool ISceneRenderHost.IsSurfaceVisible => IsValid && IsVisible;
 	Vector2 ISceneRenderHost.SurfaceSize => ScreenSize;
 	Vector2 ISceneRenderHost.SurfaceScreenPosition => ScreenPosition;
-	float ISceneRenderHost.SurfaceScale => ScaleToScreen;
+	float ISceneRenderHost.SurfaceScale => DeviceScale;
 	bool ISceneRenderHost.IsUnderMouse => IsUnderMouse;
 
 	string ISceneRenderHost.HostDescription =>

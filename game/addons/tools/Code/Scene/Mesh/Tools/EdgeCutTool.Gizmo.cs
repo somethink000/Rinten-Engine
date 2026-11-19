@@ -147,7 +147,7 @@ partial class EdgeCutTool
 		{
 			var textPos = screenPos + new Vector2( 8, -24 );
 			var text = $"({Measurement.Round( distanceA )} : {Measurement.Round( distanceB )})";
-			var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var textSize = 22 * Gizmo.Settings.GizmoScale;
 
 			using ( Gizmo.Scope( "LengthText" ) )
 			{
@@ -169,7 +169,7 @@ partial class EdgeCutTool
 		{
 			var textPos = screenPos + new Vector2( 8, -24 );
 			var text = Measurement.Round( distance );
-			var textSize = 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+			var textSize = 22 * Gizmo.Settings.GizmoScale;
 
 			using ( Gizmo.Scope( "LengthText" ) )
 			{

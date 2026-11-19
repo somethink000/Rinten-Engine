@@ -171,7 +171,7 @@ public abstract class BaseBrushTool : EditorTool
 		var textScope = new TextRendering.Scope
 		{
 			TextColor = Color.White,
-			FontSize = 16 * Gizmo.Settings.GizmoScale * Application.DpiScale,
+			FontSize = 16 * Gizmo.Settings.GizmoScale,
 			FontName = "Roboto Mono",
 			FontWeight = 600,
 			LineHeight = 1,

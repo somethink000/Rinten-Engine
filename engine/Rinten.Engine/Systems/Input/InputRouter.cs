@@ -237,8 +237,10 @@ internal static partial class InputRouter
 		else
 		{
 			EngineInput.SetIMEAllowed( true );
+			//The window system is told in device pixels; an editor panel is laid out in units
 			var rect = KeyboardFocusPanel.Rect;
-			EngineInput.SetIMETextLocation( (int)rect.Left, (int)rect.Top, (int)rect.Width, (int)rect.Height );
+			var device = KeyboardFocusPanel is Rinten.UI.Panel { DeviceScale: var scale } ? scale : 1.0f;
+			EngineInput.SetIMETextLocation( (int)( rect.Left * device ), (int)( rect.Top * device ), (int)MathF.Ceiling( rect.Width * device ), (int)MathF.Ceiling( rect.Height * device ) );
 		}
 
 		MouseCursorDelta = 0;

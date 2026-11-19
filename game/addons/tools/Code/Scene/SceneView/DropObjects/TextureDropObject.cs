@@ -54,7 +54,7 @@ partial class TextureDropObject : BaseDropObject
 
 		if ( !string.IsNullOrWhiteSpace( PackageStatus ) )
 		{
-			Gizmo.Draw.Text( PackageStatus, new Transform( Bounds.Center ), "Inter", 14 * Application.DpiScale );
+			Gizmo.Draw.Text( PackageStatus, new Transform( Bounds.Center ), "Inter", 14 );
 		}
 	}
 

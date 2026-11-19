@@ -16,7 +16,7 @@ internal sealed class StylePickerHighlight
 		box.AddClass( "style-picker-highlight" );
 	}
 
-	public void PointAt( IPanel target, EditorOverlay onto, Vector2 offset = default )
+	public void PointAt( IPanel target, EditorOverlay onto, Vector2 offset = default, float factor = 1.0f )
 	{
 		if ( onto is null || !target.IsValid() )
 		{
@@ -30,14 +30,13 @@ internal sealed class StylePickerHighlight
 			layer.AddChild( box );
 		}
 
-		//Measured in pixels, placed in the overlay's units
+		//In its own tree's space, mapped into the overlay's by offset and factor
 		var rect = target is Panel panel ? panel.GetScreenPixelRect() : target.OuterRect;
-		var scale = layer.ScaleFromScreen;
 
-		box.Style.Left = ( rect.Left + offset.x ) * scale;
-		box.Style.Top = ( rect.Top + offset.y ) * scale;
-		box.Style.Width = rect.Width * scale;
-		box.Style.Height = rect.Height * scale;
+		box.Style.Left = offset.x + rect.Left * factor;
+		box.Style.Top = offset.y + rect.Top * factor;
+		box.Style.Width = rect.Width * factor;
+		box.Style.Height = rect.Height * factor;
 		box.SetClass( "hidden", false );
 	}
 

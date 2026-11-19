@@ -185,7 +185,9 @@ internal sealed class CoreUiWindow : IDisposable
 
 		if ( claimed && panel is { IsValid: true, IsVisible: true } && WorldDraw is not null && panel.WearsWorld )
 		{
-			var box = panel.Box.Rect;
+			//Laid out in units; the world's pictures are device pixels
+			var unit = panel.Box.Rect;
+			var box = new Rect( unit.Position * Scale, unit.Size * Scale );
 
 			var left = System.Math.Clamp( (int)System.MathF.Round( box.Left ), 0, width );
 			var top = System.Math.Clamp( (int)System.MathF.Round( box.Top ), 0, height );
@@ -246,6 +248,9 @@ internal sealed class CoreUiWindow : IDisposable
 		worldWas = false;
 		CoreRenderDevice.SetWorldRect( swapchain, 0, 0, 0, 0 );
 	}
+
+	//Made once: a method group handed over is a new delegate every window frame
+	private System.Action<Rect> drawWorld;
 
 	//The world into this frame, where the interface pass reached its panel.
 	private void DrawWorld( Rect area )
@@ -398,7 +403,7 @@ internal sealed class CoreUiWindow : IDisposable
 		var built = CoreSceneDrawer.BuildEditorUi( root, keepable: true );
 
 		CoreSceneDrawer.DrawEditorUiOverWorld( root, new Vector2( layerAt.X, layerAt.Y ),
-			layerSize.Width, layerSize.Height, DrawWorld );
+			layerSize.Width, layerSize.Height, drawWorld ??= DrawWorld );
 
 		CoreRenderDevice.ZoneEnd();
 
@@ -461,7 +466,7 @@ internal sealed class CoreUiWindow : IDisposable
 	/// <summary>How big the inside of the window is, in pixels.</summary>
 	public (int Width, int Height) Size => window?.SizeInPixels ?? (0, 0);
 
-	/// <summary>Pixels per interface unit: what the panels are laid out in is this much smaller than the window's pixels.</summary>
+	/// <summary>Device pixels per interface unit: the panels are laid out, hit and placed in units and drawn at this many pixels each.</summary>
 	public float Scale => window?.DisplayScale ?? 1.0f;
 
 	/// <summary>How big the inside of the window is, in interface units.</summary>
@@ -474,18 +479,26 @@ internal sealed class CoreUiWindow : IDisposable
 		}
 	}
 
-	/// <summary>Area the window system may drag the window by: the caption bar minus its buttons, set by its drawer</summary>
+	/// <summary>Area the window system may drag the window by, in interface units: the caption bar minus its buttons, set by its drawer</summary>
 	public (int X, int Y, int Width, int Height) DragStrip
 	{
-		get => window?.DragStrip ?? default;
-		set { if ( window is not null ) window.DragStrip = value; }
+		set { if ( window is not null ) window.DragStrip = ToPixels( value ); }
 	}
 
 	/// <summary>Every such strip, for a bar with more than one gap in it.</summary>
 	public (int X, int Y, int Width, int Height)[] DragStrips
 	{
-		get => window?.DragStrips ?? Array.Empty<(int, int, int, int)>();
-		set { if ( window is not null ) window.DragStrips = value; }
+		set { if ( window is not null ) window.DragStrips = value is null ? null : Array.ConvertAll( value, ToPixels ); }
+	}
+
+	//A strip in units as the window system's pixels, rounded outwards
+	private (int X, int Y, int Width, int Height) ToPixels( (int X, int Y, int Width, int Height) units )
+	{
+		var scale = Scale;
+		var left = (int)MathF.Floor( units.X * scale );
+		var top = (int)MathF.Floor( units.Y * scale );
+
+		return (left, top, (int)MathF.Ceiling( ( units.X + units.Width ) * scale ) - left, (int)MathF.Ceiling( ( units.Y + units.Height ) * scale ) - top);
 	}
 
 	/// <summary>Puts the window system's frame back on a window that was opened without one. For when the caption we meant to draw instead did not happen: a window with no frame and no caption cannot be moved or closed at all.</summary>
@@ -641,6 +654,9 @@ internal sealed class CoreUiWindow : IDisposable
 	{
 		if ( window is null ) return;
 
+		//In units, as everything that names a place in the window is; the window system's pointer is pixels
+		at *= Scale;
+
 		//The pointer arrives first: what is under it is decided by the frame that sees it there, not by the one that sees it pressed.
 		window.PretendPointer( at, leftDown: false );
 		Frame();
@@ -753,7 +769,7 @@ internal sealed class CoreUiWindow : IDisposable
 		return null;
 	}
 
-	//Pixels per interface unit of the window the pointer is in, or of the first window before it has been in any
+	//Device pixels per interface unit of the window the pointer is in, or of the first window before it has been in any
 	internal static float PointerScale => PointerWindow?.Scale ?? 1.0f;
 
 	//Pixels per window unit of that window
@@ -761,7 +777,7 @@ internal sealed class CoreUiWindow : IDisposable
 
 	private static CoreUiWindow PointerWindow => Pointed ?? ( open.Count > 0 ? open[0] : null );
 
-	//Pointer in the pixels of the window it is in, the same value panels are hit-tested against
+	//Pointer in the interface units of the window it is in, the same value panels are hit-tested against
 	internal static Vector2 Pointer
 	{
 		get
@@ -774,7 +790,7 @@ internal sealed class CoreUiWindow : IDisposable
 		}
 	}
 
-	//Where this window last saw the pointer, in its own pixels.
+	//Where this window last saw the pointer, in its interface units.
 	internal Vector2 LastPointer
 	{
 		get
@@ -783,15 +799,15 @@ internal sealed class CoreUiWindow : IDisposable
 
 			var (x, y, _) = window.LastPointer;
 
-			return new Vector2( x, y );
+			return new Vector2( x, y ) / Scale;
 		}
 	}
 
-	//Puts the pointer somewhere in the window it is already in. The number came out of a widget, so the window that widget is in is the window
-	//it means. Warping inside that window rather than working out where it lands on the desktop keeps the way back the same as the way there.
+	//Puts the pointer somewhere in the window it is already in, in its units. The number came out of a widget, so the window that widget is in is the
+	//window it means. Warping inside that window rather than working out where it lands on the desktop keeps the way back the same as the way there.
 	internal static void PutPointer( Vector2 inWindow )
 	{
-		Pointed?.window?.WarpPointer( inWindow );
+		if ( Pointed is { window: { } window } shell ) window.WarpPointer( inWindow * shell.Scale );
 	}
 
 	/// <summary>Opens a window of the engine's own, with a panel tree in it.</summary>
@@ -1082,7 +1098,7 @@ internal sealed class CoreUiWindow : IDisposable
 				}
 
 				CoreRenderDevice.ZoneBegin( "ui draw" );
-				CoreSceneDrawer.DrawUi( Root, width, height, worldSize.Width > 0 ? DrawWorld : null );
+				CoreSceneDrawer.DrawUi( Root, width, height, worldSize.Width > 0 ? drawWorld ??= DrawWorld : null );
 				CoreRenderDevice.ZoneEnd();
 
 				using ( Diagnostics.Performance.Scope( "ui submit" ) )
@@ -1393,9 +1409,10 @@ internal sealed class CoreUiWindow : IDisposable
 
 			using ( Diagnostics.Performance.Scope( "Panel PreLayout" ) )
 			{
-				if ( Root is UiWindowRoot root ) root.WindowScale = Scale;
+				//Laid out in units, drawn at the device's pixels
+				Root.DeviceScale = Scale;
 
-				Root.PreLayout( new Rect( 0, 0, width, height ) );
+				Root.PreLayout( new Rect( 0, 0, width / Scale, height / Scale ) );
 			}
 
 			if ( Root is null || !Root.IsValid ) return;
@@ -1787,7 +1804,8 @@ internal sealed class CoreUiWindow : IDisposable
 	internal Func<int, int, Bitmap> WorldShot { get; set; }
 
 	//The pointer put somewhere in this window with buttons pressed or released, as though the window system had said so. Seen by the next frame.
-	internal void PretendPointer( Vector2 at, MouseButtons press, MouseButtons release ) => window?.PretendPointer( at, press, release );
+	//At a place in units, as a panel's rect gives it
+	internal void PretendPointer( Vector2 at, MouseButtons press, MouseButtons release ) => window?.PretendPointer( at * Scale, press, release );
 
 	//The wheel turned in this window, as though the window system had said so.
 	internal void PretendWheel( Vector2 turned ) => window?.PretendWheel( turned );
@@ -2151,7 +2169,7 @@ internal sealed class CoreUiWindow : IDisposable
 	}
 }
 
-//Per-window pointer state: each editor window keeps its own cursor in its own pixels
+//Per-window pointer state: each editor window keeps its own cursor in its own interface units
 internal sealed class UiWindowInput : PanelInput
 {
 	private InputData state;
@@ -2163,7 +2181,8 @@ internal sealed class UiWindowInput : PanelInput
 	{
 		var (x, y, buttons) = window.Pointer();
 
-		state.MousePos = new Vector2( x, y );
+		//The window system's pixels into the units the panels are laid out in
+		state.MousePos = new Vector2( x, y ) / window.DisplayScale;
 		//Panel button order: 1 is middle, 2 is right, matching PanelInput, not the button names
 		state.Mouse0 = ( ( buttons & MouseButtons.Left ) == MouseButtons.Left );
 		state.Mouse1 = ( ( buttons & MouseButtons.Middle ) == MouseButtons.Middle );
@@ -2448,12 +2467,9 @@ internal sealed class UiWindowInput : PanelInput
 	};
 }
 
-//The root of a window's panels, scaled by the desktop's own setting rather than by the window's size the way a game's interface is
+//The root of a window's panels: laid out one to one in interface units, the desktop's scale being its DeviceScale, not a layout scale the way a game's is
 internal sealed class UiWindowRoot : RootPanel
 {
-	//Pixels per interface unit of the window this is in; set by the window before each layout
-	internal float WindowScale = 1.0f;
-
 	//Baked into the type: the tests build one directly, and the only other maker is CoreUiWindow.Open.
 	public UiWindowRoot()
 	{
@@ -2467,7 +2483,7 @@ internal sealed class UiWindowRoot : RootPanel
 
 	protected override void UpdateScale( Rect screenSize )
 	{
-		Scale = WindowScale;
+		Scale = 1.0f;
 	}
 
 	bool handingOn;

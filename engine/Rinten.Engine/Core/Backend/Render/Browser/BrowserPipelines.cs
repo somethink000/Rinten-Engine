@@ -214,7 +214,7 @@ internal static class BrowserPipelines
 				break;
 
 			case VertexUi:
-				json.Append( "{\"arrayStride\":168,\"stepMode\":\"vertex\",\"attributes\":[" );
+				json.Append( "{\"arrayStride\":188,\"stepMode\":\"vertex\",\"attributes\":[" );
 				Attribute( json, "float32x2", 0, 0, true );
 				Attribute( json, "float32x2", 8, 1, false );
 				Attribute( json, "float32x4", 16, 2, false );
@@ -229,6 +229,8 @@ internal static class BrowserPipelines
 				Attribute( json, "uint32", 132, 11, false );
 				Attribute( json, "float32x4", 136, 12, false );
 				Attribute( json, "uint32x4", 152, 13, false );
+				Attribute( json, "float32x4", 168, 14, false );
+				Attribute( json, "uint32", 184, 15, false );
 				json.Append( "]}" );
 				break;
 		}

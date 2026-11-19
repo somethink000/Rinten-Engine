@@ -28,7 +28,7 @@ public sealed class BlockEditor( PrimitiveTool tool ) : PrimitiveEditor( tool )
 	Vector3 _dragEndPos;
 	bool _dragStarted;
 
-	static float TextSize => 22 * Gizmo.Settings.GizmoScale * Application.DpiScale;
+	static float TextSize => 22 * Gizmo.Settings.GizmoScale;
 
 	//A storey. It was a hundred and twenty eight - that storey in inches - so the first
 	//block dragged out of the tool came up a hundred and twenty eight metres tall.

@@ -16,6 +16,7 @@ internal static class StylePickerTool
 	static StylePickerCatcher catcher;
 	static IPanel hoveredPanel;
 	static Vector2 hoveredOffset;
+	static float hoveredFactor = 1.0f;
 	static TitleBarToggle toggleButton;
 
 	static readonly Func<Panel, bool> PreviousDismissal = Panel.SuppressPopupDismissal;
@@ -103,18 +104,22 @@ internal static class StylePickerTool
 		catcher?.CoverFor( layer );
 		catcher?.KeepOnTop();
 
-		hoveredPanel = FindPanelAt( Application.CursorPixels, layer );
+		hoveredPanel = FindPanelAt( Application.CursorPosition, layer );
 		hoveredOffset = default;
+		hoveredFactor = 1.0f;
 
+		//A game's UI in a view is laid out in the picture's device pixels
 		if ( GameViewAt( Application.CursorPosition ) is { } view )
 		{
-			var corner = view.GetScreenPixelRect().Position;
-			var inside = FindGamePanelAt( Application.CursorPixels - corner, layer?.Parent );
+			var corner = view.Box.Rect.Position;
+			var device = view.DeviceScale;
+			var inside = FindGamePanelAt( ( Application.CursorPosition - corner ) * device, layer?.Parent );
 
 			if ( inside.IsValid() )
 			{
 				hoveredPanel = inside;
 				hoveredOffset = corner;
+				hoveredFactor = 1.0f / device;
 			}
 		}
 
@@ -124,7 +129,7 @@ internal static class StylePickerTool
 			return;
 		}
 
-		highlight?.PointAt( hoveredPanel, layer, hoveredOffset );
+		highlight?.PointAt( hoveredPanel, layer, hoveredOffset, hoveredFactor );
 	}
 
 	static SceneRenderingPanel GameViewAt( Vector2 pos )

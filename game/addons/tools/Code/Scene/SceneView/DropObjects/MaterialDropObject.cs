@@ -45,7 +45,7 @@ partial class MaterialDropObject : BaseDropObject
 
 			using var scope = Gizmo.Scope( "DropObject", new Transform( pos, rot ) );
 			Gizmo.Draw.Color = Color.White;
-			Gizmo.Draw.Text( PackageStatus, new Transform( Bounds.Center ), "Inter", 14 * Application.DpiScale );
+			Gizmo.Draw.Text( PackageStatus, new Transform( Bounds.Center ), "Inter", 14 );
 		}
 	}
 

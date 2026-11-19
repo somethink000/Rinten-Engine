@@ -111,6 +111,8 @@ internal static class CoreCameraTargets
 			if ( views.Remove( camera, out var preview ) ) preview.Dispose();
 		}
 
+		ForgetAsked( EngineLoop.LoopFrames );
+
 		//Removing while walking a dictionary is allowed, so no copy of the keys every frame
 		foreach ( var scene in drawnAt.Keys )
 		{
@@ -121,10 +123,54 @@ internal static class CoreCameraTargets
 		}
 	}
 
+	//Cameras drawn into a texture when asked - CameraComponent.RenderToTexture - a view each, kept while they keep asking
+	private static readonly Dictionary<CameraComponent, (CoreScenePreview Preview, long Asked)> asked = new();
+	private static readonly List<CameraComponent> stale = new();
+
+	//Frames a view is kept after its camera last asked
+	private const int KeptFor = 120;
+
+	//Draws the camera straight into the texture on the device: nothing is read back or uploaded again. False where it could not.
+	internal static bool RenderInto( CameraComponent camera, Texture target )
+	{
+		if ( !camera.IsValid() || camera.Scene is not { } scene ) return false;
+
+		var frame = EngineLoop.LoopFrames;
+
+		if ( !asked.TryGetValue( camera, out var entry ) ) entry = (new CoreScenePreview { GameView = true }, frame);
+		asked[camera] = (entry.Preview, frame);
+
+		ForgetAsked( frame );
+
+		return entry.Preview.RenderInto( scene, camera, target );
+	}
+
+	//Lets go of the views of cameras gone or not asking for a while - from every frame's Forget as well, so a scene
+	//unloaded with its camera does not keep the view's pictures until some other camera asks
+	private static void ForgetAsked( long frame )
+	{
+		if ( asked.Count == 0 ) return;
+
+		stale.Clear();
+
+		foreach ( var (one, (preview, at)) in asked )
+		{
+			if ( one.IsValid() && frame - at <= KeptFor ) continue;
+
+			preview.Dispose();
+			stale.Add( one );
+		}
+
+		foreach ( var one in stale ) asked.Remove( one );
+	}
+
 	//Every view, on device teardown.
 	internal static void Release()
 	{
 		foreach ( var preview in views.Values ) preview.Dispose();
+		foreach ( var (preview, _) in asked.Values ) preview.Dispose();
+
+		asked.Clear();
 
 		views.Clear();
 		drawnAt.Clear();

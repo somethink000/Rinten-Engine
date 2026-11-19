@@ -28,13 +28,16 @@ public class GradientFog : Component, Component.ExecuteInEditor
 	[Group( "Camera Distance Fade" )]
 	[Property] public float FalloffExponent { get; set; } = 1.0f;
 
+	/// <summary>Whether the fog takes the sky's colour in each direction, times Color - haze glowing toward a low sun.</summary>
+	[Property] public bool ColorFromSky { get; set; }
+
 	protected override void OnPreRender()
 	{
 		var world = Scene?.SceneWorld;
 		if ( !world.IsValid() ) return;
 
 		world.GradientFog.Enabled = true;
-		world.GradientFog.ColorFromSky = false;
+		world.GradientFog.ColorFromSky = ColorFromSky;
 		world.GradientFog.StartDistance = StartDistance;
 		world.GradientFog.EndDistance = EndDistance;
 		world.GradientFog.Color = Color.WithAlpha( 1 );

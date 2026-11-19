@@ -635,6 +635,10 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 		if ( !CoreScenePreview.Available )
 			return false;
 
+		//On the device, where the texture lives; the read back below is only for a texture the device has no image for yet
+		if ( CoreCameraTargets.RenderInto( this, target ) )
+			return true;
+
 		using var picture = new Bitmap( target.Width, target.Height );
 
 		if ( !CoreScenePreview.Shared.Render( Scene, this, picture ) )

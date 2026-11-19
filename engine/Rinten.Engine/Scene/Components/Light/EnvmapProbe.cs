@@ -113,6 +113,10 @@ public sealed partial class EnvmapProbe : Component, Component.ExecuteInEditor, 
 	[Property]
 	public float ZFar { get; set; } = 104.0f;
 
+	/// <summary>Objects with any of these tags are left out of what the probe draws, such as the thing it rides on.</summary>
+	[Property]
+	public TagSet ExcludeTags { get; set; } = new();
+
 	/// <summary>When a runtime probe draws itself again.</summary>
 	[Header( "Runtime Updates" )]
 	[ShowIf( nameof( Mode ), EnvmapProbeMode.Runtime )]

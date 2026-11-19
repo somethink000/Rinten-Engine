@@ -13,8 +13,11 @@ internal static class CoreEnvmap
 	//a level may have" but "how many may overlap what is on screen". Four is a room, its doorway and two neighbours.
 	internal const int MostProbes = 4;
 
-	//Width of one octahedral picture, separate from the face Resolution; 128 is sharp enough
+	//Width of a baked probe's octahedral picture and a small runtime one's; separate from the face Resolution
 	internal const int Side = 128;
+
+	//A runtime probe drawn at Medium or more folds to this: a car's paint mirrors its probe and shows 128 as a blur
+	private const int SharpSide = 256;
 
 	//Roughness levels stacked as bands of one tall texture (no mip upload); the shader mixes two
 	internal const int Bands = 5;
@@ -27,6 +30,7 @@ internal static class CoreEnvmap
 	{
 		public ulong Texture;
 		public int Index;
+		public int Side;
 
 		/// <summary>The baked pixels it was made from; null for a runtime probe's capture.</summary>
 		public byte[] From;
@@ -101,7 +105,7 @@ internal static class CoreEnvmap
 	{
 		if ( !CanDraw( scene, probe ) ) return false;
 
-		job = Begin( probe );
+		job = Begin( probe, probe.Resolution >= EnvmapProbe.CubemapResolution.Medium ? SharpSide : Side );
 
 		if ( !wait ) return Step( scene, probe );
 
@@ -120,7 +124,7 @@ internal static class CoreEnvmap
 	{
 		if ( !CanDraw( scene, probe ) || job is not null ) return null;
 
-		job = Begin( probe );
+		job = Begin( probe, Side );
 
 		var done = Finish( scene );
 		if ( done is null ) return null;
@@ -132,11 +136,11 @@ internal static class CoreEnvmap
 		return pixels;
 	}
 
-	private static Job Begin( EnvmapProbe probe )
+	private static Job Begin( EnvmapProbe probe, int side )
 	{
 		var size = Math.Clamp( (int)probe.Resolution, 64, 512 );
 
-		return new Job { Probe = probe, Id = probe.GameObject.Id, Size = size, Work = Scratch.Take( size ) };
+		return new Job { Probe = probe, Id = probe.GameObject.Id, Size = size, Work = Scratch.Take( size, side ) };
 	}
 
 	//Every face of the capture under way now; the job, or null where a face failed
@@ -175,19 +179,28 @@ internal static class CoreEnvmap
 	{
 		public readonly byte[][] Faces = new byte[6][];
 		public readonly System.Numerics.Matrix4x4[] Clips = new System.Numerics.Matrix4x4[6];
-		public readonly Vector3[] Sharp = new Vector3[Side * Side];
-		public readonly Vector3[] Blur = new Vector3[Side * Side];
-		public readonly byte[] Picture = new byte[Side * Side * Bands * 4];
+		public Vector3[] Sharp;
+		public Vector3[] Blur;
+		public byte[] Picture;
 		public int Size;
+		public int Side;
 
 		private static readonly Stack<Scratch> spare = new();
 
-		/// <summary>One for a capture of faces <paramref name="size"/> on a side.</summary>
-		public static Scratch Take( int size )
+		/// <summary>One for a capture of faces <paramref name="size"/> on a side, folded to a picture <paramref name="side"/> wide.</summary>
+		public static Scratch Take( int size, int side )
 		{
 			Scratch one;
 			lock ( spare ) spare.TryPop( out one );
 			one ??= new Scratch();
+
+			if ( one.Side != side )
+			{
+				one.Sharp = new Vector3[side * side];
+				one.Blur = new Vector3[side * side];
+				one.Picture = new byte[side * side * Bands * 4];
+				one.Side = side;
+			}
 
 			if ( one.Size != size )
 			{
@@ -275,9 +288,16 @@ internal static class CoreEnvmap
 
 			if ( !CoreRenderDevice.BeginViewFrame( view, Color.Black ) ) return false;
 
-			//Hide In Game meshes are drawn in the editor only, and a reflection is of the game
-			var hadTag = camera.RenderExcludeTags.Has( MeshComponent.HideInGameTag );
-			camera.RenderExcludeTags.Add( MeshComponent.HideInGameTag );
+			//Hide In Game meshes are drawn in the editor only, and a reflection is of the game; the probe's own exclusions too
+			var added = new List<string>();
+
+			foreach ( var tag in probe.ExcludeTags?.TryGetAll().Append( MeshComponent.HideInGameTag ) ?? [MeshComponent.HideInGameTag] )
+			{
+				if ( camera.RenderExcludeTags.Has( tag ) ) continue;
+
+				camera.RenderExcludeTags.Add( tag );
+				added.Add( tag );
+			}
 
 			try
 			{
@@ -285,7 +305,7 @@ internal static class CoreEnvmap
 			}
 			finally
 			{
-				if ( !hadTag ) camera.RenderExcludeTags.Remove( MeshComponent.HideInGameTag );
+				foreach ( var tag in added ) camera.RenderExcludeTags.Remove( tag );
 			}
 
 			capturedAt = RealTime.Now;
@@ -486,7 +506,7 @@ internal static class CoreEnvmap
 
 		if ( held.TryGetValue( id, out var one ) && ReferenceEquals( one.From, pixels ) ) return true;
 
-		Upload( id, pixels );
+		Upload( id, pixels, Side );
 		held[id].From = pixels;
 
 		return true;
@@ -599,26 +619,27 @@ internal static class CoreEnvmap
 	//Six square faces into one octahedral picture, with blurred copies of it stacked underneath.
 	private static Scratch Fold( Scratch work, Vector3 where )
 	{
-		var (faces, size, clips, sharp) = (work.Faces, work.Size, work.Clips, work.Sharp);
+		var (faces, size, clips, sharp, side) = (work.Faces, work.Size, work.Clips, work.Sharp, work.Side);
 
-		for ( var y = 0; y < Side; y++ )
+		//A row at a time across the processors: each texel reads the faces and writes only its own entry
+		System.Threading.Tasks.Parallel.For( 0, side, y =>
 		{
-			for ( var x = 0; x < Side; x++ )
+			for ( var x = 0; x < side; x++ )
 			{
-		//The texel's middle, so the octahedron's halves meet on the diagonal, not a texel short
-				var uv = new Vector2( ( x + 0.5f ) / Side, ( y + 0.5f ) / Side );
+				//The texel's middle, so the octahedron's halves meet on the diagonal, not a texel short
+				var uv = new Vector2( ( x + 0.5f ) / side, ( y + 0.5f ) / side );
 				var direction = Unfold( uv );
 
-				sharp[( y * Side ) + x] = Looked( faces, size, clips, direction, where );
+				sharp[( y * side ) + x] = Looked( faces, size, clips, direction, where );
 			}
-		}
+		} );
 
-		Band( work.Picture, sharp, 0 );
+		Band( work.Picture, sharp, 0, side );
 
 		for ( var band = 1; band < Bands; band++ )
 		{
-			Blurred( sharp, Cones[band], work.Blur );
-			Band( work.Picture, work.Blur, band );
+			Blurred( sharp, Cones[band], work.Blur, side );
+			Band( work.Picture, work.Blur, band, side );
 		}
 
 		return work;
@@ -629,11 +650,11 @@ internal static class CoreEnvmap
 	private static readonly float[] Cones = { 0.0f, 0.18f, 0.38f, 0.65f, 1.0f };
 
 	//One band of the picture, encoded.
-	private static void Band( byte[] picture, Vector3[] light, int band )
+	private static void Band( byte[] picture, Vector3[] light, int band, int side )
 	{
-		var start = band * Side * Side * 4;
+		var start = band * side * side * 4;
 
-		for ( var i = 0; i < Side * Side; i++ )
+		for ( var i = 0; i < side * side; i++ )
 		{
 			var one = light[i];
 			var (r, g, b, a) = EncodeRgbm( one.x, one.y, one.z, RgbmRange );
@@ -742,7 +763,7 @@ internal static class CoreEnvmap
 	}
 
 	//Cone-averaged blur sampled by direction, so it does not smear across the octahedral seams
-	private static void Blurred( Vector3[] sharp, float wideness, Vector3[] made )
+	private static void Blurred( Vector3[] sharp, float wideness, Vector3[] made, int side )
 	{
 		var taps = wideness < 0.3f ? 16 : wideness < 0.7f ? 32 : 48;
 		var spread = MathF.Max( wideness, 0.001f ) * ( MathF.PI * 0.5f );
@@ -766,11 +787,11 @@ internal static class CoreEnvmap
 		}
 
 	//A row at a time across the processors: each texel reads the sharp picture and writes only its own entry
-		System.Threading.Tasks.Parallel.For( 0, Side, y =>
+		System.Threading.Tasks.Parallel.For( 0, side, y =>
 		{
-			for ( var x = 0; x < Side; x++ )
+			for ( var x = 0; x < side; x++ )
 			{
-				var uv = new Vector2( ( x + 0.5f ) / Side, ( y + 0.5f ) / Side );
+				var uv = new Vector2( ( x + 0.5f ) / side, ( y + 0.5f ) / side );
 				var middle = Unfold( uv );
 
 				Basis( middle, out var right, out var up );
@@ -782,10 +803,10 @@ internal static class CoreEnvmap
 					var offset = ( right * acrossRight[tap] ) + ( up * acrossUp[tap] );
 					var direction = ( ( middle * alongCos[tap] ) + offset ).Normal;
 
-					total += Read( sharp, Fold( direction ) );
+					total += Read( sharp, Fold( direction ), side );
 				}
 
-				made[( y * Side ) + x] = taps > 0 ? total / taps : Vector3.Zero;
+				made[( y * side ) + x] = taps > 0 ? total / taps : Vector3.Zero;
 			}
 		} );
 	}
@@ -799,12 +820,12 @@ internal static class CoreEnvmap
 		up = right.Cross( forward ).Normal;
 	}
 
-	private static Vector3 Read( Vector3[] light, Vector2 uv )
+	private static Vector3 Read( Vector3[] light, Vector2 uv, int side )
 	{
-		var x = Math.Clamp( (int)( uv.x * Side ), 0, Side - 1 );
-		var y = Math.Clamp( (int)( uv.y * Side ), 0, Side - 1 );
+		var x = Math.Clamp( (int)( uv.x * side ), 0, side - 1 );
+		var y = Math.Clamp( (int)( uv.y * side ), 0, side - 1 );
 
-		return light[( y * Side ) + x];
+		return light[( y * side ) + x];
 	}
 
 	//--------------------------------------------- the octahedron itself
@@ -856,23 +877,23 @@ internal static class CoreEnvmap
 	//A runtime capture onto the card, its scratch given back
 	private static void Keep( Guid id, Scratch work )
 	{
-		Upload( id, work.Picture );
+		Upload( id, work.Picture, work.Side );
 		held[id].From = null;
 		Scratch.Give( work );
 	}
 
-	//A picture onto the card: into the probe's texture where it has one - the same shape every time, so a runtime
-	//probe is not a new table slot at each capture - else a new one
-	private static void Upload( Guid id, byte[] picture )
+	//A picture onto the card: into the probe's texture where it has one of the same width - so a runtime probe is
+	//not a new table slot at each capture - else a new one
+	private static void Upload( Guid id, byte[] picture, int side )
 	{
-		if ( held.TryGetValue( id, out var was ) && was.Texture != 0 &&
-			CoreRenderDevice.UpdateTextureRgba( was.Texture, picture, Side, Side * Bands ) ) return;
+		if ( held.TryGetValue( id, out var was ) && was.Texture != 0 && was.Side == side &&
+			CoreRenderDevice.UpdateTextureRgba( was.Texture, picture, side, side * Bands ) ) return;
 
 		if ( was is not null && was.Texture != 0 )
 			CoreRenderDevice.DestroyTexture( was.Texture );
 
-		var texture = CoreRenderDevice.CreateTextureRgba( picture, Side, Side * Bands, srgb: false );
+		var texture = CoreRenderDevice.CreateTextureRgba( picture, side, side * Bands, srgb: false );
 
-		held[id] = new Held { Texture = texture, Index = texture == 0 ? 0 : (int)CoreRender.TextureIndex( texture ) };
+		held[id] = new Held { Texture = texture, Side = side, Index = texture == 0 ? 0 : (int)CoreRender.TextureIndex( texture ) };
 	}
 }

@@ -270,11 +270,15 @@ public sealed class SceneRenderCore : IDisposable
 
 		surface.WearsWorld = true;
 		shell.WorldPanel = surface;
-		shell.WorldDraw = DrawWorld;
-		shell.WorldShot = ShootWorld;
+		shell.WorldDraw = drawWorld ??= DrawWorld;
+		shell.WorldShot = shootWorld ??= ShootWorld;
 
 		host.WearTexture( null );
 	}
+
+	//Made once: Underlay runs every frame, and a method group is a new delegate each time it is handed over
+	private System.Action<ulong, int, int> drawWorld;
+	private System.Func<int, int, Bitmap> shootWorld;
 
 	//What the window calls, inside its frame, where the panels reached this one. The world as the panel shows it,
 	//drawn into a picture - what a screenshot of the window puts where the panel is. See CoreUiWindow.WorldShot.

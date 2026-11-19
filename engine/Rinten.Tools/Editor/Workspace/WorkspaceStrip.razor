@@ -77,7 +77,16 @@
 
 	static string Tip( string title, string description ) => string.IsNullOrWhiteSpace( description ) ? title : $"{title} - {description}";
 
-	EditorWorkspace Find( string title ) => _workspaces.FirstOrDefault( x => x.IsValid() && x.Title == title );
+	//A loop, not a lambda over title: BuildHash asks this for every slot every frame
+	EditorWorkspace Find( string title )
+	{
+		foreach ( var workspace in _workspaces )
+		{
+			if ( workspace.IsValid() && workspace.Title == title ) return workspace;
+		}
+
+		return null;
+	}
 
 	bool IsCurrent( EditorWorkspace workspace ) => workspace is not null && Area.IsValid() && Area.IsCurrent( workspace );
 

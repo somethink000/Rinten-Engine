@@ -97,14 +97,25 @@ sealed class ScrollFollower
 	const int Tries = 30;
 
 	readonly AssetBrowserPlace.Scroll shared;
+	readonly Func<(string Key, float Into)?> top;
+	readonly Func<string, float, bool> scrollTo;
+	readonly Func<float> offsetNow;
 	float last = float.NaN;
 	int seen;
 	int tries;
 
-	public ScrollFollower( AssetBrowserPlace.Scroll shared ) => this.shared = shared;
+	//The view's own top, its move to an item, and its offset after the move - given once, as Tick runs every frame
+	public ScrollFollower( AssetBrowserPlace.Scroll shared, Func<(string Key, float Into)?> top,
+		Func<string, float, bool> scrollTo, Func<float> offsetNow )
+	{
+		this.shared = shared;
+		this.top = top;
+		this.scrollTo = scrollTo;
+		this.offsetNow = offsetNow;
+	}
 
 	//Hovered is whether the pointer is over the view, which is how a scroll of the user's is told from a layout's
-	public void Tick( bool hovered, float offset, Func<(string Key, float Into)?> top, Func<string, float, bool> scrollTo, Func<float> offsetNow )
+	public void Tick( bool hovered, float offset )
 	{
 		if ( hovered && !float.IsNaN( last ) && MathF.Abs( offset - last ) > 0.5f )
 		{

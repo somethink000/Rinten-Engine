@@ -433,10 +433,21 @@ public static class EditorShortcuts
 		return false;
 	}
 
+	//A loop, not a lambda over identifier: IsDown is asked every frame
+	private static Entry Find( string identifier )
+	{
+		foreach ( var entry in Entries )
+		{
+			if ( entry.Identifier == identifier ) return entry;
+		}
+
+		return null;
+	}
+
 	/// <summary>Returns the keybind for a given identifier</summary>
 	public static string GetKeys( string identifier )
 	{
-		var entry = Entries.FirstOrDefault( x => x.Identifier == identifier );
+		var entry = Find( identifier );
 		if ( entry != null )
 			return entry.Keys;
 
@@ -446,7 +457,7 @@ public static class EditorShortcuts
 	/// <summary>Returns the pretty key hint for a given identifier</summary>
 	public static string GetDisplayKeys( string identifier )
 	{
-		var entry = Entries.FirstOrDefault( x => x.Identifier == identifier );
+		var entry = Find( identifier );
 		if ( entry != null )
 			return entry.DisplayKeys;
 
@@ -456,7 +467,7 @@ public static class EditorShortcuts
 	/// <summary>Returns the default keybind for a given identifier</summary>
 	public static string GetDefaultKeys( string identifier )
 	{
-		var entry = Entries.FirstOrDefault( x => x.Identifier == identifier );
+		var entry = Find( identifier );
 		if ( entry != null )
 			return entry.Attribute.Keys;
 
@@ -467,7 +478,7 @@ public static class EditorShortcuts
 	/// <summary>Returns whether a given shortcut is currently being held down</summary>
 	public static bool IsDown( string identifier )
 	{
-		var entry = Entries.FirstOrDefault( x => x.Identifier == identifier );
+		var entry = Find( identifier );
 		if ( entry is null ) return false;
 		if ( entry.IsDown ) return true;
 

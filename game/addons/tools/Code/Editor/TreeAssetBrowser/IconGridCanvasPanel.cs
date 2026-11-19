@@ -700,7 +700,8 @@ public sealed class IconGridCanvasPanel : EditorPanel, AssetSystem.IEventListene
 	ScrollFollower scroll;
 
 	/// <summary>Keeps this grid scrolled with the other browsers' grids - see ScrollFollower.</summary>
-	public void SyncScroll() => ( scroll ??= new( AssetBrowserPlace.GridScroll ) ).Tick( body.HasHovered, body.ScrollOffset.y, TopItem, ScrollToItem, () => body.ScrollOffset.y );
+	public void SyncScroll()
+		=> ( scroll ??= new( AssetBrowserPlace.GridScroll, TopItem, ScrollToItem, () => body.ScrollOffset.y ) ).Tick( body.HasHovered, body.ScrollOffset.y );
 
 	//The file at the top of the view, and how far into its row the view starts
 	(string Key, float Into)? TopItem()

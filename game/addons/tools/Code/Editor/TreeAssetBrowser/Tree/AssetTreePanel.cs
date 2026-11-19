@@ -481,8 +481,8 @@ public sealed class AssetTreePanel : TreePanel<AssetTreeItem>, ITreePathSource, 
 	{
 		if ( options.IsPickerMode || model.IsSearchActive ) return;
 
-		scroll ??= new( AssetBrowserPlace.TreeScroll );
-		scroll.Tick( PointerOverRows, ScrollY, TopKey, ( key, into ) => ScrollToRow( x => x.Key == key, into ), () => ScrollY );
+		scroll ??= new( AssetBrowserPlace.TreeScroll, TopKey, ( key, into ) => ScrollToRow( x => x.Key == key, into ), () => ScrollY );
+		scroll.Tick( PointerOverRows, ScrollY );
 	}
 
 	(string Key, float Into)? TopKey() => TopRow() is { } top ? (top.Node.Key, top.Into) : null;

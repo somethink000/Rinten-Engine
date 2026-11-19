@@ -49,6 +49,10 @@ internal static partial class AudioEngine
 	[ConVar( "snd_mute", ConVarFlags.Saved )]
 	public static bool Mute { get; set; }
 
+	//Silent for this run only, without touching the saved snd_mute: RINTEN_MUTE=1 or -nosound, for runs nobody is listening to
+	private static readonly bool MutedByLaunch = Environment.GetEnvironmentVariable( "RINTEN_MUTE" ) == "1"
+		|| Rinten.Utility.CommandLine.HasSwitch( "-nosound" );
+
 	[ConVar( "snd_mute_losefocus", ConVarFlags.Saved )]
 	public static bool MuteLoseFocus { get; set; }
 
@@ -61,7 +65,7 @@ internal static partial class AudioEngine
 			return;
 
 		//Setting the mute state is also what starts the native device for the first time - if it is never set, that device never plays anything.
-		var mute = Mute || (MuteLoseFocus && !EngineInput.IsAppActive());
+		var mute = Mute || MutedByLaunch || (MuteLoseFocus && !EngineInput.IsAppActive());
 		device.Muted = mute;
 
 		device.Tick();

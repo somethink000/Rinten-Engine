@@ -27,9 +27,6 @@
 	<PropertyGroup>
 		<AndroidLinkMode>None</AndroidLinkMode>
 		<PublishTrimmed>false</PublishTrimmed>
-		<!-- A Release build turns this on by itself, and the compiler it turns on only runs over a trimmed assembly set
-		     - which this is not, and cannot be. Without it off, every Release build stops at XA1030 before it starts. -->
-		<RunAOTCompilation>false</RunAOTCompilation>
 	</PropertyGroup>
 
 	<!-- Where the core's Android build put itself, and what the export wrote. -->

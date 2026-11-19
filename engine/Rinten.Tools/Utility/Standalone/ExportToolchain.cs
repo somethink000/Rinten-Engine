@@ -27,6 +27,9 @@ public static class ExportToolchain
 	/// <summary>Where the JDK the Android build runs goes when it is installed from here.</summary>
 	public static string JavaSdkInstall => Path.Combine( Tools, "jdk" );
 
+	//The SDK the engine builds with: C# 15 and net11.0
+	const string SdkMajor = "11.";
+
 	static string ExeName => OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
 
 	//What was found, until an install changes it
@@ -41,7 +44,7 @@ public static class ExportToolchain
 	/// <summary>Whether an install is running.</summary>
 	public static bool Installing { get; private set; }
 
-	/// <summary>The dotnet with a .NET 10 SDK: the per-user one first, then the one on the path; null where there is none.</summary>
+	/// <summary>The dotnet with a .NET 11 SDK: the per-user one first, then the one on the path; null where there is none.</summary>
 	public static string Dotnet
 	{
 		get
@@ -62,10 +65,10 @@ public static class ExportToolchain
 			string listed = null;
 
 			var found = new[] { Path.Combine( LocalRoot, ExeName ), "dotnet" }
-				.FirstOrDefault( x => ( listed = Run( x, "--list-sdks" ) ) is { } sdks && sdks.Split( '\n' ).Any( l => l.StartsWith( "10." ) ) );
+				.FirstOrDefault( x => ( listed = Run( x, "--list-sdks" ) ) is { } sdks && sdks.Split( '\n' ).Any( l => l.StartsWith( SdkMajor ) ) );
 
-			//Where the SDK is, which a shimmed dotnet (mise, asdf) does not say by its path: "10.0.100 [/root/sdk]"
-			var sdkLine = found is null ? null : listed?.Split( '\n' ).FirstOrDefault( l => l.StartsWith( "10." ) );
+			//Where the SDK is, which a shimmed dotnet (mise, asdf) does not say by its path: "11.0.100 [/root/sdk]"
+			var sdkLine = found is null ? null : listed?.Split( '\n' ).FirstOrDefault( l => l.StartsWith( SdkMajor ) );
 			var open = sdkLine?.IndexOf( '[' ) ?? -1;
 			sdkRoot = open < 0 ? null : Path.GetDirectoryName( sdkLine[( open + 1 )..].TrimEnd( ']', '\r', ' ' ) );
 
@@ -151,7 +154,8 @@ public static class ExportToolchain
 	static string FirstDirectory( params string[] paths )
 		=> paths.FirstOrDefault( x => !string.IsNullOrWhiteSpace( x ) && Directory.Exists( x ) && Directory.EnumerateFileSystemEntries( x ).Any() );
 
-	static string Workload( ExportPlatform platform ) => platform.IsWeb ? "wasm-tools" : platform.IsAndroid ? "android" : null;
+	//The web module is built for .NET 10 (NativeAOT-LLVM has no 11), so its workload is the one with 10's Emscripten
+	static string Workload( ExportPlatform platform ) => platform.IsWeb ? "wasm-tools-net10" : platform.IsAndroid ? "android" : null;
 
 	/// <summary>What this platform's export still needs installed, or null.</summary>
 	public static string Missing( ExportPlatform platform )
@@ -162,7 +166,7 @@ public static class ExportToolchain
 
 		var missing = new List<string>();
 
-		if ( dotnet is null ) missing.Add( "the .NET 10 SDK" );
+		if ( dotnet is null ) missing.Add( "the .NET 11 SDK" );
 		if ( dotnet is null || !workloads.Contains( workload ) ) missing.Add( $"its {workload} workload" );
 		if ( platform.IsAndroid && ( AndroidSdk is null || JavaSdk is null ) ) missing.Add( "the Android SDK and a JDK" );
 
@@ -192,7 +196,7 @@ public static class ExportToolchain
 			var local = Path.Combine( LocalRoot, ExeName );
 
 			if ( dotnet is null || ( !workloads.Contains( workload ) && dotnet != local ) )
-				steps.Add( ("Downloading the .NET 10 SDK", InstallSdk) );
+				steps.Add( ("Downloading the .NET 11 SDK", InstallSdk) );
 
 			if ( !workloads.Contains( workload ) )
 				steps.Add( ($"Installing the {workload} workload", p => RunLines( File.Exists( local ) ? local : Dotnet, $"workload install {workload}", 1800, p )) );
@@ -203,7 +207,8 @@ public static class ExportToolchain
 				var project = Path.GetFullPath( Path.Combine( Environment.CurrentDirectory, "..", "engine", "Launcher", "RintenAndroid", "Rinten-Android.csproj" ) );
 				var arguments = $"build \"{project}\" -t:InstallAndroidDependencies -f net11.0-android " +
 					$"-p:AndroidSdkDirectory=\"{AndroidSdk ?? AndroidSdkInstall}\" -p:JavaSdkDirectory=\"{JavaSdk ?? JavaSdkInstall}\" " +
-					"-p:AcceptAndroidSDKLicenses=True";
+					//Timeout in minutes: the default 10 cancels a slow JDK download. Google's feed: Microsoft's lacks the cmdline-tools version the workload asks for
+					"-p:AcceptAndroidSDKLicenses=True -p:AndroidDependencyInstallationTimeout=60 -p:AndroidManifestType=GoogleV2";
 
 				steps.Add( ("Installing the Android SDK and a JDK", p => RunLines( Dotnet, arguments, 3600, p )) );
 			}
@@ -256,7 +261,7 @@ public static class ExportToolchain
 		{
 			using var http = new HttpClient();
 
-			var version = ( await http.GetStringAsync( $"{Feed}/10.0/latest.version" ) )
+			var version = ( await http.GetStringAsync( $"{Feed}/{SdkMajor}0/latest.version" ) )
 				.Split( '\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries ).Last();
 
 			var url = $"{Feed}/{version}/dotnet-sdk-{version}-{rid}.{extension}";

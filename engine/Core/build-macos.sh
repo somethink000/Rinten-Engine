@@ -8,6 +8,12 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 BLD="$SRC/build/osxarm64"
 DEST="$SRC/../../game/bin/osxarm64"
 
+# Elsewhere the host compiler builds a Linux core under the Mac's name and the copy fails at the end
+if [ "$(uname -s)" != "Darwin" ]; then
+	echo "ERROR: the macOS core builds on a Mac only." >&2
+	exit 1
+fi
+
 for tool in cmake ninja; do
 	if ! command -v "$tool" >/dev/null; then
 		echo "ERROR: no $tool. Try: brew install cmake ninja" >&2

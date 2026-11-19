@@ -3,7 +3,7 @@
 # Nobody publishes an LGPL FFmpeg for Android, so it is built here from the release the desktop libraries are (see natives.json):
 # the engine reads FFmpeg's structures at that release's offsets, and arm64 lays them out as x86-64 does.
 # Decoders only - a phone plays video and records none - and LGPL: nothing GPL or nonfree is enabled.
-# Needs the Android NDK, found through ANDROID_NDK_HOME (or ANDROID_NDK_ROOT), and make. Keep LF line endings.
+# Needs the Android NDK, found by find-ndk.sh (ANDROID_NDK_HOME, or the Android SDK), and make. Keep LF line endings.
 
 set -e
 
@@ -11,13 +11,7 @@ VERSION=9.0.2
 SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 API=28
 
-NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
-
-if [ -z "$NDK" ]; then
-	echo "ERROR: no Android NDK." >&2
-	echo "Set ANDROID_NDK_HOME to it - for example ~/Android/Sdk/ndk/27.0.12077973" >&2
-	exit 1
-fi
+. "$(dirname "$0")/find-ndk.sh"
 
 TC="$(ls -d "$NDK"/toolchains/llvm/prebuilt/*/ 2>/dev/null | head -1)"
 

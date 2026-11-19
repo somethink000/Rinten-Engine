@@ -35,7 +35,7 @@ partial class StandaloneExporter
 		if ( !File.Exists( core ) )
 		{
 			Problem( $"no apk: {core} is not there. " +
-				"Build the core for Android first (ANDROID_NDK_HOME=.. engine/Core/build-android.sh)." );
+				"Build the core for Android first (./build.sh android, with an NDK in the Android SDK)." );
 			return;
 		}
 

@@ -1,16 +1,10 @@
 #!/bin/bash
-# Builds rintencore.so for Android and installs it into game/bin/android-arm64. ./build-android.sh            incremental ./build-android.sh fresh      delete the build dir first The same build build-android.cmd does on Windows, and the same one core.yml runs on ubuntu. It existed in those two places and in neither of them could a person on Linux or a Mac run it: the script was Windows-only and the workflow is a yaml. Now the workflow calls this. Needs the Android NDK, found through ANDROID_NDK_HOME (or
-# ANDROID_NDK_ROOT). Everything else comes with it: the NDK ships its own CMake toolchain file and a clang that targets the phone. arm64 only. A 32-bit phone will not run this engine, and every device Vulkan is worth having on has been arm64 for years. Note that a phone cannot compile a shader: Slang has no Android build, so an Android game runs pre-baked .shader_c the way the web does. This script builds the core; it does not make that problem go away. Keep LF line endings or Linux will not execute this.
+# Builds rintencore.so for Android and installs it into game/bin/android-arm64. ./build-android.sh            incremental ./build-android.sh fresh      delete the build dir first The same build build-android.cmd does on Windows, and the same one core.yml runs on ubuntu. It existed in those two places and in neither of them could a person on Linux or a Mac run it: the script was Windows-only and the workflow is a yaml. Now the workflow calls this. Needs the Android NDK, found by find-ndk.sh (ANDROID_NDK_HOME, or the Android SDK).
+# Everything else comes with it: the NDK ships its own CMake toolchain file and a clang that targets the phone. arm64 only. A 32-bit phone will not run this engine, and every device Vulkan is worth having on has been arm64 for years. Note that a phone cannot compile a shader: Slang has no Android build, so an Android game runs pre-baked .shader_c the way the web does. This script builds the core; it does not make that problem go away. Keep LF line endings or Linux will not execute this.
 
 set -e
 
-NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
-
-if [ -z "$NDK" ]; then
-	echo "ERROR: no Android NDK." >&2
-	echo "Set ANDROID_NDK_HOME to it - for example ~/Android/Sdk/ndk/27.0.12077973" >&2
-	exit 1
-fi
+. "$(dirname "$0")/find-ndk.sh"
 
 TOOLCHAIN="$NDK/build/cmake/android.toolchain.cmake"
 

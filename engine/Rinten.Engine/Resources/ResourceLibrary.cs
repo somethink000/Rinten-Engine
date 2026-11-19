@@ -209,8 +209,8 @@ public class ResourceSystem
 	{
 		lock ( indexLock )
 		{
-			if ( ResourceIndex.TryGetValue( identifier, out var resource ) )
-				return resource as T;
+			if ( ResourceIndex.TryGetValue( identifier, out var resource ) && resource is T found )
+				return found;
 
 			if ( WeakIndex.TryGetValue( identifier, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
 				return weakResource as T;
@@ -224,8 +224,9 @@ public class ResourceSystem
 	{
 		lock ( indexLock )
 		{
-			if ( ResourceIndexLong.TryGetValue( idLong, out var resource ) )
-				return resource as T;
+			//One path can hold two kinds - a .tex is a TextureDefinition and the Texture made from it - so a miss on the kind looks on
+			if ( ResourceIndexLong.TryGetValue( idLong, out var resource ) && resource is T found )
+				return found;
 
 			if ( WeakIndexLong.TryGetValue( idLong, out var weakRef ) && weakRef.TryGetTarget( out var weakResource ) )
 				return weakResource as T;

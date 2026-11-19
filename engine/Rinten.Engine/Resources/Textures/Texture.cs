@@ -184,6 +184,9 @@ public partial class Texture : Resource, IDisposable, ITexture
 		//taken: taking it moves the picture, and freeing it afterwards would destroy the one this texture now draws.
 		if ( !CopyFrom( newTex ) )
 			newTex.Dispose();
+
+		//A loader registers what it made under the path; the name belongs to this one, which now holds the pixels
+		if ( !string.IsNullOrEmpty( ResourcePath ) ) Game.Resources.RegisterWeak( this );
 	}
 
 	/// <summary>If this texture is a sprite sheet, will return information about the sheet, which is generally used in the shader. You don't really need to think about the contents.</summary>

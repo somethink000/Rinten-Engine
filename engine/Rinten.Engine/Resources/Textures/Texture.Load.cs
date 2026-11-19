@@ -76,13 +76,14 @@ public partial class Texture
 	{
 		//What was generated from the picture - a sprite's frames - is not under the picture's own name, so the lookup below never finds it.
 		Rinten.Resources.ImageFileGenerator.FileChanged( filepath );
+		TextureLoader.Definition.SourceChanged( filesystem, filepath );
 
 		var existing = Game.Resources.Get<Texture>( filepath );
 		if ( existing is not null )
 		{
 			existing.TryReload( filesystem, existing.ResourcePath );
 		}
-		else if ( filepath.StartsWith( "/" ) && TextureLoader.Image.IsAppropriate( filepath ) )
+		else if ( filepath.StartsWith( "/" ) && ( TextureLoader.Image.IsAppropriate( filepath ) || TextureLoader.Definition.IsAppropriate( filepath ) ) )
 		{
 			//Image might have been loaded without '/' so try again without it
 			Hotload( filesystem, filepath[1..] );
@@ -128,6 +129,12 @@ public partial class Texture
 		if ( TextureLoader.ImageDataUri.IsAppropriate( filepath ) )
 		{
 			return TextureLoader.ImageDataUri.Load( filepath, warnOnMissing );
+		}
+
+		//Our own .tex: a picture and how it is read
+		if ( TextureLoader.Definition.IsAppropriate( filepath ) )
+		{
+			return TextureLoader.Definition.Load( filesystem, filepath, warnOnMissing );
 		}
 
 		//Image loader

@@ -25,7 +25,7 @@ internal static class Image
 		return Extensions.Contains( extension );
 	}
 
-	public static Texture Load( System.IO.Stream stream, string debugName )
+	public static Texture Load( System.IO.Stream stream, string debugName, bool mips = true )
 	{
 		System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
 
@@ -51,7 +51,7 @@ internal static class Image
 				var animation = new Texture.Animation( codec );
 				codec = null; //ownership transferred to Animation
 
-				var texture = CreateTexture( animation.Bitmap, debugName );
+				var texture = CreateTexture( animation.Bitmap, debugName, mips );
 				texture.IsAnimated = true;
 				animation.Texture = new System.WeakReference<Texture>( texture );
 				Texture.Animations.Add( animation );
@@ -63,8 +63,7 @@ internal static class Image
 				using var image = SKImage.FromEncodedData( data );
 				using var bitmap = SKBitmap.FromImage( image );
 
-				var texture = CreateTexture( bitmap, debugName );
-				return texture;
+				return CreateTexture( bitmap, debugName, mips );
 			}
 		}
 		finally
@@ -87,7 +86,7 @@ internal static class Image
 		return bitmap.ToTexture();
 	}
 
-	private static Texture CreateTexture( SKBitmap bitmap, string name )
+	private static Texture CreateTexture( SKBitmap bitmap, string name, bool mips )
 	{
 		var format = bitmap.ColorType switch
 		{
@@ -97,7 +96,7 @@ internal static class Image
 			_ => throw new System.Exception( $"bitmap.ColorType is {bitmap.ColorType} - unsupported" ),
 		};
 
-		int numMips = (int)Math.Log2( Math.Min( bitmap.Width, bitmap.Height ) ) + 1;
+		int numMips = mips ? (int)Math.Log2( Math.Min( bitmap.Width, bitmap.Height ) ) + 1 : 1;
 
 		var texture = Texture.Create( bitmap.Width, bitmap.Height, format )
 			.WithName( name )
@@ -121,28 +120,11 @@ internal static class Image
 
 		try
 		{
-			Texture tex = default;
+			var tex = LoadFile( filesystem, filename, true );
 
-			var extension = System.IO.Path.GetExtension( filename );
-			if ( extension == ".tga" )
-			{
-				tex = LoadOurselves( filesystem, filename );
-			}
-			else if ( extension == ".ies" )
-			{
-				var bytes = filesystem.ReadAllBytes( filename ).ToArray();
-				using var iesBitmap = Bitmap.CreateFromIesBytes( bytes );
+			//An IES profile is a light's shape, not a picture to share by name
+			if ( System.IO.Path.GetExtension( filename ) != ".ies" ) tex?.RegisterWeakResourceId( filename );
 
-				if ( iesBitmap is not null )
-					return iesBitmap.ToTexture();
-			}
-			else
-			{
-				using var stream = filesystem.OpenRead( filename );
-				tex = Load( stream, filename );
-			}
-
-			tex?.RegisterWeakResourceId( filename );
 			return tex;
 		}
 		catch ( System.IO.FileNotFoundException e )
@@ -160,6 +142,25 @@ internal static class Image
 		}
 
 		return null;
+	}
+
+	//A picture file read into a texture of its own: not looked up, not registered under its name
+	internal static Texture LoadFile( BaseFileSystem filesystem, string filename, bool mips )
+	{
+		var extension = System.IO.Path.GetExtension( filename );
+
+		if ( extension == ".tga" ) return LoadOurselves( filesystem, filename );
+
+		if ( extension == ".ies" )
+		{
+			var bytes = filesystem.ReadAllBytes( filename ).ToArray();
+			using var iesBitmap = Bitmap.CreateFromIesBytes( bytes );
+
+			return iesBitmap?.ToTexture();
+		}
+
+		using var stream = filesystem.OpenRead( filename );
+		return Load( stream, filename, mips );
 	}
 
 	//A picture a build carries as its compiled blocks, loaded from those. The colour reading first: that is how a picture loaded from its file

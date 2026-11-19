@@ -356,7 +356,7 @@ partial class StandaloneExporter
 	//Files the game names whatever it is: a scene's models, a style's fonts
 	private static readonly HashSet<string> NamingFiles = new( StringComparer.OrdinalIgnoreCase )
 	{
-		".cs", ".razor", ".scss", ".css", ".json", ".mdl", ".scene", ".prefab", ".mat",
+		".cs", ".razor", ".scss", ".css", ".json", ".mdl", ".scene", ".prefab", ".mat", ".tex",
 	};
 
 	//Base models and font faces nothing in the game or the base code names: the skeleton and its clips, Poppins

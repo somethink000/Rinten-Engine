@@ -221,7 +221,7 @@ internal static class CoreTextureStreaming
 				one.Arriving = 0;
 			}
 
-			var made = CoreTextureFile.Load( one.Path ) is { } file && one.Finest < file.MipCount ? MadeFrom( file, one.Finest ) : 0ul;
+			var made = Made( one.Path, one.Finest );
 			if ( made != 0 ) Apply( [(one, one.Finest, made)] );
 		}
 	}
@@ -530,7 +530,22 @@ internal static class CoreTextureStreaming
 			return;
 		}
 
-		one.Reading = Task.Run( () => CoreTextureFile.Load( path ) is { } file && top < file.MipCount ? MadeFrom( file, top ) : 0ul );
+		one.Reading = Task.Run( () => Made( path, top ) );
+	}
+
+	//A file's levels from top down as a picture, read through a pooled buffer
+	private static ulong Made( string path, int top )
+	{
+		if ( CoreTextureFile.LoadPooled( path ) is not { } file ) return 0ul;
+
+		try
+		{
+			return top < file.MipCount ? MadeFrom( file, top ) : 0ul;
+		}
+		finally
+		{
+			file.Return();
+		}
 	}
 
 	//A picture of a file's levels from top down.

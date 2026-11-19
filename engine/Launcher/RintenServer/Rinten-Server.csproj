@@ -35,4 +35,9 @@
 	</ItemGroup>
 
 	<Import Project="..\Shared\LaunchShared.projitems" Label="Shared" />
+  <!-- Compact the large-object heap once it is more than half free: a world's load and bake throw away gigabytes of
+       large arrays, and the heap otherwise keeps their holes as memory the process holds -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
 </Project>

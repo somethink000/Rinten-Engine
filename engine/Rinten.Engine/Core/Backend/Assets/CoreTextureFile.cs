@@ -152,14 +152,65 @@ internal sealed partial class CoreTextureFile
 		return FromBytes( bytes );
 	}
 
-	/// <summary>A compiled texture from bytes in memory, e.g. a model's impostor; null if not one.</summary>
-	public static CoreTextureFile FromBytes( byte[] bytes )
+	//Streaming reads a picture, uploads it and drops it: the file goes into a pooled buffer, handed back by Return
+	internal static CoreTextureFile LoadPooled( string path )
 	{
-		if ( bytes is null || bytes.Length < HeaderSize ) return null;
+		if ( string.IsNullOrEmpty( path ) ) return null;
+
+		byte[] rented = null;
+
+		try
+		{
+			using var stream = new FileStream( path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan );
+			var length = (int)stream.Length;
+			if ( length < HeaderSize ) return null;
+
+			rented = System.Buffers.ArrayPool<byte>.Shared.Rent( length );
+			stream.ReadExactly( rented, 0, length );
+
+			//A sealed build's files are opened the ordinary way
+			if ( ReadU32( rented, HeaderMagic ) != Magic )
+			{
+				System.Buffers.ArrayPool<byte>.Shared.Return( rented );
+				return Load( path );
+			}
+
+			var file = FromBytes( rented, length );
+			if ( file is null ) { System.Buffers.ArrayPool<byte>.Shared.Return( rented ); return null; }
+
+			file.pooled = true;
+			return file;
+		}
+		catch ( Exception e ) when ( e is IOException or UnauthorizedAccessException )
+		{
+			if ( rented is not null ) System.Buffers.ArrayPool<byte>.Shared.Return( rented );
+			return null;
+		}
+	}
+
+	//Whether bytes came from the pool, to go back by Return
+	private bool pooled;
+
+	/// <summary>Gives a pooled file's buffer back; the file must not be read after.</summary>
+	internal void Return()
+	{
+		if ( !pooled ) return;
+
+		pooled = false;
+		System.Buffers.ArrayPool<byte>.Shared.Return( bytes );
+	}
+
+	/// <summary>A compiled texture from bytes in memory, e.g. a model's impostor; null if not one.</summary>
+	public static CoreTextureFile FromBytes( byte[] bytes ) => FromBytes( bytes, bytes?.Length ?? 0 );
+
+	//The same over the first length bytes of a buffer that may be longer
+	private static CoreTextureFile FromBytes( byte[] bytes, int length )
+	{
+		if ( bytes is null || length < HeaderSize || length > bytes.Length ) return null;
 
 		if ( ReadU32( bytes, HeaderMagic ) != Magic ) return null;
 		if ( ReadU32( bytes, HeaderVersion ) != Version ) return null;
-		if ( ReadU32( bytes, HeaderByteCount ) != (uint)bytes.Length ) return null;
+		if ( ReadU32( bytes, HeaderByteCount ) != (uint)length ) return null;
 
 		var mipCount = ReadU32( bytes, HeaderMipCount );
 		var mipOffset = ReadU32( bytes, HeaderMipOffset );
@@ -170,8 +221,8 @@ internal sealed partial class CoreTextureFile
 		var mipEnd = (long)mipOffset + ( (long)MipSize * mipCount );
 		var pixelEnd = (long)pixelOffset + pixelByteCount;
 
-		if ( mipEnd > bytes.Length ) return null;
-		if ( pixelEnd > bytes.Length ) return null;
+		if ( mipEnd > length ) return null;
+		if ( pixelEnd > length ) return null;
 
 		//And every mip has to lie inside the pixel block.
 		for ( var i = 0; i < mipCount; ++i )

@@ -100,6 +100,10 @@ public partial class Scene : GameObject
 				SceneNetworkSystem.OnLoadedScene( sceneInformation?.Title );
 			}
 		}
+		catch ( Exception e )
+		{
+			Log.Error( e, $"Loading {Name} failed" );
+		}
 		finally
 		{
 			_loadingMainTask = default;

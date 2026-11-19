@@ -6,6 +6,7 @@
       "version": "11.0.0"
     },
     "configProperties": {
+      "System.GC.ConserveMemory": 5,
       "System.Reflection.Metadata.MetadataUpdater.IsSupported": false,
       "System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization": false
     }

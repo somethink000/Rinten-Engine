@@ -39,8 +39,16 @@ public partial class Terrain
 		TerrainChunkBaker.NoGroundPoint( empty );
 		pictureAtlas?.Update( new ReadOnlySpan<byte>( empty ) );
 
+		//The chunks' pictures go straight onto the card from here on, so the copy of a whole map's worth here goes once it is there
+		pictureShed = false;
+		pictureCleared = CoreResources.Cleared;
+
 		UpdateParamsMap();
 	}
+
+	//Whether the atlas has let go of its pixels here, and the device it was laid out on - see UploadPicture
+	private bool pictureShed;
+	private int pictureCleared;
 
 	//A chunk's picture onto the card, where its shape is new to it; the bake lets go of it then.
 	private void UploadPicture( Chunk chunk, int index, TerrainChunkBake result )
@@ -51,12 +59,36 @@ public partial class Terrain
 
 		if ( pictureAtlas is null || index < 0 || chunk.PictureShaped == result.Shaped ) return;
 
-		chunk.PictureShaped = result.Shaped;
+		//The device went and took the atlas with it: laid out again, and every chunk's picture is made again by its next bake
+		if ( pictureShed && pictureCleared != CoreResources.Cleared )
+		{
+			LayOutPicture();
+			foreach ( var each in chunks ) each.PictureShaped = -1;
+			if ( pictureAtlas is null ) return;
+		}
 
 		const int side = TerrainChunkBaker.PictureSide;
 
-		pictureAtlas.Update( new ReadOnlySpan<byte>( bytes ), ( index % picturePerRow ) * side * PicturePointTexels,
-			( index / picturePerRow ) * side, side * PicturePointTexels, side );
+		var x = ( index % picturePerRow ) * side * PicturePointTexels;
+		var y = ( index / picturePerRow ) * side;
+		var width = side * PicturePointTexels;
+
+		if ( !pictureShed )
+		{
+			pictureAtlas.core.ShedData();
+			pictureShed = pictureAtlas.core.Data is { Length: 0 };
+		}
+
+		if ( pictureShed )
+		{
+			if ( !pictureAtlas.core.WriteThrough( bytes, width * 4, x, y, width, side ) ) return;
+		}
+		else
+		{
+			pictureAtlas.Update( new ReadOnlySpan<byte>( bytes ), x, y, width, side );
+		}
+
+		chunk.PictureShaped = result.Shaped;
 	}
 
 	private void DropPicture()

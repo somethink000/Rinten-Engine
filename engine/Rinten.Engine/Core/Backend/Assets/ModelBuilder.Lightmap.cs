@@ -31,8 +31,8 @@ internal sealed unsafe partial class ModelBuilder
 		public float PlacedX, PlacedY;
 	}
 
-	//Triangles past which an import keeps no sheet of its own - see GenerateLightmapUv
-	private const int MostLightmapTriangles = 65536;
+	//Triangles past which an import keeps no sheet of its own - see GenerateLightmapUv; a whole level such as Sponza is 262k
+	private const int MostLightmapTriangles = 1 << 20;
 
 	//Normal dot for a triangle to join an island (about 48 degrees): to its neighbour and to the mean
 	private const float SameWay = 0.66f;

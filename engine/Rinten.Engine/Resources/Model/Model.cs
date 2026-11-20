@@ -52,6 +52,7 @@ public sealed partial class Model : Resource
 	{
 		core?.Dispose();
 		core = next;
+		isMissing = false;
 		ForgetGeometry();
 
 		//Everything else read off the old core with it: a model recompiled with a new

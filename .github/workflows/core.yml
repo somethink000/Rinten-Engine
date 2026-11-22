@@ -120,7 +120,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         if: steps.core.outputs.present == 'true'
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # build-linux.sh reads the architecture and installs into
       # game/bin/linuxsteamrtarm64, SDL and the OpenXR loader with it.
@@ -183,7 +183,7 @@ jobs:
           name: rintencore-osxarm64
           path: engine/Core/build/osxarm64/bin/rintencore.dylib
 
-  # The native half only: the managed half needs the net10.0-android workload. This used to be off unless somebody asked for it, which meant
+  # The native half only: the managed half needs the net11.0-android workload. This used to be off unless somebody asked for it, which meant
   # it was built about twice a year and broke quietly in between. It costs an ubuntu runner like the Linux job does, so it runs every time.
   android:
     runs-on: ubuntu-latest

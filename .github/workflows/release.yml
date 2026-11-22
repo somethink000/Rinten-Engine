@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # What build-linux.sh needs for the core and the SDL it builds from source
       - name: Install what it builds against
@@ -55,7 +55,7 @@ jobs:
             libdbus-1-dev libudev-dev libasound2-dev libpulse-dev
 
       - name: Install the workloads
-        run: dotnet workload install wasm-tools android
+        run: dotnet workload install wasm-tools-net10 android
 
       - uses: nttld/setup-ndk@v1
         id: ndk
@@ -125,7 +125,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # What build-linux.sh needs for the core and the SDL it builds from source
       - name: Install what it builds against
@@ -166,7 +166,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       - name: Build
         run: dotnet run --project .\engine\Tools\RintenBuild\RintenBuild.csproj -- build

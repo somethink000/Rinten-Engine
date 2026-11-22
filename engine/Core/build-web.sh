@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the browser player into game/bin/wasm32: rintencore's dependencies as a wasm archive, and the .NET launcher that draws with them. The renderer is not in the archive. It is C# - Core/Backend/Render/Browser - and it reaches the browser's WebGPU through wwwroot/webgpu.js, so what this builds on the native side is the same third-party C every other platform gets. ./build-web.sh            incremental ./build-web.sh fresh
-# delete the build dir first Needs Emscripten, which the .NET wasm-tools workload carries - the same one that relinks the runtime at publish time, which is the point: an archive built by a different Emscripten either fails to link or produces a page that does not start. dotnet workload install wasm-tools An emsdk already on PATH is used instead when its version matches the workload's. Keep LF line endings or Linux will not execute this.
+# delete the build dir first Needs Emscripten, which the .NET wasm-tools workload carries - the same one that relinks the runtime at publish time, which is the point: an archive built by a different Emscripten either fails to link or produces a page that does not start. dotnet workload install wasm-tools-net10 An emsdk already on PATH is used instead when its version matches the workload's. Keep LF line endings or Linux will not execute this.
 
 set -e
 
@@ -54,7 +54,7 @@ else
 	echo "ERROR: no Emscripten." >&2
 	echo "  Looked for the workload packs Microsoft.NET.Runtime.Emscripten.*.{Sdk,Node,Cache}.linux-x64" >&2
 	echo "  under ~/.dotnet/packs and beside dotnet, and for emcc on PATH." >&2
-	echo "  Install them with: dotnet workload install wasm-tools" >&2
+	echo "  Install them with: dotnet workload install wasm-tools-net10" >&2
 	exit 1
 fi
 

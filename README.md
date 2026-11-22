@@ -24,7 +24,7 @@ Download the editor from [Releases](../../releases). Its launcher installs, swit
 
 ## Build it
 
-You need the .NET 10 SDK. On Linux also cmake, ninja, clang and the X11/Wayland headers.
+You need the .NET 11 SDK. On Linux also cmake, ninja, clang and the X11/Wayland headers.
 
 ```
 ./Bootstrap.sh      # Linux

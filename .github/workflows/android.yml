@@ -1,6 +1,6 @@
 name: android
 
-# Builds an apk: the core for arm64, the managed engine, and the head project that puts a game inside an Android package. The point of it being here rather than on a machine: an Android build needs the NDK, the SDK, a JDK and the net10.0-android workload, and none of those are things somebody making games should have to install to find
+# Builds an apk: the core for arm64, the managed engine, and the head project that puts a game inside an Android package. The point of it being here rather than on a machine: an Android build needs the NDK, the SDK, a JDK and the net11.0-android workload, and none of those are things somebody making games should have to install to find
 # out whether their game runs on a phone. The runner has the SDK and the JDK already; this adds the other two, and what comes out is an apk on the run's page. engine/Core is a private repository checked out inside this one, so this needs the repository variable CORE_REPO and the secret CORE_TOKEN - without them the job says so and stops.
 
 on:
@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         if: steps.core.outputs.present == 'true'
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       - name: Install the Android workload
         if: steps.core.outputs.present == 'true'
@@ -73,12 +73,12 @@ jobs:
         if: steps.core.outputs.present == 'true'
         run: |
           dotnet build engine/Launcher/RintenAndroid/Rinten-Android.csproj \
-            -c Release -f net10.0-android
+            -c Release -f net11.0-android
 
       - uses: actions/upload-artifact@v4
         if: steps.core.outputs.present == 'true'
         with:
           name: rinten-android-arm64
           path: |
-            engine/Launcher/RintenAndroid/bin/Release/net10.0-android/*Signed.apk
-            engine/Launcher/RintenAndroid/bin/Release/net10.0-android/*.apk
+            engine/Launcher/RintenAndroid/bin/Release/net11.0-android/*Signed.apk
+            engine/Launcher/RintenAndroid/bin/Release/net11.0-android/*.apk

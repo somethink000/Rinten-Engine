@@ -14,6 +14,9 @@ public class ToolAddonCompiles
 	public Task CompileFxEditor() => Compiles( "FxEditor", "fxeditor" );
 
 	[TestMethod]
+	public Task CompileMaterialEditor() => Compiles( "MaterialEditor", "materialeditor" );
+
+	[TestMethod]
 	public Task CompileUiEditor() => Compiles( "UiEditor", "uieditor" );
 
 	//Compile one of the editors under game/editor the way the editor itself does.

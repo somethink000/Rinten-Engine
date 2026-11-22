@@ -17,10 +17,12 @@ jobs:
           clean: true
           fetch-depth: 0
           persist-credentials: false
+          # Rinten.System compiles RintenUI's Core/**/*.cs straight out of this submodule.
+          submodules: recursive
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # The core too: the repository carries no built rintencore
       - name: Build

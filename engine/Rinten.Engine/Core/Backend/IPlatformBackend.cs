@@ -21,8 +21,8 @@ internal interface IPlatformBackend
 
 	bool GetDesktopResolution( int monitorIndex, ref int width, ref int height, ref uint refreshRate );
 
-	//Diagonal DPI of the primary monitor. Callers divide by 96 to get a UI scale.
-	float GetDiagonalDpi();
+	//Diagonal DPI of a monitor, or of the primary one when the index is not one of ours. Callers divide by 96 to get a UI scale.
+	float GetDiagonalDpi( int monitorIndex );
 
 	bool SafeRemoveFile( string file );
 }
@@ -207,13 +207,19 @@ internal sealed partial class CorePlatformBackend : IPlatformBackend
 		return true;
 	}
 
-	public float GetDiagonalDpi()
+	public float GetDiagonalDpi( int monitorIndex )
 	{
 		var ids = GetDisplayIds();
 		if ( ids.Length == 0 ) return 96f;
 
+		//The window's own monitor where it is one of ours; the primary display otherwise. Asking the
+		//primary display for every window made a game on a differently-scaled monitor use the wrong scale.
+		var display = monitorIndex >= 0 && monitorIndex < ids.Length
+			? ids[monitorIndex]
+			: SDL_GetPrimaryDisplay();
+
 		//SDL reports a scale where 1.0 is 96 DPI, which is the same quantity callers recover by dividing this by 96 - see Screen.DesktopScale.
-		var scale = SDL_GetDisplayContentScale( SDL_GetPrimaryDisplay() );
+		var scale = SDL_GetDisplayContentScale( display );
 		return scale > 0f ? scale * 96f : 96f;
 	}
 

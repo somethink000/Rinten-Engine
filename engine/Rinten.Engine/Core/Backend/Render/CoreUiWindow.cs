@@ -769,6 +769,9 @@ internal sealed class CoreUiWindow : IDisposable
 		return null;
 	}
 
+	//Whether there is an interface window to ask for a scale at all.
+	internal static bool HasPointerWindow => PointerWindow is not null;
+
 	//Device pixels per interface unit of the window the pointer is in, or of the first window before it has been in any
 	internal static float PointerScale => PointerWindow?.Scale ?? 1.0f;
 

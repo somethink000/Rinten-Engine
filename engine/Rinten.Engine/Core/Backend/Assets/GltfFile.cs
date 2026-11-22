@@ -107,6 +107,28 @@ internal sealed class GltfFile
 	/// <summary>Whether each material draws both faces.</summary>
 	public bool[] MaterialTwoSided = Array.Empty<bool>();
 
+	/// <summary>A picture a material samples: the file a URI names, or a view of the file's own bytes.</summary>
+	public sealed class Picture
+	{
+		public string File;
+		public int View = -1;
+		public byte[] Inline;
+	}
+
+	/// <summary>The pictures and alpha a material names, for writing a material definition from it.</summary>
+	public sealed class MaterialMaps
+	{
+		public Picture Colour, Normal, Emission, RoughMetal, Occlusion;
+
+		//What the rough/metal map is multiplied by; glTF's defaults
+		public float Roughness = 1.0f, Metalness = 1.0f;
+
+		public string AlphaMode = "OPAQUE";
+		public float AlphaCutoff = 0.5f;
+	}
+
+	public MaterialMaps[] MaterialPictures = Array.Empty<MaterialMaps>();
+
 	private Accessor[] accessors = Array.Empty<Accessor>();
 	private BufferView[] views = Array.Empty<BufferView>();
 	private byte[][] buffers = Array.Empty<byte[]>();
@@ -387,6 +409,7 @@ internal sealed class GltfFile
 			MaterialSurfaces = new ModelFormat.Surface[MaterialNames.Length];
 			MaterialColourPictures = new byte[MaterialNames.Length][];
 			MaterialTwoSided = new bool[MaterialNames.Length];
+			MaterialPictures = new MaterialMaps[MaterialNames.Length];
 
 			var at = 0;
 
@@ -395,7 +418,11 @@ internal sealed class GltfFile
 				MaterialSurfaces[at] = SurfaceOf( entry );
 				MaterialColourPictures[at] = ColourPictureOf( root, entry, directory );
 				MaterialTwoSided[at] = entry.TryGetProperty( "doubleSided", out var sides ) && sides.ValueKind == JsonValueKind.True;
-				MaterialNames[at++] = StringOf( entry, "name" );
+				MaterialPictures[at] = MapsOf( root, entry, directory );
+
+				//Unnamed materials get one, so a model can remap each by surface name
+				MaterialNames[at] = StringOf( entry, "name" ) is { Length: > 0 } named ? named : $"material_{at}";
+				at++;
 			}
 		}
 
@@ -537,6 +564,62 @@ internal sealed class GltfFile
 		}
 
 		return ReadBufferUri( StringOf( imageEntry, "uri" ), directory );
+	}
+
+	private static MaterialMaps MapsOf( JsonElement root, JsonElement material, string directory )
+	{
+		var maps = new MaterialMaps
+		{
+			Normal = PictureOf( root, material, "normalTexture", directory ),
+			Emission = PictureOf( root, material, "emissiveTexture", directory ),
+			Occlusion = PictureOf( root, material, "occlusionTexture", directory ),
+			AlphaMode = StringOf( material, "alphaMode" ) ?? "OPAQUE",
+			AlphaCutoff = FloatOf( material, "alphaCutoff", 0.5f ),
+		};
+
+		if ( material.TryGetProperty( "pbrMetallicRoughness", out var pbr ) && pbr.ValueKind == JsonValueKind.Object )
+		{
+			maps.Colour = PictureOf( root, pbr, "baseColorTexture", directory );
+			maps.RoughMetal = PictureOf( root, pbr, "metallicRoughnessTexture", directory );
+			maps.Roughness = FloatOf( pbr, "roughnessFactor", 1.0f );
+			maps.Metalness = FloatOf( pbr, "metallicFactor", 1.0f );
+		}
+
+		return maps;
+	}
+
+	//Where a texture slot's image is, unread: a file beside, a buffer view, or a data URI's bytes
+	private static Picture PictureOf( JsonElement root, JsonElement owner, string slotName, string directory )
+	{
+		if ( !owner.TryGetProperty( slotName, out var slot ) || slot.ValueKind != JsonValueKind.Object ) return null;
+
+		var texture = Element( root, "textures", IntOf( slot, "index", -1 ) );
+		if ( texture is not { } textureEntry ) return null;
+
+		var image = Element( root, "images", IntOf( textureEntry, "source", -1 ) );
+		if ( image is not { } imageEntry ) return null;
+
+		if ( imageEntry.TryGetProperty( "bufferView", out var view ) && view.ValueKind == JsonValueKind.Number )
+			return new Picture { View = view.GetInt32() };
+
+		var uri = StringOf( imageEntry, "uri" );
+		if ( string.IsNullOrEmpty( uri ) ) return null;
+
+		if ( uri.StartsWith( "data:", StringComparison.Ordinal ) )
+			return ReadBufferUri( uri, directory ) is { } inline ? new Picture { Inline = inline } : null;
+
+		return directory is null ? null : new Picture { File = Path.GetFullPath( Path.Combine( directory, Uri.UnescapeDataString( uri ) ) ) };
+	}
+
+	/// <summary>The encoded bytes of a picture held inside the file, or null for one that is a file of its own.</summary>
+	public byte[] InlineBytes( Picture picture )
+	{
+		if ( picture is null ) return null;
+		if ( picture.Inline is not null ) return picture.Inline;
+		if ( picture.View < 0 ) return null;
+
+		var bytes = ViewBytes( picture.View );
+		return bytes.IsEmpty ? null : bytes.ToArray();
 	}
 
 	private static JsonElement? Element( JsonElement root, string list, int index )

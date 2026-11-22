@@ -445,6 +445,10 @@ public class CreateModelFromMeshDialog : Dialog
 		{
 			Collide( definition );
 			ApplyMaterialOverride( _options, definition );
+
+			if ( GltfMaterials.Handles( mesh.AbsolutePath ) )
+				GltfMaterials.Apply( definition, mesh, outputPath );
+
 			ApplyGeneratedMaterials( plan, definition, mesh, outputPath );
 
 			//Named the way the model editor names them when the same file is dropped on a mesh part there - see ModelTakes.

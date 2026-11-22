@@ -11,8 +11,11 @@ FEATURES
 	//Roughness map, on by default; off drops the map, the value and the sample (fully matte)
 	Feature( F_ROUGHNESS, 0..1, "Maps" ) < Map( g_tRoughness ); Default( 1 ); >;
 
-	//Metalness, on to begin with the same way. Off is a surface that is not metal at all, and nothing read to say so.
+	//Metalness: on for any metal at all; off is not metal, with nothing read
 	Feature( F_METALNESS, 0..1, "Maps" ) < Flag( Metalness ); >;
+
+	//One map with roughness in green and metalness in blue (glTF, Substance); replaces both maps' samples
+	Feature( F_ROUGH_METAL_MAP, 0..1, "Maps" ) < Map( g_tRoughMetal ); >;
 
 	//Ambient occlusion: a map turns it on, and a material without one pays no sample for a texel that would have read one.
 	Feature( F_AO, 0..1, "Maps" ) < Map( g_tAO ); >;
@@ -64,6 +67,9 @@ PARAMETERS
 	float g_flMetalness < Default( 0.0 ); Range( 0, 1 ); UiGroup( "Maps" ); Feature( F_METALNESS ); >;
 
 	Texture2D g_tMetalness < Default( 1.0 ); UiGroup( "Maps" ); Feature( F_METALNESS ); >;
+
+	//Green is roughness, blue metalness; the numbers above multiply them as they do the separate maps
+	Texture2D g_tRoughMetal < Default( 1.0 ); UiGroup( "Maps" ); Feature( F_ROUGH_METAL_MAP ); >;
 	//How hard the normal map bites: nought is flat, one is the map as painted, two doubles its slopes. Read only where F_NORMAL_MAP built the sample in.
 	float g_flNormalStrength < Default( 1.0 ); Range( 0, 2 ); UiGroup( "Maps" ); Feature( F_NORMAL_MAP ); >;
 	float g_flEmissionStrength < Default( 0.0 ); Range( 0, 8 ); UiGroup( "Maps" ); Feature( F_EMISSION ); >;
@@ -400,21 +406,25 @@ Out Shade( V2F i, bool front )
 	float3 normal = n;
 #endif
 
-	//One sample per thing it says. Where the material named no picture these read the Default from the declaration
-	//- white - without touching the table at all, so the number beside the picture is the whole of the answer.
+	//Each map times the number beside it; an unnamed map reads its white Default without a fetch
+#if F_ROUGH_METAL_MAP && ( F_ROUGHNESS || F_METALNESS )
+	float2 roughMetal = SampleUv( g_tRoughMetal, uv ).gb;
+#endif
+
 #if !F_ROUGHNESS
-	//Off: entirely matte, and nothing read to say so.
 	float roughness = 1.0;
+#elif F_ROUGH_METAL_MAP
+	float roughness = clamp( roughMetal.x * g_flRoughness, 0.04, 1.0 );
 #else
-	//The picture times the number beside it: with the number at one, a texel of 0.5 is
-	//a surface that is half rough, which is what somebody painting one means by it.
 	float roughness = clamp( SampleUv( g_tRoughness, uv ).r * g_flRoughness, 0.04, 1.0 );
 #endif
 
-#if F_METALNESS
-	float metalness = saturate( SampleUv( g_tMetalness, uv ).r * g_flMetalness );
-#else
+#if !F_METALNESS
 	float metalness = 0.0;
+#elif F_ROUGH_METAL_MAP
+	float metalness = saturate( roughMetal.y * g_flMetalness );
+#else
+	float metalness = saturate( SampleUv( g_tMetalness, uv ).r * g_flMetalness );
 #endif
 
 #if F_AO

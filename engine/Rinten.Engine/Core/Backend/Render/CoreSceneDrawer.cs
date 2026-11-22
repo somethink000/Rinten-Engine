@@ -6019,13 +6019,14 @@ internal sealed partial class CoreSceneDrawer
 	//What the gizmo frame held, for editor_gizmos_status .
 	private static void MeasureGizmos( DebugDrawList list )
 	{
-		lastGizmoBatches = list?.Shapes.Count ?? 0;
+		lastGizmoBatches = ( list?.Shapes.Count ?? 0 ) + ( list?.Wires.Count ?? 0 );
 		lastGizmoVertices = 0;
 		lastGizmoDrawn = 0;
 
 		if ( list is null ) return;
 
 		foreach ( var shape in list.Shapes ) lastGizmoVertices += shape.Count;
+		foreach ( var wire in list.Wires ) lastGizmoVertices += wire.IndexCount;
 
 		//A transform and two compares for every vertex of every gizmo in the frame - the grid alone is thousands
 		//- and nothing reads it but the console command that prints it. Off unless somebody has asked for it.
@@ -6054,9 +6055,32 @@ internal sealed partial class CoreSceneDrawer
 		if ( list is null || list.IsEmpty ) return;
 
 		DrawShapes( list.Shapes, viewProjection, overlay );
+		DrawWires( list.Wires, viewProjection, overlay );
 		DrawRings( list.Rings, viewProjection, overlay );
 		DrawSprites( list.Sprites, camera, viewProjection, overlay );
 		DrawWorldLabels( list.Labels, viewProjection, overlay );
+	}
+
+	//Whole meshes of edges that live on the card, one indexed draw each - see CoreGizmoWire. The vertices are
+	//white and the draw's colour tints them, so changing the gizmo's colour does not rebuild the mesh.
+	private void DrawWires( List<DebugDrawList.Wire> wires, System.Numerics.Matrix4x4 viewProjection, bool overlay )
+	{
+		if ( wires.Count == 0 ) return;
+
+		Span<byte> push = stackalloc byte[96];
+
+		foreach ( var wire in wires )
+		{
+			if ( wire.IgnoreDepth != overlay ) continue;
+
+			var chosen = overlay ? Pick( gizmoLinesOverlay, gizmoLinesOverlayTwo ) : Pick( gizmoLines, gizmoLinesTwo );
+			if ( chosen == 0 ) continue;
+
+			lastGizmoDrawn++;
+
+			CoreRenderDevice.DrawIndexed( chosen, wire.Vertices, wire.Indices, wire.IndexCount,
+				DynamicPush( push, wire.Transform, ( (Color)wire.Color ).ToLinear(), viewProjection ) );
+		}
 	}
 
 	//Draws a pass's shapes in request order, one draw per run of same-styled shapes

@@ -30,7 +30,11 @@ internal static class EnginePlatform
 	public static bool GetDesktopResolution( int monitorIndex, ref int width, ref int height, ref uint refreshRate )
 		=> backend.GetDesktopResolution( monitorIndex, ref width, ref height, ref refreshRate );
 
-	public static float GetDiagonalDpi() => backend.GetDiagonalDpi();
+	/// <summary>The diagonal DPI of the monitor the game window is on, or of the default monitor when there is no window.</summary>
+	public static float GetDiagonalDpi() => GetDiagonalDpi( GetEngineWindowMonitorIndex() );
+
+	/// <summary>The diagonal DPI of a monitor by index; the primary one where the index is not one of ours.</summary>
+	public static float GetDiagonalDpi( int monitorIndex ) => backend.GetDiagonalDpi( monitorIndex );
 
 	public static bool SafeRemoveFile( string file ) => backend.SafeRemoveFile( file );
 

@@ -1,8 +1,11 @@
 //The list under the "+ Add" button: each group the handlers name as a heading, its adds under it. The chrome
-//is design.scss's .editor-popup, and the width is the button's, kept by the popup itself - see ModelAddPopup.
+//is design.scss's .editor-popup. It hangs under the button rather than matching its width - the button is a
+//toolbar square, and a list thirty pixels wide said nothing - see ModelAddPopup.
 
 .model-add-popup
 {
+	min-width: 260px;
+	max-width: 380px;
 	padding: 4px;
 	gap: 4px;
 

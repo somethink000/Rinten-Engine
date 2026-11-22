@@ -17,6 +17,18 @@ public class Program
 			return;
 		}
 
+		if ( args.Length > 0 && args[0] == "gizmo" )
+		{
+			Benchmarks.Collider.ModelColliderGizmoBenchmarks.Run( [50_000, 250_000, 1_000_000] );
+			return;
+		}
+
+		if ( args.Length > 1 && args[0] == "catalog" )
+		{
+			Benchmarks.Assets.ImportCatalogBenchmarks.Run( args[1] );
+			return;
+		}
+
 		//BenchmarkRunner.Run<StringtHashSet>( config );
 		//BenchmarkRunner.Run<MemoryAlloc>( config );
 		//BenchmarkRunner.Run<StringHashing>( config );

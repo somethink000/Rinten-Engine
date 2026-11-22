@@ -119,6 +119,22 @@ internal sealed class DebugDrawList
 		readonly Vertex[] ILived.Borrowed => null;
 	}
 
+	//A whole mesh's edges kept on the card: the vertices and the line index buffer are made once, so a frame is
+	//one indexed draw however many edges there are - see CoreGizmoWire.
+	internal struct Wire : ILived
+	{
+		public ulong Vertices;
+		public ulong Indices;
+		public int IndexCount;
+		public Transform Transform;
+		public Color32 Color;
+		public bool IgnoreDepth;
+		public Life Life;
+
+		Life ILived.Life { readonly get => Life; set => Life = value; }
+		readonly Vertex[] ILived.Borrowed => null;
+	}
+
 	//Triangles in the window's pixels, drawn flat over everything: a box select, the camera speed bar, a picture put on the screen.
 	internal struct Flat : ILived
 	{
@@ -134,6 +150,7 @@ internal sealed class DebugDrawList
 	}
 
 	internal readonly List<Shape> Shapes = new();
+	internal readonly List<Wire> Wires = new();
 	internal readonly List<Ring> Rings = new();
 	internal readonly List<Sprite> Sprites = new();
 	internal readonly List<Label> Labels = new();
@@ -146,7 +163,7 @@ internal sealed class DebugDrawList
 	//A frame that asks for more than this has lost track of what it is drawing; the rest of it is dropped rather than the list emptied.
 	private const int Most = 65536;
 
-	internal bool IsEmpty => Shapes.Count == 0 && Rings.Count == 0 && Sprites.Count == 0 &&
+	internal bool IsEmpty => Shapes.Count == 0 && Wires.Count == 0 && Rings.Count == 0 && Sprites.Count == 0 &&
 		Labels.Count == 0 && Flats.Count == 0 && Models.Count == 0;
 
 	//Everything gone, and every borrowed array back in the pool.
@@ -156,6 +173,7 @@ internal sealed class DebugDrawList
 		foreach ( var flat in Flats ) CoreImmediate.Give( flat.Vertices );
 
 		Shapes.Clear();
+		Wires.Clear();
 		Rings.Clear();
 		Sprites.Clear();
 		Labels.Clear();
@@ -235,6 +253,12 @@ internal sealed class DebugDrawList
 
 	//-- the rest ---------------------------------------------------------------
 
+	internal void Add( in Wire wire )
+	{
+		if ( wire.IndexCount >= 2 && wire.Vertices != 0 && wire.Indices != 0 && Wires.Count < Most )
+			Wires.Add( wire );
+	}
+
 	internal void Add( in Ring ring )
 	{
 		if ( Rings.Count < Most ) Rings.Add( ring );
@@ -276,6 +300,7 @@ internal sealed class DebugDrawList
 		Models.Clear();
 
 		Sweep( Shapes, delta, fixedOnly: false );
+		Sweep( Wires, delta, fixedOnly: false );
 		Sweep( Rings, delta, fixedOnly: false );
 		Sweep( Sprites, delta, fixedOnly: false );
 		Sweep( Labels, delta, fixedOnly: false );
@@ -287,6 +312,7 @@ internal sealed class DebugDrawList
 	internal void AgeFixed()
 	{
 		Sweep( Shapes, 0.0f, fixedOnly: true );
+		Sweep( Wires, 0.0f, fixedOnly: true );
 		Sweep( Rings, 0.0f, fixedOnly: true );
 		Sweep( Sprites, 0.0f, fixedOnly: true );
 		Sweep( Labels, 0.0f, fixedOnly: true );

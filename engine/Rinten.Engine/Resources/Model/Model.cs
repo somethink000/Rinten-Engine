@@ -73,6 +73,10 @@ public sealed partial class Model : Resource
 		var mesh = MeshId;
 		MainThread.Queue( () => CoreResources.Gone( mesh ) );
 
+		//The physics description can hold wire geometry of its own on the card - see CoreGizmoWire.
+		_physics?.Dispose();
+		_physics = default;
+
 		core?.Dispose();
 		core = null;
 

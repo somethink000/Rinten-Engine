@@ -58,24 +58,28 @@ public class ModelCollider : Collider, IHasModel
 		{
 			using ( Gizmo.Scope( $"part {part.GetHashCode()}", part.Transform ) )
 			{
-				foreach ( var sphere in part.Spheres )
+				//In the order the shapes were built, and without the per-type lists the getters would make every frame.
+				foreach ( var shape in part.Parts )
 				{
-					Gizmo.Draw.LineSphere( sphere.Sphere );
-				}
+					switch ( shape )
+					{
+						case PhysicsGroupDescription.BodyPart.SpherePart sphere:
+							Gizmo.Draw.LineSphere( sphere.Sphere );
+							break;
 
-				foreach ( var capsule in part.Capsules )
-				{
-					Gizmo.Draw.LineCapsule( capsule.Capsule );
-				}
+						case PhysicsGroupDescription.BodyPart.CapsulePart capsule:
+							Gizmo.Draw.LineCapsule( capsule.Capsule );
+							break;
 
-				foreach ( var hull in part.Hulls )
-				{
-					Gizmo.Draw.Lines( hull.GetLines() );
-				}
+						case PhysicsGroupDescription.BodyPart.HullPart hull:
+							Gizmo.Draw.Lines( hull.GetLines() );
+							break;
 
-				foreach ( var mesh in part.Meshes )
-				{
-					Gizmo.Draw.LineTriangles( mesh.GetTriangles() );
+						//A collision mesh is kept on the card once and drawn by index - see Gizmo.Draw.LineMesh.
+						case PhysicsGroupDescription.BodyPart.MeshPart mesh:
+							Gizmo.Draw.LineMesh( mesh );
+							break;
+					}
 				}
 			}
 		}

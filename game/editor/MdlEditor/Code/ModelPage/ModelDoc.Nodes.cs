@@ -1700,7 +1700,7 @@ static class ModelDocPhysics
 
 					//Anything else is drawn whole; nothing here knows which piece a node stands for.
 					foreach ( var compiled in part.Meshes )
-						Gizmo.Draw.LineTriangles( compiled.GetTriangles() );
+						Gizmo.Draw.LineMesh( compiled );
 					foreach ( var compiled in part.Spheres )
 						Gizmo.Draw.LineSphere( compiled.Sphere );
 					foreach ( var compiled in part.Capsules )

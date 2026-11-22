@@ -23,6 +23,12 @@ public class Program
 			return;
 		}
 
+		if ( args.Length > 1 && args[0] == "catalog" )
+		{
+			Benchmarks.Assets.ImportCatalogBenchmarks.Run( args[1] );
+			return;
+		}
+
 		//BenchmarkRunner.Run<StringtHashSet>( config );
 		//BenchmarkRunner.Run<MemoryAlloc>( config );
 		//BenchmarkRunner.Run<StringHashing>( config );

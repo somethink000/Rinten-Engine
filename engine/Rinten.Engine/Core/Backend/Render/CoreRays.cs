@@ -34,7 +34,7 @@ internal static class CoreRays
 
 	//Each material's mean colour and glow, as the bake reads them - see BakeMaterial
 	private static readonly Dictionary<Material, (Vec3 Albedo, Vec3 Glow)> known = new();
-	private static readonly Dictionary<Texture, Vec3> means = new();
+	private static readonly Dictionary<(Texture, bool), Vec3> means = new();
 
 	/// <summary>Builds the scene's structure into the view's recording; false where there is nothing to trace.</summary>
 	internal static bool Build( Scene scene )
@@ -163,7 +163,15 @@ internal static class CoreRays
 
 		var tint = CoreResources.LiveTint( material );
 		var albedo = MeanOf( material.GetTexture( "Color" ) ) * new Vec3( tint.r, tint.g, tint.b );
-		albedo *= 1.0f - Math.Clamp( material.GetFloat( "Metalness", 0.0f ), 0.0f, 1.0f );
+		//Metal as complex.shader reads it: the number times its map's mean, blue of a packed rough/metal map
+		if ( CoreResources.Feature( material, "F_METALNESS" ) != 0 )
+		{
+			var map = CoreResources.Feature( material, "F_ROUGH_METAL_MAP" ) != 0
+				? MeanOf( material.GetTexture( "g_tRoughMetal" ), false ).Z
+				: MeanOf( material.GetTexture( "Metalness" ), false ).X;
+
+			albedo *= 1.0f - Math.Clamp( material.GetFloat( "Metalness", 0.0f ) * map, 0.0f, 1.0f );
+		}
 
 		var glow = Vec3.Zero;
 
@@ -178,14 +186,15 @@ internal static class CoreRays
 		return found;
 	}
 
-	private static Vec3 MeanOf( Texture texture )
+	//Colour maps are linearised; data maps (metal) are read as they are
+	private static Vec3 MeanOf( Texture texture, bool colour = true )
 	{
 		if ( texture is null ) return Vec3.One;
-		if ( means.TryGetValue( texture, out var found ) ) return found;
+		if ( means.TryGetValue( (texture, colour), out var found ) ) return found;
 
-		var mean = BakePicture.Of( texture, true )?.Mean() ?? System.Numerics.Vector4.One;
+		var mean = BakePicture.Of( texture, colour )?.Mean() ?? System.Numerics.Vector4.One;
 		found = new Vec3( mean.X, mean.Y, mean.Z );
-		means[texture] = found;
+		means[(texture, colour)] = found;
 		return found;
 	}
 }

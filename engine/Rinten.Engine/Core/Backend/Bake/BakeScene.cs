@@ -15,6 +15,26 @@ internal sealed class BakePicture
 	//The biggest a picture is kept: bounced light is soft, and a cut-out leaf needs no more.
 	private const int Largest = 256;
 
+	private BakePicture[] channels;
+
+	/// <summary>One channel moved into the first, which roughness and metal read; made once per picture.</summary>
+	public BakePicture Channel( int channel )
+	{
+		channels ??= new BakePicture[4];
+		if ( channels[channel] is { } held ) return held;
+
+		var made = new BakePicture { Width = Width, Height = Height, Texels = new Vec4[Texels.Length] };
+
+		for ( var i = 0; i < Texels.Length; ++i )
+		{
+			var t = Texels[i];
+			var value = channel switch { 0 => t.X, 1 => t.Y, 2 => t.Z, _ => t.W };
+			made.Texels[i] = new Vec4( value, value, value, 1.0f );
+		}
+
+		return channels[channel] = made;
+	}
+
 	/// <summary>Reads a texture at the first level no wider than the bake wants, colour linearised.</summary>
 	public static BakePicture Of( Texture texture, bool colour )
 	{
@@ -263,16 +283,20 @@ internal sealed class BakeMaterial
 		}
 
 		//As complex.shader: the number times the picture, nought metal and fully rough where the feature is off
+		var packed = CoreResources.Feature( material, "F_ROUGH_METAL_MAP" ) != 0
+			? Picture( material.GetTexture( "g_tRoughMetal" ), false, pictures )
+			: null;
+
 		if ( CoreResources.Feature( material, "F_METALNESS" ) != 0 )
 		{
 			made.Metalness = Math.Clamp( material.GetFloat( "Metalness", 0.0f ), 0.0f, 1.0f );
-			made.MetalnessMap = Picture( material.GetTexture( "Metalness" ), false, pictures );
+			made.MetalnessMap = packed?.Channel( 2 ) ?? Picture( material.GetTexture( "Metalness" ), false, pictures );
 		}
 
 		if ( CoreResources.Feature( material, "F_ROUGHNESS" ) != 0 )
 		{
 			made.Roughness = material.GetFloat( "Roughness", 0.5f );
-			made.RoughnessMap = Picture( material.GetTexture( "Roughness" ), false, pictures );
+			made.RoughnessMap = packed?.Channel( 1 ) ?? Picture( material.GetTexture( "Roughness" ), false, pictures );
 		}
 
 		var strength = material.GetFloat( "EmissionStrength", 0.0f );

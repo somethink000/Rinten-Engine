@@ -536,6 +536,18 @@ internal static unsafe partial class VkPipelines
 						blendAttachment.DstAlphaBlendFactor = BlendFactor.One;
 						blendAttachment.AlphaBlendOp = BlendOp.Add;
 					}
+					else if ( blend == 7 )
+					{
+						//Premultiplied: the colour comes already weighed by its own coverage, so what only adds - a glow
+						//that does not block, alpha nought - adds its colour without covering what is behind it
+						blendAttachment.BlendEnable = true;
+						blendAttachment.SrcColorBlendFactor = BlendFactor.One;
+						blendAttachment.DstColorBlendFactor = BlendFactor.OneMinusSrcAlpha;
+						blendAttachment.ColorBlendOp = BlendOp.Add;
+						blendAttachment.SrcAlphaBlendFactor = BlendFactor.One;
+						blendAttachment.DstAlphaBlendFactor = BlendFactor.OneMinusSrcAlpha;
+						blendAttachment.AlphaBlendOp = BlendOp.Add;
+					}
 					else if ( blend == 5 )
 					{
 						//Added by its own alpha: as much of what is drawn as the alpha says, on top of what is

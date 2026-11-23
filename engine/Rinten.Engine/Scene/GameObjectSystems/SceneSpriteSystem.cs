@@ -27,6 +27,9 @@ public sealed class SceneSpriteSystem : GameObjectSystem<SceneSpriteSystem>
 
 	Dictionary<ulong, SpriteBatchSceneObject> RenderGroups = [];
 
+	//How many batches this system has made - see CreateRenderGroup
+	private int batchesMade;
+
 	public SceneSpriteSystem( Scene scene ) : base( scene )
 	{
 		Listen( Stage.FinishUpdate, 1, UpdateSprites, "UpdateSprites" ); //We want to upload after particles update
@@ -391,6 +394,10 @@ public sealed class SceneSpriteSystem : GameObjectSystem<SceneSpriteSystem>
 		renderGroupObject.Opaque = (config.Flags & InstanceGroupFlags.Opaque) != 0;
 		renderGroupObject.Material = config.Material;
 		renderGroupObject.DrawOrder = config.SortOrder;
+
+		//Batches of one order - sprites that differ in blending, material or tags - in the order they were made, the same
+		//every frame. Left at nought the tie fell to the world's set of objects, whose order is a hash set's
+		renderGroupObject.DrawTie = ++batchesMade;
 		renderGroupObject.Tags.SetFrom( new TagSet( config.Tags.Select( StringToken.GetValue ) ) );
 		config.RenderOptions.Apply( renderGroupObject );
 

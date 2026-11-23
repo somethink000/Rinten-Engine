@@ -46,15 +46,22 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 	/// <summary>Every <see cref="GlobalLight2D"/>, added together, already multiplied by its intensity.</summary>
 	public Color GlobalLight { get; private set; }
 
-	/// <summary>The scene's 2D lights this frame, the nearest to the camera first.</summary>
+	/// <summary>The scene's 2D lights this frame, those reaching nearest the camera first.</summary>
 	public IReadOnlyList<Record> Lights => lights;
+
+	//How far short of the camera each found light's reach falls, for picking which a frame carries - see Gather
+	readonly List<float> shortOf = new();
+	readonly List<int> picked = new();
+	Comparison<int> byReach;
+
+	int ByReach( int a, int b ) => shortOf[a] != shortOf[b] ? shortOf[a].CompareTo( shortOf[b] ) : a.CompareTo( b );
 
 	public SceneLight2DSystem( Scene scene ) : base( scene )
 	{
 	}
 
-	/// <summary>Looks the scene over again - see CoreSceneRenderer.SetLight2D, which asks once a frame.</summary>
-	internal void Gather()
+	/// <summary>Looks the scene over again for a view whose eye is here - see CoreSceneRenderer.SetLight2D, which asks once a view.</summary>
+	internal void Gather( Vector3 eye )
 	{
 		lights.Clear();
 		found.Clear();
@@ -107,16 +114,30 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 
 		Active = anyGlobal || found.Count > 0 || Glows;
 
-		//The nearest first, so a scene with more lights than a frame carries keeps the ones on screen
-		if ( found.Count > MostLights && Scene.Camera.IsValid() )
+		//Where a scene has more lights than a frame carries, those whose reach comes nearest the eye on the plane: one whose
+		//circle takes the eye in first, and the bigger the further in. By the lights' own distance alone, as it was, a
+		//handful of small lights near the middle - bullets, each carrying one - pushed out the big light of the room the
+		//player stood in, and the room went dark and lit again as they came and went
+		picked.Clear();
+		shortOf.Clear();
+
+		for ( var i = 0; i < found.Count; i++ )
 		{
-			var eye = Scene.Camera.WorldPosition;
-			found.Sort( ( a, b ) => a.WorldPosition.DistanceSquared( eye ).CompareTo( b.WorldPosition.DistanceSquared( eye ) ) );
+			picked.Add( i );
+
+			var at = found[i].WorldPosition;
+			var apart = MathF.Sqrt( ( ( at.x - eye.x ) * ( at.x - eye.x ) ) + ( ( at.y - eye.y ) * ( at.y - eye.y ) ) );
+
+			shortOf.Add( apart - found[i].Range );
 		}
 
-		for ( var i = 0; i < found.Count && i < MostLights; i++ )
+		//Ties - lights standing together - go by the order they were found in, so the same lights are kept frame to frame
+		if ( found.Count > MostLights )
+			picked.Sort( byReach ??= ByReach );
+
+		for ( var n = 0; n < picked.Count && n < MostLights; n++ )
 		{
-			var light = found[i];
+			var light = found[picked[n]];
 			var spot = light as SpotLight2D;
 
 			lights.Add( new Record(

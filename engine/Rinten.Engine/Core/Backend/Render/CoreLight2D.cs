@@ -493,8 +493,9 @@ internal static class CoreLight2D
 		var vertex = CoreShaderCache.Pass( EngineShaders.Light2DSprites, "MainVs", CoreShaderCompiler.Stage.Vertex, defines );
 		var pixel = CoreShaderCache.Pass( EngineShaders.Light2DSprites, "MainPs", CoreShaderCompiler.Stage.Pixel, defines );
 
+		//Premultiplied, so a glow that does not block adds to the scene without marking it as blocking - see light2d_sprites.slang
 		made = vertex is null || pixel is null ? 0 : CoreRenderDevice.CreatePipeline( vertex, pixel, CoreRender.VertexLayoutKind.None,
-			blend: true, target: CoreRender.TargetKind.Picture, pictureFormat: format );
+			blend: true, premultiplied: true, target: CoreRender.TargetKind.Picture, pictureFormat: format );
 
 		Warn( made, $"the 2D light's {( tiles ? "tiles" : "sprites" )}" );
 

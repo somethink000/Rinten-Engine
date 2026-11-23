@@ -141,15 +141,19 @@ static const float LeastPenetration = 1.5;
 bool SelfShadow() { return g_frame[0].light2dInfo.y > 0.5; }
 
 //How far from a point in the texel at the nearest blocking texel is, at least - a ray can stride this far without
-//passing one. In blocks: to the nearest blocking block's middle, less its half diagonal, then in pixels
+//passing one. In blocks: from this block's middle to the nearest blocking block's middle, less that block's half
+//diagonal, less how far the point is from this block's middle; then in pixels. The flood found the blocker nearest the
+//block's middle, not the point: measured from the point to that one, as it was, a blocker nearer the point was missed
+//by up to three pixels, and a ray stepped over a corner or not as the light moved - the shadow's edge shook with it
 float Clearance( int2 at, float2 position )
 {
-	float2 offset = Read( g_pictures.z, at / 2 ).xy;
+	int2 block = at / 2;
+	float2 offset = Read( g_pictures.z, block ).xy;
 	if ( !Seeded( offset ) ) return g_extra.x;
 
-	float2 apart = float2( at / 2 ) + 0.5 + offset - ( position * 0.5 );
+	float2 fromMiddle = ( position * 0.5 ) - ( float2( block ) + 0.5 );
 
-	return ( length( apart ) - 0.71 ) * 2.0;
+	return ( length( offset ) - 0.71 - length( fromMiddle ) ) * 2.0;
 }
 
 //One ray over its stretch: what it hit in rgb, and in a whether it went through untouched. A ray of the first
@@ -310,9 +314,11 @@ float3 Gathered( float2 here )
 //Angles a light's shadow map has about it - see CoreLight2D.ShadowAngles
 static const int ShadowAngles = 4096;
 
-//How many strides a shadow map's ray may take to the light's range, and the least of one as a share of that range
-static const int MostShadowSteps = 512;
-static const float LeastShadowStrideShare = 256.0;
+//How many strides a shadow map's ray may take to the light's range, and the least of one as a share of that range.
+//A ray skimming a wall strides the least the whole way, so the least has to be small - half a pixel for a light of a
+//normal range - or it strides over a blocker's corner, and the steps enough for it to get to the end at that
+static const int MostShadowSteps = 1024;
+static const float LeastShadowStrideShare = 512.0;
 
 //Angles read each side of a point's way to a light, looking for the nearest blocked one - see Shadow
 static const int ShadowSearch = 6;
@@ -384,6 +390,13 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 	float seen = light.range;
 	float least = max( 0.5, light.range / LeastShadowStrideShare );
 
+	//A light standing in a blocker - a lamp set into a wall, a torch held up against one - shines out of it: the
+	//blocker it stands in is passed through, and only what is met after it blocks. Stopped at once, every ray of such
+	//a light was blocked where it started and the light went out, and as it moved over a blocking texel's edge it
+	//went on and off
+	int2 own = int2( floor( light.position ) );
+	bool leaving = enter <= 0.0 && Inside( own ) && Solid( own );
+
 	for ( int steps = 0; steps < MostShadowSteps && t < leave; steps++ )
 	{
 		float2 position = light.position + ( toward * t );
@@ -397,18 +410,26 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 
 		if ( Solid( at ) )
 		{
+			if ( leaving )
+			{
+				t += 0.5;
+				continue;
+			}
+
 			seen = EntryInto( at, light.position, toward, t );
 			break;
 		}
 
+		leaving = false;
 		t += max( Clearance( at, position ), least );
 	}
 
 	g_out[int2( angle, i )] = float4( seen, 0.0, 0.0, 0.0 );
 }
 
-//How far light i sees along an angle, between the map's two nearest
-float Seen( int i, float turn )
+//The map's two angles either side of this one for light i: how far each sees in x and y, and how far between the two
+//this one lies in z
+float3 Around( int i, float turn )
 {
 	float place = ( turn / ( 2.0 * Pi ) * float( ShadowAngles ) ) - 0.5;
 	float corner = floor( place );
@@ -417,7 +438,14 @@ float Seen( int i, float turn )
 	float near = Read( g_extra.z, int2( ( a + ShadowAngles ) % ShadowAngles, i ) ).x;
 	float far = Read( g_extra.z, int2( ( a + 1 + ShadowAngles ) % ShadowAngles, i ) ).x;
 
-	return lerp( near, far, place - corner );
+	return float3( near, far, place - corner );
+}
+
+//How far light i sees along an angle, between the map's two nearest
+float Seen( int i, float turn )
+{
+	float3 around = Around( i, turn );
+	return lerp( around.x, around.y, around.z );
 }
 
 //Whether light i reaches this far this way, between the map's two nearest angles: each one's answer, blended. Their
@@ -426,14 +454,22 @@ float Seen( int i, float turn )
 //by a ray's width. Blended answers slide an edge from one ray to the next as the light moves
 float Visible( int i, float turn, float distance )
 {
-	float place = ( turn / ( 2.0 * Pi ) * float( ShadowAngles ) ) - 0.5;
-	float corner = floor( place );
-	int a = int( corner );
+	float3 around = Around( i, turn );
+	return lerp( around.x + 0.5 >= distance ? 1.0 : 0.0, around.y + 0.5 >= distance ? 1.0 : 0.0, around.z );
+}
 
-	float near = Read( g_extra.z, int2( ( a + ShadowAngles ) % ShadowAngles, i ) ).x;
-	float far = Read( g_extra.z, int2( ( a + 1 + ShadowAngles ) % ShadowAngles, i ) ).x;
+//How much of light i a blocker's texel this far from it this way takes: lit as far into the blocker as the penetration,
+//fading on the way. Each of the map's two nearest angles' answer, blended, as Visible does - their distances blended
+//were neither at a corner, where one ray stops on this blocker and the next goes past it, and lit the blocker deep
+//inside in streaks that moved as the light did
+float Penetrated( int i, float turn, float distance, float penetration )
+{
+	float3 around = Around( i, turn );
 
-	return lerp( near + 0.5 >= distance ? 1.0 : 0.0, far + 0.5 >= distance ? 1.0 : 0.0, place - corner );
+	float near = 1.0 - smoothstep( penetration * 0.5, penetration, distance - around.x );
+	float far = 1.0 - smoothstep( penetration * 0.5, penetration, distance - around.y );
+
+	return lerp( near, far, around.z );
 }
 
 //How much of light i reaches a point this far from it this way, from its map. None where the way to the light's middle
@@ -446,9 +482,7 @@ float Shadow( int i, float2 apart, float distance, float source, bool solid, flo
 	float turn = atan2( apart.y, apart.x );
 	if ( turn < 0.0 ) turn += 2.0 * Pi;
 
-	float past = distance - Seen( i, turn );
-
-	if ( solid ) return 1.0 - smoothstep( penetration * 0.5, penetration, past );
+	if ( solid ) return Penetrated( i, turn, distance, penetration );
 
 	float open = Visible( i, turn, distance );
 	if ( open <= 0.0 ) return 0.0;

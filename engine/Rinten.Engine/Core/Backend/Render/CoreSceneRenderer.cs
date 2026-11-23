@@ -507,7 +507,7 @@ internal static unsafe class CoreSceneRenderer
 		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "block light 2d" );
-		SetLight2D( block, scene );
+		SetLight2D( block, scene, camera );
 		CoreRenderDevice.ZoneEnd();
 
 		CoreRenderDevice.ZoneBegin( "block fog" );
@@ -688,12 +688,12 @@ internal static unsafe class CoreSceneRenderer
 	//The scene's 2D lighting - see Light2DAt here and in sprite.slang, and Lights2DAt. Off in a scene with no 2D light,
 	//so a sprite lit in 2D is drawn unlit rather than black in a scene nobody has lit. Gathered here, once a frame,
 	//rather than in the scene's update, which an editor scene that is not playing does not run
-	internal static void SetLight2D( float[] block, Scene scene )
+	internal static void SetLight2D( float[] block, Scene scene, Vector3 eye )
 	{
 		var system = scene.GetSystem<SceneLight2DSystem>();
 		if ( system is null ) return;
 
-		system.Gather();
+		system.Gather( eye );
 
 		if ( !system.Active ) return;
 

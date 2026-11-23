@@ -16,6 +16,17 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 	internal Dictionary<Guid, SpriteRenderer> Components = new();
 
+	//When each of Components came into the batch - see InOrder
+	private readonly Dictionary<Guid, long> joined = new();
+	private static long joins;
+
+	//Components in the order they came into the batch, which is the order they are drawn in where the batch is not sorted
+	//and how a sort breaks a tie. A dictionary's own order, as it was, put a sprite made after another was taken out
+	//into the hole it left: which of two sprites of one Order In Layer was on top was down to what had come and gone
+	//before them, and changed as the game made and destroyed them
+	private readonly List<SpriteRenderer> inOrder = new();
+	private bool reorder;
+
 	private static ComputeShader SpriteComputeShader => field ??= new( "sprite/sprite_cs" );
 	private static ComputeShader SortComputeShader => field ??= new( "sort_cs" );
 	private static readonly uint[] ZeroUint = [0];
@@ -50,9 +61,6 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		/// <summary>Pixel art: the picture is read as hard-edged texels, see SpriteRenderer.TextureFilter. The shader does it, because a picture here is bound with the one sampler it was made with and there is no table of others to pick from.</summary>
 		Pixelated = 0x20,
-
-		/// <summary>BlendSheetUV.w is how far to set the quad back in depth, as a fraction of its depth; see TileMap.SetBack.</summary>
-		SetBack = 0x40,
 	}
 
 	//GPU Resident representation of a sprite. Four-byte packing, which is how sprite_ps.shader reads it: packed to sixteen, Mono lays a Vector4
@@ -304,14 +312,34 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 	public void RegisterSprite( Guid id, SpriteRenderer component )
 	{
 		Components[id] = component;
+		if ( joined.TryAdd( id, ++joins ) ) reorder = true;
 		OnChanged();
 	}
 
 	public void UnregisterSprite( Guid id )
 	{
 		Components.Remove( id );
+		if ( joined.Remove( id ) ) reorder = true;
 		OnChanged();
 	}
+
+	//Components, in the order they joined the batch
+	private List<SpriteRenderer> InOrder()
+	{
+		if ( !reorder && inOrder.Count == Components.Count ) return inOrder;
+
+		inOrder.Clear();
+		inOrder.AddRange( Components.Values );
+		inOrder.Sort( byJoining ??= ByJoining );
+
+		reorder = false;
+		return inOrder;
+	}
+
+	private Comparison<SpriteRenderer> byJoining;
+
+	private int ByJoining( SpriteRenderer a, SpriteRenderer b )
+		=> joined.GetValueOrDefault( a.Id ).CompareTo( joined.GetValueOrDefault( b.Id ) );
 
 	public void UnregisterSpriteGroup( Guid ownerId )
 	{
@@ -326,9 +354,10 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 	public void UpdateSprite( Guid id, SpriteRenderer component )
 	{
-		if ( Components.ContainsKey( id ) )
+		if ( Components.TryGetValue( id, out var had ) )
 		{
 			Components[id] = component;
+			if ( !ReferenceEquals( had, component ) ) reorder = true;
 			OnChanged();
 		}
 	}
@@ -390,7 +419,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 			}
 
 			int index = 0;
-			foreach ( var component in Components.Values )
+			foreach ( var component in InOrder() )
 			{
 				_componentBuffer[index++] = component;
 			}
@@ -531,11 +560,12 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 			Offset = c.Pivot
 		};
 
+		//The furthest corner from where it stands, whichever way it is turned: the longer side alone, as it was, left the
+		//corners of a turned sprite out of the box, and a sprite at the screen's edge was culled while they still showed
 		var pivot = c.Pivot;
-		float halfSize = MathF.Max(
-			MathF.Max( pivot.x, 1f - pivot.x ) * 2f * spriteScale.x,
-			MathF.Max( pivot.y, 1f - pivot.y ) * 2f * spriteScale.y
-		);
+		var reachX = MathF.Max( pivot.x, 1f - pivot.x ) * 2f * spriteScale.x;
+		var reachY = MathF.Max( pivot.y, 1f - pivot.y ) * 2f * spriteScale.y;
+		float halfSize = MathF.Sqrt( ( reachX * reachX ) + ( reachY * reachY ) );
 		var expand = new Vector3( halfSize, halfSize, halfSize );
 		return (Vector3.Min( local.mins, spritePos - expand ), Vector3.Max( local.maxs, spritePos + expand ));
 	}
@@ -788,7 +818,9 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		//What is sorted is where each sprite is, not the sprite. A sprite is a hundred and thirty-six bytes and a
 		//sort moves its items n log n times; the order is four, and the sprites are then laid out once, in order.
-		Array.Sort( _sortKeys, _sortOrder, 0, count );
+		//Ties - every sprite of a flat 2D scene stands at one depth - go by where each is in the batch, which is the order
+		//they joined it: Array.Sort is not stable, and which of two sprites at one depth was on top changed as they moved
+		Array.Sort( _sortOrder, 0, count, sortComparer ??= new DepthThenPlace( this ) );
 
 		for ( var i = 0; i < count; i++ )
 		{
@@ -826,6 +858,17 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 	private float[] _sortKeys = [];
 	private int[] _sortOrder = [];
+	private DepthThenPlace sortComparer;
+
+	//Furthest first, and a tie by place in the batch
+	private sealed class DepthThenPlace( SpriteBatchSceneObject batch ) : IComparer<int>
+	{
+		public int Compare( int a, int b )
+		{
+			var keys = batch._sortKeys;
+			return keys[a] != keys[b] ? keys[a].CompareTo( keys[b] ) : a.CompareTo( b );
+		}
+	}
 	private SpriteData[] _sortScratch = [];
 
 	//One buffer for each view a frame has drawn this batch in so far.

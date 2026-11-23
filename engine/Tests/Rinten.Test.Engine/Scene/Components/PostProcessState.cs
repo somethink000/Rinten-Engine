@@ -8,8 +8,8 @@ namespace SceneTests.Components;
 [DoNotParallelize]
 public class PostProcessStateTest : SceneTest
 {
-	//PostProcessVolume's defaults match the source initializers: priority 0, full blend weight, a 50
-	//unit blend distance, editor preview on, and the VolumeComponent default of a 100 unit box volume.
+	//PostProcessVolume's defaults match the source initializers: priority 0, full blend weight, a
+	//50-inch blend distance (1.27 m), editor preview on, and the VolumeComponent default of a 100-inch (2.54 m) box volume.
 	[TestMethod]
 	public void VolumeDefaultsMatchSource()
 	{
@@ -21,11 +21,11 @@ public class PostProcessStateTest : SceneTest
 
 		Assert.AreEqual( 0, volume.Priority );
 		Assert.AreEqual( 1.0f, volume.BlendWeight );
-		Assert.AreEqual( 50.0f, volume.BlendDistance );
+		Assert.AreEqual( 1.27f, volume.BlendDistance, 0.0001f );
 		Assert.IsTrue( volume.EditorPreview );
 
 		Assert.AreEqual( SceneVolume.VolumeTypes.Box, volume.SceneVolume.Type );
-		Assert.AreEqual( BBox.FromPositionAndSize( 0, 100 ), volume.SceneVolume.Box );
+		Assert.AreEqual( BBox.FromPositionAndSize( 0, 2.54f ), volume.SceneVolume.Box );
 		Assert.IsFalse( volume.IsInfinite );
 	}
 

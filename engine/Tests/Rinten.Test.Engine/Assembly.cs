@@ -36,6 +36,11 @@ public class TestInit
 		GlobalContext.Current.TypeLibrary.AddAssembly( typeof( Facepunch.ActionGraphs.ActionGraph ).Assembly, false );
 		GlobalContext.Current.TypeLibrary.AddAssembly( typeof( TestInit ).Assembly, true );
 
+		//A tool mounts the base addon's assets for the editor's fonts - Inter for text and Material Icons for every
+		//icon. Without them a panel measures and lays out with a fallback font, and the layout tests measure that.
+		var editorAssets = new LocalFileSystem( gameFolder ).CreateSubSystem( "/addons/base/Assets" );
+		Rinten.FontManager.Instance.LoadAll( editorAssets );
+
 		GlobalToolsNamespace.EditorTypeLibrary = new TypeLibrary();
 		GlobalToolsNamespace.EditorTypeLibrary.AddIntrinsicTypes();
 		GlobalToolsNamespace.EditorTypeLibrary.AddAssembly( typeof( Vector3 ).Assembly, false );

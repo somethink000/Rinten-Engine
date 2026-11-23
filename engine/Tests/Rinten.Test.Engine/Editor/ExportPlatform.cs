@@ -24,7 +24,7 @@ public class ExportPlatformTest
 				$"{platform.Id} shares a bin folder with another platform" );
 		}
 
-		Assert.AreEqual( 5, ExportPlatform.All.Count, "Windows, Linux, macOS, Web and Android" );
+		Assert.AreEqual( 6, ExportPlatform.All.Count, "Windows, Linux, Linux Arm, macOS, Web and Android" );
 	}
 
 	//What a build's folder is named after, which is what somebody reads in a folder of builds

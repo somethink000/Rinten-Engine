@@ -30,6 +30,22 @@ namespace AddonTests
 
 		}
 
+		//A local project's name may itself contain dots ("local.bench.core"); a remote ident keeps to one separator.
+		[TestMethod]
+		public void ParseIdentWithADottedLocalProjectName()
+		{
+			Assert.IsFalse( Package.TryParseIdent( "too.many.dots", out var _ ) );
+
+			Assert.IsTrue( Package.TryParseIdent( "local.bench.core#local", out var tagged ) );
+			Assert.AreEqual( "local", tagged.org );
+			Assert.AreEqual( "bench.core", tagged.package );
+			Assert.IsTrue( tagged.local );
+
+			Assert.IsTrue( Package.TryParseIdent( "local.bench.core", out var plain ) );
+			Assert.AreEqual( "local", plain.org );
+			Assert.AreEqual( "bench.core", plain.package );
+		}
+
 		[TestMethod]
 		public void ParseIdentWithVersion()
 		{

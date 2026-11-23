@@ -18,7 +18,7 @@ public partial class FileSystemTest
 		System.IO.Directory.CreateDirectory( ".rinten/TestFolder" );
 
 		Rinten.EngineFileSystem.Shutdown();
-		Rinten.EngineFileSystem.Initialize( ".rinten/TestFolder", true );
+		Rinten.EngineFileSystem.Initialize( System.IO.Path.GetFullPath( ".rinten/TestFolder" ), true );
 
 		Rinten.EngineFileSystem.Root.WriteAllText( "root_text_file.txt", "Hello" );
 

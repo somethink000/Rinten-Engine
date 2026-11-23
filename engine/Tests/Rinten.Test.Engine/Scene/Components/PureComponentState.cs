@@ -205,8 +205,8 @@ public class PureComponentStateTest : SceneTest
 		Assert.AreEqual( SoundscapeTrigger.TriggerType.Point, trigger.Type );
 		Assert.IsTrue( trigger.StayActiveOnExit );
 		Assert.AreEqual( 1.0f, trigger.Volume );
-		Assert.AreEqual( 500.0f, trigger.Radius );
-		Assert.AreEqual( new Vector3( 50, 50, 50 ), trigger.BoxSize );
+		Assert.AreEqual( 12.5f, trigger.Radius );
+		Assert.AreEqual( new Vector3( 1.27f ), trigger.BoxSize );
 		Assert.IsFalse( trigger.Playing );
 
 		//Point: heard from anywhere
@@ -220,8 +220,8 @@ public class PureComponentStateTest : SceneTest
 
 		//Box: local-space box from -BoxSize to +BoxSize
 		trigger.Type = SoundscapeTrigger.TriggerType.Box;
-		Assert.IsTrue( trigger.TestListenerPosition( new Vector3( 1000, 0, 40 ) ) );
-		Assert.IsFalse( trigger.TestListenerPosition( new Vector3( 1000, 0, 80 ) ) );
+		Assert.IsTrue( trigger.TestListenerPosition( new Vector3( 1000, 0, 1 ) ) );
+		Assert.IsFalse( trigger.TestListenerPosition( new Vector3( 1000, 0, 2 ) ) );
 	}
 
 	//A sphere trigger far away from the listener (which sits at the origin headless) is never
@@ -319,7 +319,7 @@ public class PureComponentStateTest : SceneTest
 		Assert.AreEqual( 0, dsp.Priority );
 		Assert.IsNull( dsp.Dsp.Name );
 		Assert.AreEqual( SceneVolume.VolumeTypes.Box, dsp.SceneVolume.Type );
-		Assert.AreEqual( BBox.FromPositionAndSize( 0, 100 ), dsp.SceneVolume.Box );
+		Assert.AreEqual( BBox.FromPositionAndSize( 0, 2.54f ), dsp.SceneVolume.Box );
 		Assert.IsFalse( dsp.IsInfinite );
 
 		Assert.AreSame( dsp, scene.Volumes.FindSingle<DspVolume>( Vector3.Zero ) );

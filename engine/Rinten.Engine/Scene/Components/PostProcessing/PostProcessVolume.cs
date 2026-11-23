@@ -35,6 +35,11 @@ public class PostProcessVolume : VolumeComponent, Component.ExecuteInEditor
 			return BlendWeight;
 		}
 
+		//Outside the volume there is nothing to blend with. The edge distance is unsigned, so the containment
+		//test is what tells the two apart - without it every point in the scene weighed the same as the middle.
+		if ( !SceneVolume.Test( WorldTransform, pos ) )
+			return 0.0f;
+
 		var distance = GetEdgeDistance( pos );
 		return MathX.Remap( distance, 0, BlendDistance, 0, BlendWeight );
 	}

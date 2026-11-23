@@ -9,6 +9,29 @@ namespace EngineTests;
 [DoNotParallelize]
 public class ShaderCacheTest
 {
+	private static string isolatedFolder;
+
+	//A cache of the test's own, so the person's own compiled shaders - which are merged in under the baked file -
+	//neither change the counts here nor get written to by the test.
+	[ClassInitialize]
+	public static void IsolateLocalCache( TestContext context )
+	{
+		isolatedFolder = Path.Combine( Path.GetTempPath(), $"rinten-shadercache-local-{Guid.NewGuid():N}" );
+		Directory.CreateDirectory( isolatedFolder );
+
+		Environment.SetEnvironmentVariable( "RINTEN_SHADER_CACHE", Path.Combine( isolatedFolder, "shaders.cache" ) );
+		CoreShaderCache.Forget();
+	}
+
+	[ClassCleanup]
+	public static void RestoreLocalCache()
+	{
+		Environment.SetEnvironmentVariable( "RINTEN_SHADER_CACHE", null );
+		CoreShaderCache.Forget();
+
+		try { Directory.Delete( isolatedFolder, true ); } catch ( IOException ) { }
+	}
+
 	//A cache with nothing in it is not an error - it is what the first run on a machine has, and what a platform with no compiler falls back from.
 	[TestMethod]
 	public void AnEmptyCacheWritesAndReads()

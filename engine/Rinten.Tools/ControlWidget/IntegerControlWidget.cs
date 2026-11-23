@@ -28,6 +28,12 @@ public class IntegerControlWidget : FloatControlWidget
 	internal new static object StringToValueImpl( string text, SerializedProperty property )
 	{
 		Type underlyingType = Nullable.GetUnderlyingType( property.PropertyType ) ?? property.PropertyType;
+
+		//A whole number that is already one keeps every bit. ToLongEval goes through a double for formulas,
+		//which cannot hold an Int64's low bits - a value typed into an Int64 field came back changed.
+		if ( long.TryParse( text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var exact ) )
+			return Convert.ChangeType( exact, underlyingType );
+
 		return Convert.ChangeType( text.ToLongEval( property.As.Long ), underlyingType );
 	}
 

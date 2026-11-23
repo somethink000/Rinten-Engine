@@ -318,6 +318,10 @@ internal static class CoreShaderCache
 	{
 		get
 		{
+			//An explicit file wins, so a test or a bench neither reads nor writes the cache of the person running it.
+			var asked = Environment.GetEnvironmentVariable( "RINTEN_SHADER_CACHE" );
+			if ( !string.IsNullOrEmpty( asked ) ) return asked;
+
 			var root = Environment.GetFolderPath( Environment.SpecialFolder.LocalApplicationData );
 			if ( string.IsNullOrEmpty( root ) ) root = Path.GetTempPath();
 

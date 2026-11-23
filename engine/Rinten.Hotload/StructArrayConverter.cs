@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Linq;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -14,24 +12,12 @@ namespace Rinten
 
 		static StructArrayConverter()
 		{
-			try
-			{
-				var memMoveFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-				var memMoveArgTypes = typeof( MemmoveDelegate )
-					.GetMethod( "Invoke" )!
-					.GetParameters()
-					.Select( x => x.ParameterType )
-					.ToArray();
-
-				var memmoveNet9 = typeof( Buffer ).GetMethod( "_Memmove", memMoveFlags, memMoveArgTypes );
-				var memmoveNet7 = typeof( Buffer ).GetMethod( "Memmove", memMoveFlags, memMoveArgTypes );
-				var memmoveNet10 = typeof( Buffer ).GetMethod( "MemmoveInternal", memMoveFlags, memMoveArgTypes );
-
-				MemmoveImpl = (memmoveNet10 ?? memmoveNet9 ?? memmoveNet7)?.CreateDelegate<MemmoveDelegate>();
-			}
-			catch
-			{
-			}
+			//cpblk under the hood, so this is the same unaligned block copy the runtime's own memmove does.
+			//Reflecting into a private Buffer helper used to work, but .NET 11 turned it into a generic
+			//Buffer.Memmove<T> taking an element count, so the old lookup silently found nothing and left
+			//MemmoveImpl null - which then blew up as a null reference on the first block copy.
+			MemmoveImpl = ( ref byte dest, ref byte src, nuint len ) =>
+				Unsafe.CopyBlockUnaligned( ref dest, ref src, (uint)len );
 		}
 
 		public static bool CanCopyHigherRankArrays => MemmoveImpl is not null;

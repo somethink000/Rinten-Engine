@@ -199,7 +199,11 @@ public partial class CompilerTest
 		//Editor Dlls
 		{
 			int editorFolderId = 0;
-			var editorFolders = System.IO.Directory.EnumerateDirectories( codePath, "editor", SearchOption.AllDirectories ).ToArray();
+			var editorFolders = new System.IO.DirectoryInfo( codePath )
+				.EnumerateDirectories( "*", SearchOption.AllDirectories )
+				.Where( d => string.Equals( d.Name, "editor", System.StringComparison.OrdinalIgnoreCase ) )
+				.Select( d => d.FullName )
+				.ToArray();
 			if ( editorFolders.Count() > 0 )
 			{
 				var compilerSettings = new Compiler.Configuration();

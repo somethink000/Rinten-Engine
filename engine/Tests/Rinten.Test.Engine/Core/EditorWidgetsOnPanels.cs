@@ -2,6 +2,9 @@
 using Rinten;
 using Rinten.UI;
 using System.Linq;
+using Button = Editor.Button;
+using Checkbox = Editor.Checkbox;
+using Option = Editor.Option;
 
 namespace EngineTests;
 

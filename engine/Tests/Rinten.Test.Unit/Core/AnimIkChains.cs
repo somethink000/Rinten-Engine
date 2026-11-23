@@ -208,11 +208,13 @@ public class AnimIkChainTests
 
 		var target = Target( new Vector3( 0.0f, 0.0f, -1.0f ) );
 
-		Assert.IsTrue( CoreAnimRuntime.PoseIkChain( forward, 0, [1, 2, 3, 4], target, 1.0f, 0.0f, true, Vector3.Forward ) );
-		Assert.IsTrue( CoreAnimRuntime.PoseIkChain( back, 0, [1, 2, 3, 4], target, 1.0f, 0.0f, true, -Vector3.Forward ) );
+		//The knee has to name a side the chain can actually fold to. The chain runs along -Z, the same way the target lies,
+		//so a knee pointing along +-Z has no sideways component to give and cannot decide between left and right.
+		Assert.IsTrue( CoreAnimRuntime.PoseIkChain( forward, 0, [1, 2, 3, 4], target, 1.0f, 0.0f, true, Vector3.Right ) );
+		Assert.IsTrue( CoreAnimRuntime.PoseIkChain( back, 0, [1, 2, 3, 4], target, 1.0f, 0.0f, true, -Vector3.Right ) );
 
-		Assert.IsTrue( Where( forward, 3 ).x > 0.05f, "forward should fold the joints one way" );
-		Assert.IsTrue( Where( back, 3 ).x < -0.05f, "back should fold them the other" );
+		Assert.IsTrue( Where( forward, 3 ).x > 0.05f, $"forward should fold the joints one way - got {Where( forward, 3 )} (twist {Where( forward, 2 )})" );
+		Assert.IsTrue( Where( back, 3 ).x < -0.05f, $"back should fold them the other - got {Where( back, 3 )} (twist {Where( back, 2 )})" );
 	}
 
 	//A chain of one segment has nothing to bend, so it aims instead.

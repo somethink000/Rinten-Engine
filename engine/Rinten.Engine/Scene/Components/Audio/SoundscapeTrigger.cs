@@ -71,7 +71,8 @@ public class SoundscapeTrigger : Component
 	[ShowIf( nameof( Type ), TriggerType.Sphere )]
 	public float Radius { get; set; } = 12.5f;
 
-	Vector3 _scale = 50;
+	//50 inches, in metres - the source default, converted like the radius above it.
+	Vector3 _scale = new Vector3( 1.27f );
 
 	/// <summary>The size of the Soundscape when <see cref="Type"/> is set to <see cref="TriggerType.Box"/>.</summary>
 	[Property]

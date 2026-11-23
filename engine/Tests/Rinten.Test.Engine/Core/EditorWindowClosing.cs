@@ -1,6 +1,7 @@
 using Editor;
 using Rinten;
 using Rinten.UI;
+using Button = Editor.Button;
 
 namespace EngineTests;
 

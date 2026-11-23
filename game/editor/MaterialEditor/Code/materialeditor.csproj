@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+	<PropertyGroup>
+		<TargetFramework>net11.0</TargetFramework>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<AssemblyName>materialeditor</AssemblyName>
+		<PackageId>materialeditor</PackageId>
+		<LangVersion>14</LangVersion>
+		<NoWarn>1701;1702;1591;</NoWarn>
+		<WarningsAsErrors></WarningsAsErrors>
+		<TreatWarningsAsErrors>True</TreatWarningsAsErrors>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<DefineConstants>SANDBOX</DefineConstants>
+		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+		<OutputPath>../../../.vs/output/</OutputPath>
+		<DocumentationFile>../../../.vs/output/materialeditor.xml</DocumentationFile>
+		<RootNamespace>Rinten</RootNamespace>
+		<Nullable>disable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Using Include="Rinten.Internal.GlobalToolsNamespace" Static="true" />
+		<Using Include="Rinten.Internal.GlobalGameNamespace" Static="true" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Analyzer Include="../../../bin/managed/Rinten.CodeUpgrader.dll"/> 
+		<Analyzer Include="../../../bin/managed/Rinten.Generator.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.System.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Engine.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Filesystem.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Reflection.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Mounting.dll"/> 
+		<Reference Include="../../../bin/managed/Microsoft.AspNetCore.Components.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.AppSystem.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Tools.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Compiling.dll"/> 
+		<Reference Include="../../../bin/managed/Microsoft.CodeAnalysis.dll"/> 
+		<Reference Include="../../../bin/managed/Microsoft.CodeAnalysis.CSharp.dll"/> 
+		<Reference Include="../../../bin/managed/Rinten.Bind.dll"/> 
+		<Reference Include="../../../bin/managed/Facepunch.ActionGraphs.dll"/> 
+		<Reference Include="../../../bin/managed/SkiaSharp.dll"/> 
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="../../../addons/tools/Code/Base Editor Library.csproj" />
+	</ItemGroup>
+
+</Project>

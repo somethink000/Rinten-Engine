@@ -6,6 +6,13 @@
 	width: 100%;
 	height: 100%;
 
+	//The add button sits at the bar's left end; a little ground before it so it is not flush
+	//against the dock's edge.
+	> .dock-bar
+	{
+		padding-left: 4px;
+	}
+
 	> .parts
 	{
 		flex-direction: column;

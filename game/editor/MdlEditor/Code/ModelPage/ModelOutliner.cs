@@ -276,6 +276,38 @@ sealed class ModelOutliner : PanelDockHost
 		RebuildTree();
 	}
 
+	//The bar's fold button: every group and every folder somebody made shut, then the list read again - a group
+	//that is shut is one whose handler stops after its heading, so the tree is the headings alone.
+	internal void CollapseAll()
+	{
+		foreach ( var handler in ModelDoc.All )
+		{
+			_collapsed.Add( handler.Kind );
+
+			foreach ( var kind in handler.AlsoHandles )
+				_collapsed.Add( kind );
+		}
+
+		//Only the folders the list currently knows: one inside a shut group is not read again until the group opens,
+		//and it starts open anyway.
+		foreach ( var item in _items.Where( IsFolderItem ) )
+			_collapsedFolders.Add( Key( item ) );
+
+		RefreshTree();
+	}
+
+	//The bar's unfold button: no group or folder shut, then the list read again - every group reads its contents, and
+	//the tree opens every node that has some.
+	internal void ExpandAll()
+	{
+		_collapsed.Clear();
+		_collapsedFolders.Clear();
+
+		RefreshTree();
+	}
+
+	static bool IsFolderItem( ModelDocItem item ) => item.IsFolder && item.Kind == ModelDocKind.Folder;
+
 	//The graph row: what pressing it will do, said before it is pressed.
 	void RebuildHeader()
 	{
@@ -363,7 +395,7 @@ sealed class ModelOutliner : PanelDockHost
 	//The list the "+ Add" button opens, while it is up.
 	ModelAddPopup _addPopup;
 
-	//Toggles the add popup under the button, matching its width
+	//Toggles the add popup that hangs under the button
 	internal void ToggleAddPopup( Panel anchor )
 	{
 		if ( _addPopup.IsValid() )
@@ -765,17 +797,21 @@ sealed class ModelOutlinerPanel : EditorPanel
 		var add = bar.AddChild<ToolbarButton>();
 		add.Icon = "add";
 		add.ToolTip = "Add";
+		//A square you can hit: its own minimum, so the first button in the bar cannot be squeezed by
+		//the dock's edge - the add list used to open at whatever width was left.
+		add.Style.MinWidth = 28.0f;
+		add.Style.MinHeight = 28.0f;
 		add.OnPressed = () => _list.ToggleAddPopup( add );
 
 		var unfold = bar.AddChild<ToolbarButton>();
 		unfold.Icon = "unfold_more";
 		unfold.ToolTip = "Expand all";
-		unfold.OnPressed = () => Tree?.OpenAll();
+		unfold.OnPressed = () => _list.ExpandAll();
 
 		var fold = bar.AddChild<ToolbarButton>();
 		fold.Icon = "unfold_less";
 		fold.ToolTip = "Collapse all";
-		fold.OnPressed = () => Tree?.CloseAll();
+		fold.OnPressed = () => _list.CollapseAll();
 
 		bar.AddChild<Panel>( "spacer" );
 

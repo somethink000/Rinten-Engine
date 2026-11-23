@@ -62,6 +62,7 @@ public partial class Project
 			AddFromFileBuiltIn( $"editor/ActionGraph/{Extension}" );
 			AddFromFileBuiltIn( $"editor/MdlEditor/{Extension}" );
 			AddFromFileBuiltIn( $"editor/FxEditor/{Extension}" );
+			AddFromFileBuiltIn( $"editor/MaterialEditor/{Extension}" );
 			AddFromFileBuiltIn( $"editor/UiEditor/{Extension}" );
 			AddFromFileBuiltIn( $"editor/MovieMaker/{Extension}" );
 		}

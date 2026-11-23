@@ -32,7 +32,10 @@ sealed class ModelAddPopup : Popup
 	{
 		_run = run;
 
-		SetPositioning( anchor, PositionMode.BelowStretch, 2.0f );
+		//Under the button, not the button's width: the anchor is a toolbar square, and stretching the list
+		//to thirty-odd pixels left nothing readable and nothing clickable.
+		SetPositioning( anchor, PositionMode.BelowLeft, 2.0f );
+		Style.MinWidth = 260.0f;
 		CloseWhenParentIsHidden = true;
 
 		AddClass( "editor-popup" );

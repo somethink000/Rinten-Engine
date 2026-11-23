@@ -6,27 +6,6 @@ namespace Rinten
 {
 	internal abstract class StructArrayConverter : IDisposable
 	{
-		private delegate void MemmoveDelegate( ref byte dest, ref byte src, nuint len );
-
-		private static MemmoveDelegate MemmoveImpl { get; }
-
-		static StructArrayConverter()
-		{
-			//cpblk under the hood, so this is the same unaligned block copy the runtime's own memmove does.
-			//Reflecting into a private Buffer helper used to work, but .NET 11 turned it into a generic
-			//Buffer.Memmove<T> taking an element count, so the old lookup silently found nothing and left
-			//MemmoveImpl null - which then blew up as a null reference on the first block copy.
-			MemmoveImpl = ( ref byte dest, ref byte src, nuint len ) =>
-				Unsafe.CopyBlockUnaligned( ref dest, ref src, (uint)len );
-		}
-
-		public static bool CanCopyHigherRankArrays => MemmoveImpl is not null;
-
-		protected static void Memmove( ref byte dst, ref byte src, nuint len )
-		{
-			MemmoveImpl( ref dst, ref src, len );
-		}
-
 		protected int ElementSize { get; }
 
 		public static StructArrayConverter Create( Type srcType, Type dstType )
@@ -87,7 +66,7 @@ namespace Rinten
 			ref var srcDataRef = ref MemoryMarshal.GetArrayDataReference( src );
 			ref var dstDataRef = ref MemoryMarshal.GetArrayDataReference( dst );
 
-			Memmove( ref dstDataRef, ref srcDataRef, byteCount );
+			Unsafe.CopyBlockUnaligned( ref dstDataRef, ref srcDataRef, checked( (uint)byteCount ) );
 		}
 	}
 }

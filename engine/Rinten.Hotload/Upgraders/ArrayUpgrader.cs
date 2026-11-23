@@ -123,11 +123,8 @@ namespace Rinten.Upgraders
 					return 1;
 				}
 
-				if ( oldInst.Rank == 1 || StructArrayConverter.CanCopyHigherRankArrays )
-				{
-					BlockCopyStructArray( oldInst, newInst, oldElemType, newElemType ?? oldElemType, oldInst.Length );
-					return 1;
-				}
+				BlockCopyStructArray( oldInst, newInst, oldElemType, newElemType ?? oldElemType, oldInst.Length );
+				return 1;
 			}
 
 			var oldPath = CurrentPath;

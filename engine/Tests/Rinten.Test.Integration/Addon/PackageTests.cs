@@ -35,6 +35,7 @@ namespace AddonTests
 		public void ParseIdentWithADottedLocalProjectName()
 		{
 			Assert.IsFalse( Package.TryParseIdent( "too.many.dots", out var _ ) );
+			Assert.IsFalse( Package.TryParseIdent( "org/pkg/extra", out var _ ) );
 
 			Assert.IsTrue( Package.TryParseIdent( "local.bench.core#local", out var tagged ) );
 			Assert.AreEqual( "local", tagged.org );

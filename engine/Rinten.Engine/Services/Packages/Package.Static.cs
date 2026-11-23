@@ -69,17 +69,15 @@ public partial class Package
 			}
 		}
 
-		//org.package or org/package. The first separator is the one that divides them, so a local project whose
-		//name contains dots ("local.bench.core") parses. A remote ident keeps the older grammar - one separator,
-		//nothing more - which is what its tests and the backend share.
-		var at = ident.IndexOfAny( new[] { '.', '/' } );
+		//org.package or org/package, split at the first; only a local package's name may hold more dots
+		var at = ident.IndexOfAny( ['.', '/'] );
 
 		if ( at > 0 && at < ident.Length - 1 )
 		{
 			var org = ident[..at];
 			var package = ident[(at + 1)..];
 
-			if ( !parsed.local && org != "local" && package.Contains( '.' ) )
+			if ( package.Contains( '/' ) || ( !parsed.local && org != "local" && package.Contains( '.' ) ) )
 				return false;
 
 			parsed.org = org;

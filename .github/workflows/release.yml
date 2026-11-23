@@ -32,6 +32,8 @@ jobs:
       DOTNET_INSTALL_DIR: /home/runner/.dotnet
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       # A runner starts with ~14 GB free; the workloads, the NDK and a full build need more. The Android SDK and the JDK stay
       - name: Free disk space
@@ -114,6 +116,8 @@ jobs:
       DOTNET_INSTALL_DIR: /home/runner/.dotnet
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       # A runner starts with ~14 GB free; the workloads, the NDK and a full build need more. The Android SDK and the JDK stay
       - name: Free disk space
@@ -163,6 +167,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/setup-dotnet@v5
         with:

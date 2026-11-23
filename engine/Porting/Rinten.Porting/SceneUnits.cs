@@ -327,7 +327,7 @@ public static class SceneUnits
 		["Rinten.Vignette.Roundness"] = PortDimension.None,
 		["Rinten.Vignette.Smoothness"] = PortDimension.None,
 
-		//Screen-space, like the vignette: a radius here is a share of the screen, not a distance in the world.
+		//Screen-space, not a length
 		["Rinten.AmbientOcclusion.Radius"] = PortDimension.None,
 
 		["Rinten.ChromaticAberration.Offset"] = PortDimension.None,
@@ -1065,8 +1065,7 @@ public static class SceneUnits
 		switch ( node )
 		{
 			case JsonValue value when value.TryGetValue<double>( out var number ):
-				//A factor of one is nothing to do, and writing the number back would turn an integer into a
-				//double - a scene's "Radius": 16 came back as 16.0 and no longer read as the int it was.
+				//Writing it back would turn an int into a double
 				if ( factor == 1.0 ) return 0;
 
 				owner[key] = JsonValue.Create( number * factor );

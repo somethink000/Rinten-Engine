@@ -178,13 +178,11 @@ public class GameTags : ITagSet
 
 		MarkTokensDirty();
 
-		//Once for the whole subtree: the notification already walks this object's descendants, so a child that
-		//dirtied its own tokens and notified its own subtree too was telling every component below it twice.
+		//Once: it already reaches every component below
 		target.OnTagsUpdatedInternal();
 	}
 
-	//The tokens a descendant caches are inherited, so a change here is a change there. Only the cache is
-	//invalidated here; see MarkDirty for the one notification the subtree gets.
+	//Descendants cache inherited tokens, so theirs go too
 	private void MarkTokensDirty()
 	{
 		_tokensDirty = true;

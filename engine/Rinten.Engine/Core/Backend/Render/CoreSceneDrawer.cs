@@ -6061,8 +6061,7 @@ internal sealed partial class CoreSceneDrawer
 		DrawWorldLabels( list.Labels, viewProjection, overlay );
 	}
 
-	//Whole meshes of edges that live on the card, one indexed draw each - see CoreGizmoWire. The vertices are
-	//white and the draw's colour tints them, so changing the gizmo's colour does not rebuild the mesh.
+	//One indexed draw per mesh of edges on the card, tinted by the draw - see CoreGizmoWire
 	private void DrawWires( List<DebugDrawList.Wire> wires, System.Numerics.Matrix4x4 viewProjection, bool overlay )
 	{
 		if ( wires.Count == 0 ) return;

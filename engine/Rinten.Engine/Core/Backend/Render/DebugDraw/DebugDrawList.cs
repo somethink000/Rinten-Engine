@@ -119,8 +119,7 @@ internal sealed class DebugDrawList
 		readonly Vertex[] ILived.Borrowed => null;
 	}
 
-	//A whole mesh's edges kept on the card: the vertices and the line index buffer are made once, so a frame is
-	//one indexed draw however many edges there are - see CoreGizmoWire.
+	//A mesh's edges in buffers on the card, one indexed draw - see CoreGizmoWire
 	internal struct Wire : ILived
 	{
 		public ulong Vertices;

@@ -317,17 +317,13 @@ public sealed class PhysicsGroupDescription : Resource
 				Bounds = this.vertices.Length > 0 ? BBox.FromPoints( this.vertices ) : default;
 			}
 
-			//The line copy kept on the card for a selected collider's gizmo, made on first use - see CoreGizmoWire.
+			//The gizmo's line copy on the card - see CoreGizmoWire
 			internal CoreGizmoWire.Geometry Wire;
-
-			//Whether the card was asked for one already, so a mesh it would not take is not built again every frame.
-			internal bool WireTried;
 
 			internal override void Dispose()
 			{
 				Wire?.Dispose();
 				Wire = null;
-				WireTried = false;
 			}
 
 			/// <summary>Get all vertices in this mesh.</summary>

@@ -160,27 +160,20 @@ public static partial class Gizmo
 			}
 		}
 
-		/// <summary>
-		/// Draws every edge of a collision mesh from geometry kept on the card: one indexed draw a frame, however
-		/// many triangles it has, rather than three lines built on the CPU for each of them. Falls back to
-		/// <see cref="LineTriangles"/> where there is no device to keep it on.
-		/// </summary>
+		/// <summary>Every edge of a collision mesh, from a line mesh kept on the card: one draw a frame.</summary>
 		public void LineMesh( PhysicsGroupDescription.BodyPart.MeshPart mesh, Color? color = null, float duration = 0, bool? overlay = null )
 		{
 			if ( mesh is null ) return;
 
 			var wire = CoreGizmoWire.Get( mesh );
 
-			//No device to keep it on: the lines are built the old way, which is what a test host and a
-			//viewport before the device starts get.
+			//No device (a test host, before the device starts): lines built on the CPU
 			if ( wire is null )
 			{
 				LineTriangles( mesh.GetTriangles(), color, duration, overlay );
 				return;
 			}
 
-			//The card would not keep it. Falling back would put the whole mesh back on every frame, which is the
-			//cost this is here to avoid, so the mesh is left out rather than drawn at that price.
 			if ( !wire.IsValid ) return;
 
 			Target?.Add( new DebugDrawList.Wire

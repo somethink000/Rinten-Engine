@@ -69,13 +69,15 @@ public sealed partial class Model : Resource
 
 	internal override void Destroy()
 	{
-		//Its device mesh goes with it, on the main thread, from whichever thread let it go - the finalizer's for a model built at runtime
+		//Device mesh and collider wire go on the main thread, from whichever thread let it go (the finalizer's too)
 		var mesh = MeshId;
-		MainThread.Queue( () => CoreResources.Gone( mesh ) );
-
-		//The physics description can hold wire geometry of its own on the card - see CoreGizmoWire.
-		_physics?.Dispose();
+		var physics = _physics;
 		_physics = default;
+		MainThread.Queue( () =>
+		{
+			CoreResources.Gone( mesh );
+			physics?.Dispose();
+		} );
 
 		core?.Dispose();
 		core = null;

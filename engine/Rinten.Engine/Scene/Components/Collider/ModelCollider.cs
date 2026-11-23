@@ -58,7 +58,7 @@ public class ModelCollider : Collider, IHasModel
 		{
 			using ( Gizmo.Scope( $"part {part.GetHashCode()}", part.Transform ) )
 			{
-				//In the order the shapes were built, and without the per-type lists the getters would make every frame.
+				//One walk, without the per-type lists the getters make every frame
 				foreach ( var shape in part.Parts )
 				{
 					switch ( shape )
@@ -75,7 +75,6 @@ public class ModelCollider : Collider, IHasModel
 							Gizmo.Draw.Lines( hull.GetLines() );
 							break;
 
-						//A collision mesh is kept on the card once and drawn by index - see Gizmo.Draw.LineMesh.
 						case PhysicsGroupDescription.BodyPart.MeshPart mesh:
 							Gizmo.Draw.LineMesh( mesh );
 							break;

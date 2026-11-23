@@ -536,14 +536,6 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 				RefreshScale();
 				shapeChanged = true;
 				break;
-
-			//Where the window is was said, before the scale is known to have changed - Wayland sends these as
-			//the surface enters an output, then updates the fractional scale with no window event of its own.
-			//Asking here catches it where the desktop did say, and PollAll asks anyway for where it did not.
-			case SDL_EVENT_WINDOW_MOVED:
-			case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-				if ( RefreshScale() ) shapeChanged = true;
-				break;
 		}
 	}
 
@@ -646,24 +638,15 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	private float density = 1.0f;
 	private float displayScale = 1.0f;
 
-	//Asks the window what its scales are now, and says whether either moved. The interface needs to know both
-	//when the scale changed - a stale one leaves its drag strips in the old monitor's pixels, over the tabs.
-	private bool RefreshScale()
+	private void RefreshScale()
 	{
-		if ( Adopted || Handle == IntPtr.Zero ) return false;
+		if ( Adopted || Handle == IntPtr.Zero ) return;
 
 		var pixels = SDL_GetWindowPixelDensity( Handle );
 		var scale = SDL_GetWindowDisplayScale( Handle );
 
-		var nextDensity = pixels > 0.0f ? pixels : 1.0f;
-		var nextScale = scale > 0.0f ? scale : nextDensity;
-
-		if ( nextDensity == density && nextScale == displayScale ) return false;
-
-		density = nextDensity;
-		displayScale = nextScale;
-
-		return true;
+		density = pixels > 0.0f ? pixels : 1.0f;
+		displayScale = scale > 0.0f ? scale : density;
 	}
 
 	//The density of a window of ours by its handle, 1 for one we do not know
@@ -1688,16 +1671,6 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 			}
 		}
 
-		//Wayland's fractional-scale and preferred-buffer-scale paths update the window's scale factor without sending
-		//SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED. Ask every window once a frame, so coming back to a display is
-		//noticed even when the compositor said nothing: the interface was left laid out at the old display's scale.
-		for ( var i = 0; i < live.Count; i++ )
-		{
-			var window = live[i];
-
-			if ( window.RefreshScale() ) window.shapeChanged = true;
-		}
-
 		PumpCarry();
 	}
 
@@ -1912,13 +1885,11 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	}
 
 	private const uint SDL_EVENT_WINDOW_EXPOSED = 0x204;
-	private const uint SDL_EVENT_WINDOW_MOVED = 0x205;
 	private const uint SDL_EVENT_WINDOW_RESIZED = 0x206;
 	private const uint SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED = 0x207;
 	private const uint SDL_EVENT_WINDOW_MINIMIZED = 0x209;
 	private const uint SDL_EVENT_WINDOW_MAXIMIZED = 0x20A;
 	private const uint SDL_EVENT_WINDOW_RESTORED = 0x20B;
-	private const uint SDL_EVENT_WINDOW_DISPLAY_CHANGED = 0x213;
 	private const uint SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED = 0x214;
 
 	[System.Runtime.InteropServices.UnmanagedFunctionPointer( System.Runtime.InteropServices.CallingConvention.Cdecl )]

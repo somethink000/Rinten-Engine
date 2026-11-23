@@ -36,22 +36,13 @@ public static class Screen
 	/// <summary>The desktop's dpi scale on the current monitor.</summary>
 	public static float DesktopScale { get; private set; } = 1.0f;
 
-	//Where the scale comes from. The window asks its platform once when the display scale changes; the
-	//editor's interface window is the fallback when the game is being played in a viewport. Kept as a
-	//field so a test can drive a scale change without a second monitor.
-	internal static Func<float> DesktopScaleSource { get; set; } = CurrentDesktopScale;
-
-	private static float CurrentDesktopScale()
+	//The scale of the window the game is seen in; 0 before there is one
+	private static float WindowScale()
 	{
-		//A game window knows its own display scale, and refreshes it when SDL says the display moved.
-		if ( CoreGameRenderer.Window is { Adopted: false } window )
-			return window.DisplayScale;
+		if ( CoreGameRenderer.Window is { Adopted: false } window ) return window.DisplayScale;
 
-		//Played in the editor: the interface window around the viewport is the one whose scale applies.
-		if ( CoreUiWindow.HasPointerWindow )
-			return CoreUiWindow.PointerScale;
-
-		return EnginePlatform.GetDiagonalDpi() / 96.0f;
+		//Played in the editor: the interface window around the viewport
+		return CoreUiWindow.HasPointerWindow ? CoreUiWindow.PointerScale : 0.0f;
 	}
 
 	/// <summary>Fullscreen state; on web it applies on the next user gesture, so it may read false briefly after set</summary>
@@ -101,12 +92,9 @@ public static class Screen
 			}
 		}
 
-		//The scale is refreshed even when the pixel size did not change. A maximized window moved to a
-		//monitor with another scale setting keeps the same resolution, and the old early return left the
-		//HUD and gizmos sized for the monitor it came from.
-		var scale = DesktopScaleSource();
-		if ( scale > 0.0f && scale != DesktopScale )
-			DesktopScale = scale;
+		//Every frame: a window moved to a monitor of another scale keeps its pixel size
+		var scale = WindowScale();
+		if ( scale > 0.0f ) DesktopScale = scale;
 
 		var newSize = new Vector2( width, height );
 		if ( newSize == Size )
@@ -115,6 +103,8 @@ public static class Screen
 		Size = new Vector2( width, height );
 
 		RenderTarget.Flush();
+
+		if ( scale <= 0.0f ) DesktopScale = EnginePlatform.GetDiagonalDpi() / 96.0f;
 	}
 
 	/// <summary>Converts a vertical field of view to a horizontal field of view based on the screen aspect ratio.</summary>

@@ -212,8 +212,6 @@ internal sealed partial class CorePlatformBackend : IPlatformBackend
 		var ids = GetDisplayIds();
 		if ( ids.Length == 0 ) return 96f;
 
-		//The window's own monitor where it is one of ours; the primary display otherwise. Asking the
-		//primary display for every window made a game on a differently-scaled monitor use the wrong scale.
 		var display = monitorIndex >= 0 && monitorIndex < ids.Length
 			? ids[monitorIndex]
 			: SDL_GetPrimaryDisplay();

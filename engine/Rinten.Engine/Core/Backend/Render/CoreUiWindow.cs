@@ -482,13 +482,25 @@ internal sealed class CoreUiWindow : IDisposable
 	/// <summary>Area the window system may drag the window by, in interface units: the caption bar minus its buttons, set by its drawer</summary>
 	public (int X, int Y, int Width, int Height) DragStrip
 	{
-		set { if ( window is not null ) window.DragStrip = ToPixels( value ); }
+		set => DragStrips = value.Width > 0 && value.Height > 0 ? [value] : null;
 	}
 
 	/// <summary>Every such strip, for a bar with more than one gap in it.</summary>
 	public (int X, int Y, int Width, int Height)[] DragStrips
 	{
-		set { if ( window is not null ) window.DragStrips = value is null ? null : Array.ConvertAll( value, ToPixels ); }
+		set
+		{
+			dragUnits = value;
+			PlaceDragStrips();
+		}
+	}
+
+	//Kept in units, so a change of display scale turns them into the new pixels
+	private (int X, int Y, int Width, int Height)[] dragUnits;
+
+	private void PlaceDragStrips()
+	{
+		if ( window is not null ) window.DragStrips = dragUnits is null ? null : Array.ConvertAll( dragUnits, ToPixels );
 	}
 
 	//A strip in units as the window system's pixels, rounded outwards
@@ -1010,7 +1022,11 @@ internal sealed class CoreUiWindow : IDisposable
 
 		//A change of shape is told now, before the layout below, so a window resized this frame is laid out to its new shape this frame.
 		//The widgets that follow the window used to ask it once a frame instead - every one of them, every frame, for the same answer.
-		if ( window.TakeShapeChanged() ) Resized?.Invoke();
+		if ( window.TakeShapeChanged() )
+		{
+			PlaceDragStrips();
+			Resized?.Invoke();
+		}
 
 		//A window pumped from inside blocking work is asked to draw far more often than a screen can show
 		//it. Its own clock, not the engine's: those are wound by whoever draws, and this decides whether to.

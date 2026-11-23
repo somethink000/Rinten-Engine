@@ -209,11 +209,6 @@ internal class TitleBar : Widget
 	//What the window system was last told, so it is not told it again.
 	private (int X, int Y, int Width, int Height)[] strips;
 
-	//The scale those strips were turned into pixels with. The bar's own layout is in interface units, so moving to a
-	//display with another scale leaves the pixel strips the old size until they are handed over again - which is how
-	//a tab ends up under the window's drag strip.
-	private float stripsScale;
-
 	//Whether what the bar holds has moved since its strips were last handed over.
 	private bool stripsMoved = true;
 
@@ -243,6 +238,8 @@ internal class TitleBar : Widget
 	{
 		base.OnWidgetFrame();
 
+		if ( !stripsMoved ) return;
+
 		if ( Host is not Window window ) return;
 
 		var shell = window.Shell;
@@ -250,14 +247,6 @@ internal class TitleBar : Widget
 		//Still moved: handed over once there is a window to hand them to.
 		if ( shell is null ) return;
 
-		//A change of display scale moves nothing in interface units, but everything in pixels: the strips have to be
-		//turned into them again, or a bar laid out at the last display's scale hands the window a strip over its tabs.
-		var scale = shell.Scale;
-		var scaleChanged = scale != stripsScale;
-
-		if ( !stripsMoved && !scaleChanged ) return;
-
-		stripsScale = scale;
 		stripsMoved = false;
 
 		Span<Rect> areas = stackalloc Rect[2];
@@ -280,9 +269,7 @@ internal class TitleBar : Widget
 
 		//On the frames something moved - everything under the bar arranging, a menu added by a tool, a workspace tab opened or closed, the
 		//window changing shape. Compared on the stack: the array the window system is handed is made only when the strips actually moved.
-		//A scale change is the exception: the interface rectangles are identical, but the pixels they become are not, so they are handed
-		//over again even when Same says nothing moved.
-		if ( !scaleChanged && Same( strips, next[..count] ) ) return;
+		if ( Same( strips, next[..count] ) ) return;
 
 		strips = next[..count].ToArray();
 		shell.DragStrips = strips;

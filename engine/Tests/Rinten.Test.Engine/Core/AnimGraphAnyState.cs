@@ -116,7 +116,9 @@ public class AnimGraphAnyStateTest
 		{
 			var builder = AnimGraph.Builder;
 
-			var shoot = builder.BoolParameter( "shoot" );
+			//A trigger: lowered once the update that read it is done
+			var shoot = builder.AddControlParameter( "shoot", AnimGraphBuilder.NodeKind.Bool,
+				new AnimGraphBuilder.ControlParameterSettings { Describe = true, AutoReset = true } );
 
 			var machine = builder.StateMachine();
 

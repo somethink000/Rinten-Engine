@@ -167,10 +167,8 @@ public sealed partial class AnimGraphBuilder
 	public Node FloatParameter( string name, float min = 0.0f, float max = 0.0f )
 		=> AddControlParameter( name, NodeKind.Float, new ControlParameterSettings { Describe = true, Min = min, Max = max } );
 
-	//A bool is a trigger by nature: a game sets it true for one update and never sets it false again, so it
-	//goes back to its default once that update has read it. A state that must persist is written every frame.
 	public Node BoolParameter( string name )
-		=> AddControlParameter( name, NodeKind.Bool, new ControlParameterSettings { Describe = true, AutoReset = true } );
+		=> AddControlParameter( name, NodeKind.Bool, new ControlParameterSettings { Describe = true } );
 
 	public Node IdParameter( string name, params string[] options )
 		=> AddControlParameter( name, NodeKind.Id, new ControlParameterSettings { Describe = true, Options = options } );

@@ -276,8 +276,7 @@ sealed class ModelOutliner : PanelDockHost
 		RebuildTree();
 	}
 
-	//The bar's fold button: every group and every folder somebody made shut, then the list read again - a group
-	//that is shut is one whose handler stops after its heading, so the tree is the headings alone.
+	//Every group and folder shut: a shut group's handler stops after its heading
 	internal void CollapseAll()
 	{
 		foreach ( var handler in ModelDoc.All )
@@ -288,16 +287,14 @@ sealed class ModelOutliner : PanelDockHost
 				_collapsed.Add( kind );
 		}
 
-		//Only the folders the list currently knows: one inside a shut group is not read again until the group opens,
-		//and it starts open anyway.
+		//Only folders the list knows; one inside a shut group starts open when the group opens
 		foreach ( var item in _items.Where( IsFolderItem ) )
 			_collapsedFolders.Add( Key( item ) );
 
 		RefreshTree();
 	}
 
-	//The bar's unfold button: no group or folder shut, then the list read again - every group reads its contents, and
-	//the tree opens every node that has some.
+	//Nothing shut: every group reads its contents and the tree opens them
 	internal void ExpandAll()
 	{
 		_collapsed.Clear();
@@ -797,10 +794,7 @@ sealed class ModelOutlinerPanel : EditorPanel
 		var add = bar.AddChild<ToolbarButton>();
 		add.Icon = "add";
 		add.ToolTip = "Add";
-		//A square you can hit: its own minimum, so the first button in the bar cannot be squeezed by
-		//the dock's edge - the add list used to open at whatever width was left.
-		add.Style.MinWidth = 28.0f;
-		add.Style.MinHeight = 28.0f;
+		add.AddClass( "add-button" );
 		add.OnPressed = () => _list.ToggleAddPopup( add );
 
 		var unfold = bar.AddChild<ToolbarButton>();

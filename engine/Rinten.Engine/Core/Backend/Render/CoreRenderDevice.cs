@@ -1280,7 +1280,7 @@ internal static unsafe class CoreRenderDevice
 		CoreRender.TargetKind target = CoreRender.TargetKind.Screen, bool lines = false,
 		bool additive = false, DepthCompare compare = DepthCompare.NearerOrSame,
 		bool screen = false, int specialize = -1, bool colourAlone = false, int pictureFormat = -1,
-		bool addByAlpha = false, bool multiply = false )
+		bool addByAlpha = false, bool multiply = false, bool premultiplied = false )
 	{
 		if ( !CoreNative.Available ) return 0;
 		if ( vertexSpirv is not { Length: > 0 } || pixelSpirv is not { Length: > 0 } ) return 0;
@@ -1292,9 +1292,10 @@ internal static unsafe class CoreRenderDevice
 				vertex, vertexSpirv.Length, "main",
 				pixel, pixelSpirv.Length, "main",
 				//Two means additive, which is what a pass gathering over several draws wants; three screens,
-				//which is adding without going past white; five adds by the source's own alpha - see VkPipelines.
+				//which is adding without going past white; five adds by the source's own alpha; seven is premultiplied
+				//- see VkPipelines.
 				(int)vertexLayout, depthTest ? (int)compare : 0, (int)topology,
-				screen ? 3 : additive ? 2 : addByAlpha ? 5 : multiply ? 6 : blend ? 1 : 0,
+				screen ? 3 : additive ? 2 : addByAlpha ? 5 : multiply ? 6 : premultiplied ? 7 : blend ? 1 : 0,
 				( depthWrite ?? depthTest ) ? 1 : 0, cullBack ? 1 : 0, depthOnly ? 1 : 0, (int)target,
 				//Raster flags: bit 0 draws edges, bit 1 leaves the world's second picture alone - see VkPipelines
 				( lines ? 1 : 0 ) | ( colourAlone ? 2 : 0 ),

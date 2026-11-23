@@ -12,7 +12,6 @@ public sealed partial class TileMap
 		public SpriteBatchSceneObject.SpriteData[] Tiles;
 		public int Count;
 		public GpuBuffer<SpriteBatchSceneObject.SpriteData> Buffer;
-		public bool Opaque;
 		public int Order;
 		public int ZIndex;
 		public BBox Bounds;
@@ -141,11 +140,8 @@ public sealed partial class TileMap
 
 		chunkDrawn ??= drawn[key] = new DrawnChunk();
 
-		//Layers of a map share exact corners, so their depths tie and drawing order decides. Other maps' and
-		//sprites' corners differ, and a tilted view rounds those depths apart: SetBack decides those ties.
 		BuildTiles( chunkDrawn, set, layer, chunk, transform );
 
-		chunkDrawn.Opaque = layer.Tint.a >= 1.0f;
 		chunkDrawn.Order = rank;
 		chunkDrawn.ZIndex = layer.ZIndex;
 
@@ -186,7 +182,6 @@ public sealed partial class TileMap
 		var half = new Vector2( size.x * 0.5f * transform.Scale.x, size.y * 0.5f * transform.Scale.y );
 		var step = ( set.TileSize.x + set.Spacing.x ) / width;
 		var cutout = SpriteBatchSceneObject.SpriteData.PackFogAndAlphaCutout( 0.0f, AlphaCutoff );
-		var setBack = SetBack( layer.ZIndex );
 
 		//The four ways a tile can be turned, as the angles the record carries - worked out once a chunk rather than once a tile.
 		Span<Vector3> turned = stackalloc Vector3[4];
@@ -204,7 +199,7 @@ public sealed partial class TileMap
 			var info = set.Info( cell.Tile );
 			var region = set.Region( cell.Tile );
 
-			var flags = SpriteBatchSceneObject.SpriteFlags.Pixelated | SpriteBatchSceneObject.SpriteFlags.SetBack;
+			var flags = SpriteBatchSceneObject.SpriteFlags.Pixelated;
 			if ( ( ( cell.Flip & TileFlip.X ) == TileFlip.X ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipX;
 			if ( ( ( cell.Flip & TileFlip.Y ) == TileFlip.Y ) ) flags |= SpriteBatchSceneObject.SpriteFlags.FlipY;
 
@@ -236,7 +231,7 @@ public sealed partial class TileMap
 				BillboardMode = (uint)SpriteRenderer.BillboardMode.None,
 				FogStrengthCutout = cutout,
 				Offset = new Vector2( 0.5f, 0.5f ),
-				BlendSheetUV = frames > 1 ? new Vector4( frames, info.FramesPerSecond, step, setBack ) : new Vector4( 0.0f, 0.0f, 0.0f, setBack ),
+				BlendSheetUV = frames > 1 ? new Vector4( frames, info.FramesPerSecond, step, 0.0f ) : default,
 			};
 		}
 
@@ -257,22 +252,8 @@ public sealed partial class TileMap
 
 	private static int mapsMade;
 
-	//Older maps draw first and stand further back, so a tie between maps goes the same way every frame
+	//Older maps draw first, so a tie between maps goes the same way every frame - see TileMapSceneObject
 	internal readonly int Sequence = mapsMade++;
-
-	//One step is about 30 float ulps of depth, past what rounding moves it; the most is 0.1% of the depth
-	private const float SetBackStep = 2e-6f;
-	private const int MapsApart = 16;
-	private const int OrdersApart = 32;
-
-	//Later in drawing order is less far back; coplanar sprites, not set back, always pass. Past the ranges ties can return
-	private float SetBack( int zIndex )
-	{
-		var order = Math.Clamp( zIndex + OrdersApart / 2, 0, OrdersApart - 1 );
-		var later = order * MapsApart + Sequence % MapsApart;
-
-		return ( OrdersApart * MapsApart - later ) * SetBackStep;
-	}
 
 	//Where a tile's alpha is cut: under it the pixel is not there at all.
 	private const float AlphaCutoff = 0.5f;
@@ -309,6 +290,10 @@ public sealed partial class TileMap
 
 	//Draw the chunks of one z-index, for the view being gathered - called by its scene object while the frame collects what is drawn by hand. The layers
 	//all lie in one plane, so they are drawn strictly back layer first, solid or see-through alike: each covers the ones drawn before it.
+	//
+	//None writes depth, as no sprite does: what is on top is the drawing order - the z-index among the layers and the sprites' Order In
+	//Layer - and nothing else. A solid layer that wrote depth hid every sprite standing a little further from the camera whatever its order,
+	//and a map put nearer the camera - a room placed by a point a little off the plane - hid the player behind its back wall.
 	internal void DrawChunks( int zIndex )
 	{
 		if ( drawn.Count == 0 ) return;
@@ -336,6 +321,7 @@ public sealed partial class TileMap
 		try
 		{
 			attributes.SetCombo( "D_BLEND", 0 );
+			attributes.SetCombo( "D_OPAQUE", 0 );
 
 			var portable = CoreRenderDevice.PortableFrame;
 			var perRun = portable ? Graphics.InstancesPerRun( Marshal.SizeOf<SpriteBatchSceneObject.SpriteData>() ) : 0;
@@ -345,8 +331,6 @@ public sealed partial class TileMap
 				if ( chunk.ZIndex < zIndex ) continue;
 				if ( chunk.ZIndex > zIndex ) break;
 				if ( chunk.Count == 0 ) continue;
-
-				attributes.SetCombo( "D_OPAQUE", chunk.Opaque ? 1 : 0 );
 
 				if ( portable )
 				{

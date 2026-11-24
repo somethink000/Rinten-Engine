@@ -102,10 +102,55 @@ public static class ExportToolchain
 		Environment.GetEnvironmentVariable( "ANDROID_SDK_ROOT" ), AndroidSdkInstall,
 		Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.UserProfile ), "Android", "Sdk" ) );
 
-	//JAVA_HOME, the one installed from here, then the newest JDK 17+ where the platform keeps them
-	static string JavaSdk => new[] { Environment.GetEnvironmentVariable( "JAVA_HOME" ), JavaSdkInstall }
-		.Concat( SystemJdks().OrderByDescending( JdkVersion ) )
-		.FirstOrDefault( x => !string.IsNullOrWhiteSpace( x ) && JdkVersion( x ) >= 17 );
+	//JAVA_HOME, the one installed from here, then the newest JDK where the platform keeps them that the Android build takes
+	static string JavaSdk
+	{
+		get
+		{
+			var (low, high) = JavaRange();
+
+			return new[] { Environment.GetEnvironmentVariable( "JAVA_HOME" ), JavaSdkInstall }
+				.Concat( SystemJdks().OrderByDescending( JdkVersion ) )
+				.FirstOrDefault( x => !string.IsNullOrWhiteSpace( x ) && JdkVersion( x ) is var version && version >= low && version <= high );
+		}
+	}
+
+	//The JDKs the Android workload builds with, from its own props - 21 to 25 in the one for .NET 11. A machine's newest JDK
+	//can be past the top of that, and the build then stops before it starts: see XA0030.
+	static (int Low, int High) JavaRange()
+	{
+		var low = 0;
+		var high = 0;
+
+		foreach ( var root in PackRoots().Where( Directory.Exists ) )
+			foreach ( var pack in Directory.EnumerateDirectories( root, "Microsoft.Android.Sdk.*" ) )
+				foreach ( var version in Directory.EnumerateDirectories( pack ) )
+				{
+					var props = Path.Combine( version, "tools", "Xamarin.Android.Common.props" );
+					if ( !File.Exists( props ) ) continue;
+
+					var xml = System.Xml.Linq.XDocument.Load( props );
+
+					low = Math.Max( low, Setting( xml, "MinimumSupportedJavaVersion" ) );
+					high = Math.Max( high, Setting( xml, "LatestSupportedJavaVersion" ) );
+				}
+
+		//No workload installed to ask yet: anything from 17 up, as it was before there was a range to read
+		return high == 0 ? (17, int.MaxValue) : (low, high);
+	}
+
+	//A property's value in the workload's props, which is in the MSBuild namespace and so is matched by its local name
+	static int Setting( System.Xml.Linq.XDocument xml, string name )
+		=> Major( xml.Descendants().FirstOrDefault( x => x.Name.LocalName == name )?.Value );
+
+	//The major version of a version string - "25.0.99" is 25 - or 0 where there is none
+	static int Major( string version )
+	{
+		if ( string.IsNullOrEmpty( version ) ) return 0;
+
+		var major = version.StartsWith( "1." ) ? version[2..] : version;
+		return int.TryParse( major.Split( '.' )[0], out var n ) ? n : 0;
+	}
 
 	static IEnumerable<string> SystemJdks()
 	{
@@ -130,9 +175,8 @@ public static class ExportToolchain
 
 			var line = File.ReadLines( release ).FirstOrDefault( x => x.StartsWith( "JAVA_VERSION=" ) );
 			var version = line?.Split( '=' )[1].Trim( '"' ) ?? "";
-			var major = version.StartsWith( "1." ) ? version[2..] : version;
 
-			return int.TryParse( major.Split( '.' )[0], out var n ) ? n : 0;
+			return Major( version );
 		}
 		catch ( IOException )
 		{

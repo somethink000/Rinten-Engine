@@ -8,6 +8,10 @@
 	row-gap: 4px;
 	pointer-events: none;
 
+	//One blur behind the column rather than one per button: the buttons are black glass on it, so the scene shows
+	//through frosted and costs the window a single copy however many buttons the strip holds.
+	backdrop-filter: blur( 25px );
+
 	//A mode: the bigger button, on the outer column.
 	&.modes
 	{

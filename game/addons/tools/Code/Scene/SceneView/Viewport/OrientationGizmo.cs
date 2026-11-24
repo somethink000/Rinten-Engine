@@ -10,6 +10,10 @@ internal interface IOrientationGizmoHost
 	//How big the picture is, in its own pixels.
 	Vector2 SurfaceSize { get; }
 
+	//How much of the picture's top is under the bar over it, in the picture's own pixels - nought when the viewport
+	//stands clear of the bar. The gizmo keeps its distance from what can be seen, not from the picture's edge.
+	float TopInset { get; }
+
 	//Where the pointer is in that picture.
 	Vector2 MousePosition { get; }
 
@@ -73,7 +77,12 @@ internal sealed class OrientationGizmo
 		get
 		{
 			var inset = Radius + BallRadius + 20f * Dpi;
-			return new Vector2( host.SurfaceSize.x - inset, inset );
+
+			//Under the bar the picture's top is hidden, so the gizmo stands that much lower - and a little lower
+			//again, so the air between it and the bar is the same as the air between it and the picture's edge.
+			var top = inset + host.TopInset + ( host.TopInset > 0.0f ? 8f * Dpi : 0.0f );
+
+			return new Vector2( host.SurfaceSize.x - inset, top );
 		}
 	}
 

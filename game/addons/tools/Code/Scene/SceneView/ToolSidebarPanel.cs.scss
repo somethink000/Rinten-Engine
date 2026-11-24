@@ -4,8 +4,9 @@
 {
 	position: absolute;
 	left: 0;
-	top: 0;
-	height: 100%;
+	//The bar over the scene is laid over the picture, so the strips start under it - 32 is ViewportToolsPanel.Height.
+	top: 32px;
+	height: calc( 100% - 32px );
 	flex-direction: column;
 	pointer-events: none;
 

@@ -80,6 +80,12 @@ public partial class SceneViewportPanel : EditorPanel, IOrientationGizmoHost
 
 	CameraComponent IOrientationGizmoHost.Camera => ActiveCamera;
 	Vector2 IOrientationGizmoHost.SurfaceSize => SurfaceSize;
+
+	//The bar over the scene lies on the picture's top. A viewport standing under it - the top row of a split, or the
+	//one view there is - keeps its gizmo clear of the bar rather than under the buttons.
+	float IOrientationGizmoHost.TopInset =>
+		ScreenPosition.y <= SceneView.ScreenPosition.y + 1.0f ? ViewportToolsPanel.Height : 0.0f;
+
 	Vector2 IOrientationGizmoHost.MousePosition => PointerPosition;
 	bool IOrientationGizmoHost.IsActiveWindow => IsActiveWindow;
 	void IOrientationGizmoHost.SetCursor( CursorShape shape ) => Renderer.Cursor = shape;

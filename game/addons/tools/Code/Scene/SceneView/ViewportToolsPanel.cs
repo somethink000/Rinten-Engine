@@ -4,6 +4,9 @@
 [StyleSheet( "ViewportToolsPanel.cs.scss" )]
 public partial class ViewportToolsPanel : EditorPanel
 {
+	/// <summary>How tall the bar is. The scene runs on behind it, so what sits in the viewport's top corner has to clear it.</summary>
+	public const float Height = 32.0f;
+
 	private SceneViewPanel sceneView;
 
 	/// <summary>One thing on the bar: a button, a bit of live text, or a widget that has not been ported yet.</summary>

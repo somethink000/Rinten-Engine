@@ -1,7 +1,15 @@
 //The bar across the top of a scene view: its controls' 26 pixels with three round them (10-08: 28
 //with row-high controls read as small over the picture; it was 36 before, fourteen of them air).
+//It lies over the picture rather than standing above it, so the scene runs on behind it and each control
+//carries its own glass. The height here has to match ViewportToolsPanel.Height.
 .viewport-tools
 {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	right: 0px;
+	z-index: 3;
+
 	height: 32px;
 	flex-shrink: 0;
 	flex-direction: row;

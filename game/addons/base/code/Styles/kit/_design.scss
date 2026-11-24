@@ -1253,10 +1253,8 @@ $viewport-bar-control: 26px;
 	padding: 0px 6px;
 	gap: 6px;
 
-	//A plate: the bar the viewport's controls stand on is exactly where the hands keep going, and grey
-	//here means that. The viewport itself and the strip of open scenes stay on the window's ground.
-	background-color: $panel-ground;
-
+	//No plate on the bar itself: the scene runs on behind it, and what is solid is the glass each control stands
+	//on. The controls are reached for, so they are what a hand sees - not the strip between them.
 	pointer-events: all;
 
 	//The bar is part of the scene window rather than something lying over its neighbours. Buttons do not squeeze (the icon would stop
@@ -1303,7 +1301,8 @@ $viewport-bar-control: 26px;
 		&.right { justify-content: flex-end; }
 	}
 
-	//Several buttons side by side, close together. Each is a box of its own - below - so the group itself wears nothing.
+	//A run of controls: the glass is on each button below, and the group adds one blur behind them - a copy of the
+	//window per group rather than one per button.
 	.group
 	{
 		flex-direction: row;
@@ -1312,11 +1311,14 @@ $viewport-bar-control: 26px;
 		height: $viewport-bar-control;
 		padding: 0px;
 		gap: 2px;
+		border-radius: $radius-2;
+		backdrop-filter: blur( 25px );
 
 		//What the tool put on the bar itself: it has its own look and is given only the room.
 		&.plain
 		{
 			background-color: transparent;
+			backdrop-filter: none;
 			padding: 0px;
 			gap: 6px;
 		}
@@ -1330,9 +1332,8 @@ $viewport-bar-control: 26px;
 		background-color: $edge;
 	}
 
-	//Every button on the bar the height of the dropdown beside it, on the editor's black - a field's ground and edge - and a step up under the
-	//pointer, the way a field that is pressed does (10-07: the buttons were glyphs on a grey veil, a different size from everything else on the bar).
-	//The build menu's button stands in a panel of its own, and wears the same box
+	//Every control on the bar is a plate of frosted glass: the scene is blurred by the group behind it, and the plate
+	//is black enough for a glyph or a number to read on any picture. Active keeps the picked plate.
 	.group > .toolbarbutton,
 	.group > .build-menu-button > .toolbarbutton,
 	.snap-step,
@@ -1340,8 +1341,8 @@ $viewport-bar-control: 26px;
 	.tool-mode-picker
 	{
 		height: $viewport-bar-control;
-		background-color: $control-background;
-		border: 1px solid $border;
+		background-color: rgba( 0, 0, 0, 0.75 );
+		border: 1px solid rgba( 255, 255, 255, 0.12 );
 		border-radius: $control-radius;
 	}
 
@@ -1352,12 +1353,10 @@ $viewport-bar-control: 26px;
 	}
 
 	.group > .toolbarbutton:hover,
-	.group > .build-menu-button > .toolbarbutton:hover,
-	.snap-step:hover,
-	.resolution-mode:hover
+	.group > .build-menu-button > .toolbarbutton:hover
 	{
-		background-color: $control-background-light;
-		border-color: $edge-lit;
+		background-color: rgba( 0, 0, 0, 0.85 );
+		border-color: rgba( 255, 255, 255, 0.24 );
 	}
 
 	//On is still the picked plate, the same as everywhere else.

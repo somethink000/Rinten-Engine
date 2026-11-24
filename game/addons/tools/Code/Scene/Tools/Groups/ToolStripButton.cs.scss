@@ -9,8 +9,8 @@
 	align-items: center;
 	justify-content: center;
 	border-radius: 4px;
-	border: 1px solid $edge;
-	background-color: $window-ground;
+	border: 1px solid rgba( 255, 255, 255, 0.12 );
+	background-color: rgba( 0, 0, 0, 0.75 );
 	color: $ink;
 	cursor: pointer;
 	pointer-events: all;
@@ -59,7 +59,8 @@
 
 	&:hover
 	{
-		background-color: $tile-hover;
+		background-color: rgba( 0, 0, 0, 0.85 );
+		border-color: rgba( 255, 255, 255, 0.24 );
 	}
 
 	//Active: accent background with the glyph kept white like all other icons

@@ -92,6 +92,9 @@ $separator-width: 4px;
 $separator-color: $header-background;
 $separator-hover-color: #282828;
 
+//The outline round a dock group: darker than the panel, so it reads as a seam rather than trim.
+$dock-border: #2a2a2a;
+
 $font-family: $font;
 
 $vertical-gap: 4px;

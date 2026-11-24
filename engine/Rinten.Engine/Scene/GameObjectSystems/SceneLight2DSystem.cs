@@ -49,7 +49,7 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 	/// <summary>The scene's 2D lights this frame, those reaching nearest the camera first.</summary>
 	public IReadOnlyList<Record> Lights => lights;
 
-	//How far short of the camera each found light's reach falls, for picking which a frame carries - see Gather
+	//How far short of the eye each found light's reach falls; ties go by found order so the pick is steady
 	readonly List<float> shortOf = new();
 	readonly List<int> picked = new();
 	Comparison<int> byReach;
@@ -114,26 +114,22 @@ public sealed class SceneLight2DSystem : GameObjectSystem<SceneLight2DSystem>
 
 		Active = anyGlobal || found.Count > 0 || Glows;
 
-		//Where a scene has more lights than a frame carries, those whose reach comes nearest the eye on the plane: one whose
-		//circle takes the eye in first, and the bigger the further in. By the lights' own distance alone, as it was, a
-		//handful of small lights near the middle - bullets, each carrying one - pushed out the big light of the room the
-		//player stood in, and the room went dark and lit again as they came and went
 		picked.Clear();
 		shortOf.Clear();
 
-		for ( var i = 0; i < found.Count; i++ )
-		{
-			picked.Add( i );
+		for ( var i = 0; i < found.Count; i++ ) picked.Add( i );
 
-			var at = found[i].WorldPosition;
-			var apart = MathF.Sqrt( ( ( at.x - eye.x ) * ( at.x - eye.x ) ) + ( ( at.y - eye.y ) * ( at.y - eye.y ) ) );
-
-			shortOf.Add( apart - found[i].Range );
-		}
-
-		//Ties - lights standing together - go by the order they were found in, so the same lights are kept frame to frame
+		//Over the limit, keep the lights whose reach comes nearest the eye, so small lights near it can't push out a room's big one
 		if ( found.Count > MostLights )
+		{
+			foreach ( var light in found )
+			{
+				var at = light.WorldPosition;
+				shortOf.Add( MathF.Sqrt( ( ( at.x - eye.x ) * ( at.x - eye.x ) ) + ( ( at.y - eye.y ) * ( at.y - eye.y ) ) ) - light.Range );
+			}
+
 			picked.Sort( byReach ??= ByReach );
+		}
 
 		for ( var n = 0; n < picked.Count && n < MostLights; n++ )
 		{

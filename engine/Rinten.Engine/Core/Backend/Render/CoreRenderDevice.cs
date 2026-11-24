@@ -1265,6 +1265,9 @@ internal static unsafe class CoreRenderDevice
 
 		/// <summary>The same in a light's map, which keeps nearer as less.</summary>
 		LightNearerOrSame = 4,
+
+		/// <summary>Drawn only where strictly nearer than what is there, so a tie keeps what was drawn first.</summary>
+		Nearer = 5,
 	}
 
 	/// <summary>What a camera's depth is cleared to and reads where nothing was drawn: the far plane, reversed.</summary>
@@ -1291,9 +1294,7 @@ internal static unsafe class CoreRenderDevice
 			var handle = CoreRender.PipelineCreate(
 				vertex, vertexSpirv.Length, "main",
 				pixel, pixelSpirv.Length, "main",
-				//Two means additive, which is what a pass gathering over several draws wants; three screens,
-				//which is adding without going past white; five adds by the source's own alpha; seven is premultiplied
-				//- see VkPipelines.
+				//1 alpha, 2 additive, 3 screen, 5 add by alpha, 6 multiply, 7 premultiplied - see VkPipelines
 				(int)vertexLayout, depthTest ? (int)compare : 0, (int)topology,
 				screen ? 3 : additive ? 2 : addByAlpha ? 5 : multiply ? 6 : premultiplied ? 7 : blend ? 1 : 0,
 				( depthWrite ?? depthTest ) ? 1 : 0, cullBack ? 1 : 0, depthOnly ? 1 : 0, (int)target,

@@ -290,10 +290,7 @@ public sealed partial class TileMap
 
 	//Draw the chunks of one z-index, for the view being gathered - called by its scene object while the frame collects what is drawn by hand. The layers
 	//all lie in one plane, so they are drawn strictly back layer first, solid or see-through alike: each covers the ones drawn before it.
-	//
-	//None writes depth, as no sprite does: what is on top is the drawing order - the z-index among the layers and the sprites' Order In
-	//Layer - and nothing else. A solid layer that wrote depth hid every sprite standing a little further from the camera whatever its order,
-	//and a map put nearer the camera - a room placed by a point a little off the plane - hid the player behind its back wall.
+	//No layer writes depth: z-index and Order In Layer decide what is on top, and depth only ties within one order
 	internal void DrawChunks( int zIndex )
 	{
 		if ( drawn.Count == 0 ) return;
@@ -322,6 +319,7 @@ public sealed partial class TileMap
 		{
 			attributes.SetCombo( "D_BLEND", 0 );
 			attributes.SetCombo( "D_OPAQUE", 0 );
+			attributes.SetCombo( "D_NEARER_ONLY", 1 );
 
 			var portable = CoreRenderDevice.PortableFrame;
 			var perRun = portable ? Graphics.InstancesPerRun( Marshal.SizeOf<SpriteBatchSceneObject.SpriteData>() ) : 0;
@@ -417,8 +415,9 @@ internal sealed class TileMapSceneObject : SceneCustomObject
 		this.zIndex = zIndex;
 		DrawOrder = zIndex;
 
-		//Below every other object of this order, so a sprite stands on the tiles of its order however late they were made
-		DrawTie = int.MinValue + map.Sequence;
+		//After this order's opaque sprites, which hold depth: tiles cover those behind the plane, not those on or before it.
+		//Before the see-through ones, which go over the tiles whatever their depth
+		DrawTie = ( int.MinValue / 2 ) + map.Sequence;
 		Flags.CastShadows = false;
 	}
 

@@ -140,11 +140,8 @@ static const float LeastPenetration = 1.5;
 //Whether occluders shadow themselves - see Lighting2D.SelfShadow
 bool SelfShadow() { return g_frame[0].light2dInfo.y > 0.5; }
 
-//How far from a point in the texel at the nearest blocking texel is, at least - a ray can stride this far without
-//passing one. In blocks: from this block's middle to the nearest blocking block's middle, less that block's half
-//diagonal, less how far the point is from this block's middle; then in pixels. The flood found the blocker nearest the
-//block's middle, not the point: measured from the point to that one, as it was, a blocker nearer the point was missed
-//by up to three pixels, and a ray stepped over a corner or not as the light moved - the shadow's edge shook with it
+//How far a ray from this point can stride without passing a blocking texel, in pixels. The flood measured from the
+//block's middle, so the point's own distance from it is taken off too
 float Clearance( int2 at, float2 position )
 {
 	int2 block = at / 2;
@@ -314,9 +311,7 @@ float3 Gathered( float2 here )
 //Angles a light's shadow map has about it - see CoreLight2D.ShadowAngles
 static const int ShadowAngles = 4096;
 
-//How many strides a shadow map's ray may take to the light's range, and the least of one as a share of that range.
-//A ray skimming a wall strides the least the whole way, so the least has to be small - half a pixel for a light of a
-//normal range - or it strides over a blocker's corner, and the steps enough for it to get to the end at that
+//Most strides a shadow ray takes, and the least stride as a share of range: small, or a ray skimming a wall skips corners
 static const int MostShadowSteps = 1024;
 static const float LeastShadowStrideShare = 512.0;
 
@@ -390,10 +385,7 @@ void ShadowsCs( uint3 id : SV_DispatchThreadID )
 	float seen = light.range;
 	float least = max( 0.5, light.range / LeastShadowStrideShare );
 
-	//A light standing in a blocker - a lamp set into a wall, a torch held up against one - shines out of it: the
-	//blocker it stands in is passed through, and only what is met after it blocks. Stopped at once, every ray of such
-	//a light was blocked where it started and the light went out, and as it moved over a blocking texel's edge it
-	//went on and off
+	//A light standing in a blocker shines out of it: that blocker is passed through, and only what comes after blocks
 	int2 own = int2( floor( light.position ) );
 	bool leaving = enter <= 0.0 && Inside( own ) && Solid( own );
 
@@ -458,10 +450,8 @@ float Visible( int i, float turn, float distance )
 	return lerp( around.x + 0.5 >= distance ? 1.0 : 0.0, around.y + 0.5 >= distance ? 1.0 : 0.0, around.z );
 }
 
-//How much of light i a blocker's texel this far from it this way takes: lit as far into the blocker as the penetration,
-//fading on the way. Each of the map's two nearest angles' answer, blended, as Visible does - their distances blended
-//were neither at a corner, where one ray stops on this blocker and the next goes past it, and lit the blocker deep
-//inside in streaks that moved as the light did
+//How much of light i a blocker's texel takes, fading over the penetration depth. Answers blended, not distances, as
+//Visible does: blended distances lit corners deep inside
 float Penetrated( int i, float turn, float distance, float penetration )
 {
 	float3 around = Around( i, turn );

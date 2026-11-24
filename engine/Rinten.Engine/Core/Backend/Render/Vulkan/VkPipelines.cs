@@ -605,12 +605,13 @@ internal static unsafe partial class VkPipelines
 						DepthWriteEnable = depthWrite != 0,
 
 						//Or-equal so a depth pre-pass doesn't reject itself; a camera's depth is reversed, a light's map is not - see
-						//CoreRenderDevice.DepthCompare: 1 nearer in a camera, 2 equal, 3 always, 4 nearer in a light's map
+						//CoreRenderDevice.DepthCompare: 1 nearer in a camera, 2 equal, 3 always, 4 nearer in a light's map, 5 strictly nearer
 						DepthCompareOp = depthTest switch
 						{
 							2 => CompareOp.Equal,
 							3 => CompareOp.Always,
 							4 => CompareOp.LessOrEqual,
+							5 => CompareOp.Greater,
 							_ => CompareOp.GreaterOrEqual,
 						},
 					};

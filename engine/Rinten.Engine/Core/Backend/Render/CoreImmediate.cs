@@ -50,7 +50,7 @@ internal static class CoreImmediate
 
 	//What an instanced draw's pipeline is made of, kept so that it can be baked again for the picture it is replayed into: Pipeline
 	//is the one for the finished picture, and the world's own pass wants its own - see CoreSceneDrawer.DrawInstancedInWorld.
-	internal readonly record struct InstancedKind( string Shader, bool Additive, bool Opaque );
+	internal readonly record struct InstancedKind( string Shader, bool Additive, bool Opaque, bool NearerOnly );
 
 	//The portable frame's form of an instanced draw: the instances ride in a slot of the frame's bone ring rather than in
 	//a buffer of their own, a run at a time, with the one picture the run shares - see CoreRenderDevice.DrawBlockInstanced.

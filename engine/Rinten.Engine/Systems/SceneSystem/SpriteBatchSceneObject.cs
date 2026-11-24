@@ -20,10 +20,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 	private readonly Dictionary<Guid, long> joined = new();
 	private static long joins;
 
-	//Components in the order they came into the batch, which is the order they are drawn in where the batch is not sorted
-	//and how a sort breaks a tie. A dictionary's own order, as it was, put a sprite made after another was taken out
-	//into the hole it left: which of two sprites of one Order In Layer was on top was down to what had come and gone
-	//before them, and changed as the game made and destroyed them
+	//Components in joining order: the draw order unsorted and the tie break sorted, steady as sprites come and go
 	private readonly List<SpriteRenderer> inOrder = new();
 	private bool reorder;
 
@@ -560,8 +557,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 			Offset = c.Pivot
 		};
 
-		//The furthest corner from where it stands, whichever way it is turned: the longer side alone, as it was, left the
-		//corners of a turned sprite out of the box, and a sprite at the screen's edge was culled while they still showed
+		//The furthest corner whichever way it is turned, so a turned sprite's corners stay inside the box
 		var pivot = c.Pivot;
 		var reachX = MathF.Max( pivot.x, 1f - pivot.x ) * 2f * spriteScale.x;
 		var reachY = MathF.Max( pivot.y, 1f - pivot.y ) * 2f * spriteScale.y;
@@ -818,8 +814,7 @@ internal sealed class SpriteBatchSceneObject : SceneCustomObject
 
 		//What is sorted is where each sprite is, not the sprite. A sprite is a hundred and thirty-six bytes and a
 		//sort moves its items n log n times; the order is four, and the sprites are then laid out once, in order.
-		//Ties - every sprite of a flat 2D scene stands at one depth - go by where each is in the batch, which is the order
-		//they joined it: Array.Sort is not stable, and which of two sprites at one depth was on top changed as they moved
+		//Array.Sort is not stable, and a flat 2D scene ties everywhere: ties go by place in the batch
 		Array.Sort( _sortOrder, 0, count, sortComparer ??= new DepthThenPlace( this ) );
 
 		for ( var i = 0; i < count; i++ )

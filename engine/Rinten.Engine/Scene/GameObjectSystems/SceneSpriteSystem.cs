@@ -395,9 +395,8 @@ public sealed class SceneSpriteSystem : GameObjectSystem<SceneSpriteSystem>
 		renderGroupObject.Material = config.Material;
 		renderGroupObject.DrawOrder = config.SortOrder;
 
-		//Batches of one order - sprites that differ in blending, material or tags - in the order they were made, the same
-		//every frame. Left at nought the tie fell to the world's set of objects, whose order is a hash set's
-		renderGroupObject.DrawTie = ++batchesMade;
+		//Within an order: opaque batches, then tile maps, then the rest, each in the order made - see TileMapSceneObject
+		renderGroupObject.DrawTie = renderGroupObject.Opaque ? int.MinValue + ++batchesMade : ++batchesMade;
 		renderGroupObject.Tags.SetFrom( new TagSet( config.Tags.Select( StringToken.GetValue ) ) );
 		config.RenderOptions.Apply( renderGroupObject );
 

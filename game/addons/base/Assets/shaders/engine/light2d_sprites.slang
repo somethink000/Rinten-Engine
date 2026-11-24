@@ -1,8 +1,5 @@
-//The frame's sprites and tiles redrawn into the 2D light's scene (CoreLight2D): what blocks writes its coverage, what
-//glows its own colour times its strength, and everything else nothing. Premultiplied over what is there, so an
-//occluder in front of a glow hides it, and a glow that does not block adds its colour and leaves the coverage alone -
-//written with its coverage as alpha, every glowing sprite blocked light as if it were an occluder.
-//LIGHT2D_TILE steps a tile map's animation the way tile_ps.shader does
+//Sprites and tiles redrawn into the 2D light's scene (CoreLight2D), premultiplied: blockers write coverage, glows add
+//colour without blocking. LIGHT2D_TILE steps a tile map's animation the way tile_ps.shader does
 
 #define LIGHT2D_SCENE 1
 

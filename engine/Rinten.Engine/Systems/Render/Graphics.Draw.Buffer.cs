@@ -376,18 +376,19 @@ partial class Graphics
 	{
 		var additive = attributes is not null && attributes.TryGetCombo( "D_BLEND", out var blend ) && blend != 0;
 		var opaque = attributes is not null && attributes.TryGetCombo( "D_OPAQUE", out var solid ) && solid != 0;
+		var nearerOnly = attributes is not null && attributes.TryGetCombo( "D_NEARER_ONLY", out var nearer ) && nearer != 0;
 
-		return new CoreImmediate.InstancedKind( material.ShaderName, additive, opaque );
+		return new CoreImmediate.InstancedKind( material.ShaderName, additive, opaque, nearerOnly );
 	}
 
 	//Cached instanced pipeline per target and blend mode, since blending is pipeline state here
 	internal static ulong InstancedPipeline( CoreImmediate.InstancedKind kind, CoreRender.TargetKind? world )
 	{
-		var (shader, additive, opaque) = kind;
+		var (shader, additive, opaque, nearerOnly) = kind;
 
 		if ( string.IsNullOrWhiteSpace( shader ) ) return 0;
 
-		var key = ( shader, additive, opaque, world );
+		var key = ( kind, world );
 
 		if ( instancedPipelines.TryGetValue( key, out var kept ) ) return kept;
 
@@ -417,6 +418,7 @@ partial class Graphics
 		var made = CoreRenderDevice.CreatePipeline( vertex, pixel,
 			CoreRender.VertexLayoutKind.None,
 			depthTest: true,
+			compare: nearerOnly ? CoreRenderDevice.DepthCompare.Nearer : CoreRenderDevice.DepthCompare.NearerOrSame,
 			blend: !opaque,
 			//Translucent sprites read the depth they are drawn against and do not add to it; an opaque one is an ordinary surface.
 			depthWrite: opaque,
@@ -430,7 +432,7 @@ partial class Graphics
 		return made;
 	}
 
-	private static readonly Dictionary<(string Shader, bool Additive, bool Opaque, CoreRender.TargetKind? World), ulong> instancedPipelines = new();
+	private static readonly Dictionary<(CoreImmediate.InstancedKind Kind, CoreRender.TargetKind? World), ulong> instancedPipelines = new();
 
 	internal static void DrawIndexedInstancedIndirect<T>( GpuBuffer<T> vertexBuffer, GpuBuffer indexBuffer, Material material, GpuBuffer indirectBuffer, uint indirectElementOffset = 0, RenderAttributes attributes = null, PrimitiveType primitiveType = PrimitiveType.Triangles, uint drawCount = 1, uint stride = 0 ) where T : unmanaged
 	{

@@ -64,8 +64,8 @@ public sealed class ToolCommand : IToolCommand
 	}
 }
 
-//Here rather than on each command, so every command reads the keybinds page the same way and every button writes the same thing in its corner.
-/// <summary>The words a tool command shows: its tooltip, and the key written in its corner.</summary>
+//Here rather than on each command, so every command reads the keybinds page the same way and every tooltip says the same thing.
+/// <summary>The words a tool command shows: its tooltip.</summary>
 public static class ToolCommandText
 {
 	/// <summary>The keys the command's shortcut is on right now, upper case, or null where it has no shortcut or the shortcut has no keys.</summary>
@@ -76,15 +76,6 @@ public static class ToolCommandText
 		var keys = EditorShortcuts.GetKeys( command.Shortcut )?.Trim().ToUpperInvariant();
 
 		return string.IsNullOrEmpty( keys ) ? null : keys;
-	}
-
-	//A combination does not fit in the corner of a button, and the whole point of writing it there is that it is the one thing to press.
-	/// <summary>The key as the corner of a button writes it: only where it is one key.</summary>
-	public static string CornerKey( IToolCommand command )
-	{
-		var keys = Keys( command );
-
-		return keys is { Length: > 0 and <= 2 } && !keys.Contains( '+' ) ? keys : null;
 	}
 
 	/// <summary><c>&lt;b&gt;Title (KEYS)&lt;/b&gt;&lt;br&gt;Description</c>, with the keys and the description left out where there are none.</summary>

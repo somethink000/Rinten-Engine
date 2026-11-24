@@ -4,6 +4,9 @@
 {
 	position: absolute;
 	left: 0;
+	//The strips line up with the bar's own 6px inset: the bar pads 6, the strip pads 1, so 5 here puts the
+	//first mode button's left edge under the mode dropdown's.
+	padding-left: 5px;
 	//The bar over the scene is laid over the picture, so the strips start under it - 32 is ViewportToolsPanel.Height.
 	top: 32px;
 	height: calc( 100% - 32px );

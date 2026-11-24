@@ -115,8 +115,7 @@ public static class ExportToolchain
 		}
 	}
 
-	//The JDKs the Android workload builds with, from its own props - 21 to 25 in the one for .NET 11. A machine's newest JDK
-	//can be past the top of that, and the build then stops before it starts: see XA0030.
+	//The JDKs the Android workload accepts, from its props; a newer one stops the build with XA0030
 	static (int Low, int High) JavaRange()
 	{
 		var low = 0;
@@ -135,7 +134,7 @@ public static class ExportToolchain
 					high = Math.Max( high, Setting( xml, "LatestSupportedJavaVersion" ) );
 				}
 
-		//No workload installed to ask yet: anything from 17 up, as it was before there was a range to read
+		//No workload installed to ask yet: anything from 17 up
 		return high == 0 ? (17, int.MaxValue) : (low, high);
 	}
 

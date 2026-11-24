@@ -1301,8 +1301,8 @@ $viewport-bar-control: 26px;
 		&.right { justify-content: flex-end; }
 	}
 
-	//A run of controls: the glass is on each button below, and the group adds one blur behind them - a copy of the
-	//window per group rather than one per button.
+	//A run of controls: the glass is on each button below. No blur on the group - over a bright scene it shows
+	//as a blue patch around the plates, and the plates are dark enough to read without it.
 	.group
 	{
 		flex-direction: row;
@@ -1312,13 +1312,11 @@ $viewport-bar-control: 26px;
 		padding: 0px;
 		gap: 2px;
 		border-radius: $radius-2;
-		backdrop-filter: blur( 25px );
 
 		//What the tool put on the bar itself: it has its own look and is given only the room.
 		&.plain
 		{
 			background-color: transparent;
-			backdrop-filter: none;
 			padding: 0px;
 			gap: 6px;
 		}
@@ -1332,8 +1330,8 @@ $viewport-bar-control: 26px;
 		background-color: $edge;
 	}
 
-	//Every control on the bar is a plate of frosted glass: the scene is blurred by the group behind it, and the plate
-	//is black enough for a glyph or a number to read on any picture. Active keeps the picked plate.
+	//Every control on the bar is a plate of dark glass: black enough for a glyph or a number to read on any picture.
+	//Active keeps the picked plate.
 	.group > .toolbarbutton,
 	.group > .build-menu-button > .toolbarbutton,
 	.snap-step,

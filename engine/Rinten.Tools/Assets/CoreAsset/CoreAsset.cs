@@ -138,8 +138,10 @@ internal sealed class CoreAsset : Asset
 	public override List<string> GetUnrecognizedReferencePaths() => new();
 
 	//Whether this is a model definition, the one file type compiled here on save
+	//A .mdl_c left without its .mdl resolves to the same type but is the build, not a definition
 	internal bool IsModel
-		=> string.Equals( AssetType?.FileExtension, "mdl", StringComparison.OrdinalIgnoreCase );
+		=> string.Equals( AssetType?.FileExtension, "mdl", StringComparison.OrdinalIgnoreCase )
+			&& !relative.EndsWith( "_c", StringComparison.OrdinalIgnoreCase );
 
 	//Whether an addon registered a builder for this type (BuildsAssetTypeAttribute)
 	private bool Built => AssetBuilders.Has( AssetType?.FileExtension );

@@ -27,7 +27,10 @@ internal static class CorePictures
 			return compressed;
 		}
 
-		return CoreModel.ResolveOnDisk( blocks );
+		if ( CoreModel.ResolveOnDisk( blocks ) is { } plain ) return plain;
+
+		//An Android build carries Basis blocks only, and a phone with BC reads them too
+		return CoreRender.ReadsUniversal ? CoreModel.ResolveOnDisk( CompiledPaths.Universal( blocks ) ) : null;
 	}
 
 	//A picture's carried blocks on the device, or nought where it has none.

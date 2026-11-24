@@ -891,16 +891,16 @@ internal static unsafe class CoreRender
 		=> web ? BrowserTextures.CreateMips( width, height, format, srgb, mipCount, mipInfo, pixels, byteCount )
 			: VkTextures.CreateMips( width, height, format, srgb, mipCount, mipInfo, pixels, byteCount );
 
-	//Whether this device takes Basis textures: a page, or Vulkan without BC; RINTEN_KTX2=1 forces it
-	internal static bool TakesUniversal => web || NativeUniversal;
+	//Whether this device can read Basis textures at all: a page, or Vulkan with the transcoder
+	internal static bool ReadsUniversal => web || CoreBasisTranscoder.Available;
+
+	//Whether it reads them before BC blocks: a page, or Vulkan without BC; RINTEN_KTX2=1 forces it
+	internal static bool TakesUniversal => web || ( ReadsUniversal && ( universalTried || !VkDevice.blockCompression ) );
 
 	private static readonly bool universalTried = Environment.GetEnvironmentVariable( "RINTEN_KTX2" ) == "1";
 
-	private static bool NativeUniversal
-		=> !web && ( universalTried || !VkDevice.blockCompression ) && CoreBasisTranscoder.Available;
-
 	internal static ulong TextureCreateUniversal( CoreUniversalTexture picture )
-		=> web ? BrowserTextures.CreateUniversal( picture ) : NativeUniversal ? VkTextures.CreateUniversal( picture ) : 0;
+		=> web ? BrowserTextures.CreateUniversal( picture ) : ReadsUniversal ? VkTextures.CreateUniversal( picture ) : 0;
 
 	internal static ulong TextureCreateRgba( byte* pixels, int width, int height, int srgb )
 		=> web ? BrowserTextures.CreateRgba( pixels, width, height, srgb )

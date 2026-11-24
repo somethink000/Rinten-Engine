@@ -729,7 +729,18 @@ public sealed partial class CameraComponent : Component, Component.ExecuteInEdit
 			//Our renderer draws this the way it draws a window: a viewport with no window to present to.
 			if ( CoreScenePreview.Available )
 			{
-				CoreScenePreview.Shared.Render( Scene, this, targetBitmap );
+				//Game view is what draws the screen panels
+				var preview = CoreScenePreview.Shared;
+				preview.GameView = renderUI;
+
+				try
+				{
+					preview.Render( Scene, this, targetBitmap );
+				}
+				finally
+				{
+					preview.GameView = false;
+				}
 			}
 
 			//Resize the UI back to the screen size

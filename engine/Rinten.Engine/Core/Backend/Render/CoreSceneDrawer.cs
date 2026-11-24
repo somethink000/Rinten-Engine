@@ -3445,7 +3445,7 @@ internal sealed partial class CoreSceneDrawer
 		//Nothing records commands against this drawer outside its own frame.
 		Drawing = null;
 
-		if ( Watched || gameView )
+		if ( Watched )
 		{
 			CoreRenderDevice.ZoneBegin( "report" );
 

@@ -27,7 +27,7 @@ internal static class CoreGameRenderer
 
 	//Told it is drawing a game rather than an editor viewport, which is what decides whether the furniture of the editor - the grid, the icons over
 	//components, the selection outline - is drawn, and whether the game's own panels are. A window with no editor around it is always the game.
-	private static readonly CoreSceneDrawer drawer = new() { GameViewSource = () => true };
+	private static readonly CoreSceneDrawer drawer = new() { GameViewSource = () => true, Watched = true };
 
 	//Draws the scene from its own camera, into this tick's frame. False means it did not - and then whoever asked falls back to the legacy renderer.
 	internal static bool Render( Scene scene )

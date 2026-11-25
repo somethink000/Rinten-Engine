@@ -53,6 +53,7 @@ public sealed partial class Model : Resource
 		core?.Dispose();
 		core = next;
 		isMissing = false;
+		_physicsBounds = null;
 		ForgetGeometry();
 
 		//Everything else read off the old core with it: a model recompiled with a new
@@ -81,6 +82,7 @@ public sealed partial class Model : Resource
 
 		core?.Dispose();
 		core = null;
+		_physicsBounds = null;
 
 		base.Destroy();
 	}
@@ -88,6 +90,7 @@ public sealed partial class Model : Resource
 	//Called when the resource is reloaded. We should clear any cached values.
 	internal override void OnReloaded()
 	{
+		_physicsBounds = null;
 		_physics?.Dispose();
 		_physics = default;
 

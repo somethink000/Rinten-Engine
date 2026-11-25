@@ -109,12 +109,15 @@ public partial class GameObject : IValid
 	}
 
 	//Remove all children
+	/// <summary>
+	/// Remove a child, searching from the end because parent destruction removes children in reverse order.
+	/// </summary>
+	/// <param name="child"></param>
 	private void RemoveChild( GameObject child )
 	{
-		var i = Children.IndexOf( child );
-		if ( i < 0 ) return;
-
-		Children.RemoveAt( i );
+		var i = Children.LastIndexOf( child );
+		if ( i >= 0 )
+			Children.RemoveAt( i );
 	}
 
 	/// <summary>Destroy all components and child objects</summary>

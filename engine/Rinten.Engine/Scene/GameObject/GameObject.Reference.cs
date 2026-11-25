@@ -7,7 +7,7 @@ namespace Rinten;
 //A serialized reference to a GameObject that can be resolved at runtime. Can either have
 //a GameObjectId for objects in a scene, or a PrefabPath if we're referencing a prefab.
 [ActionGraphExposeWhenCached]
-internal readonly struct GameObjectReference
+internal readonly struct GameObjectReference : IEquatable<GameObjectReference>
 {
 	private const string ExpectedReferenceType = "gameobject";
 
@@ -50,6 +50,21 @@ internal readonly struct GameObjectReference
 		GameObjectId = gameObjectId;
 		PrefabPath = prefabPath;
 	}
+
+	public bool Equals( GameObjectReference other )
+	{
+		return GameObjectId == other.GameObjectId
+			&& string.Equals( PrefabPath, other.PrefabPath, StringComparison.Ordinal )
+			&& string.Equals( ReferenceType, other.ReferenceType, StringComparison.Ordinal );
+	}
+
+	public override bool Equals( object? obj ) => obj is GameObjectReference other && Equals( other );
+
+	/// <summary>Leaves out <see cref="ReferenceType"/>: it's the same for every reference, so it adds nothing to the hash.</summary>
+	public override int GetHashCode() => HashCode.Combine( GameObjectId, PrefabPath );
+
+	public static bool operator ==( GameObjectReference left, GameObjectReference right ) => left.Equals( right );
+	public static bool operator !=( GameObjectReference left, GameObjectReference right ) => !left.Equals( right );
 
 	/// <summary>Attempt to resolve this reference in the current <see cref="Game.ActiveScene"/>. Returns <see langword="null"/> if the reference couldn't be resolved, and logs a warning.</summary>
 	public GameObject? Resolve() => Resolve( Game.ActiveScene );

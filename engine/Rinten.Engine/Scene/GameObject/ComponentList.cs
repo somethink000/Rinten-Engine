@@ -176,7 +176,10 @@ public class ComponentList
 	/// <summary>Get a list of components on this game object, optionally recurse when deep is true</summary>
 	public IEnumerable<T> GetAll<T>( FindMode find = FindMode.InSelf | FindMode.Enabled | FindMode.InDescendants )
 	{
-		if ( go.IsDestroyed ) return Enumerable.Empty<T>();
+		if ( go.IsDestroyed
+			|| (find.Contains( FindMode.Enabled ) && !find.Contains( FindMode.Disabled ) && !go.Enabled)
+			|| (Count == 0 && go.Children.Count == 0 && (find & (FindMode.InParent | FindMode.InAncestors)) == 0) )
+			return Enumerable.Empty<T>();
 
 		var results = new List<T>( 16 );
 

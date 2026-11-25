@@ -264,11 +264,8 @@ public partial class GameObject : IJsonConvert, IComponentLister, BytePack.ISeri
 		//Clear any local interpolation when our parent changes. This will also call TransformChanged.
 		Transform.ClearLocalInterpolation();
 
-		//Tags could have changed
-		foreach ( var c in Components.GetAll( FindMode.EnabledInSelfAndDescendants ) )
-		{
-			c.OnTagsUpdatedInternal();
-		}
+		//Tags could have changed: the inherited token caches here and below are stale, and components hear about it
+		Tags.MarkDirty();
 
 		//Network owner could have changed
 		UpdateNetworkRoot();

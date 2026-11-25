@@ -149,7 +149,7 @@ internal static class VoiceCodec
 	static readonly short[] decoded = new short[FrameSamples * ( MaxFramesPerPacket + MaxConcealedFrames )];
 	static RealTimeSince lastSwept;
 
-	/// <summary>Decode a packet, hiding any frames lost since the talker's last one, and hand what it says to <paramref name="ondata"/> - 16 bit mono at <see cref="SampleRate"/>. The memory is only good for the call. False, with nothing handed over, when it is not a voice packet.</summary>
+	/// <summary>Decode a packet, hiding any frames lost since the talker's last one, and hand what it says to <paramref name="ondata"/> - 16 bit mono at <see cref="SampleRate"/>. The callback gets its own copy, and runs outside the decoder lock, so it may keep the samples. False, with nothing handed over, when it is not a voice packet.</summary>
 	public static bool Decode( ReadOnlySpan<byte> packet, Action<Memory<short>> ondata )
 	{
 		if ( packet.Length < HeaderBytes || packet[0] != Tag ) return false;
@@ -159,6 +159,8 @@ internal static class VoiceCodec
 		var count = packet[7];
 
 		if ( count == 0 || count > MaxFramesPerPacket ) return false;
+
+		short[] result = null;
 
 		lock ( padlock )
 		{
@@ -210,8 +212,12 @@ internal static class VoiceCodec
 				listener.Started = true;
 			}
 
-			if ( produced > 0 ) ondata?.Invoke( decoded.AsMemory( 0, produced ) );
+			if ( produced > 0 ) result = decoded.AsSpan( 0, produced ).ToArray();
 		}
+
+		//The callback can keep the memory, so it gets a copy rather than the decoder's shared scratch;
+		//and it runs after the lock, so a slow or re-entrant callback can't stall or deadlock another talker.
+		if ( result is not null ) ondata?.Invoke( result );
 
 		return true;
 	}

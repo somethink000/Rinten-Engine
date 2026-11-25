@@ -235,7 +235,35 @@ public partial class SoundFile : Resource, IValid
 		var loopStart = region ? Math.Max( options.LoopStart, 0 ) : 0;
 		var loopEnd = region ? Math.Max( options.LoopEnd, 0 ) : 0;
 
+		ValidatePcmLayout( data.Length, options.Channels, options.Bits, ref loopStart, ref loopEnd );
+
 		return Create( filename, WrapAsWav( data, options.Channels, options.Rate, options.Bits ), looping, loopStart, loopEnd );
+	}
+
+	//Raw samples are the game's own numbers, so the layout is checked before a WAV header is written around it:
+	//a channel count or sample size the decoder can't read would otherwise be taken as far as the mixer.
+	internal static void ValidatePcmLayout( int dataLength, int channels, int bits, ref int loopStart, ref int loopEnd )
+	{
+		if ( channels is < 1 or > byte.MaxValue )
+			throw new ArgumentException( $"Unsupported channel count: {channels}" );
+
+		if ( bits is not (8 or 16 or 24 or 32) )
+			throw new ArgumentException( $"Unsupported sample size: {bits} bits" );
+
+		var frameSize = channels * ( bits >> 3 );
+
+		if ( dataLength <= 0 || dataLength % frameSize != 0 )
+			throw new ArgumentException( $"PCM data length {dataLength} is not a whole number of {frameSize}-byte frames" );
+
+		var sampleCount = dataLength / frameSize;
+
+		if ( loopEnd < 0 || loopEnd > sampleCount )
+			loopEnd = 0;
+
+		var loopLimit = loopEnd > 0 ? loopEnd : sampleCount;
+
+		if ( loopStart < -1 || loopStart >= loopLimit )
+			loopStart = -1;
 	}
 
 	/// <summary>Load from WAV.</summary>

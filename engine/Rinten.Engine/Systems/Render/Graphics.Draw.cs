@@ -147,9 +147,21 @@ public static partial class Graphics
 
 	private static readonly HashSet<string> warned = new();
 
+	//A draw names a count as well as a span; a count past the span would read memory the caller never gave us.
+	internal static void ValidateDrawCounts( int vertCount, int vertexLength, int indexCount = 0, int indexLength = 0 )
+	{
+		if ( vertCount < 0 || vertCount > vertexLength )
+			throw new ArgumentOutOfRangeException( nameof( vertCount ), $"{nameof( vertCount )} ({vertCount}) must be between 0 and the number of vertices ({vertexLength})" );
+
+		if ( indexCount < 0 || indexCount > indexLength )
+			throw new ArgumentOutOfRangeException( nameof( indexCount ), $"{nameof( indexCount )} ({indexCount}) must be between 0 and the number of indices ({indexLength})" );
+	}
+
 	/// <summary>Draw a bunch of vertices</summary>
 	public static unsafe void Draw( Span<Vertex> vertices, int vertCount, Material material, RenderAttributes attributes = null, PrimitiveType primitiveType = PrimitiveType.Triangles )
 	{
+		ValidateDrawCounts( vertCount, vertices.Length );
+
 		fixed ( Vertex* ptr = vertices )
 		{
 			DrawInternal( ptr, vertCount, default, default, material, attributes, primitiveType );
@@ -159,6 +171,8 @@ public static partial class Graphics
 	//Draw a bunch of vertices TODO: make this public TODO: Is this safe to be public TODO: Is VertexLayoutManager.Get Safe
 	internal static unsafe void Draw<T>( Span<T> vertices, int vertCount, Material material, RenderAttributes attributes = null, PrimitiveType primitiveType = PrimitiveType.Triangles ) where T : unmanaged
 	{
+		ValidateDrawCounts( vertCount, vertices.Length );
+
 		fixed ( T* ptr = vertices )
 		{
 			DrawInternal( ptr, vertCount, default, default, material, attributes, primitiveType );
@@ -210,6 +224,8 @@ public static partial class Graphics
 	/// <summary>Draw a bunch of vertices</summary>
 	public static unsafe void Draw( Span<Vertex> vertices, int vertCount, Span<ushort> indices, int indexCount, Material material, RenderAttributes attributes = null, PrimitiveType primitiveType = PrimitiveType.Triangles )
 	{
+		ValidateDrawCounts( vertCount, vertices.Length, indexCount, indices.Length );
+
 		fixed ( Vertex* vptr = vertices )
 		fixed ( ushort* iptr = indices )
 		{

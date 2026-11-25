@@ -162,6 +162,7 @@ static class MixingThread
 		foreach ( var listener in Listener.ActiveList )
 		{
 			listener.MixTransform = listener.Transform;
+			listener.Motion.Update( listener.MixTransform.Position, RealTime.NowDouble );
 			snapshot.Listeners.Add( new ListenerState
 			{
 				Listener = listener,

@@ -165,9 +165,9 @@ public sealed partial class CommandList
 		{
 			static void Execute( ref Entry entry, CommandList commandList )
 			{
-				if ( entry.Object2 is T data ) commandList.Values.SetData( entry.Token, data );
+				commandList.Values.SetData( entry.Token, commandList.ReadPayload<T>( entry ) );
 			}
-			list.AddEntry( &Execute, new Entry { Token = token, Object2 = data, Object4 = this } );
+			list.AddEntry( &Execute, new Entry { Token = token, Object4 = this }, data );
 		}
 
 		/// <summary>Set a special value</summary>

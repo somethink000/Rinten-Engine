@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Rinten.Rendering;
@@ -58,6 +59,9 @@ public sealed unsafe partial class CommandList
 		public Vector4 Data1;
 		public Vector4 Data2;
 		public Vector4 Data3;
+
+		//Where a struct payload too big for this entry lives in the list's payload buffer - see AddEntry<T>.
+		public int Count;
 	}
 
 	//An ordered list of entries that will execute on the render thread. All access (record and execute) is serialized by _lock - recording
@@ -126,6 +130,30 @@ public sealed unsafe partial class CommandList
 			_entries.Add( data );
 	}
 
+	//Struct payloads too big for an Entry, written here instead of boxed. Reused across Reset.
+	byte[] _payload = [];
+	int _payloadUsed;
+
+	/// <summary>Add an entry with a struct payload, read back with <see cref="ReadPayload{T}"/>. Uses <see cref="Entry.Count"/>.</summary>
+	void AddEntry<T>( delegate*< ref Entry, CommandList, void > execute, Entry data, in T payload ) where T : unmanaged
+	{
+		data.Execute = execute;
+
+		lock ( _lock )
+		{
+			var size = Unsafe.SizeOf<T>();
+			if ( _payloadUsed + size > _payload.Length )
+				Array.Resize( ref _payload, Math.Max( Math.Max( _payload.Length * 2, 256 ), _payloadUsed + size ) );
+
+			MemoryMarshal.Write( _payload.AsSpan( _payloadUsed ), in payload );
+			data.Count = _payloadUsed;
+			_payloadUsed += size;
+			_entries.Add( data );
+		}
+	}
+
+	T ReadPayload<T>( in Entry entry ) where T : unmanaged => MemoryMarshal.Read<T>( _payload.AsSpan( entry.Count ) );
+
 	[Obsolete]
 	RenderAttributes attributes => Graphics.Attributes;
 
@@ -166,6 +194,7 @@ public sealed unsafe partial class CommandList
 			Values.Clear();
 			Pictures.Clear();
 			_entries.Clear();
+			_payloadUsed = 0;
 		}
 	}
 

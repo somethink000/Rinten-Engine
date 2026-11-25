@@ -99,7 +99,7 @@ public sealed partial class PlayerController : ICameraModifier
 		cam.FieldOfView = view.FieldOfView;
 
 #pragma warning disable CS0618
-		IEvents.PostToGameObject( GameObject, x => x.PostCameraSetup( cam ) );
+		GameObject.Components.ExecuteEnabledInSelfAndDescendants<IEvents, CameraComponent>( cam, static ( x, cam ) => x.PostCameraSetup( cam ) );
 #pragma warning restore CS0618
 
 		view.Position = cam.WorldPosition;

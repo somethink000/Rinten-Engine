@@ -6,7 +6,16 @@ internal sealed partial class Controller
 	internal static HashSet<Controller> All { get; private set; } = new();
 
 	//Get the first controller that's connected (shortcut)
-	internal static Controller First => All.FirstOrDefault();
+	internal static Controller First
+	{
+		get
+		{
+			foreach ( var controller in All )
+				return controller;
+
+			return null;
+		}
+	}
 
 	//The input context for this controller.
 	internal Input.Context InputContext { get; set; }

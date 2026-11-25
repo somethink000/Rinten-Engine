@@ -269,6 +269,7 @@ static class MixingThread
 	//What the whole mix comes out into. Native, because the video writer takes it as it is when a game is
 	//being recorded - it is one buffer, and being native costs nothing that the many per-voice ones did.
 	static readonly MultiChannelBuffer _mixOutput = new( AudioEngine.ChannelCount, native: true );
+	static readonly MasterLimiter _limiter = new();
 
 	static void Mix( VoiceFrameSnapshot snapshot )
 	{
@@ -286,6 +287,7 @@ static class MixingThread
 
 		_mixOutput.Silence();
 		_mixOutput.MixFrom( Mixer.Master.Output, snapshot.MasterVolume );
+		_limiter.Process( _mixOutput );
 		_mixOutput.HardLimit();
 		_mixOutput.SendToOutput();
 	}

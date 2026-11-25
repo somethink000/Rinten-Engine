@@ -74,6 +74,12 @@ public abstract partial class AudioProcessor
 	public void Deserialize( JsonObject node )
 	{
 		Json.DeserializeToObject( this, node );
+		OnDeserialized( node );
+	}
+
+	/// <summary>Lets processors migrate properties saved by older versions.</summary>
+	internal virtual void OnDeserialized( JsonObject node )
+	{
 	}
 
 	public override string ToString() => GetType().Name;

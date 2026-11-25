@@ -5,6 +5,9 @@
 	min-width: 0;
 	min-height: 0;
 	color: $ink-dim;
+	//Painted here as well as on the dock: the window is glass, and the toolbar row and the seams between the
+	//browser's panels were showing the desktop through their transparent pixels.
+	background-color: $panel-ground;
 
 	> .scopes {
 		flex-direction: column;
@@ -42,6 +45,9 @@
 		flex-grow: 1;
 		min-width: 0;
 		min-height: 0;
+		//The toolbar at the top has no plate of its own; without this the window's glass shows through the row
+		//above the browser - a hole with the desktop behind it.
+		background-color: $panel-ground;
 	}
 
 	.toolbar {
@@ -51,6 +57,7 @@
 		gap: 4px;
 		padding: 4px;
 		height: $row;
+		background-color: $panel-ground;
 
 		//Two thirds of the row it stands in, and no longer the thing that takes whatever width is going: what
 		//is to the right of it - the pinned folders - is worth more of the bar than an empty search box.
@@ -124,6 +131,7 @@
 		min-width: 0;
 		min-height: 0;
 		height: 100%;
+		background-color: $panel-ground;
 
 		//A panel whose width the splitter set; the last one takes the rest of the row.
 		> .fixed {

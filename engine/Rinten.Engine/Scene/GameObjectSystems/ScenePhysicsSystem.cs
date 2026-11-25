@@ -39,6 +39,11 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 	{
 		base.Dispose();
 		Unhook();
+
+		foreach ( var c in KeyframeColliders.EnumerateLocked( true ) )
+			c.KeyframeQueued = false;
+
+		KeyframeColliders.Clear();
 	}
 
 	private void Unhook()
@@ -79,7 +84,8 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 		//System.Threading.Tasks.Parallel.ForEach( KeyframeColliders.EnumerateLocked( true ), c => c.UpdateKeyframeTransform() );
 		foreach ( var c in KeyframeColliders.EnumerateLocked( true ) )
 		{
-			c.UpdateKeyframeTransform();
+			if ( c.UpdateKeyframeTransform() )
+				RemoveKeyframe( c );
 		}
 
 		//The actual physics step - if the world was never created there's nothing to step
@@ -90,6 +96,9 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 		//System.Threading.Tasks.Parallel.ForEach( Scene.GetAll<Rigidbody>(), c => c.UpdateTransformFromBody() );
 		foreach ( var obj in Scene.GetAll<Rigidbody>() )
 		{
+			//Asleep with nothing pending
+			if ( !obj.NeedsTransformSync ) continue;
+
 			obj.UpdateTransformFromBody();
 		}
 
@@ -166,8 +175,17 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 		}
 	}
 
-	internal void AddKeyframe( Collider collider ) => KeyframeColliders.Add( collider );
-	internal void RemoveKeyframe( Collider collider ) => KeyframeColliders.Remove( collider );
+	internal void AddKeyframe( Collider collider )
+	{
+		KeyframeColliders.Add( collider );
+		collider.KeyframeQueued = true;
+	}
+
+	internal void RemoveKeyframe( Collider collider )
+	{
+		KeyframeColliders.Remove( collider );
+		collider.KeyframeQueued = false;
+	}
 
 	internal void AddRigidBody( Rigidbody rigidBody )
 	{

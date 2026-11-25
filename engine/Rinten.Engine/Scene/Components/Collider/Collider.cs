@@ -30,8 +30,9 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 			_keyframeBody.BodyType = isKeyframed ? PhysicsBodyType.Keyframed : PhysicsBodyType.Static;
 			_keyframeBody.UseController = isKeyframed;
 
-			if ( isKeyframed ) ScenePhysicsSystem.Current?.AddKeyframe( this );
-			else ScenePhysicsSystem.Current?.RemoveKeyframe( this );
+			var system = Scene.GetSystem<ScenePhysicsSystem>();
+			if ( isKeyframed ) system?.AddKeyframe( this );
+			else system?.RemoveKeyframe( this );
 		}
 	}
 
@@ -197,6 +198,7 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 		UpdatePhysicsBody();
 
 		Transform.OnTransformChangedInternal += TransformChanged;
+		Transform.OnProxyChangedInternal += QueueKeyframeUpdate;
 		ChangeBody();
 
 		base.OnEnabledInternal();
@@ -205,6 +207,7 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 	internal override void OnDisabledInternal()
 	{
 		Transform.OnTransformChangedInternal -= TransformChanged;
+		Transform.OnProxyChangedInternal -= QueueKeyframeUpdate;
 
 		DisconnectBody();
 
@@ -320,11 +323,11 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 
 			if ( Static )
 			{
-				ScenePhysicsSystem.Current?.RemoveKeyframe( this );
+				Scene.GetSystem<ScenePhysicsSystem>()?.RemoveKeyframe( this );
 			}
 			else
 			{
-				ScenePhysicsSystem.Current?.AddKeyframe( this );
+				Scene.GetSystem<ScenePhysicsSystem>()?.AddKeyframe( this );
 			}
 		}
 		else
@@ -332,7 +335,7 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 			//If we're in editor, check if the editor wants to simulate us
 			if ( Scene.IsEditor )
 			{
-				var system = ScenePhysicsSystem.Current;
+				var system = Scene.GetSystem<ScenePhysicsSystem>();
 				body.BodyType = system is not null && system.HasRigidBody( Rigidbody ) ? PhysicsBodyType.Dynamic : PhysicsBodyType.Static;
 
 				//Always considered dynamic for navmesh
@@ -475,6 +478,8 @@ public abstract partial class Collider : Component, Component.ExecuteInEditor, C
 		}
 		else
 		{
+			QueueKeyframeUpdate();
+
 			if ( !Transform.InsideChangeCallback && targetTransform == _bodyWorld.WithScale( 1.0f ) )
 			{
 				TeleportKeyframeBody( targetTransform );

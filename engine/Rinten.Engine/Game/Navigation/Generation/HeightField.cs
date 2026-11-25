@@ -57,6 +57,9 @@ internal sealed class Heightfield : IDisposable
 		CellSize = cellSize;
 		CellHeight = cellHeight;
 
+		//A pooled generator keeps one heightfield; a crowded tile grew its columns and the next tile must start small again
+		_columnCapacity = _initialColumnCapacity;
+
 		if ( _spans == null || _spans.Length < ColumnCount * _columnCapacity )
 		{
 			if ( _spans != null ) ArrayPool<SpanData>.Shared.Return( _spans );
@@ -99,7 +102,23 @@ internal sealed class Heightfield : IDisposable
 	public void GrowColumns()
 	{
 		var newCapacity = _columnCapacity * 2;
-		var newSpans = ArrayPool<SpanData>.Shared.Rent( ColumnCount * newCapacity );
+		var needed = ColumnCount * newCapacity;
+
+		//The rented array may already have room: move the columns inside it, from the last down so
+		//none is overwritten by a column that has not moved yet.
+		if ( _spans.Length >= needed )
+		{
+			for ( int c = ColumnCount - 1; c >= 0; c-- )
+			{
+				int count = _columnCounts[c];
+				Array.Copy( _spans, c * _columnCapacity, _spans, c * newCapacity, count );
+			}
+
+			_columnCapacity = newCapacity;
+			return;
+		}
+
+		var newSpans = ArrayPool<SpanData>.Shared.Rent( needed );
 		for ( int c = 0; c < ColumnCount; c++ )
 		{
 			int count = _columnCounts[c];
@@ -109,6 +128,8 @@ internal sealed class Heightfield : IDisposable
 		_spans = newSpans;
 		_columnCapacity = newCapacity;
 	}
+
+	internal int ColumnCapacity => _columnCapacity;
 
 	/// <summary>Adds (and merges) a span into a column. Disallowed after compression.</summary>
 	public void AddOrMergeSpan( int x, int z, ushort sMin, ushort sMax, int areaId, int flagMergeThreshold )

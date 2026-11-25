@@ -50,6 +50,12 @@ public partial class Texture
 		if ( height <= 0 ) height = Height;
 		if ( depth <= 0 ) depth = 1;
 
+		if ( x < 0 || y < 0 || z < 0 )
+			throw new ArgumentException( "Update region can't be negative" );
+
+		if ( (long)x + width > Width || (long)y + height > Height || (long)z + depth > Math.Max( Depth, 1 ) )
+			throw new ArgumentException( "Update region is outside the texture" );
+
 		var memRequired = ImageFormatSize.Total( width, height, depth, 1, ImageFormat );
 		if ( data.Length < memRequired )
 		{

@@ -1,5 +1,4 @@
 using NativeEngine;
-using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -118,6 +117,29 @@ public partial class Texture
 		return ImageFormatSize.Total( width, height, 1, 1, format );
 	}
 
+	//How many slices a mip has: a volume's depth shrinks with its mips, an array's or cube's count does not.
+	private int GetSliceCount( int mip )
+	{
+		var desc = core.Desc;
+
+		if ( desc.m_nFlags.HasFlag( RuntimeTextureSpecificationFlags.TSPEC_VOLUME_TEXTURE ) )
+			return Math.Max( 1, desc.m_nDepth >> mip );
+
+		return Math.Max( 1, desc.ArrayCount );
+	}
+
+	private void ThrowIfSliceOutOfRange( int slice, int mip )
+	{
+		if ( slice < 0 || slice >= GetSliceCount( mip ) )
+			throw new ArgumentOutOfRangeException( nameof( slice ) );
+	}
+
+	private void ThrowIfMipOutOfRange( int mip )
+	{
+		if ( mip < 0 || mip >= Mips )
+			throw new ArgumentOutOfRangeException( nameof( mip ) );
+	}
+
 	/// <summary>Reads a 2D range of pixel values from the texture at the specified mip level, writing to <paramref name="dstData"/>. This reads one slice from a 2D texture array or 3D texture volume.</summary>
 	[Pure]
 	public unsafe void GetPixels<T>( (int X, int Y, int Width, int Height) srcRect, int slice, int mip, Span<T> dstData, ImageFormat dstFormat, (int X, int Y) dstSize = default )
@@ -141,6 +163,11 @@ public partial class Texture
 		{
 			throw new ArgumentException( $"{nameof( srcRect )} out of range" );
 		}
+
+		ThrowIfSliceOutOfRange( slice, mip );
+
+		if ( dstSize.X > srcRect.Width || dstSize.Y > srcRect.Height )
+			throw new ArgumentException( $"{nameof( dstSize )} can't be larger than {nameof( srcRect )}" );
 
 		var dstStrideBytes = GetImageFormatSize( dstFormat, dstSize.X, 1 );
 		if ( dstStrideBytes <= 0 )
@@ -183,7 +210,7 @@ public partial class Texture
 	{
 		var pixelByteSize = Unsafe.SizeOf<T>();
 
-		if ( dstRect.W < 0 || dstRect.H < 0 )
+		if ( dstRect.X < 0 || dstRect.Y < 0 || dstRect.W < 0 || dstRect.H < 0 )
 			throw new ArgumentException( $"{nameof( dstRect )} can't be negative" );
 
 		if ( dstRect.W == 0 )
@@ -200,33 +227,32 @@ public partial class Texture
 			throw new ArgumentException( $"{nameof( srcRect )} out of range" );
 		}
 
-		var maxLength = (dstRect.Y + dstRect.H - 1) * dstStride + dstRect.X + dstRect.W;
-		if ( maxLength > dstData.Length )
-			throw new ArgumentException( $"Output rect size ({maxLength}) exceeds destination array size {dstData.Length}" );
+		ThrowIfSliceOutOfRange( slice, mip );
 
-		if ( maxLength <= 0 )
-			throw new ArgumentException( $"Output rect size ({maxLength}) below zero or equal to zero" );
-
-		if ( maxLength > int.MaxValue )
-			throw new ArgumentException( $"Output rect size ({maxLength}) too large" );
-
-		var sliceSize = GetImageFormatSize( dstFormat ) * maxLength;
-		if ( sliceSize <= 0 )
-			throw new ArgumentException( $"{nameof( dstRect )} invalid" );
+		if ( dstRect.W > srcRect.Width || dstRect.H > srcRect.Height )
+			throw new ArgumentException( $"{nameof( dstRect )} can't be larger than {nameof( srcRect )}" );
 
 		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
 			throw new ArgumentException( $"{nameof( T )} must be a POD type" );
 
+		long formatSize = GetImageFormatSize( dstFormat );
+		long strideBytes = (long)dstStride * pixelByteSize;
+		long rowEndBytes = ((long)dstRect.X + dstRect.W) * formatSize;
+
+		if ( strideBytes > int.MaxValue || rowEndBytes > strideBytes )
+			throw new ArgumentException( $"{nameof( dstStride )} ({dstStride}) is too small for {nameof( dstRect )}" );
+
+		var requiredBytes = ((long)dstRect.Y + dstRect.H - 1) * strideBytes + rowEndBytes;
 		var dataSize = (long)dstData.Length * pixelByteSize;
 
-		if ( dataSize < sliceSize )
+		if ( requiredBytes > dataSize || requiredBytes > int.MaxValue )
 		{
-			throw new ArgumentException( "Output array is too small to fit the given pixel range.",
+			throw new ArgumentException( $"Output rect size ({requiredBytes} bytes) exceeds destination array size ({dataSize} bytes)",
 				nameof( dstData ) );
 		}
 
 			if ( !core.Read( srcRect, slice, mip, MemoryMarshal.AsBytes( dstData ), dstFormat,
-				(dstRect.X, dstRect.Y, dstRect.W, dstRect.H), dstStride * pixelByteSize ) )
+				(dstRect.X, dstRect.Y, dstRect.W, dstRect.H), (int)strideBytes ) )
 				throw new Exception( "Unable to read texture pixels" );
 
 		var nativeSrcRect = new NativeRect { x = srcRect.X, y = srcRect.Y, w = srcRect.Width, h = srcRect.Height };
@@ -371,13 +397,17 @@ public partial class Texture
 	/// <summary>Reads a 2D pixel range at a mip asynchronously; the span is only valid during the callback</summary>
 	public void GetPixelsAsync<T>( Action<ReadOnlySpan<T>> callback, ImageFormat dstFormat = ImageFormat.Default, (int X, int Y, int Width, int Height) srcRect = default, int slice = 0, int mip = 0 ) where T : unmanaged
 	{
+		ThrowIfMipOutOfRange( mip );
+
 		if ( srcRect.X < 0 || srcRect.Y < 0 ||
 			srcRect.Width <= 0 || srcRect.Height <= 0 ||
-			((long)srcRect.X + srcRect.Width) > Width ||
-			((long)srcRect.Y + srcRect.Height) > Height )
+			((long)srcRect.X + srcRect.Width) > Math.Max( 1, Width >> mip ) ||
+			((long)srcRect.Y + srcRect.Height) > Math.Max( 1, Height >> mip ) )
 		{
 			throw new ArgumentException( $"{nameof( srcRect )} out of range" );
 		}
+
+		ThrowIfSliceOutOfRange( slice, mip );
 
 		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
 			throw new ArgumentException( $"{nameof( T )} must be a POD type" );
@@ -405,11 +435,13 @@ public partial class Texture
 		if ( srcBox.Depth == 0 )
 			srcBox.Depth = Depth;
 
+		ThrowIfMipOutOfRange( mip );
+
 		if ( srcBox.X < 0 || srcBox.Y < 0 || srcBox.Z < 0 ||
 			srcBox.Width <= 0 || srcBox.Height <= 0 || srcBox.Depth <= 0 ||
-			((long)srcBox.X + srcBox.Width) > Width ||
-			((long)srcBox.Y + srcBox.Height) > Height ||
-			((long)srcBox.Z + srcBox.Depth) > Depth )
+			((long)srcBox.X + srcBox.Width) > Math.Max( 1, Width >> mip ) ||
+			((long)srcBox.Y + srcBox.Height) > Math.Max( 1, Height >> mip ) ||
+			((long)srcBox.Z + srcBox.Depth) > GetSliceCount( mip ) )
 		{
 			throw new ArgumentException( $"{nameof( srcBox )} out of range" );
 		}
@@ -417,13 +449,13 @@ public partial class Texture
 		if ( !SandboxedUnsafe.IsAcceptablePod<T>() )
 			throw new ArgumentException( $"{nameof( T )} must be a POD type" );
 
+		if ( dstFormat == ImageFormat.Default ) dstFormat = ImageFormat;
+
 		var sliceSize = GetImageFormatSize( dstFormat, srcBox.Width, srcBox.Height );
 		if ( sliceSize <= 0 )
 			throw new ArgumentException( $"{nameof( srcBox )} invalid size" );
 
-		if ( dstFormat == ImageFormat.Default ) dstFormat = ImageFormat;
-
-		var totalBytes = sliceSize * srcBox.Depth;
+		var totalBytes = checked(sliceSize * srcBox.Depth);
 
 		//One of ours, read slice by slice here rather than through a context that would only be waiting for memory it already has.
 			var buffer = new byte[totalBytes];
@@ -437,9 +469,6 @@ public partial class Texture
 			}
 
 			callback( MemoryMarshal.Cast<byte, T>( buffer ) );
-
-		//Create final buffer to hold all slices
-		byte[] resultBuffer = ArrayPool<byte>.Shared.Rent( totalBytes );
 
 		//Reading back from the GPU asynchronously was their render context's to do. Ours keeps
 		//the pixels in memory, so anything that gets here is a texture that has none to read.

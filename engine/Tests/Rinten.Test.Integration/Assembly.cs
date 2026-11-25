@@ -25,6 +25,10 @@ public class TestInit
 		TestAppSystem = new TestAppSystem();
 		TestAppSystem.Init();
 
+		//Tests bring their own components and helpers; the engine's type library has to know them for
+		//Create<T>, JSON and the scene directory to resolve them.
+		GlobalContext.Current.TypeLibrary.AddAssembly( typeof( TestInit ).Assembly, true );
+
 		//Trace results resolve the hit Surface by index, and nothing mounts base content
 		//in headless tests - install a fallback surface so any test that traces works.
 		if ( Surface.All.Count == 0 )

@@ -31,6 +31,7 @@ public partial class Scene
 		}
 
 		systems.Clear();
+		traceProviders.Clear();
 	}
 
 	//Find all types of SceneHook, create an instance of each one and install it.
@@ -79,6 +80,18 @@ public partial class Scene
 				if ( e is GameObjectSystem.ITraceProvider provider ) traceProviders.Add( provider );
 				AddObjectToDirectory( e );
 			}
+		}
+	}
+
+	//Rebuilt after reference migration: hotload can add or remove the provider interface.
+	internal void RebuildTraceProviders()
+	{
+		traceProviders.Clear();
+
+		foreach ( var system in systems.Values )
+		{
+			if ( system is GameObjectSystem.ITraceProvider provider )
+				traceProviders.Add( provider );
 		}
 	}
 

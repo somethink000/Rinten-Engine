@@ -56,12 +56,9 @@ public partial class Scene : GameObject
 			}
 		}
 
-		foreach ( var system in systems.Values )
+		for ( var i = 0; i < traceProviders.Count; i++ )
 		{
-			if ( system is GameObjectSystem.ITraceProvider traceProvider )
-			{
-				traceProvider.DoTrace( trace, results );
-			}
+			traceProviders[i].DoTrace( trace, results );
 		}
 
 		SceneTrace.ClearTraceFilter();

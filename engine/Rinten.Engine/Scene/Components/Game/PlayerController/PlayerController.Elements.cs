@@ -92,6 +92,7 @@ public sealed partial class PlayerController : Component
 		Body.MassOverride = BodyMass;
 		Body.EnhancedCcd = false;
 		Body.PhysicsBody?.AutoSleep = false;
+		Body.PhysicsBody?.ContactRecycling = false;
 
 		//When trying to move, we move the mass center up to the waist so the player
 		//can "step" over smaller shit When not moving we drop it to the foot position.

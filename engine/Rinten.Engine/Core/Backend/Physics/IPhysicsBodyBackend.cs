@@ -90,6 +90,9 @@ internal interface IPhysicsBodyBackend
 	void EnableAutoSleeping();
 	void DisableAutoSleeping();
 
+	//Keep warm contacts between steps where the body allows it - see b3Body_EnableContactRecycling.
+	void SetContactRecycling( bool enabled );
+
 	float GetSleepThreshold();
 	void SetSleepThreshold( float threshold );
 

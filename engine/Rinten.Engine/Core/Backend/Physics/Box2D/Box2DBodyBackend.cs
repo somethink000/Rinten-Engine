@@ -350,6 +350,8 @@ internal sealed unsafe partial class Box2DBodyBackend : IPhysicsBodyBackend
 	public void EnableAutoSleeping() { if ( IsValid ) b2Body_EnableSleep( id, true ); }
 	public void DisableAutoSleeping() { if ( IsValid ) b2Body_EnableSleep( id, false ); }
 
+	public void SetContactRecycling( bool enabled ) { if ( IsValid ) b2Body_EnableContactRecycling( id, enabled ); }
+
 	public float GetSleepThreshold() => IsValid ? b2Body_GetSleepThreshold( id ) : 0;
 	public void SetSleepThreshold( float threshold ) { if ( IsValid ) b2Body_SetSleepThreshold( id, threshold ); }
 

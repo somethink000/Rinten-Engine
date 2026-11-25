@@ -12,12 +12,24 @@ sealed class SceneSoundscapeSystem : GameObjectSystem<SceneSoundscapeSystem>
 	SoundscapeTrigger active;
 	RealTimeSince timeSinceUpdate;
 
-	//Soundscape for this point; separate from Update so its capturing lambdas don't allocate per tick
+	//Soundscape for this point; a loop rather than LINQ, so asking it every fifth of a second allocates nothing
 	SoundscapeTrigger Closest( Vector3 head )
 	{
-		return Scene.GetAllComponents<SoundscapeTrigger>()
-			.Where( x => x.TestListenerPosition( head ) )
-			.MinBy( x => (x.Type == SoundscapeTrigger.TriggerType.Point ? 1 : 0, x.WorldPosition.DistanceSquared( head )) );
+		SoundscapeTrigger best = null;
+		(int, float) bestKey = default;
+
+		foreach ( var trigger in Scene.GetAllComponents<SoundscapeTrigger>() )
+		{
+			if ( !trigger.TestListenerPosition( head ) ) continue;
+
+			var key = (trigger.Type == SoundscapeTrigger.TriggerType.Point ? 1 : 0, trigger.WorldPosition.DistanceSquared( head ));
+			if ( best is not null && key.CompareTo( bestKey ) >= 0 ) continue;
+
+			best = trigger;
+			bestKey = key;
+		}
+
+		return best;
 	}
 
 	void Update()

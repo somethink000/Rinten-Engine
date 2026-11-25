@@ -31,13 +31,17 @@ internal sealed partial class Controller
 	//Get an axis
 	internal float GetAxis( NativeEngine.GameControllerAxis axis, float defaultValue = 0f )
 	{
-		var foundAxis = ControllerAxes.FirstOrDefault( x => x.Axis == axis );
-		if ( foundAxis is null )
+		return FindAxis( axis )?.Value ?? defaultValue;
+	}
+
+	InputAxis FindAxis( NativeEngine.GameControllerAxis axis )
+	{
+		foreach ( var a in ControllerAxes )
 		{
-			return defaultValue;
+			if ( a.Axis == axis ) return a;
 		}
 
-		return foundAxis.Value;
+		return null;
 	}
 
 	internal void SetAxis( NativeEngine.GameControllerAxis axis, int inputValue )
@@ -56,7 +60,7 @@ internal sealed partial class Controller
 			Rinten.Input.UsingController = true;
 		}
 
-		var current = ControllerAxes.FirstOrDefault( x => x.Axis == axis );
+		var current = FindAxis( axis );
 		if ( current is null )
 		{
 			current = new InputAxis

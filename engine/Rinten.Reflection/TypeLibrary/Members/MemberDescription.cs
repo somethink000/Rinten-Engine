@@ -203,7 +203,16 @@ public class MemberDescription : ISourceLineProvider, IMemberNameProvider, ITitl
 	/// <summary>Returns the first of Attributes of the passed in type. Or null.</summary>
 	public T GetCustomAttribute<T>() where T : System.Attribute
 	{
-		return Attributes?.OfType<T>().FirstOrDefault() ?? null;
+		var attributes = Attributes;
+		if ( attributes is null ) return null;
+
+		foreach ( var attribute in attributes )
+		{
+			if ( attribute is T t )
+				return t;
+		}
+
+		return null;
 	}
 
 	internal virtual void Dispose()

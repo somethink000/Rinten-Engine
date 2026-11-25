@@ -74,6 +74,10 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 		//this to move their keyframes, and I want to catch those changes before the physics step.
 		IScenePhysicsEvents.Post( x => x.PrePhysicsStep() );
 
+		//A callback in PrePhysicsStep can tear the scene down, world and all. Nothing else below can run on that.
+		if ( !PhysicsWorld.IsValid() )
+			return;
+
 		//Tell all the keyframe colliders to "move" their keyframes to their new position - we do this right before the
 		//physics step - this means that changes in FixedUpdate are immediate Box3D doesn't like us threading things
 		//System.Threading.Tasks.Parallel.ForEach( KeyframeColliders.EnumerateLocked( true ), c => c.UpdateKeyframeTransform() );
@@ -84,6 +88,10 @@ sealed class ScenePhysicsSystem : GameObjectSystem<ScenePhysicsSystem>
 
 		//The actual physics step - if the world was never created there's nothing to step
 		PhysicsWorld?.Step( Time.NowDouble, Time.Delta, steps );
+
+		//The step runs collision callbacks, and one of them can have removed the world under us.
+		if ( !PhysicsWorld.IsValid() )
+			return;
 
 		//Update the positions of the rigidbodies based on the new physics positions todo: we should only update ones that have
 		//changed, skip asleep? I don't feel comfortable doing this in a thread, because of all the LocalTransformChanged callbacks

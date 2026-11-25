@@ -1234,4 +1234,20 @@ public class SerializableClassConverter : JsonConverter<SerializableClass>
 
 #if TEST_BEFORE
 public class RemovedClass;
+
+//A timer callback from a removed method: the runtime runs it on a pool thread, so it must not throw.
+public static class TimerCallbackClass
+{
+	public static System.Threading.TimerCallback Callback;
+
+	public static void Tick( object state ) => throw new InvalidOperationException( "Tick was removed" );
+}
+#endif
+
+#if TEST_AFTER
+//The method is gone; only the field the delegate lived in remains.
+public static class TimerCallbackClass
+{
+	public static System.Threading.TimerCallback Callback;
+}
 #endif

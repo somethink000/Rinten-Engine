@@ -345,6 +345,12 @@ internal static unsafe partial class CorePhysics
 		b3Body_EnableSleep( id, enabled );
 	}
 
+	public static void BodyEnableContactRecycling( ulong body, bool enabled )
+	{
+		if ( !ResolveBody( body, out var id ) ) return;
+		b3Body_EnableContactRecycling( id, enabled );
+	}
+
 	public static float BodyGetSleepThreshold( ulong body )
 	{
 		if ( !ResolveBody( body, out var id ) ) return 0.0f;

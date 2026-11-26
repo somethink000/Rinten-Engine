@@ -30,12 +30,16 @@ public sealed class TriggerHurt : Component
 
 		timeSinceDamage = 0;
 
+		bool hasHurt = false;
+
 		foreach ( var touching in Collider.Touching.SelectMany( x => x.GetComponentsInParent<IDamageable>() ).Distinct() )
 		{
 			if ( touching is not Component target ) continue;
 
 			if ( !Exclude.IsEmpty && target.GameObject.Tags.HasAny( Exclude ) ) continue;
 			if ( !Include.IsEmpty && !target.GameObject.Tags.HasAny( Include ) ) continue;
+
+			hasHurt = true;
 
 			var damage = new DamageInfo();
 			damage.Tags.Add( DamageTags );
@@ -46,5 +50,8 @@ public sealed class TriggerHurt : Component
 
 			touching.OnDamage( damage );
 		}
+
+		//Only holding the timer while something was actually hurt: an empty trigger must keep looking every fixed update.
+		if ( !hasHurt ) timeSinceDamage = 0;
 	}
 }

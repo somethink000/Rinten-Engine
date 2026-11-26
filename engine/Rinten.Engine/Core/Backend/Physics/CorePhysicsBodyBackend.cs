@@ -224,6 +224,8 @@ internal sealed unsafe class CorePhysicsBodyBackend : IPhysicsBodyBackend
 	public void EnableAutoSleeping() => CorePhysics.BodyEnableAutoSleep( body, true );
 	public void DisableAutoSleeping() => CorePhysics.BodyEnableAutoSleep( body, false );
 
+	public void SetContactRecycling( bool enabled ) => CorePhysics.BodyEnableContactRecycling( body, enabled );
+
 	public float GetSleepThreshold() => CorePhysics.BodyGetSleepThreshold( body );
 	public void SetSleepThreshold( float threshold ) => CorePhysics.BodySetSleepThreshold( body, threshold );
 

@@ -194,6 +194,10 @@ internal class HotloadManager : IDisposable
 					info = Hotload.UpdateReferences();
 				}
 
+				//Hotload can add or remove ITraceProvider from a system
+				foreach ( var scene in Scene.Loaded )
+					scene.RebuildTraceProviders();
+
 				if ( info.NoAction )
 				{
 					eventRecord = null; //don't bother with the event

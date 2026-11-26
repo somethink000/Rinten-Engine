@@ -283,6 +283,12 @@ public sealed partial class PhysicsBody : IHandle
 		}
 	}
 
+	//Warm contacts between steps. Off for bodies whose contacts must be current every tick, like the player.
+	internal bool ContactRecycling
+	{
+		set => backend.SetContactRecycling( value );
+	}
+
 	/// <summary>The speed threshold below which this body will be put to sleep. Units per second. The default is about 2 units/sec. Increase this to make bodies sleep sooner, which is useful for stacking stability.</summary>
 	public float SleepThreshold
 	{

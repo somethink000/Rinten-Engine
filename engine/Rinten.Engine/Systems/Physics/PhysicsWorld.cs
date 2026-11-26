@@ -123,7 +123,7 @@ public sealed partial class PhysicsWorld : IHandle
 	public unsafe void Step( float delta, int subSteps )
 	{
 		CurrentTime += delta;
-		Step( CurrentTime, delta, subSteps * SubSteps );
+		Step( CurrentTime, delta, subSteps );
 	}
 
 	/// <summary>Step simulation of this physics world. You can only do this on physics worlds that you manually create.</summary>

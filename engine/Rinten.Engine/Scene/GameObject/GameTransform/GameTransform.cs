@@ -32,7 +32,22 @@ public partial class GameTransform
 		return true;
 	}
 
-	public TransformProxy Proxy { get; set; }
+	private TransformProxy _proxy;
+
+	public TransformProxy Proxy
+	{
+		get => _proxy;
+		set
+		{
+			if ( _proxy == value ) return;
+
+			_proxy = value;
+			OnProxyChangedInternal?.Invoke();
+		}
+	}
+
+	//Somebody moved the proxy (a networked or animated object), so anything following the transform is stale.
+	internal event Action OnProxyChangedInternal;
 
 	//Returns true if we're inside the transform changed callback.
 	internal bool InsideChangeCallback { get; private set; }

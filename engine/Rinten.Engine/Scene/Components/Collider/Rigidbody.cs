@@ -191,6 +191,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		{
 			_lastVelocity = value;
 			field = value;
+			MarkActive();
 		}
 	}
 
@@ -202,6 +203,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		{
 			_lastAngularVelocity = value;
 			field = value;
+			MarkActive();
 		}
 	}
 
@@ -304,6 +306,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 				return;
 
 			_body.Sleeping = value;
+			MarkActive();
 		}
 	}
 
@@ -360,6 +363,11 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 				_body.SleepThreshold = value;
 		}
 	} = 0.05f;
+
+	void IGameObjectNetworkEvents.NetworkOwnerChanged( Connection newOwner, Connection previousOwner )
+	{
+		MarkActive();
+	}
 
 	void IGameObjectNetworkEvents.BeforeDropOwnership()
 	{
@@ -447,6 +455,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		_body.Component = this;
 		_body.Transform = WorldTransform;
 		_body.AutoSleep = true;
+		_body.OnDirty = MarkActive;
 
 		//defaults
 		_body.EnableTouch = CollisionEventsEnabled;
@@ -474,6 +483,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		Assert.NotNull( Scene.PhysicsWorld, "Tried to create physics object but no physics world" );
 
 		EnsureBodyCreated();
+		MarkActive();
 
 		if ( _collisionEvents is not null )
 			_collisionEvents.Rebind( _body );
@@ -528,6 +538,8 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		if ( !_body.IsValid() ) return;
 		if ( !_isSimulatingPhysics ) return;
 
+		_transformSyncPending = false;
+
 		var tx = WorldTransform;
 		var target = _body.Transform.WithScale( tx.Scale );
 		if ( target == tx ) return;
@@ -538,7 +550,29 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 	}
 
 	//Used for transforming a selected rigidbody in editor, if useful for gameplay this could be made public.
-	internal Transform? TargetTransform { get; set; }
+	internal Transform? TargetTransform
+	{
+		get;
+		set
+		{
+			field = value;
+			MarkActive();
+		}
+	}
+
+	/// <summary>False while asleep with nothing to do per step, until the body wakes or it or our transform changes.</summary>
+	internal bool IsPhysicsActive = true;
+
+	//A change while asleep, like a teleport, still has to reach our transform
+	bool _transformSyncPending = true;
+
+	internal bool NeedsTransformSync => IsPhysicsActive || _transformSyncPending;
+
+	void MarkActive()
+	{
+		IsPhysicsActive = true;
+		_transformSyncPending = true;
+	}
 
 	//Linear velocity before physics step. Internal until someone needs them.
 	internal Vector3 PreVelocity { get; private set; }
@@ -551,6 +585,20 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 	void IScenePhysicsEvents.PrePhysicsStep()
 	{
 		if ( !_body.IsValid() ) return;
+
+		//Impulses, velocity writes and a new transform proxy don't mark us, so check again
+		if ( !IsPhysicsActive && _body.Sleeping && Transform.Proxy is null ) return;
+
+		//Owned and asleep with the synced velocities already zeroed: nothing below would change until something marks us
+		if ( _isSimulatingPhysics && !TargetTransform.HasValue && _lastVelocity == Vector3.Zero && _lastAngularVelocity == Vector3.Zero && !IsProxy && _body.Sleeping && Transform.Proxy is null )
+		{
+			PreVelocity = default;
+			PreAngularVelocity = default;
+			IsPhysicsActive = false;
+			return;
+		}
+
+		IsPhysicsActive = true;
 
 		var angularVelocity = _body.AngularVelocity;
 		var velocity = _body.Velocity;
@@ -608,6 +656,9 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 	void OnLocalTransformChanged()
 	{
 		if ( isUpdatingFromPhysics ) return;
+
+		MarkActive();
+
 		if ( IsProxy ) return;
 		if ( Transform.InsideChangeCallback ) return;
 
@@ -683,6 +734,8 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 	internal void UpdateBody()
 	{
 		if ( !_body.IsValid() ) return;
+
+		MarkActive();
 
 		//If we're in editor, check if the editor wants to simulate us
 		if ( Scene.IsEditor )

@@ -28,8 +28,6 @@ public sealed class TriggerHurt : Component
 		if ( timeSinceDamage < Rate ) return;
 		if ( !Collider.IsValid() ) return;
 
-		timeSinceDamage = 0;
-
 		bool hasHurt = false;
 
 		foreach ( var touching in Collider.Touching.SelectMany( x => x.GetComponentsInParent<IDamageable>() ).Distinct() )
@@ -51,7 +49,7 @@ public sealed class TriggerHurt : Component
 			touching.OnDamage( damage );
 		}
 
-		//Only holding the timer while something was actually hurt: an empty trigger must keep looking every fixed update.
-		if ( !hasHurt ) timeSinceDamage = 0;
+		//Only wait out the rate after a hit, so an empty trigger hurts whatever enters at once
+		if ( hasHurt ) timeSinceDamage = 0;
 	}
 }

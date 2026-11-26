@@ -180,8 +180,6 @@ public sealed partial class PlayerController : Component
 
 	readonly List<SceneTraceResult> _lookHits = new();
 	readonly List<IPressable> _pressables = new();
-	GameObject _lookHitObject;
-	Component _lookFound;
 
 	//Get the best component we're looking at. We don't just return any old component, by default we only return components
 	//that implement IPressable. Components can implement GetUsableComponent to search and provide better alternatives.
@@ -207,12 +205,10 @@ public sealed partial class PlayerController : Component
 					continue;
 
 				//Allow our other components to provide something
-				_lookHitObject = hitObject;
-				_lookFound = default;
-				GameObject.Components.ExecuteEnabledInSelfAndDescendants<IEvents, PlayerController>( this, static ( x, pc ) => pc._lookFound = x.GetUsableComponent( pc._lookHitObject ) ?? pc._lookFound );
-				var foundComponent = _lookFound;
-				_lookHitObject = null;
-				_lookFound = null;
+				var look = (Hit: hitObject, Found: (Component)null);
+				GameObject.Components.ExecuteEnabledInSelfAndDescendants<IEvents, (GameObject Hit, Component Found)>( ref look,
+					static ( IEvents x, ref (GameObject Hit, Component Found) s ) => s.Found = x.GetUsableComponent( s.Hit ) ?? s.Found );
+				var foundComponent = look.Found;
 
 				if ( foundComponent.IsValid() )
 					return foundComponent;

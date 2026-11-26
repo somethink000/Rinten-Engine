@@ -88,9 +88,7 @@ public abstract partial class Collider
 		return Transform.Proxy is null && _keyframeBody.Sleeping;
 	}
 
-	/// <summary>
-	/// Our target or our body may have moved, update the body before the next physics step.
-	/// </summary>
+	//Our target or our body may have moved: update the body before the next physics step
 	internal void QueueKeyframeUpdate()
 	{
 		//Moving colliders ask every step, keep that cheap
@@ -101,6 +99,6 @@ public abstract partial class Collider
 			Scene.GetSystem<ScenePhysicsSystem>()?.AddKeyframe( this );
 	}
 
-	/// <summary>In the physics system's keyframe update set.</summary>
+	//In the physics system's keyframe update set
 	internal bool KeyframeQueued;
 }

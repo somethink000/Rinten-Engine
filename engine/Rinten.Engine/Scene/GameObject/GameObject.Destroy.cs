@@ -108,11 +108,7 @@ public partial class GameObject : IValid
 		Term();
 	}
 
-	//Remove all children
-	/// <summary>
-	/// Remove a child, searching from the end because parent destruction removes children in reverse order.
-	/// </summary>
-	/// <param name="child"></param>
+	//From the end: destroying a parent removes its children last first
 	private void RemoveChild( GameObject child )
 	{
 		var i = Children.LastIndexOf( child );

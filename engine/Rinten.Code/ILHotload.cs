@@ -54,10 +54,7 @@ public partial class ILHotload : IFastHotload
 		DetourFactory = null;
 	}
 
-	/// <summary>
-	/// Undo and forget every detour applied to <paramref name="assembly"/>. Call this when a full hotload
-	/// replaces the assembly, otherwise the detours keep it loaded for the rest of the session.
-	/// </summary>
+	/// <summary>Undoes the detours on an assembly a full hotload replaces, so they don't keep it loaded.</summary>
 	public void RemoveDetours( Assembly assembly )
 	{
 		if ( assembly is null || ActiveDetours is null ) return;

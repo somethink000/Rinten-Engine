@@ -77,7 +77,7 @@ public class GameTags : ITagSet
 		return false;
 	}
 
-	public override bool HasAny( ITagSet other ) => other is TagSet tagSet ? tagSet.AnyHasIn( this ) : base.HasAny( other );
+	public override bool HasAny( ITagSet other ) => other is TagSet tagSet ? tagSet.HasAny( this ) : base.HasAny( other );
 
 	bool AddSingle( string tag )
 	{

@@ -9,7 +9,7 @@ public partial class TypeLibrary
 	//ConcurrentDictionary does not allow null values, so we box null results with this sentinel.
 	private static readonly object NullSentinel = new();
 
-	/// <summary>Get or cache the result. Pass a static factory and its inputs as state, so a cache hit doesn't allocate.</summary>
+	//A static factory with its inputs as state, so a cache hit doesn't allocate
 	T Cached<T, TState>( int key, TState state, Func<TState, T> factory )
 	{
 		//GetOrAdd is thread-safe; the factory may be called more than once under contention,

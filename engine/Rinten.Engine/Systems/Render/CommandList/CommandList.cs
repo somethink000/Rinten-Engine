@@ -134,7 +134,7 @@ public sealed unsafe partial class CommandList
 	byte[] _payload = [];
 	int _payloadUsed;
 
-	/// <summary>Add an entry with a struct payload, read back with <see cref="ReadPayload{T}"/>. Uses <see cref="Entry.Count"/>.</summary>
+	//Read back with ReadPayload; the offset goes in Entry.Count
 	void AddEntry<T>( delegate*< ref Entry, CommandList, void > execute, Entry data, in T payload ) where T : unmanaged
 	{
 		data.Execute = execute;

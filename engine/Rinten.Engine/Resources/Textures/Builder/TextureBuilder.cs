@@ -227,10 +227,7 @@ namespace Rinten
 		/// <summary>Finish creating the texture.</summary>
 		public readonly Texture Create( string name = null, bool anonymous = true, ReadOnlySpan<byte> data = default, int dataLength = 0 )
 		{
-			//matt: wtf does this accept a Span which has a length and an int length parameter for... ???
-
-			//A default format resolves to RGBA8888, the same way the typed builders' Finish does - and goes through
-			//the non-readonly path so the size checks below use the format the texture is actually made with.
+			//Default is RGBA8888, as in the typed builders' Finish; the size checks below need the real format
 			if ( _config.m_nImageFormat == ImageFormat.Default )
 			{
 				var builder = this;
@@ -269,8 +266,6 @@ namespace Rinten
 
 			if ( dataLength > data.Length )
 				throw new ArgumentException( "Data length exceeds the data" );
-
-			//HERE'S WHERE WE SANITY CHECK EVERYTHING TO PREVENT FUCKUPS
 
 			var memoryRequired = ImageFormatSize.Total( _config.m_nWidth, _config.m_nHeight, depth, 1, _config.m_nImageFormat ) * faces;
 			if ( dataLength != memoryRequired && dataLength != memoryRequiredWithMips )

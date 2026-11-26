@@ -1,9 +1,6 @@
 namespace Rinten.Audio;
 
-/// <summary>
-/// Velocity from position changes, smoothed so uneven frame times don't make the pitch warble. A jump for one update (a
-/// teleport, a respawn, a network correction, a camera cut) is ignored; a new speed that holds for two updates is taken.
-/// </summary>
+//Smoothed velocity from positions; a one-update jump (teleport, camera cut) is ignored, one that holds is taken
 internal struct VelocityTracker
 {
 	const float HalfLife = 0.03f;
@@ -17,7 +14,7 @@ internal struct VelocityTracker
 
 	public Vector3 Velocity { get; private set; }
 
-	/// <summary>A speed has been measured. Until then <see cref="Velocity"/> is zero and means nothing.</summary>
+	//Until a speed is measured, Velocity is zero and means nothing
 	public bool Known { get; private set; }
 
 	public void Update( Vector3 position, double time )

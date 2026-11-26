@@ -99,10 +99,7 @@ public partial class SoundHandle : IValid, IDisposable
 	/// <summary>Pitch of the sound.</summary>
 	public float Pitch { get; set; } = 1.0f;
 
-	/// <summary>
-	/// How strongly the sound shifts in pitch when it and the listener move toward or away from each other (Doppler).
-	/// 1 is physical, 0 turns it off.
-	/// </summary>
+	/// <summary>How strongly the pitch shifts as the sound and listener approach or part (Doppler); 1 is physical, 0 off.</summary>
 	public float DopplerScale { get; set; } = 1.0f;
 
 	VelocityTracker _motion;
@@ -490,8 +487,8 @@ public partial class SoundHandle : IValid, IDisposable
 
 		var reverb = isLocal ? null : GetOrCreateReverb();
 
-		//One pitch per voice, so the Doppler shift follows the first listener in the sound's scene. Not for streams (voice
-		//chat, video, music): they have to be read as fast as they arrive.
+		//One pitch per voice, so Doppler follows the first listener in the sound's scene. Not for streams: they
+		//have to be read as fast as they arrive
 		var pitch = Pitch;
 		if ( !isLocal && !IsVoice && SoundFile is not null )
 		{

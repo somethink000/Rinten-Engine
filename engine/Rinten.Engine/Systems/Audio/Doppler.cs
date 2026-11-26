@@ -1,18 +1,12 @@
 namespace Rinten.Audio;
 
-/// <summary>
-/// Pitch shift from a sound and its listener moving along the line between them, as a pitch change on the voice the way
-/// FMOD, Wwise and Unity do it.
-/// </summary>
+//Pitch shift from a sound and its listener moving along the line between them, applied to the voice's pitch
 internal static class Doppler
 {
-	/// <summary>343 m/s, the speed of sound at room temperature.</summary>
+	//Metres per second, at room temperature
 	public const float SpeedOfSound = 343f;
 
-	/// <summary>
-	/// Pitch factor for a sound heard by a listener, velocities in metres per second. Scale multiplies the velocities,
-	/// 0 turns it off.
-	/// </summary>
+	//Velocities in m/s; scale multiplies them, 0 turns the shift off
 	public static float Factor( Vector3 source, Vector3 sourceVelocity, Vector3 listener, Vector3 listenerVelocity, float scale )
 	{
 		if ( scale <= 0f ) return 1f;

@@ -17,7 +17,7 @@ public partial class Scene : GameObject
 		return results;
 	}
 
-	/// <summary>Run the trace into <paramref name="results"/>, which is cleared first, sorted by distance.</summary>
+	//Into results, cleared first, sorted by distance
 	internal void RunTraceAll( SceneTrace trace, List<SceneTraceResult> results )
 	{
 		SceneMetrics.CountRayTraceAll();
@@ -678,14 +678,12 @@ public partial struct SceneTrace
 	{
 		if ( go is null ) return true;
 
-		// Ignore anything under a hierarchy we're skipping
+		//Ignore anything under a hierarchy we're skipping
 		return !_traceIgnoreHierarchy.ContainsAncestorOf( go );
 	}
 }
 
-/// <summary>
-/// The objects a trace ignores. Holds the first inline, since most traces ignore just one.
-/// </summary>
+//The objects a trace ignores; the first is held inline, since most traces ignore just one
 internal struct GameObjectIgnoreList
 {
 	GameObject _first;

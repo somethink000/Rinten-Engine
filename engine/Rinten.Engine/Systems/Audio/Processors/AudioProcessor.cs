@@ -77,7 +77,7 @@ public abstract partial class AudioProcessor
 		OnDeserialized( node );
 	}
 
-	/// <summary>Lets processors migrate properties saved by older versions.</summary>
+	//Lets a processor migrate properties saved by older versions
 	internal virtual void OnDeserialized( JsonObject node )
 	{
 	}

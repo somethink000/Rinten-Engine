@@ -7,10 +7,8 @@ internal static partial class NativeResourceCache
 {
 	const int ExpirationSeconds = 5;
 
-	//Recently touched resources, stamped with the generation they were last touched in. Each tick drops
-	//those untouched for a whole generation, so retention is one to two ExpirationSeconds - enough that
-	//something fetched every frame isn't collected and rebuilt in between. Entries are updated in place,
-	//so only a newly touched resource allocates.
+	//Recently touched resources by the generation they were last touched in; a tick drops those a generation
+	//old, so retention is one to two ExpirationSeconds. Updated in place, so only a new resource allocates
 	static readonly ConcurrentDictionary<long, Retained> retained = new();
 	static int generation;
 

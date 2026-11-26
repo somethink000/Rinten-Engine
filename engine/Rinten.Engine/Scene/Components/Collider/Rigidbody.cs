@@ -560,7 +560,7 @@ sealed public partial class Rigidbody : Component, Component.ExecuteInEditor, IG
 		}
 	}
 
-	/// <summary>False while asleep with nothing to do per step, until the body wakes or it or our transform changes.</summary>
+	//False while asleep with nothing to do per step, until the body wakes or it or our transform changes
 	internal bool IsPhysicsActive = true;
 
 	//A change while asleep, like a teleport, still has to reach our transform

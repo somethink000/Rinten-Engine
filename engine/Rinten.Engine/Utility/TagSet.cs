@@ -11,17 +11,12 @@ public class TagSet : ITagSet, BytePack.ISerializer
 
 	public bool IsEmpty => Tags.Count == 0;
 
-	//Iterated as a HashSet so the enumerator isn't boxed
-	internal HashSet<uint> TokenSet => _tokens;
-
 	/// <summary>Nothing, where this set is empty - without asking the other side for its tags.</summary>
 	public override bool HasAny( ITagSet other )
 	{
 		if ( IsEmpty || other is null ) return false;
 
-		if ( other is TagSet ) return AnyHasIn( other );
-
-		//GameTags keeps its tags as tokens already, so compare tokens instead of enumerating strings.
+		//GameTags keeps its own and inherited tags as tokens, so compare those
 		if ( other is GameTags gameTags )
 		{
 			var tokens = gameTags.GetTokens();
@@ -34,12 +29,7 @@ public class TagSet : ITagSet, BytePack.ISerializer
 			return false;
 		}
 
-		return base.HasAny( other );
-	}
-
-	//Ask the other set about ours; enumerating this one would box its enumerator.
-	internal bool AnyHasIn( ITagSet other )
-	{
+		//Ask the other set about ours; enumerating it through ITagSet would box
 		foreach ( var tag in Tags )
 		{
 			if ( other.Has( tag ) ) return true;

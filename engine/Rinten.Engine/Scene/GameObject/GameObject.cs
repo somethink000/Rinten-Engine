@@ -576,10 +576,7 @@ public partial class GameObject : IJsonConvert, IComponentLister, BytePack.ISeri
 		Name = $"{baseName} ({highestNumber + 1})";
 	}
 
-	/// <summary>
-	/// Returns this object and its descendants in depth-first order, optionally skipping disabled subtrees.
-	/// Descendants are snapshotted after yielding this object.
-	/// </summary>
+	/// <summary>This object and its descendants depth first, optionally skipping disabled subtrees; descendants are taken after this one is yielded.</summary>
 	[ActionGraphInclude, Pure]
 	public IEnumerable<GameObject> GetAllObjects( bool enabled )
 	{

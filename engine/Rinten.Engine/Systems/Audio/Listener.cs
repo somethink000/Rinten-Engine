@@ -40,7 +40,7 @@ internal class Listener : IValid, IDisposable
 	//Mixer thread safe transform.
 	internal Transform MixTransform { get; set; }
 
-	/// <summary>How fast the listener moves, for the Doppler shift.</summary>
+	//For the Doppler shift
 	internal VelocityTracker Motion;
 
 	/// <summary>Listener's world position, where we are listening to sounds from.</summary>

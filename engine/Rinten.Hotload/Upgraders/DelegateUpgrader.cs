@@ -182,10 +182,7 @@ namespace Rinten.Upgraders
 
 		private const string DroppedCallbackName = "__dropped_runtime_callback";
 
-		/// <summary>
-		/// A delegate the runtime runs on its own threads, where nothing catches an exception: the continuation of an
-		/// async method suspended at an await (its state machine box's MoveNext), or a timer or thread pool callback.
-		/// </summary>
+		//Run by the runtime where nothing catches: an await continuation (box MoveNext), a timer or pool callback
 		private static bool IsRuntimeCallback( Delegate oldDelegate )
 		{
 			if ( oldDelegate.Method.Name == DroppedCallbackName && oldDelegate.Method.DeclaringType == null )
@@ -226,8 +223,7 @@ namespace Rinten.Upgraders
 			var newReturnType = GetNewType( oldMethod.ReturnType );
 			var newDelegType = GetNewType( oldDelegate.GetType() );
 
-			//Its code is gone or changed, and the runtime runs it on a thread pool thread where nothing catches an
-			//exception: thrown, it ends the process. Drop it; a suspended async method never resumes, a timer does nothing.
+			//An exception there ends the process, so drop it: a suspended async method never resumes, a timer does nothing
 			if ( IsRuntimeCallback( oldDelegate ) )
 			{
 				if ( oldMethod.Name != DroppedCallbackName )

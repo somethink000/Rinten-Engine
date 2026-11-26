@@ -1,9 +1,6 @@
 namespace Rinten.Audio;
 
-/// <summary>
-/// Lookahead peak limiter for the master output. The gain is already down when a peak arrives and recovers over
-/// <see cref="ReleaseSeconds"/>, so loud moments get quieter instead of clipping.
-/// </summary>
+//Lookahead peak limiter for the master output: the gain is down before a peak arrives, so it doesn't clip
 sealed class MasterLimiter
 {
 	public const int Lookahead = 64;
@@ -41,7 +38,7 @@ sealed class MasterLimiter
 		for ( int ch = 0; ch < channels; ch++ ) _scratch[ch].AsSpan( 0, frames ).CopyTo( buffer.Get( ch ).Buffer );
 	}
 
-	/// <summary>Limit <paramref name="frames"/> samples of every channel in place. Output lags input by <see cref="Lookahead"/> - 1 samples.</summary>
+	//In place; output lags input by Lookahead - 1 samples
 	public void Process( float[][] channels, int frames )
 	{
 		if ( _delay.Length != channels.Length )

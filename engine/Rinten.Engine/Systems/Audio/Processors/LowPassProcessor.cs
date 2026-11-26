@@ -1,39 +1,52 @@
-﻿namespace Rinten.Audio;
+﻿using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
-/// <summary>Just a test - don't count on this sticking around</summary>
+namespace Rinten.Audio;
+
+/// <summary>Cuts frequencies above <see cref="Frequency"/>, making sounds muffled.</summary>
 [Expose]
 public sealed class LowPassProcessor : AudioProcessor<LowPassProcessor.State>
 {
-	/// <summary>Cutoff frequency for the low-pass filter (normalized 0 to 1).</summary>
-	[Range( 0, 1 )]
-	public float Cutoff { get; set; } = 0.5f;
+	/// <summary>Frequencies above this are cut, in Hz.</summary>
+	[Range( 20, 20000 )]
+	public float Frequency { get; set; } = 11025f;
+
+	/// <summary>Boosts frequencies around the cutoff. 0.707 is a flat response.</summary>
+	[Range( 0.1f, 10 )]
+	public float Resonance { get; set; } = 0.707f;
+
+	/// <summary>Legacy cutoff as a share of Nyquist (0 to 1), mapped to <see cref="Frequency"/>.</summary>
+	[Obsolete( "Use Frequency" ), Hide, JsonIgnore]
+	public float Cutoff
+	{
+		get => Frequency / ( 0.5f * AudioEngine.SamplingRate );
+		set => Frequency = Math.Clamp( Math.Clamp( value, 0f, 1f ) * 0.5f * AudioEngine.SamplingRate, 20, 20000 );
+	}
 
 	public class State : ListenerState
 	{
-		internal PerChannel<float> PreviousSample;
+		internal PerChannel<float> Z1;
+		internal PerChannel<float> Z2;
 	}
 
-	//One pole, per sample: the recursion is serial, so lanes of a vector would each be a filter of every eighth sample
 	protected override void ProcessSingleChannel( AudioChannel channel, Span<float> input )
 	{
-		var alpha = Smoothing( Cutoff );
-		var previous = CurrentState.PreviousSample.Get( channel );
+		var filter = Biquad.LowPass( Frequency, Resonance, AudioEngine.SamplingRate );
 
-		for ( var i = 0; i < input.Length; i++ )
-		{
-			previous += alpha * ( input[i] - previous );
-			input[i] = previous;
-		}
+		var z1 = CurrentState.Z1.Get( channel );
+		var z2 = CurrentState.Z2.Get( channel );
 
-		CurrentState.PreviousSample.Set( channel, previous );
+		filter.Process( input, ref z1, ref z2 );
+
+		CurrentState.Z1.Set( channel, z1 );
+		CurrentState.Z2.Set( channel, z2 );
 	}
 
-	//How far each sample moves toward the input for a cutoff given as a share of Nyquist - an RC filter's dt / ( RC + dt )
-	internal static float Smoothing( float cutoff )
+	internal override void OnDeserialized( JsonObject node )
 	{
-		var frequency = Math.Clamp( cutoff, 0.0f, 1.0f ) * 0.5f;
-		var rc = 1.0f / ( 2.0f * MathF.PI * MathF.Max( frequency, 1e-6f ) );
-
-		return 1.0f / ( rc + 1.0f );
+#pragma warning disable CS0618
+		if ( !node.ContainsKey( nameof( Frequency ) ) && node[nameof( Cutoff )] is JsonValue cutoff )
+			Cutoff = cutoff.GetValue<float>();
+#pragma warning restore CS0618
 	}
 }

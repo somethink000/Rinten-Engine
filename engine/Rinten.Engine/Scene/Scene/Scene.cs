@@ -107,7 +107,7 @@ public partial class Scene : GameObject
 	//Hash of the scene settings that need the world rebuilt when they change.
 	internal int ReloadHash => HashCode.Combine( PhysicsMode );
 
-	public PhysicsWorld PhysicsWorld => _physicsWorld ??= CreatePhysicsWorld();
+	public PhysicsWorld PhysicsWorld => _physicsWorld ??= _destroyed ? null : CreatePhysicsWorld();
 
 	//The physics world for this scene, of the kind PhysicsMode asks for.
 	private PhysicsWorld CreatePhysicsWorld()

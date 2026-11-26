@@ -299,7 +299,7 @@ internal static class VoiceManager
 		OnCompressedVoiceData?.Invoke( packet );
 	}
 
-	/// <summary>Uncompress a voice buffer and call ondata with the result: 16 bit mono at <see cref="SampleRate"/>, good only for the length of the call.</summary>
+	/// <summary>Uncompress a voice buffer and call ondata with the result: 16 bit mono at <see cref="SampleRate"/>. The callback owns the samples it is given.</summary>
 	public static void Uncompress( byte[] buffer, Action<Memory<short>> ondata )
 	{
 		if ( buffer is null || buffer.Length == 0 ) return;

@@ -805,5 +805,21 @@ namespace HotloadTests
 			Assert.IsNotNull( After::TestClass45.Instance );
 			Assert.ThrowsException<NotImplementedException>( After::TestClass45.Instance );
 		}
+
+		//A timer callback whose method a hotload removes must be dropped rather than turned into a throwing
+		//error delegate: the runtime runs it on a pool thread where nothing catches the exception.
+		[TestMethod]
+		public void RemovedTimerCallback()
+		{
+			Before::TimerCallbackClass.Callback = Before::TimerCallbackClass.Tick;
+
+			var result = Hotload();
+
+			Assert.IsTrue( result.Warnings.Any(), "dropping the callback should warn" );
+			Assert.IsNotNull( After::TimerCallbackClass.Callback );
+
+			//Would end the process if it threw on a thread pool thread.
+			After::TimerCallbackClass.Callback( null );
+		}
 	}
 }

@@ -208,6 +208,11 @@ namespace Rinten
 			core.VertexStride = sizeof( T );
 			core.VertexCount = vertexCount;
 			core.Layout = layout;
+
+			var elementMax = int.MaxValue / core.VertexStride;
+			if ( vertexCount > elementMax )
+				throw new ArgumentException( $"Too many vertices for a {core.VertexStride}-byte vertex. Maximum is {elementMax}" );
+
 			core.Vertices = new byte[vertexCount * core.VertexStride];
 
 			if ( data.IsEmpty ) return;
@@ -229,12 +234,12 @@ namespace Rinten
 				throw new InvalidOperationException( "Vertex buffer has not been created" );
 
 			var bytes = MemoryMarshal.AsBytes( data );
-			var at = elementOffset * sizeof( T );
+			var at = (long)elementOffset * sizeof( T );
 
 			if ( at < 0 || at + bytes.Length > core.Vertices.Length )
 				throw new ArgumentException( "Setting vertex buffer data out of bounds" );
 
-			bytes.CopyTo( core.Vertices.AsSpan( at ) );
+			bytes.CopyTo( core.Vertices.AsSpan( (int)at ) );
 		}
 
 		/// <summary>Resize the vertex buffer</summary>
@@ -245,6 +250,10 @@ namespace Rinten
 
 			if ( vertexType is null ) return;
 			if ( core.VertexStride <= 0 ) return;
+
+			var elementMax = int.MaxValue / core.VertexStride;
+			if ( elementCount > elementMax )
+				throw new ArgumentException( $"Too many vertices for a {core.VertexStride}-byte vertex. Maximum is {elementMax}" );
 
 			var resized = new byte[elementCount * core.VertexStride];
 
@@ -274,12 +283,12 @@ namespace Rinten
 		{
 			if ( handler is null || core.Vertices is null ) return;
 
-			var at = elementOffset * sizeof( T );
-			var length = elementCount * sizeof( T );
+			var at = (long)elementOffset * sizeof( T );
+			var length = (long)elementCount * sizeof( T );
 
 			if ( at < 0 || length < 0 || at + length > core.Vertices.Length ) return;
 
-			handler( MemoryMarshal.Cast<byte, T>( core.Vertices.AsSpan( at, length ) ) );
+			handler( MemoryMarshal.Cast<byte, T>( core.Vertices.AsSpan( (int)at, (int)length ) ) );
 		}
 	}
 }

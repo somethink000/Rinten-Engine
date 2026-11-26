@@ -2,6 +2,9 @@ namespace Rinten;
 
 public partial class Bitmap
 {
+	//The largest picture a TGA may hold, so a malformed header can't ask for an allocation the machine can't meet.
+	internal const int MaxTgaPixels = 8192 * 8192;
+
 	//Skia does not know this format, and the native float bitmap that read it before is gone. It is a small format: a header, then rows of pixels, optionally run-length encoded. The content this engine inherited is full of them, so it reads them itself.
 	/// <summary>Reads a Targa image.</summary>
 	public unsafe static Bitmap CreateFromTgaBytes( byte[] data )
@@ -23,6 +26,9 @@ public partial class Bitmap
 		var descriptor = data[17];
 
 		if ( width <= 0 || height <= 0 )
+			return default;
+
+		if ( (long)width * height > MaxTgaPixels )
 			return default;
 
 		if ( bits != 8 && bits != 24 && bits != 32 )

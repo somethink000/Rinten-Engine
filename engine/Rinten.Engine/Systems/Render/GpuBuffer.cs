@@ -90,6 +90,7 @@ public partial class GpuBuffer : IValid, IDisposable
 	{
 		if ( elementCount <= 0 ) throw new ArgumentException( "Element count must be greater than zero." );
 		if ( elementSize <= 0 ) throw new ArgumentException( "Element size must be greater than zero." );
+		if ( ElementCount != 0 ) throw new InvalidOperationException( "GpuBuffer is already initialized." );
 
 		//Structured buffers element size must be 4 byte aligned
 		if ( ( ( usageFlags & UsageFlags.Structured ) == UsageFlags.Structured ) )

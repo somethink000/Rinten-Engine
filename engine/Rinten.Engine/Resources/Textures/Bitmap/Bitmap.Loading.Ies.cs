@@ -63,11 +63,13 @@ public partial class Bitmap
 
 		unsafe
 		{
-			fixed ( Half* ptr = imageData )
-			{
-				bitmap.SetPixels( (IntPtr)ptr );
-			}
+			//Copy into the bitmap's own pixels: SetPixels( IntPtr ) would point Skia at this local array, which
+			//is gone the moment this method returns.
+			var destination = new Span<byte>( (void*)bitmap.GetPixels(), imageData.Length * sizeof( Half ) );
+			System.Runtime.InteropServices.MemoryMarshal.AsBytes( imageData.AsSpan() ).CopyTo( destination );
 		}
+
+		bitmap.NotifyPixelsChanged();
 
 		return new Bitmap( bitmap );
 	}

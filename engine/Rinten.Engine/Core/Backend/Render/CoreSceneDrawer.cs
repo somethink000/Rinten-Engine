@@ -5819,7 +5819,7 @@ internal sealed partial class CoreSceneDrawer
 			seen++;
 
 			if ( found is not SceneDynamicObject dynamic ) continue;
-			if ( !dynamic.RenderingEnabled || dynamic.Geometry.Count == 0 ) continue;
+			if ( !dynamic.RenderingEnabled ) continue;
 
 			//What a shader would have drawn out of these vertices is not what the vertices are - the grid is
 			//four white quads until its shader turns them into lines. Left alone rather than drawn wrong.
@@ -5840,7 +5840,8 @@ internal sealed partial class CoreSceneDrawer
 
 			if ( chosen == 0 ) continue;
 
-			var vertices = (ReadOnlySpan<Vertex>)System.Runtime.InteropServices.CollectionsMarshal.AsSpan( dynamic.Geometry );
+			var vertices = dynamic.GeometryForDraw();
+			if ( vertices.IsEmpty ) continue;
 
 			//The line pipeline draws pairs, and a strip handed to it as it is came out as every other
 			//segment. See Graphics.DrawInternal, which spells out the immediate strips the same way.

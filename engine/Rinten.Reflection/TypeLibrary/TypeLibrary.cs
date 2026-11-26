@@ -92,18 +92,28 @@ public partial class TypeLibrary
 		IndexMemberAttributes( incoming );
 
 		var added = new ConcurrentBag<Action>();
-		if ( OperatingSystem.IsBrowser() )
+		try
 		{
+			if ( OperatingSystem.IsBrowser() )
+			{
+				foreach ( var t in types )
+					AddType( t, isDynamic );
+			}
+			else
+			{
+				System.Threading.Tasks.Parallel.ForEach( types, t => AddType( t, isDynamic ) );
+			}
+		}
+		finally
+		{
+			//If one type throws, the others are already live. Track them all anyway, so RemoveAssembly can take
+			//them out again - a type that stayed behind here outlived every hotload next to its new version.
 			foreach ( var t in types )
-				AddType( t, isDynamic );
+			{
+				if ( typedata.ContainsKey( t ) )
+					Types.Add( t );
+			}
 		}
-		else
-		{
-			System.Threading.Tasks.Parallel.ForEach( types, t => AddType( t, isDynamic ) );
-		}
-
-		foreach ( var t in types )
-			Types.Add( t );
 
 		DescribeCodeGenerated( incoming, types );
 
@@ -323,7 +333,13 @@ public partial class TypeLibrary
 
 		log.Trace( $"Removing {asm}" );
 
-		foreach ( var type in Types.Where( x => x.Assembly == asm ).ToArray() )
+		//A type can be described without having made it into Types - a registration that threw part way through -
+		//so take the union; otherwise those types would never leave the library.
+		var outgoing = typedata.Where( x => x.Key.Assembly == asm ).Select( x => x.Key )
+			.Union( Types.Where( x => x.Assembly == asm ) )
+			.ToArray();
+
+		foreach ( var type in outgoing )
 		{
 			Types.Remove( type );
 			log.Trace( $" - {type}" );

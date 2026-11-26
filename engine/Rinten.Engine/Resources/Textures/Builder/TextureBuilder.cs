@@ -31,6 +31,11 @@ namespace NativeEngine
 			var fix = this;
 			fix.m_nNumMipLevels = Math.Max( fix.m_nNumMipLevels, (short)1 );
 
+			if ( fix.m_nImageFormat == ImageFormat.Default )
+				fix.m_nImageFormat = ImageFormat.RGBA8888;
+
+			fix.m_nImageFormat.ThrowIfInvalid();
+
 			bool isDepth = fix.m_nImageFormat.IsDepthFormat();
 			if ( isDepth )
 			{
@@ -180,6 +185,7 @@ namespace Rinten
 		/// <summary>The internal texture format to use.</summary>
 		public TextureBuilder WithFormat( ImageFormat format )
 		{
+			format.ThrowIfInvalid( allowDefault: true );
 			_config.m_nImageFormat = format;
 			return this;
 		}
@@ -222,6 +228,17 @@ namespace Rinten
 		public readonly Texture Create( string name = null, bool anonymous = true, ReadOnlySpan<byte> data = default, int dataLength = 0 )
 		{
 			//matt: wtf does this accept a Span which has a length and an int length parameter for... ???
+
+			//A default format resolves to RGBA8888, the same way the typed builders' Finish does - and goes through
+			//the non-readonly path so the size checks below use the format the texture is actually made with.
+			if ( _config.m_nImageFormat == ImageFormat.Default )
+			{
+				var builder = this;
+				builder._config.m_nImageFormat = ImageFormat.RGBA8888;
+				return builder.Create( name, anonymous, data, dataLength );
+			}
+
+			_config.m_nImageFormat.ThrowIfInvalid();
 
 			if ( _config.m_nWidth <= 0 || _config.m_nHeight <= 0 )
 				throw new ArgumentException( $"Couldn't create texture - invalid size - {_config.m_nWidth} x {_config.m_nHeight}" );

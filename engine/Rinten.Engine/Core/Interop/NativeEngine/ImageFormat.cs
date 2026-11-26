@@ -111,6 +111,15 @@ public enum ImageFormat : int
 
 internal static class ImageFormatExtensions
 {
+	internal static bool IsValid( this ImageFormat format ) => format >= ImageFormat.RGBA8888 && Enum.IsDefined( format );
+
+	internal static void ThrowIfInvalid( this ImageFormat format, bool allowDefault = false )
+	{
+		if ( allowDefault && format == ImageFormat.Default ) return;
+		if ( !format.IsValid() )
+			throw new ArgumentOutOfRangeException( nameof( format ), $"Invalid image format {(int)format}" );
+	}
+
 	public static bool IsDepthFormat( this ImageFormat format )
 	{
 		switch ( format )

@@ -43,6 +43,10 @@ internal interface IFastHotload : IDisposable
 	//The bodies of what changed between oldAssembly and newAssembly patched into
 	//baseAssembly's methods. False where that cannot be done and a full hotload is needed.
 	bool Replace( System.Reflection.Assembly baseAssembly, System.Reflection.Assembly oldAssembly, System.Reflection.Assembly newAssembly );
+
+	//Undo and forget the detours applied to an assembly a full hotload is about to replace, so they
+	//don't keep it loaded for the rest of the session.
+	void RemoveDetours( System.Reflection.Assembly assembly );
 }
 
 //One project's compilers: its game code's and its editor code's.

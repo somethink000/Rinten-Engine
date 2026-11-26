@@ -1,6 +1,6 @@
 {
   "TabBackground": "#333333",
-  "TabBarBackground": "#1F1F1F",
+  "TabBarBackground": "#00000000",
   "TabInactiveBackground": "#00000000",
   "SurfaceBackground": "#333333",
   "SurfaceLightBackground": "#444444",

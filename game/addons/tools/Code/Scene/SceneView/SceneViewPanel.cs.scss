@@ -5,9 +5,6 @@
 	flex-grow: 1;
 	min-width: 0;
 	min-height: 0;
-	//A ground of its own: the window is glass, and a gap between two viewports or between a viewport and
-	//the splitter would otherwise show the desktop through the seam.
-	background-color: $window-ground;
 
 	> .viewport-area
 	{
@@ -16,7 +13,6 @@
 		flex-grow: 1;
 		min-width: 0;
 		min-height: 0;
-		background-color: $window-ground;
 	}
 }
 
@@ -28,8 +24,7 @@
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	//Not the old grey: a pixel the render does not quite reach has to read as the seam, not as a bright line.
-	background-color: $window-ground;
+	background-color: #38393c;
 }
 
 //The scene render fills the viewport; with several viewports SceneViewportPanel.Sizing remeasures each one and writes pixels over this.

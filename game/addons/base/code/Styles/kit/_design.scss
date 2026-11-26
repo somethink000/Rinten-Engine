@@ -1460,9 +1460,7 @@ $viewport-bar-control: 26px;
 //The dock area is that same ground, showing between panels and through the seams.
 .dockmanager
 {
-	//The window ground, painted rather than left transparent: the window is glass, and a one-pixel gap between two
-	//docks would show the desktop through it as a bright seam.
-	background-color: $window-ground;
+	background-color: transparent;
 }
 
 //Text entries look the same everywhere in the editor

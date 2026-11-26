@@ -1,0 +1,178 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+
+namespace Rinten.Network;
+
+//A host's or client's key pair for one session: P-256, sent as SubjectPublicKeyInfo
+internal sealed class WireKey : IDisposable
+{
+	readonly ECDiffieHellman pair = ECDiffieHellman.Create( ECCurve.NamedCurves.nistP256 );
+
+	public byte[] Public { get; }
+
+	//SHA-256 of Public, hex; what an invite can pin as host:port#fingerprint
+	public string Fingerprint { get; }
+
+	public WireKey()
+	{
+		Public = pair.PublicKey.ExportSubjectPublicKeyInfo();
+		Fingerprint = FingerprintOf( Public );
+	}
+
+	public static string FingerprintOf( ReadOnlySpan<byte> publicKey ) => Convert.ToHexStringLower( SHA256.HashData( publicKey ) );
+
+	//Null where the other side's key isn't a P-256 key
+	public byte[] Agree( ReadOnlySpan<byte> remotePublic )
+	{
+		using var remote = ECDiffieHellman.Create();
+
+		try
+		{
+			remote.ImportSubjectPublicKeyInfo( remotePublic, out var read );
+			if ( read != remotePublic.Length || remote.KeySize != 256 ) return null;
+
+			return pair.DeriveRawSecretAgreement( remote.PublicKey );
+		}
+		catch ( CryptographicException )
+		{
+			return null;
+		}
+	}
+
+	public void Dispose() => pair.Dispose();
+}
+
+//One connection's sealing: AES-256-GCM, a key per direction, a counter nonce and a replay window on receive
+internal sealed class WireSession : IDisposable
+{
+	public const byte Plain = 0;
+	public const byte Sealed = 1;
+
+	const int CounterSize = 8;
+	const int TagSize = 16;
+
+	//Tag byte, counter, GCM tag
+	public const int Overhead = 1 + CounterSize + TagSize;
+
+	//Counters a late unreliable packet may still be accepted at
+	const int Window = 1024;
+
+	readonly AesGcm send;
+	readonly AesGcm receive;
+	readonly object sendLock = new();
+	readonly object receiveLock = new();
+
+	ulong sent;
+	ulong highest;
+	readonly ulong[] seen = new ulong[Window / 64];
+
+	WireSession( ReadOnlySpan<byte> sendKey, ReadOnlySpan<byte> receiveKey )
+	{
+		send = new AesGcm( sendKey, TagSize );
+		receive = new AesGcm( receiveKey, TagSize );
+	}
+
+	//Both ends derive the same two keys: from the shared secret, salted by both public keys in client-server order
+	public static WireSession Create( byte[] secret, ReadOnlySpan<byte> clientPublic, ReadOnlySpan<byte> serverPublic, bool isServer )
+	{
+		var salt = new byte[clientPublic.Length + serverPublic.Length];
+		clientPublic.CopyTo( salt );
+		serverPublic.CopyTo( salt.AsSpan( clientPublic.Length ) );
+
+		var keys = HKDF.DeriveKey( HashAlgorithmName.SHA256, secret, 64, SHA256.HashData( salt ), "rinten wire v1"u8.ToArray() );
+		CryptographicOperations.ZeroMemory( secret );
+
+		var toServer = keys.AsSpan( 0, 32 );
+		var toClient = keys.AsSpan( 32, 32 );
+
+		var session = isServer ? new WireSession( toClient, toServer ) : new WireSession( toServer, toClient );
+		CryptographicOperations.ZeroMemory( keys );
+
+		return session;
+	}
+
+	public byte[] Seal( ReadOnlySpan<byte> plain )
+	{
+		var packet = new byte[Overhead + plain.Length];
+		packet[0] = Sealed;
+
+		Span<byte> nonce = stackalloc byte[12];
+
+		lock ( sendLock )
+		{
+			var counter = ++sent;
+			BinaryPrimitives.WriteUInt64LittleEndian( packet.AsSpan( 1 ), counter );
+			BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
+
+			send.Encrypt( nonce, plain, packet.AsSpan( 1 + CounterSize, plain.Length ), packet.AsSpan( packet.Length - TagSize ), packet.AsSpan( 0, 1 + CounterSize ) );
+		}
+
+		return packet;
+	}
+
+	//Null for anything forged, damaged, replayed or too old
+	public byte[] Open( ReadOnlySpan<byte> packet )
+	{
+		if ( packet.Length < Overhead || packet[0] != Sealed ) return null;
+
+		var counter = BinaryPrimitives.ReadUInt64LittleEndian( packet[1..] );
+		if ( counter == 0 ) return null;
+
+		Span<byte> nonce = stackalloc byte[12];
+		BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
+
+		var plain = new byte[packet.Length - Overhead];
+
+		lock ( receiveLock )
+		{
+			if ( !Fresh( counter ) ) return null;
+
+			try
+			{
+				receive.Decrypt( nonce, packet.Slice( 1 + CounterSize, plain.Length ), packet[^TagSize..], plain, packet[..( 1 + CounterSize )] );
+			}
+			catch ( AuthenticationTagMismatchException )
+			{
+				return null;
+			}
+
+			Mark( counter );
+		}
+
+		return plain;
+	}
+
+	bool Fresh( ulong counter )
+	{
+		if ( counter > highest ) return true;
+		if ( highest - counter >= Window ) return false;
+
+		var bit = counter % Window;
+		return ( seen[bit / 64] & ( 1ul << (int)( bit % 64 ) ) ) == 0;
+	}
+
+	void Mark( ulong counter )
+	{
+		if ( counter > highest )
+		{
+			//Bits for counters the window slid past are cleared, so they read as unseen when reused
+			var step = Math.Min( counter - highest, Window );
+			for ( ulong i = 1; i <= step; i++ )
+			{
+				var clear = ( highest + i ) % Window;
+				seen[clear / 64] &= ~( 1ul << (int)( clear % 64 ) );
+			}
+
+			highest = counter;
+		}
+
+		var bit = counter % Window;
+		seen[bit / 64] |= 1ul << (int)( bit % 64 );
+	}
+
+	public void Dispose()
+	{
+		send.Dispose();
+		receive.Dispose();
+	}
+}

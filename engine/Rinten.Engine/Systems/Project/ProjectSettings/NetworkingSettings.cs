@@ -28,4 +28,7 @@ public class NetworkingSettings : ConfigData
 	/// <summary>The frequency at which the network system will send updates to clients. Higher is better but you probably want to stay in the 10-60 range.</summary>
 	public float UpdateRate { get; set; } = 30;
 
+	/// <summary>host:port of a Rinten Relay server, for join codes, NAT punch-through, relaying and lobby lists. Empty for none: games are then joined by address.</summary>
+	public string RelayAddress { get; set; } = "";
+
 }

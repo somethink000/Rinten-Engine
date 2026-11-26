@@ -66,6 +66,8 @@
 		<!-- Opus, for voice chat (Utility/VoiceManager). A C# port of the reference codec, BSD licensed like it, so the same code runs on every
 		     platform including the web and Android and there is no native library to ship. Only the managed codec is used - see VoiceCodec. -->
 		<PackageReference Include="Concentus" Version="2.2.2" />
+		<!-- MIT: reliable UDP under Systems/Networking/Transports/Lnl; we seal its payloads ourselves -->
+		<PackageReference Include="LiteNetLib" Version="1.3.1" />
 		<!-- MIT: compiled s&amp;box textures can zstd their mips - see CoreImportedTexture -->
 		<PackageReference Include="ZstdSharp.Port" Version="0.8.5" />
 		<!-- Vulkan, for the renderer in Core/Backend/Render/Vulkan. The binding only: the driver is found by our

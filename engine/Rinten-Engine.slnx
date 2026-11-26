@@ -38,6 +38,7 @@
   </Folder>
   <Folder Name="/Engine/Tier0/Networking/">
     <Project Path="Networking/Rinten.Networking.Steam/Rinten.Networking.Steam.csproj" />
+    <Project Path="Networking/Rinten.Relay/Rinten.Relay.csproj" />
   </Folder>
   <Folder Name="/Engine/Tier0/Mounting/">
     <Project Path="Mounting/Rinten.Mounting.GoldSrc/Rinten.Mounting.GoldSrc.csproj" />

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The relay server games name in Networking settings: join codes, NAT punch-through, relaying and lobby lists.
+       Its own program, run by whoever ships the game - see README.md. Shares only the protocol file with the engine. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>15</LangVersion>
+    <AssemblyName>rinten-relay</AssemblyName>
+    <RootNamespace>Rinten.Relay</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Rinten.Engine/Systems/Networking/Transports/Lnl/RelayProtocol.cs" Link="RelayProtocol.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LiteNetLib" Version="1.3.1" />
+  </ItemGroup>
+
+</Project>

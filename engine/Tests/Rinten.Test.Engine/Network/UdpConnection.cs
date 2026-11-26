@@ -6,7 +6,7 @@ using System;
 
 namespace NetworkTests;
 
-//Full game protocol (handshake, 1.5MB string table) over our UDP transport, mirroring the TCP test
+//Full game protocol (handshake, 1.5MB string table) over the LiteNetLib transport, mirroring the TCP test
 [TestClass]
 public class UdpConnectionTest
 {
@@ -57,13 +57,13 @@ public class UdpConnectionTest
 	{
 		var server = new NetworkSystem( "server", tl );
 		server.InitializeHost();
-		server.AddSocket( new UdpSocket( Port ) );
+		server.AddSocket( new LnlSocket( Port ) );
 
 		var serverTable = InstallDataTables( server );
 		Assert.AreEqual( 4, serverTable.Entries.Count );
 
 		var client = new NetworkSystem( "client", tl );
-		client.Connect( new UdpConnection( $"udp://127.0.0.1:{Port}" ) );
+		client.Connect( LnlTransport.Connect( $"udp://127.0.0.1:{Port}" ) );
 
 		var clientTable = InstallDataTables( client );
 		Assert.AreEqual( 0, clientTable.Entries.Count );

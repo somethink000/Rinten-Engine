@@ -97,6 +97,9 @@ public static partial class Networking
 		}
 	}
 
+	/// <summary>The join code the project's relay gave this host; Connect( "relay://" + code ) joins it. Null without a relay.</summary>
+	public static string RelayCode => System?.Sockets.OfType<LnlSocket>().FirstOrDefault()?.RelayCode;
+
 	/// <summary>The maximum number of players allowed on the server you're connected to.</summary>
 	public static int MaxPlayers { get; internal set; }
 
@@ -199,13 +202,13 @@ public static partial class Networking
 
 	//Open our own listen socket, if we are meant to and if we can. A port that is already taken is an ordinary thing here - a second copy of the game
 	//on the same machine is how anybody tests one - and it is not a reason to refuse to host. What is lost is the ability to be joined by address.
-	private static UdpSocket OpenUdpSocket()
+	private static LnlSocket OpenUdpSocket( LobbyConfig config )
 	{
-		if ( !UdpEnabled ) return null;
+		if ( !UdpEnabled || Application.OnWeb ) return null;
 
 		try
 		{
-			return new UdpSocket( Port );
+			return new LnlSocket( Port, config );
 		}
 		catch ( Exception e )
 		{
@@ -244,6 +247,20 @@ public static partial class Networking
 	{
 		var found = new List<LobbyInformation>();
 		filters ??= new Dictionary<string, string>();
+
+		var relay = ProjectSettings.Networking?.RelayAddress;
+		if ( !Application.OnWeb && !string.IsNullOrWhiteSpace( relay ) && ( provider is null || provider.Equals( "relay", StringComparison.OrdinalIgnoreCase ) ) )
+		{
+			try
+			{
+				found.AddRange( ( await LnlTransport.QueryRelay( relay ) )
+					.Where( x => filters.All( f => x.Data is not null && x.Data.TryGetValue( f.Key, out var v ) && v == f.Value ) ) );
+			}
+			catch ( Exception e )
+			{
+				Log.Warning( $"Couldn't list lobbies from the relay: {e.Message}" );
+			}
+		}
 
 		foreach ( var p in NetworkProviders.All )
 		{
@@ -435,7 +452,7 @@ public static partial class Networking
 			System.InitializeHost();
 
 			//Our UDP, on the server's port: the way in from other machines.
-			var udp = OpenUdpSocket();
+			var udp = OpenUdpSocket( config );
 			if ( udp is not null ) System.AddSocket( udp );
 
 			AddProviderSockets( System, config );
@@ -484,7 +501,7 @@ public static partial class Networking
 			return false;
 
 		//Our UDP, the same way a dedicated server opens it. Nothing lists this game anywhere: it is joined by its address.
-		var udp = OpenUdpSocket();
+		var udp = OpenUdpSocket( config );
 		if ( udp is not null ) net.AddSocket( udp );
 
 		//Any platform there is to host through, with the privacy the lobby asked for.
@@ -578,6 +595,18 @@ public static partial class Networking
 					System = new( "localclient", IGameInstanceDll.Current.TypeLibrary );
 					System.Connect( new TcpChannel( "127.0.0.1", 55333 ) );
 				}
+				else if ( target.StartsWith( "relay://", StringComparison.OrdinalIgnoreCase ) )
+				{
+					var relay = ProjectSettings.Networking?.RelayAddress;
+					if ( string.IsNullOrWhiteSpace( relay ) )
+					{
+						Log.Warning( "Couldn't connect - this project names no relay (Networking settings, Relay Address)" );
+						return false;
+					}
+
+					System = new( "client", IGameInstanceDll.Current.TypeLibrary );
+					System.Connect( LnlTransport.ConnectViaRelay( target[8..], relay ) );
+				}
 				else if ( NetworkProviders.TryResolve( target, out var provider, out var rest ) )
 				{
 					Log.Info( $"Connecting through {provider.Title} to {rest}.." );
@@ -587,17 +616,10 @@ public static partial class Networking
 				}
 				else
 				{
-					//replace localhost
-					target = target.Replace( "localhost", "127.0.0.1", StringComparison.OrdinalIgnoreCase );
-
-					//append port if needed
-					if ( !target.StartsWith( "udp://", StringComparison.OrdinalIgnoreCase ) && !target.Contains( ':' ) )
-						target = $"{target}:{Port}";
-
-					//Our UDP, which is what a server listens on for other machines. A udp:// in front says the same thing.
+					//host[:port][#fingerprint] over our UDP; udp:// in front says the same
 					Log.Info( $"Connecting to {target}.." );
 					System = new( "client", IGameInstanceDll.Current.TypeLibrary );
-					System.Connect( new UdpConnection( target ) );
+					System.Connect( LnlTransport.Connect( target ) );
 				}
 
 				LastConnectionString = target;

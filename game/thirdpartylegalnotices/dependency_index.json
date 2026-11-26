@@ -433,6 +433,20 @@
 			]
 		},
 		{
+			"Name": "LiteNetLib",
+			"Comment": "Reliable UDP for multiplayer; Rinten encrypts the payloads on top of it.",
+			"UsedBy": [
+				"Rinten.Engine"
+			],
+			"License": "MIT",
+			"ProjectUrl": "https://github.com/RevenantX/LiteNetLib",
+			"Version": "1.3.1",
+			"Linkage": "dynamic",
+			"Copyright": [
+				"Ruslan Pyrch"
+			]
+		},
+		{
 			"Name": "LiteDB",
 			"Comment": "Embedded database used by the editor's cloud asset directory.",
 			"UsedBy": [

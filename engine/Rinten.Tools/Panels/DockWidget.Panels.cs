@@ -14,21 +14,7 @@ public partial class DockWidget
 	private bool closed;
 
 	//Whether this dock ever shows a tab of its own.
-	private bool noTab;
-
-	internal bool NoTab
-	{
-		get => noTab;
-		set
-		{
-			if ( noTab == value ) return;
-
-			noTab = value;
-
-			//The outline rounds a dock that is the whole group; one under a tab strip keeps its top corners square.
-			Surface?.SetClass( "notab", value );
-		}
-	}
+	internal bool NoTab { get; set; }
 
 	//Whether this dock has been torn off into a window of its own. It stays on its edge's list while it is out there - that list is
 	//where it goes back to, and which edge it came from is the answer nobody wants to be asked for again when the window is closed.

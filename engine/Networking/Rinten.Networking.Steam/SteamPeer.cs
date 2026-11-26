@@ -9,6 +9,10 @@ namespace Rinten.NetworkModules.Steam;
 //A Steam P2P peer; sends queue until the lobby connection to the host exists
 internal sealed class SteamPeer : NetworkPeer
 {
+	//Sends held before the connection exists, and arrivals waiting for the main thread before the sender is taken to be flooding
+	private const int MostWaiting = 4096;
+	private const int MostReceived = 16384;
+
 	private readonly SteamProvider provider;
 	private readonly ConcurrentQueue<byte[]> received = new();
 	private readonly List<(byte[] Data, bool Reliable)> waiting = new();
@@ -82,7 +86,7 @@ internal sealed class SteamPeer : NetworkPeer
 		{
 			if ( Connection == 0 )
 			{
-				waiting.Add( (data, reliable) );
+				if ( waiting.Count < MostWaiting ) waiting.Add( (data, reliable) );
 				return;
 			}
 		}
@@ -93,14 +97,18 @@ internal sealed class SteamPeer : NetworkPeer
 	public override bool TryReceive( out byte[] data ) => received.TryDequeue( out data );
 
 	/// <summary>A message that arrived by some way other than <see cref="Pump"/>.</summary>
-	public void Deliver( byte[] data ) => received.Enqueue( data );
+	public void Deliver( byte[] data )
+	{
+		if ( received.Count >= MostReceived ) Close( 0, "Too many messages" );
+		else received.Enqueue( data );
+	}
 
 	/// <summary>Collect what Steam has for this connection. Main thread.</summary>
 	public void Pump()
 	{
-		if ( Connection == 0 ) return;
+		if ( Connection == 0 || ended ) return;
 
-		SteamApi.Receive( Connection, received.Enqueue );
+		SteamApi.Receive( Connection, Deliver );
 	}
 
 	public void Measure()

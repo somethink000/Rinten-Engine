@@ -160,6 +160,15 @@ internal partial class NetworkSystem
 
 		Log.Info( $"{msg.Name} [{msg.SteamId}] is connecting" );
 
+		//Players already in: everyone but this one, and the host's own player unless it is a dedicated server
+		var players = Connection.All.Count( c => c != source && c != Connection.Local ) + ( Application.IsDedicatedServer ? 0 : 1 );
+		if ( Networking.MaxPlayers > 0 && players >= Networking.MaxPlayers )
+		{
+			Log.Info( $"Kicking {msg.Name} [{msg.SteamId}] - server is full" );
+			source.Kick( "Server is full" );
+			return;
+		}
+
 		var denialReason = "";
 
 		if ( GameSystem is not null && !GameSystem.AcceptConnection( source, ref denialReason ) )

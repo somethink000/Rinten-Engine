@@ -17,6 +17,9 @@ public abstract partial class Connection
 	//Upper bound on decompressed payload size. Any FlagCompressed packet claiming a larger original length is treated as corrupt/malicious and rejected.
 	private const int MaxDecompressedByteSize = 256 * 1024 * 1024;
 
+	//What a host takes from a client in one message, so a client can't make it allocate the full limit
+	internal const int MostFromClient = 16 * 1024 * 1024;
+
 	//Static decode buffer — all decoding is synchronous on the network tick thread, so a
 	//single shared buffer with grow-to-high-water-mark is safe and zero-GC after warmup.
 	static byte[] _decodeBuffer;
@@ -52,7 +55,7 @@ public abstract partial class Connection
 
 	//Decode a wire payload (FlagRaw or FlagCompressed). FlagChunk packets must be fully reassembled by OnRawPacketReceived before reaching this method.
 	//Returns a span into either the source data (raw) or the static _decodeBuffer (compressed). The span is only valid until the next call to Decode.
-	internal static ReadOnlySpan<byte> Decode( ReadOnlySpan<byte> data )
+	internal static ReadOnlySpan<byte> Decode( ReadOnlySpan<byte> data, int maxSize = MaxDecompressedByteSize )
 	{
 		if ( data.Length < 1 )
 			return ReadOnlySpan<byte>.Empty;
@@ -68,8 +71,12 @@ public abstract partial class Connection
 						throw new InvalidDataException( $"Compressed packet too short ({data.Length}b, need {headerSize}b)" );
 
 					var origLen = BinaryPrimitives.ReadInt32LittleEndian( data.Slice( 1, sizeof( int ) ) );
-					if ( origLen <= 0 || origLen > MaxDecompressedByteSize )
-						throw new InvalidDataException( $"Compressed origLen {origLen} out of range (1..{MaxDecompressedByteSize})" );
+					if ( origLen <= 0 || origLen > maxSize )
+						throw new InvalidDataException( $"Compressed origLen {origLen} out of range (1..{maxSize})" );
+
+					//LZ4 can't expand a block more than 255 times, so a bigger claim is a lie to make us allocate
+					if ( origLen > ( (long)data.Length - headerSize ) * 255 + 16 )
+						throw new InvalidDataException( $"Compressed origLen {origLen} is impossible for {data.Length}b" );
 
 					//Grow to high-water mark; never returned — zero GC after warmup.
 					if ( _decodeBuffer == null || _decodeBuffer.Length < origLen )

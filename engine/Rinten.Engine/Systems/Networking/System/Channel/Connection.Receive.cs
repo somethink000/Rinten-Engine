@@ -10,6 +10,7 @@ public abstract partial class Connection
 	byte[] _chunkBuffer;
 	int _chunkBufferLength = -1;
 	uint _chunkExpectedIndex;
+	uint _chunkTotal;
 
 	//Entry point for all incoming transport packets. Handles chunk reassembly transparently;
 	//fully assembled (or non-chunked) payloads are decoded and dispatched to handler.
@@ -60,15 +61,17 @@ public abstract partial class Connection
 		if ( index + 1 > total ) throw new InvalidDataException( $"chunkIndex {index} >= total {total}" );
 		if ( total <= 1 ) throw new InvalidDataException( "Chunk total must be > 1" );
 		if ( total > 1024 ) throw new InvalidDataException( $"Chunk total {total} exceeds 1024 limit" );
+		if ( !IsHost && (long)total * MaxChunkSize > MostFromClient ) throw new InvalidDataException( $"Chunk total {total} is more than a client may send" );
 
 		if ( index == 0 )
 		{
-			//Grow the owned buffer to fit this message if needed.
-			var required = (int)total * MaxChunkSize;
-			if ( _chunkBuffer == null || _chunkBuffer.Length < required )
-				_chunkBuffer = GC.AllocateUninitializedArray<byte>( required );
+			//Room for the first few chunks; it grows as they arrive, so a claimed total costs nothing until sent
+			var start = (int)Math.Min( total, 4 ) * MaxChunkSize;
+			if ( _chunkBuffer == null || _chunkBuffer.Length < start )
+				_chunkBuffer = GC.AllocateUninitializedArray<byte>( start );
 			_chunkBufferLength = 0;
 			_chunkExpectedIndex = 0;
+			_chunkTotal = total;
 		}
 
 		//This can happen when leaving a lobby (usually during connect) and then rejoining:
@@ -85,8 +88,11 @@ public abstract partial class Connection
 		if ( chunkData.Length > MaxChunkSize )
 			throw new InvalidDataException( $"Chunk payload {chunkData.Length}b exceeds MaxChunkSize ({MaxChunkSize}b) from {this}" );
 
+		if ( total != _chunkTotal )
+			throw new InvalidDataException( $"Chunk total changed from {_chunkTotal} to {total} from {this}" );
+
 		if ( _chunkBufferLength + chunkData.Length > _chunkBuffer.Length )
-			throw new InvalidDataException( $"Chunk overflows reassembly buffer ({_chunkBufferLength} + {chunkData.Length} > {_chunkBuffer.Length}) from {this}" );
+			Array.Resize( ref _chunkBuffer, (int)Math.Min( (long)_chunkBuffer.Length * 2, (long)total * MaxChunkSize ) );
 
 		chunkData.CopyTo( _chunkBuffer.AsSpan( _chunkBufferLength ) );
 		_chunkBufferLength += chunkData.Length;
@@ -102,7 +108,7 @@ public abstract partial class Connection
 
 	private void DeliverDecoded( ReadOnlySpan<byte> encoded, NetworkSystem.MessageHandler handler )
 	{
-		var payload = Decode( encoded );
+		var payload = Decode( encoded, IsHost ? MaxDecompressedByteSize : MostFromClient );
 		using var stream = ByteStream.CreateReader( payload );
 		handler( new NetworkSystem.NetworkMessage { Source = this, Data = stream } );
 		MessagesRecieved++;

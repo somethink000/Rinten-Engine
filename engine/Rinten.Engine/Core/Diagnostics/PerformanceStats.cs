@@ -168,15 +168,22 @@ public static partial class PerformanceStats
 		EngineEventSource.Instance.Clocks( Time.NowDouble, RealTime.NowDouble,
 			( DateTime.UtcNow - ProcessStartUtc ).TotalSeconds );
 
-		var ls = new Block();
-		ls.FrameAvg = _history.Average( x => x.FrameAvg );
-		ls.FrameMin = _history.Min( x => x.FrameAvg );
-		ls.FrameMax = _history.Max( x => x.FrameAvg );
-		ls.ByteAlloc = _history.Sum( x => x.ByteAlloc );
-		ls.Gc0 = _history.Sum( x => x.Gc0 );
-		ls.Gc1 = _history.Sum( x => x.Gc1 );
-		ls.Gc2 = _history.Sum( x => x.Gc2 );
-		ls.GcPause = _history.Sum( x => x.GcPause );
+		var ls = new Block { FrameMin = float.MaxValue, FrameMax = float.MinValue };
+		float secondFrameSum = 0;
+
+		foreach ( var b in _history )
+		{
+			secondFrameSum += b.FrameAvg;
+			ls.FrameMin = Math.Min( ls.FrameMin, b.FrameAvg );
+			ls.FrameMax = Math.Max( ls.FrameMax, b.FrameAvg );
+			ls.ByteAlloc += b.ByteAlloc;
+			ls.Gc0 += b.Gc0;
+			ls.Gc1 += b.Gc1;
+			ls.Gc2 += b.Gc2;
+			ls.GcPause += b.GcPause;
+		}
+
+		ls.FrameAvg = secondFrameSum / _history.Count;
 
 		LastSecond = ls;
 

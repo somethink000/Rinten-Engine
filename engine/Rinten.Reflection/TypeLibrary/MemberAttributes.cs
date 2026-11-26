@@ -20,13 +20,13 @@ public partial class TypeLibrary
 	//The types whose members can carry an attribute of this kind: those declaring a
 	//member with one, and those inheriting a member with one, which list it as theirs.
 	IReadOnlyList<TypeDescription> TypesWithMemberAttribute<T>() where T : Attribute
-		=> Cached( HashCode.Combine( "TypesWithMemberAttribute", typeof( T ) ), () =>
+		=> Cached( HashCode.Combine( "TypesWithMemberAttribute", typeof( T ) ), this, static lib =>
 		{
 			//Nobody can say what an unnamed attribute is, or whether its member is inherited.
-			var declaring = new HashSet<Type>( ownersOfUnnamedAttributes.Keys );
-			var passing = new HashSet<Type>( ownersOfUnnamedAttributes.Keys );
+			var declaring = new HashSet<Type>( lib.ownersOfUnnamedAttributes.Keys );
+			var passing = new HashSet<Type>( lib.ownersOfUnnamedAttributes.Keys );
 
-			foreach ( var (attribute, types) in memberAttributeOwners )
+			foreach ( var (attribute, types) in lib.memberAttributeOwners )
 			{
 				if ( !attribute.IsAssignableTo( typeof( T ) ) ) continue;
 
@@ -37,9 +37,9 @@ public partial class TypeLibrary
 				}
 			}
 
-			if ( declaring.Count == 0 && unindexedAssemblies.IsEmpty ) return ImmutableList<TypeDescription>.Empty;
+			if ( declaring.Count == 0 && lib.unindexedAssemblies.IsEmpty ) return ImmutableList<TypeDescription>.Empty;
 
-			return typedata.Values.Where( x => MayCarry( x.TargetType, declaring, passing ) ).ToImmutableList();
+			return lib.typedata.Values.Where( x => lib.MayCarry( x.TargetType, declaring, passing ) ).ToImmutableList();
 		} );
 
 	//Whether a type declares one of these members, or inherits one from a type passing it down, or

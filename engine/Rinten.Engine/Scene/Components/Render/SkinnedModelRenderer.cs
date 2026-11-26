@@ -201,7 +201,7 @@ public sealed partial class SkinnedModelRenderer : ModelRenderer, Component.Exec
 
 	internal bool IsRootRenderer => _skinnedParent == null;
 
-	internal IEnumerable<SkinnedModelRenderer> SkinnedChildren => _skinnedChildren;
+	internal HashSet<SkinnedModelRenderer> SkinnedChildren => _skinnedChildren;
 
 	private void UpdateSkinnedRendererParent()
 	{

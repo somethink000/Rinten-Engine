@@ -110,8 +110,10 @@ internal static partial class DebugOverlay
 
 			var found = 0;
 
-			foreach ( var timing in PerformanceStats.Timings.GetMain() )
+			var main = PerformanceStats.Timings.Main;
+			for ( var timings = 0; timings < main.Count; timings++ )
 			{
+				var timing = main[timings];
 				var metric = timing.GetMetric( 60 );
 				if ( metric.Max < 0.05f )
 					continue;

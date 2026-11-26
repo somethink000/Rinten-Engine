@@ -176,7 +176,10 @@ public class ComponentList
 	/// <summary>Get a list of components on this game object, optionally recurse when deep is true</summary>
 	public IEnumerable<T> GetAll<T>( FindMode find = FindMode.InSelf | FindMode.Enabled | FindMode.InDescendants )
 	{
-		if ( go.IsDestroyed ) return Enumerable.Empty<T>();
+		if ( go.IsDestroyed
+			|| (find.Contains( FindMode.Enabled ) && !find.Contains( FindMode.Disabled ) && !go.Enabled)
+			|| (Count == 0 && go.Children.Count == 0 && (find & (FindMode.InParent | FindMode.InAncestors)) == 0) )
+			return Enumerable.Empty<T>();
 
 		var results = new List<T>( 16 );
 
@@ -191,6 +194,37 @@ public class ComponentList
 		if ( go.IsDestroyed ) return;
 
 		CollectAll( results, find );
+	}
+
+	internal delegate void RefAction<T, TState>( T target, ref TState state );
+
+	//Ref-state variant, for listeners that modify the state (like OnEyeAngles). Walks the same
+	//enabled components GetAll would, without building a list or capturing a closure.
+	internal void ExecuteEnabledInSelfAndDescendants<T, TState>( ref TState state, RefAction<T, TState> action )
+	{
+		if ( !go.IsValid() || !go.Enabled ) return;
+
+		if ( _internalList is not null )
+		{
+			for ( int i = 0; i < _list.Count; i++ )
+			{
+				var component = _list[i];
+				if ( component is null ) continue;
+
+				if ( component is T target && component.Active )
+					action.Invoke( target, ref state );
+			}
+		}
+
+		for ( int i = go.Children.Count - 1; i >= 0; i-- )
+		{
+			if ( i >= go.Children.Count ) continue;
+
+			var child = go.Children[i];
+			if ( !child.IsValid() ) continue;
+
+			child.Components.ExecuteEnabledInSelfAndDescendants( ref state, action );
+		}
 	}
 
 	//This is an incredibly hot code path, even the slightest change should be verified with benchmarks.

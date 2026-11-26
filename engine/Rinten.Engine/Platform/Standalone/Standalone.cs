@@ -22,6 +22,7 @@ public static class Standalone
 		Application.DebugExport = Manifest.Debug;
 		Application.IsApp = Manifest.App;
 		Splash.EngineSplash.Picture = Manifest.Splash;
+		WebCode.CompiledFrom( Manifest.Code );
 	}
 
 	private static DateTime _buildDate = DateTime.UnixEpoch;

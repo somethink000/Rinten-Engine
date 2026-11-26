@@ -255,6 +255,9 @@ internal static class Bootstrap
 				var cmd = ConVarSystem.Find( sw.Key );
 				if ( cmd is null || !cmd.IsConCommand ) continue;
 
+				//A shipped game loads its own package first, which would drop a session; it hosts or connects after - see CoreAppSystem
+				if ( Standalone.Manifest is not null && sw.Key is "connect" or "host" ) continue;
+
 				cmd.Run( sw.Value );
 			}
 

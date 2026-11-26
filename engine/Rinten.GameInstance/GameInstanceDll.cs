@@ -470,6 +470,15 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			return;
 		}
 
+		//A shipped game has no menu to fall back to, and closing it would quit: it stays, back in its startup scene
+		if ( Application.IsStandalone && gameInstance is not null )
+		{
+			Networking.Disconnect();
+			gameInstance.OpenStartupScene();
+			LoadingScreen.IsVisible = false;
+			return;
+		}
+
 		//cancel any in-progress load right now instead of waiting for tick
 		CancelLoad();
 		Game.Close();
@@ -477,7 +486,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 		if ( !string.IsNullOrEmpty( message ) )
 		{
 			using var scope = GlobalContext.MenuScope();
-			IModalSystem.Current.Notice( "Disconnected", message, "wifi_off" );
+			IModalSystem.Current?.Notice( "Disconnected", message, "wifi_off" );
 		}
 
 		LoadingScreen.IsVisible = false;
@@ -830,8 +839,9 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 
 			var libraries = Path.Combine( project.RootDirectory.FullName, "Libraries" );
 
-			//We should iterate all available libraries and add their projects
-			foreach ( var folder in Directory.EnumerateDirectories( libraries ) )
+			//Each library's project; most projects have no Libraries folder at all
+			var folders = Directory.Exists( libraries ) ? Directory.EnumerateDirectories( libraries ) : [];
+			foreach ( var folder in folders )
 			{
 				var configs = Directory.EnumerateFiles( folder, Project.ExtensionSearch ).ToArray();
 				if ( configs.Length != 1 ) continue;

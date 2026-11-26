@@ -164,8 +164,8 @@ internal partial class GameInstanceDll
 		{
 			serverCode?.Update( entry.Data );
 
-			//A page that joined with the server's code is left behind by a change to it.
-			if ( serverCode is null && OperatingSystem.IsBrowser() && WebCode.Refuses( [(entry.Name, entry.Data)] ) is { } refused )
+			//A build that joined with the server's code is left behind by a change to it.
+			if ( serverCode is null && WebCode.Refuses( [(entry.Name, entry.Data)] ) is { } refused )
 				Disconnect( refused );
 		};
 
@@ -189,23 +189,19 @@ internal partial class GameInstanceDll
 
 	public async Task<bool> LoadNetworkTables( NetworkSystem system )
 	{
-		//Where this build has a compiler. One without - a web page - can join a server that sends no code, or one whose code
-		//is the code the page was compiled from (its module holds it already - see WebCode.Refuses); never a different one.
+		//Where this build has a compiler. One without - a shipped game or a web page - joins a server that sends no code, or
+		//one whose code it was compiled from (see WebCode.Refuses); never a different one.
 		serverCode = ProjectCompiling.Current?.NewServerCode();
 
 		if ( serverCode is null && CodeArchiveTable.Entries.Any() )
 		{
-			var refused = OperatingSystem.IsBrowser()
-				? WebCode.Refuses( CodeArchiveTable.Entries.Select( x => (x.Key, x.Value.Data) ) )
-				: "This server sends its code to be compiled, and this build of the game has no compiler.";
-
-			if ( refused is not null )
+			if ( WebCode.Refuses( CodeArchiveTable.Entries.Select( x => (x.Key, x.Value.Data) ) ) is { } refused )
 			{
 				Disconnect( refused );
 				return false;
 			}
 
-			//The page's own code is the server's: nothing to compile, nothing to load - the loop below hands the archives to no one.
+			//Our own code is the server's: nothing to compile, nothing to load - the loop below hands the archives to no one.
 		}
 
 		//Don't hotload while we're downloading stuff!

@@ -25,4 +25,7 @@ public class StandaloneManifest
 
 	/// <summary>The picture shown while the game starts, as a path in the engine's content; empty shows none.</summary>
 	public string Splash { get; set; }
+
+	/// <summary>Fingerprints of the code the build was compiled from, by assembly, so it can join a server running that code.</summary>
+	public Dictionary<string, List<string>> Code { get; set; }
 }

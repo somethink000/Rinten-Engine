@@ -291,6 +291,7 @@ public partial class StandaloneExporter
 			Debug = _exportConfig.ExportDebug,
 			App = _exportConfig.App,
 			Splash = SplashInBuild() is { } splash ? "/" + splash : null,
+			Code = CodeFingerprints(),
 		};
 	}
 

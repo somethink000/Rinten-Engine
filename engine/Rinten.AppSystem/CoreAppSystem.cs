@@ -57,7 +57,8 @@ public class CoreAppSystem : AppSystem
 
 		Bootstrap.PreInitCore( root,
 			headless: Dedicated || Utility.CommandLine.HasSwitch( "-headless" ),
-			standalone: !IsEditorApp,
+			//A server without a shipped build's manifest runs the project it is told to: not a standalone game
+			standalone: !IsEditorApp && ( !Dedicated || manifest is not null ),
 			dedicated: Dedicated,
 			editor: IsEditorApp );
 
@@ -299,7 +300,8 @@ public class CoreAppSystem : AppSystem
 	{
 		if ( Application.WantsExit ) return false;
 
-		if ( Application.IsHeadless ) return false;
+		//A headless tool run is done after Init; a dedicated server is headless and runs until told to quit
+		if ( Application.IsHeadless && !Application.IsDedicatedServer ) return false;
 
 		//A phone's window is lent: while the game is in the background, or the system has the surface
 		//back, this is where the frame waits - and where the window it comes back to is a new one.
@@ -336,6 +338,11 @@ public class CoreAppSystem : AppSystem
 			//Throws where the load failed, which is the only place anybody would see why.
 			loading.GetAwaiter().GetResult();
 			loading = null;
+
+			if ( Utility.CommandLine.HasSwitch( "host" ) )
+				Networking.CreateLobby( new() );
+			else if ( Utility.CommandLine.GetSwitch( "connect", null ) is { Length: > 0 } target )
+				Networking.Connect( target.Trim( '"' ) );
 		}
 
 		framesRun++;

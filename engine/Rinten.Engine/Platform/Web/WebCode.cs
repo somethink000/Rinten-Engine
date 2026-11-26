@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Rinten;
 
-//Registers a web build's precompiled game types in the library; a page cannot load code at runtime
+//What code a shipped build was compiled from, so it joins only servers running it; and a web build's baked-in game types
 internal static class WebCode
 {
 	private static readonly Logger log = new( "Web" );
@@ -23,7 +23,7 @@ internal static class WebCode
 		foreach ( var (name, archive) in sent )
 		{
 			if ( !compiledFrom.TryGetValue( name, out var known ) )
-				return $"This server runs code ({name}) that this web build was not made with.";
+				return $"This server runs code ({name}) that this build was not made with.";
 
 			string mine;
 
@@ -33,17 +33,18 @@ internal static class WebCode
 			}
 			catch ( Exception e )
 			{
-				return $"This server sent code ({name}) this web build cannot read: {e.Message}";
+				return $"This server sent code ({name}) this build cannot read: {e.Message}";
 			}
 
 			if ( !known.Contains( mine, StringComparer.OrdinalIgnoreCase ) )
-				return $"This server runs a different version of {name} than this web build was made from - export the web build again from the server's project.";
+				return $"This server runs a different version of {name} than this build was made from - export it again from the server's project.";
 		}
 
 		return null;
 	}
 
-	//SHA-256 over a code archive's sources (path + text, path order), parsed without the compiler
+	//SHA-256 over a code archive's source texts, in hash order: paths differ between a server and an export
+	//(absolute or relative), and generated files under /.obj/ follow the build configuration, not the code
 	internal static string Fingerprint( byte[] archive )
 	{
 		using var compressed = ByteStream.CreateReader( archive );
@@ -56,7 +57,7 @@ internal static class WebCode
 		_ = stream.Read<string>(); //its configuration
 		_ = stream.Read<string>(); //the references
 
-		var files = new SortedDictionary<string, string>( StringComparer.Ordinal );
+		var texts = new List<string>();
 
 		foreach ( var list in new[] { stream.Read<string>(), stream.Read<string>() } )
 		{
@@ -64,22 +65,17 @@ internal static class WebCode
 
 			foreach ( var file in document.RootElement.EnumerateArray() )
 			{
-				var path = file.GetProperty( "LocalPath" ).GetString() ?? "";
-				files[path.Replace( '\\', '/' )] = file.GetProperty( "Text" ).GetString() ?? "";
+				var path = ( file.GetProperty( "LocalPath" ).GetString() ?? "" ).Replace( '\\', '/' );
+				if ( path.StartsWith( "/.obj/", StringComparison.Ordinal ) ) continue;
+
+				var text = ( file.GetProperty( "Text" ).GetString() ?? "" ).Replace( "\r\n", "\n" );
+				texts.Add( Convert.ToHexString( System.Security.Cryptography.SHA256.HashData( System.Text.Encoding.UTF8.GetBytes( text ) ) ) );
 			}
 		}
 
-		using var hash = System.Security.Cryptography.IncrementalHash.CreateHash( System.Security.Cryptography.HashAlgorithmName.SHA256 );
+		texts.Sort( StringComparer.Ordinal );
 
-		foreach ( var (path, text) in files )
-		{
-			hash.AppendData( System.Text.Encoding.UTF8.GetBytes( path ) );
-			hash.AppendData( [0] );
-			hash.AppendData( System.Text.Encoding.UTF8.GetBytes( text.Replace( "\r\n", "\n" ) ) );
-			hash.AppendData( [0] );
-		}
-
-		return Convert.ToHexString( hash.GetHashAndReset() );
+		return Convert.ToHexString( System.Security.Cryptography.SHA256.HashData( System.Text.Encoding.UTF8.GetBytes( string.Join( "\n", texts ) ) ) );
 	}
 
 	//One of the game's assemblies, compiled into the module with the engine, into the library. Throws where the module has no such assembly.

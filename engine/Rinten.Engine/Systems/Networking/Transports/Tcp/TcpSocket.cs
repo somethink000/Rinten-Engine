@@ -8,9 +8,9 @@ namespace Rinten.Network;
 //A listen socket over TCP. For testing locally.
 internal class TcpSocket : NetworkSocket, IValid
 {
-	Action queue;
-
-	List<TcpChannel> Connections = new List<TcpChannel>();
+	//Accepted on the listen task, handed over on the main thread
+	readonly System.Collections.Concurrent.ConcurrentQueue<TcpChannel> accepted = new();
+	readonly List<TcpChannel> connections = new();
 
 	async Task SocketThread( string address, int port, CancellationToken token )
 	{
@@ -31,10 +31,7 @@ internal class TcpSocket : NetworkSocket, IValid
 			try
 			{
 				var client = await listener.AcceptTcpClientAsync( token );
-				var c = new TcpChannel( client );
-
-				Connections.Add( c );
-				queue += () => OnClientConnect?.Invoke( c );
+				accepted.Enqueue( new TcpChannel( client ) );
 			}
 			catch ( OperationCanceledException )
 			{
@@ -69,6 +66,11 @@ internal class TcpSocket : NetworkSocket, IValid
 		tokenSource.Cancel();
 		tokenSource.Dispose();
 
+		//Their sockets would otherwise stay open, and the clients would never hear the host went
+		foreach ( var c in connections ) c.Close( 0, "Host closed" );
+		while ( accepted.TryDequeue( out var c ) ) c.Close( 0, "Host closed" );
+		connections.Clear();
+
 		GC.SuppressFinalize( this );
 	}
 
@@ -79,25 +81,22 @@ internal class TcpSocket : NetworkSocket, IValid
 
 	internal override void GetIncomingMessages( NetworkSystem.MessageHandler handler )
 	{
-		try
+		while ( accepted.TryDequeue( out var c ) )
 		{
-			queue?.Invoke();
-		}
-		catch ( Exception e )
-		{
-			Log.Warning( e );
+			connections.Add( c );
+			OnClientConnect?.Invoke( c );
 		}
 
-		queue = null;
-
-		foreach ( var c in Connections )
+		for ( var i = connections.Count - 1; i >= 0; i-- )
 		{
+			var c = connections[i];
+
 			if ( !c.IsConnected )
 			{
-				Connections.Remove( c );
+				connections.RemoveAt( i );
 				OnClientDisconnect?.Invoke( c );
 				c.Close( 0, "Disconnect" );
-				return;
+				continue;
 			}
 
 			c.GetIncomingMessages( handler );

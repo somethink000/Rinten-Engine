@@ -17,6 +17,10 @@ internal class TcpChannel : Connection
 
 	public bool IsConnected => client?.Connected ?? false;
 
+	//Set once the socket had connected and its loop ended; the client end tells the network system once
+	volatile bool ended;
+	bool told;
+
 	async Task SocketLoop( CancellationToken token )
 	{
 		try
@@ -30,9 +34,9 @@ internal class TcpChannel : Connection
 			_address = client?.Client?.RemoteEndPoint?.ToString() ?? client?.Client?.LocalEndPoint?.ToString() ?? "Tcp";
 
 			var stream = client.GetStream();
+			started = true;
 
 			_ = Task.Run( async () => await SendThread( token ), token );
-			_ = Task.Run( async () => await FakeLagProcess( token ), token );
 
 			while ( !token.IsCancellationRequested )
 			{
@@ -51,9 +55,9 @@ internal class TcpChannel : Connection
 				await incoming.Writer.WriteAsync( packet, token );
 			}
 		}
-		catch ( OperationCanceledException )
+		catch ( Exception e ) when ( e is OperationCanceledException or global::System.IO.EndOfStreamException )
 		{
-			//normal
+			//Closed by us, or by the other end
 		}
 		catch ( Exception e )
 		{
@@ -64,8 +68,11 @@ internal class TcpChannel : Connection
 			client?.Close();
 			client?.Dispose();
 			client = null;
+			ended = started;
 		}
 	}
+
+	bool started;
 
 	readonly CancellationTokenSource tokenSource;
 
@@ -109,8 +116,6 @@ internal class TcpChannel : Connection
 
 	Channel<byte[]> sendChannel = Channel.CreateUnbounded<byte[]>();
 
-	private Queue<(byte[], RealTimeUntil)> fakeLagIncoming = new();
-	private ConcurrentQueue<(byte[], RealTimeUntil)> fakeLagOutgoing = new();
 
 	private async Task ConnectAndRunAsync( string host, int port, CancellationToken token )
 	{
@@ -128,58 +133,10 @@ internal class TcpChannel : Connection
 		}
 	}
 
-	private async Task FakeLagProcess( CancellationToken token )
-	{
-		try
-		{
-			while ( !token.IsCancellationRequested )
-			{
-				var processedPacket = false;
-
-				if ( fakeLagOutgoing.TryPeek( out var o ) )
-				{
-					if ( o.Item2 )
-					{
-						if ( fakeLagOutgoing.TryDequeue( out _ ) )
-						{
-							processedPacket = true;
-							await sendChannel.Writer.WriteAsync( BitConverter.GetBytes( o.Item1.Length ), token );
-							await sendChannel.Writer.WriteAsync( o.Item1, token );
-						}
-					}
-				}
-
-				if ( !processedPacket ) //Maybe something will be ready later?
-					await Task.Delay( 1, token );
-			}
-		}
-		catch ( OperationCanceledException )
-		{
-			//normal
-		}
-		catch ( Exception e )
-		{
-			Log.Error( e );
-		}
-	}
-
 	internal override void InternalSend( byte[] output, NetFlags flags )
 	{
 		if ( client?.Connected != true )
 			return;
-
-		if ( Networking.FakePacketLoss > 0 && !( ( flags & NetFlags.Reliable ) == NetFlags.Reliable ) )
-		{
-			var chance = Random.Shared.Next( 0, 100 );
-			if ( chance <= Networking.FakePacketLoss )
-				return;
-		}
-
-		if ( Networking.FakeLag > 0 )
-		{
-			fakeLagOutgoing.Enqueue( (output, Networking.FakeLag / 1000f) );
-			return;
-		}
 
 		try
 		{
@@ -227,8 +184,15 @@ internal class TcpChannel : Connection
 		}
 	}
 
+	bool closed;
+
+	//Both the network system and the socket close a channel; the second does nothing
 	internal override void InternalClose( int closeCode, string closeReason )
 	{
+		if ( closed ) return;
+		closed = true;
+
+		told = true;
 		tokenSource.Cancel();
 		tokenSource.Dispose();
 		GC.SuppressFinalize( this );
@@ -239,20 +203,13 @@ internal class TcpChannel : Connection
 		//A message handler can synchronously close this channel (for example, reconnect).
 		while ( !tokenSource.IsCancellationRequested && incoming.Reader.TryRead( out byte[] data ) )
 		{
-			if ( Networking.FakeLag > 0 || fakeLagIncoming.Count > 0 )
-			{
-				fakeLagIncoming.Enqueue( (data, Networking.FakeLag / 1000f) );
-				continue;
-			}
-
 			OnRawPacketReceived( data, handler );
 		}
 
-		//Delayed packets must use the same tick thread and ordering as normal receives.
-		while ( !tokenSource.IsCancellationRequested && fakeLagIncoming.TryPeek( out var packet ) && packet.Item2 )
+		if ( isHost && ended && !told )
 		{
-			fakeLagIncoming.Dequeue();
-			OnRawPacketReceived( packet.Item1, handler );
+			told = true;
+			System?.OnServerDisconnection( 0, "connection lost" );
 		}
 	}
 }

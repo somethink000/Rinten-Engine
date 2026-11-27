@@ -63,6 +63,14 @@ public static partial class Game
 	/// <summary>Close the current game.</summary>
 	public static void Close()
 	{
+		//An editor's -joinlocal instance exists only to join it: it goes with the session
+		if ( Application.IsJoinLocal )
+		{
+			Networking.Disconnect();
+			Application.Exit();
+			return;
+		}
+
 		//Editor only: just exit playmode
 		if ( IToolsDll.Current is not null )
 		{

@@ -119,7 +119,7 @@ public static partial class Networking
 	internal static float InterpolationTime { get; set; } = 0.1f;
 
 	[ConVar( "net_fakepacketloss", ConVarFlags.Protected | ConVarFlags.Cheat, Help = "Simulate packet loss in %" )]
-	internal static int FakePacketLoss { get; set; } = 0;
+	internal static float FakePacketLoss { get; set; } = 0;
 
 	[ConVar( "net_fakelag", ConVarFlags.Protected | ConVarFlags.Cheat, Help = "Simulate latency in ms" )]
 	internal static int FakeLag { get; set; } = 0;

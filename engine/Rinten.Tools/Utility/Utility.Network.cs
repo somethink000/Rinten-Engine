@@ -22,6 +22,20 @@ public static partial class EditorUtility
 			set => Networking.EditorLobbyPrivacy = value;
 		}
 
+		/// <summary>Simulated latency in milliseconds, added to both directions of every connection (net_fakelag).</summary>
+		public static int SimulatedLag
+		{
+			get => Networking.FakeLag;
+			set => Networking.FakeLag = Math.Max( value, 0 );
+		}
+
+		/// <summary>Percent of unreliable messages dropped on purpose (net_fakepacketloss).</summary>
+		public static float SimulatedPacketLoss
+		{
+			get => Networking.FakePacketLoss;
+			set => Networking.FakePacketLoss = Math.Clamp( value, 0.0f, 100.0f );
+		}
+
 		/// <summary>Disconnect from the current network session</summary>
 		public static void Disconnect() => Networking.Disconnect();
 

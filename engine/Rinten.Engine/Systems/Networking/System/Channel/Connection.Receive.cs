@@ -12,9 +12,62 @@ public abstract partial class Connection
 	uint _chunkExpectedIndex;
 	uint _chunkTotal;
 
-	//Entry point for all incoming transport packets. Handles chunk reassembly transparently;
-	//fully assembled (or non-chunked) payloads are decoded and dispatched to handler.
+	//Simulated lag (net_fakelag) and loss (net_fakepacketloss) for every transport; lag holds both directions
+	readonly Queue<(byte[] Data, NetFlags Flags, double At)> lagOut = new();
+	readonly Queue<(byte[] Data, double At)> lagIn = new();
+
+	void Transmit( byte[] data, NetFlags flags )
+	{
+		if ( Networking.FakePacketLoss > 0 && ( flags & NetFlags.Reliable ) == 0 && Random.Shared.NextSingle() * 100.0f < Networking.FakePacketLoss )
+			return;
+
+		//No lock unless lag is being simulated, which is the only time the queue is used
+		if ( Networking.FakeLag <= 0 && lagOut.Count == 0 )
+		{
+			InternalSend( data, flags );
+			return;
+		}
+
+		lock ( lagOut ) lagOut.Enqueue( (data, flags, RealTime.NowDouble + Networking.FakeLag / 1000.0) );
+	}
+
+	//What simulated lag held back and is now due; the network system calls this every tick for every connection
+	internal void ReleaseLagged( NetworkSystem.MessageHandler handler )
+	{
+		if ( lagOut.Count == 0 && lagIn.Count == 0 ) return;
+
+		var now = RealTime.NowDouble;
+
+		lock ( lagOut )
+		{
+			while ( lagOut.TryPeek( out var due ) && due.At <= now )
+			{
+				lagOut.Dequeue();
+				InternalSend( due.Data, due.Flags );
+			}
+		}
+
+		while ( lagIn.TryPeek( out var arrived ) && arrived.At <= now )
+		{
+			lagIn.Dequeue();
+			Receive( arrived.Data, handler );
+		}
+	}
+
+	//Entry point for all incoming transport packets
 	internal void OnRawPacketReceived( ReadOnlySpan<byte> rawPacket, NetworkSystem.MessageHandler handler )
+	{
+		if ( Networking.FakeLag > 0 || lagIn.Count > 0 )
+		{
+			lagIn.Enqueue( (rawPacket.ToArray(), RealTime.NowDouble + Networking.FakeLag / 1000.0) );
+			return;
+		}
+
+		Receive( rawPacket, handler );
+	}
+
+	//Chunk reassembly, then decoded payloads to the handler
+	void Receive( ReadOnlySpan<byte> rawPacket, NetworkSystem.MessageHandler handler )
 	{
 		try
 		{

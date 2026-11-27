@@ -139,6 +139,13 @@ internal partial class NetworkSystem
 		}
 
 		Connection?.GetIncomingMessages( HandleIncomingMessage );
+
+		foreach ( var connection in _connections )
+		{
+			connection.ReleaseLagged( HandleIncomingMessage );
+		}
+
+		Connection?.ReleaseLagged( HandleIncomingMessage );
 	}
 
 	//Whether a game network system's Push is one the engine wrote - its own default or the scene system's - rather than a game's override.

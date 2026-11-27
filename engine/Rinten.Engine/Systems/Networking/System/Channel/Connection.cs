@@ -276,7 +276,7 @@ public abstract partial class Connection
 
 		if ( !isReliable || encoded.Length < MaxChunkSize )
 		{
-			InternalSend( encoded, flags );
+			Transmit( encoded, flags );
 			return;
 		}
 
@@ -287,7 +287,7 @@ public abstract partial class Connection
 			var offset = i * MaxChunkSize;
 			var length = Math.Min( MaxChunkSize, encoded.Length - offset );
 			var chunk = BuildChunkPacket( encoded, offset, length, i, chunks );
-			InternalSend( chunk, flags );
+			Transmit( chunk, flags );
 		}
 	}
 

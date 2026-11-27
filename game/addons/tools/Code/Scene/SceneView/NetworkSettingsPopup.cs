@@ -97,11 +97,9 @@ public sealed class NetworkSettingsPopup : Popup
 	{
 		using var p = new Process();
 
+		//Output not redirected: nothing reads it, and a full pipe would stall the instance
 		p.StartInfo.FileName = EngineExecutables.EditorFile;
 		p.StartInfo.WorkingDirectory = Environment.CurrentDirectory;
-		p.StartInfo.CreateNoWindow = true;
-		p.StartInfo.RedirectStandardOutput = true;
-		p.StartInfo.RedirectStandardError = true;
 		p.StartInfo.UseShellExecute = false;
 
 		p.StartInfo.ArgumentList.Add( "-joinlocal" );
@@ -144,15 +142,15 @@ public sealed class NetworkSettingsPopup : Popup
 		[Range( 0f, 500f ), Step( 25f )]
 		public int SimulateLag
 		{
-			get => ConsoleSystem.GetValueInt( "net_fakelag" );
-			set => ConsoleSystem.SetValue( "net_fakelag", value.ToString() );
+			get => EditorUtility.Network.SimulatedLag;
+			set => EditorUtility.Network.SimulatedLag = value;
 		}
 
 		[Range( 0f, 100f ), Step( 0.5f )]
 		public float SimulatePacketLoss
 		{
-			get => ConsoleSystem.GetValueFloat( "net_fakepacketloss" );
-			set => ConsoleSystem.SetValue( "net_fakepacketloss", value.ToString() );
+			get => EditorUtility.Network.SimulatedPacketLoss;
+			set => EditorUtility.Network.SimulatedPacketLoss = value;
 		}
 	}
 

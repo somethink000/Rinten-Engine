@@ -91,9 +91,10 @@ internal sealed class WireSession : IDisposable
 		return session;
 	}
 
-	public byte[] Seal( ReadOnlySpan<byte> plain )
+	//Into the start of a buffer at least plain.Length + Overhead long; returns the bytes written
+	public int Seal( ReadOnlySpan<byte> plain, Span<byte> packet )
 	{
-		var packet = new byte[Overhead + plain.Length];
+		var length = Overhead + plain.Length;
 		packet[0] = Sealed;
 
 		Span<byte> nonce = stackalloc byte[12];
@@ -101,13 +102,13 @@ internal sealed class WireSession : IDisposable
 		lock ( sendLock )
 		{
 			var counter = ++sent;
-			BinaryPrimitives.WriteUInt64LittleEndian( packet.AsSpan( 1 ), counter );
+			BinaryPrimitives.WriteUInt64LittleEndian( packet[1..], counter );
 			BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
 
-			send.Encrypt( nonce, plain, packet.AsSpan( 1 + CounterSize, plain.Length ), packet.AsSpan( packet.Length - TagSize ), packet.AsSpan( 0, 1 + CounterSize ) );
+			send.Encrypt( nonce, plain, packet.Slice( 1 + CounterSize, plain.Length ), packet.Slice( length - TagSize, TagSize ), packet[..( 1 + CounterSize )] );
 		}
 
-		return packet;
+		return length;
 	}
 
 	//Null for anything forged, damaged, replayed or too old

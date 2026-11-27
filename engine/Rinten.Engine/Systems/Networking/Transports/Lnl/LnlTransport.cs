@@ -205,10 +205,11 @@ internal sealed partial class LnlTransport : INetEventListener, IDisposable
 	{
 		channel.Begin( WireSession.Create( secret, clientKey, Key.Public, isServer: true ) );
 
-		var hello = new byte[1 + Key.Public.Length];
-		hello[0] = WireSession.Plain;
-		Key.Public.CopyTo( hello, 1 );
-		channel.Transmit( hello, DeliveryMethod.ReliableOrdered );
+		const int at = LnlChannel.RelayHeader;
+		var hello = new byte[at + 1 + Key.Public.Length];
+		hello[at] = WireSession.Plain;
+		Key.Public.CopyTo( hello, at + 1 );
+		channel.Transmit( hello, at, hello.Length - at, DeliveryMethod.ReliableOrdered );
 
 		OnConnected?.Invoke( channel );
 	}

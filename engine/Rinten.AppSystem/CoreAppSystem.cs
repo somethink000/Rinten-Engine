@@ -62,6 +62,13 @@ public class CoreAppSystem : AppSystem
 			dedicated: Dedicated,
 			editor: IsEditorApp );
 
+		//A server stopped by its host (docker stop, systemd, Ctrl+C) quits the normal way, so its players are told rather than timing out
+		if ( Dedicated )
+		{
+			stopOnTerm = System.Runtime.InteropServices.PosixSignalRegistration.Create( System.Runtime.InteropServices.PosixSignal.SIGTERM, StopFromSignal );
+			stopOnInterrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create( System.Runtime.InteropServices.PosixSignal.SIGINT, StopFromSignal );
+		}
+
 		framesWanted = Utility.CommandLine.GetSwitchInt( "-frames", 0 );
 
 		//-bakewebshaders <path>: builds the engine's web shaders to check they compile for browsers
@@ -238,6 +245,15 @@ public class CoreAppSystem : AppSystem
 		}
 	}
 
+	System.Runtime.InteropServices.PosixSignalRegistration stopOnTerm;
+	System.Runtime.InteropServices.PosixSignalRegistration stopOnInterrupt;
+
+	static void StopFromSignal( System.Runtime.InteropServices.PosixSignalContext context )
+	{
+		context.Cancel = true;
+		Application.WantsExit = true;
+	}
+
 	//Platform-provided window source (e.g. Android surface); otherwise we open our own
 	internal static Func<CoreWindow> WindowSource { get; set; }
 
@@ -352,6 +368,9 @@ public class CoreAppSystem : AppSystem
 
 	public override void Shutdown()
 	{
+		stopOnTerm?.Dispose();
+		stopOnInterrupt?.Dispose();
+
 		CoreGameRenderer.Shutdown();
 
 		shellWindow?.Dispose();

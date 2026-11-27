@@ -313,10 +313,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 				var allowed = host.Sent.Spend( payload.Length, options.HostRate, Now, out _ );
 				if ( !allowed && method == DeliveryMethod.Unreliable ) return;
 
-				var w = new NetDataWriter( false, payload.Length + 1 );
-				w.Put( (byte)Op.Data );
-				w.Put( payload.ToArray() );
-				client.Peer.Send( w, method );
+				client.Peer.Send( Frame( payload, null ), method );
 				break;
 			}
 
@@ -362,14 +359,26 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 					if ( method == DeliveryMethod.Unreliable ) return;
 				}
 
-				var w = new NetDataWriter( false, payload.Length + 5 );
-				w.Put( (byte)Op.Data );
-				w.Put( client.Id );
-				w.Put( payload.ToArray() );
-				host.Peer.Send( w, method );
+				host.Peer.Send( Frame( payload, client.Id ), method );
 				break;
 			}
 		}
+	}
+
+	//One loop on one thread, and LiteNetLib copies what it sends, so one buffer frames every forwarded packet
+	byte[] frame = new byte[2048];
+
+	//Op.Data, the client id where it goes to the host, then the payload
+	ReadOnlySpan<byte> Frame( ReadOnlySpan<byte> payload, uint? id )
+	{
+		var header = id.HasValue ? 5 : 1;
+		if ( frame.Length < payload.Length + header ) frame = new byte[payload.Length + header];
+
+		frame[0] = (byte)Op.Data;
+		if ( id is { } value ) System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian( frame.AsSpan( 1 ), value );
+		payload.CopyTo( frame.AsSpan( header ) );
+
+		return frame.AsSpan( 0, payload.Length + header );
 	}
 
 	void INetEventListener.OnPeerDisconnected( NetPeer peer, DisconnectInfo disconnectInfo )

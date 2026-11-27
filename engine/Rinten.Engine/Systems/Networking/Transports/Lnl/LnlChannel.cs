@@ -1,5 +1,6 @@
 using LiteNetLib;
 using LiteNetLib.Utils;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 
@@ -18,7 +19,7 @@ internal sealed class LnlChannel : Connection
 	const int MostReceived = 16384;
 
 	//Op byte and client id in front of a relayed packet
-	const int RelayHeader = 5;
+	internal const int RelayHeader = 5;
 
 	readonly LnlTransport transport;
 	readonly bool isHost;
@@ -136,13 +137,20 @@ internal sealed class LnlChannel : Connection
 		SendSealed( data, flags );
 	}
 
+	//Per sending thread; LiteNetLib copies what it is given, so one buffer serves every send
+	[ThreadStatic] static byte[] scratch;
+
 	void SendSealed( byte[] data, NetFlags flags )
 	{
-		byte[] sealedPacket;
+		var needed = RelayHeader + WireSession.Overhead + data.Length;
+		if ( scratch is null || scratch.Length < needed ) scratch = new byte[Math.Max( needed, 2048 )];
+
+		//Room for the relay header in front, so a relayed packet needs no second copy
+		int length;
 
 		try
 		{
-			sealedPacket = session.Seal( data );
+			length = session.Seal( data, scratch.AsSpan( RelayHeader ) );
 		}
 		catch ( ObjectDisposedException )
 		{
@@ -152,27 +160,29 @@ internal sealed class LnlChannel : Connection
 		var method = ( flags & NetFlags.Unreliable ) != 0 ? DeliveryMethod.Unreliable : DeliveryMethod.ReliableOrdered;
 
 		//Only reliable messages are split into fragments; an unreliable one too big for a packet goes reliably instead
-		if ( method == DeliveryMethod.Unreliable && sealedPacket.Length + RelayHeader > peer.GetMaxSinglePacketSize( DeliveryMethod.Unreliable ) )
+		if ( method == DeliveryMethod.Unreliable && length + RelayHeader > peer.GetMaxSinglePacketSize( DeliveryMethod.Unreliable ) )
 			method = DeliveryMethod.ReliableUnordered;
 
-		Transmit( sealedPacket, method );
+		Transmit( scratch, RelayHeader, length, method );
 	}
 
-	//The host's end of a relayed channel names the client; the client's end has only the one host
-	internal void Transmit( byte[] packet, DeliveryMethod method )
+	//The packet sits at offset in buffer with RelayHeader free bytes before it. The host's end of a relayed channel
+	//names the client; the client's end has only the one host.
+	internal void Transmit( byte[] buffer, int offset, int length, DeliveryMethod method )
 	{
 		if ( !relayed )
 		{
-			peer.Send( packet, method );
+			peer.Send( buffer.AsSpan( offset, length ), method );
 			return;
 		}
 
-		var w = new NetDataWriter( false, packet.Length + RelayHeader );
-		w.Put( (byte)RelayProtocol.Op.Data );
-		if ( !isHost ) w.Put( relayId );
-		w.Put( packet );
+		var header = isHost ? 1 : RelayHeader;
+		var start = offset - header;
 
-		peer.Send( w, method );
+		buffer[start] = (byte)RelayProtocol.Op.Data;
+		if ( !isHost ) BinaryPrimitives.WriteUInt32LittleEndian( buffer.AsSpan( start + 1 ), relayId );
+
+		peer.Send( buffer.AsSpan( start, length + header ), method );
 	}
 
 	internal override void InternalRecv( NetworkSystem.MessageHandler handler )

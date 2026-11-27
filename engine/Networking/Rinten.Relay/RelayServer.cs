@@ -35,6 +35,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 	readonly Dictionary<string, Host> hosts = new( StringComparer.Ordinal );
 	readonly Dictionary<string, Introduction> introductions = new( StringComparer.Ordinal );
 	readonly Dictionary<IPAddress, (int Misses, double Since)> misses = new();
+	readonly Dictionary<IPAddress, int> perAddress = new();
 	readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 	uint nextId;
 
@@ -174,7 +175,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 			return;
 		}
 
-		if ( manager.ConnectedPeerList.Count( p => p.Address.Equals( address ) ) >= options.MostPerAddress )
+		if ( perAddress.GetValueOrDefault( address ) >= options.MostPerAddress )
 		{
 			Reject( request, "Too many connections" );
 			return;
@@ -200,6 +201,14 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 		}
 	}
 
+	//Counted here and not on connect, so a burst of requests in one poll can't pass the per-address limit together
+	NetPeer Accept( ConnectionRequest request )
+	{
+		var peer = request.Accept();
+		perAddress[peer.Address] = perAddress.GetValueOrDefault( peer.Address ) + 1;
+		return peer;
+	}
+
 	static void Reject( ConnectionRequest request, string reason ) => request.Reject( Encoding.UTF8.GetBytes( reason ) );
 
 	void AcceptHost( ConnectionRequest request, string game )
@@ -219,7 +228,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 		var code = NewCode();
 		lobby.Code = code;
 
-		var host = new Host { Peer = request.Accept(), Game = game, Lobby = lobby };
+		var host = new Host { Peer = Accept( request ), Game = game, Lobby = lobby };
 		host.Peer.Tag = host;
 		hosts[code] = host;
 
@@ -248,7 +257,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 			return;
 		}
 
-		var client = new Client { Peer = request.Accept(), Host = host, Id = ++nextId, Game = game };
+		var client = new Client { Peer = Accept( request ), Host = host, Id = ++nextId, Game = game };
 		client.Peer.Tag = client;
 		host.Clients[client.Id] = client;
 
@@ -265,7 +274,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 
 	void AcceptQuery( ConnectionRequest request, string game )
 	{
-		var peer = request.Accept();
+		var peer = Accept( request );
 
 		var listed = hosts.Values.Where( h => h.Lobby.Public && string.Equals( h.Game, game, StringComparison.OrdinalIgnoreCase ) ).Take( 200 ).ToList();
 
@@ -313,7 +322,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 				var allowed = host.Sent.Spend( payload.Length, options.HostRate, Now, out _ );
 				if ( !allowed && method == DeliveryMethod.Unreliable ) return;
 
-				client.Peer.Send( Frame( payload, null ), method );
+				Forward( client.Peer, Frame( payload, null ), method );
 				break;
 			}
 
@@ -359,7 +368,7 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 					if ( method == DeliveryMethod.Unreliable ) return;
 				}
 
-				host.Peer.Send( Frame( payload, client.Id ), method );
+				Forward( host.Peer, Frame( payload, client.Id ), method );
 				break;
 			}
 		}
@@ -381,8 +390,24 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 		return frame.AsSpan( 0, payload.Length + header );
 	}
 
+	//The two hops can have different MTUs, and a client's packet grows by its id; LiteNetLib throws on an unreliable
+	//packet too big for one datagram
+	static void Forward( NetPeer to, ReadOnlySpan<byte> packet, DeliveryMethod method )
+	{
+		if ( method == DeliveryMethod.Unreliable && packet.Length > to.GetMaxSinglePacketSize( method ) ) method = DeliveryMethod.ReliableUnordered;
+		to.Send( packet, method );
+	}
+
+	void INetEventListener.OnPeerConnected( NetPeer peer ) { }
+
 	void INetEventListener.OnPeerDisconnected( NetPeer peer, DisconnectInfo disconnectInfo )
 	{
+		if ( perAddress.TryGetValue( peer.Address, out var count ) )
+		{
+			if ( count <= 1 ) perAddress.Remove( peer.Address );
+			else perAddress[peer.Address] = count - 1;
+		}
+
 		if ( peer.Tag is Host host )
 		{
 			hosts.Remove( host.Lobby.Code );
@@ -436,7 +461,6 @@ sealed class RelayServer : INetEventListener, INatPunchListener
 
 	void INatPunchListener.OnNatIntroductionSuccess( IPEndPoint targetEndPoint, NatAddressType type, string token ) { }
 
-	void INetEventListener.OnPeerConnected( NetPeer peer ) { }
 
 	void INetEventListener.OnNetworkError( IPEndPoint endPoint, System.Net.Sockets.SocketError socketError ) { }
 

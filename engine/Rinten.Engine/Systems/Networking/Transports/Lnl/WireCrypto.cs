@@ -42,7 +42,8 @@ internal sealed class WireKey : IDisposable
 	public void Dispose() => pair.Dispose();
 }
 
-//One connection's sealing: AES-256-GCM, a key per direction, a counter nonce and a replay window on receive
+//One connection's sealing: AES-256-GCM, a key per direction and two counter streams. The ordered stream
+//arrives exactly in order, so it must be the next counter; the loose one is checked against a replay window.
 internal sealed class WireSession : IDisposable
 {
 	public const byte Plain = 0;
@@ -54,15 +55,29 @@ internal sealed class WireSession : IDisposable
 	//Tag byte, counter, GCM tag
 	public const int Overhead = 1 + CounterSize + TagSize;
 
-	//Counters a late unreliable packet may still be accepted at
+	//Set on ordered counters, so the two streams never share a nonce
+	const ulong OrderedBit = 1ul << 63;
+
+	//Loose counters a late packet may still be accepted at
 	const int Window = 1024;
+
+	public enum Opened
+	{
+		Ok,
+
+		//Replayed, too old or out of order: dropped, but nothing says it was forged
+		Stale,
+
+		//Fails authentication or isn't a sealed packet
+		Forged,
+	}
 
 	readonly AesGcm send;
 	readonly AesGcm receive;
-	readonly object sendLock = new();
-	readonly object receiveLock = new();
 
-	ulong sent;
+	ulong sentOrdered;
+	ulong sentLoose;
+	ulong heardOrdered;
 	ulong highest;
 	readonly ulong[] seen = new ulong[Window / 64];
 
@@ -91,56 +106,55 @@ internal sealed class WireSession : IDisposable
 		return session;
 	}
 
-	//Into the start of a buffer at least plain.Length + Overhead long; returns the bytes written
-	public int Seal( ReadOnlySpan<byte> plain, Span<byte> packet )
+	//Into the start of a buffer at least plain.Length + Overhead long; returns the bytes written. Not thread safe:
+	//ordered packets must reach the wire in the order they were sealed, so the caller holds one lock over both.
+	public int Seal( ReadOnlySpan<byte> plain, Span<byte> packet, bool ordered )
 	{
 		var length = Overhead + plain.Length;
-		packet[0] = Sealed;
-
-		Span<byte> nonce = stackalloc byte[12];
-
-		lock ( sendLock )
-		{
-			var counter = ++sent;
-			BinaryPrimitives.WriteUInt64LittleEndian( packet[1..], counter );
-			BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
-
-			send.Encrypt( nonce, plain, packet.Slice( 1 + CounterSize, plain.Length ), packet.Slice( length - TagSize, TagSize ), packet[..( 1 + CounterSize )] );
-		}
-
-		return length;
-	}
-
-	//Null for anything forged, damaged, replayed or too old
-	public byte[] Open( ReadOnlySpan<byte> packet )
-	{
-		if ( packet.Length < Overhead || packet[0] != Sealed ) return null;
-
-		var counter = BinaryPrimitives.ReadUInt64LittleEndian( packet[1..] );
-		if ( counter == 0 ) return null;
+		var counter = ordered ? ++sentOrdered | OrderedBit : ++sentLoose;
 
 		Span<byte> nonce = stackalloc byte[12];
 		BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
 
-		var plain = new byte[packet.Length - Overhead];
+		packet[0] = Sealed;
+		BinaryPrimitives.WriteUInt64LittleEndian( packet[1..], counter );
+		send.Encrypt( nonce, plain, packet.Slice( 1 + CounterSize, plain.Length ), packet.Slice( length - TagSize, TagSize ), packet[..( 1 + CounterSize )] );
 
-		lock ( receiveLock )
+		return length;
+	}
+
+	//Called from the one thread that polls the connection
+	public Opened Open( ReadOnlySpan<byte> packet, out byte[] plain )
+	{
+		plain = null;
+		if ( packet.Length < Overhead || packet[0] != Sealed ) return Opened.Forged;
+
+		var counter = BinaryPrimitives.ReadUInt64LittleEndian( packet[1..] );
+		var ordered = ( counter & OrderedBit ) != 0;
+		var number = counter & ~OrderedBit;
+
+		if ( number == 0 ) return Opened.Forged;
+		if ( ordered ? number != heardOrdered + 1 : !Fresh( number ) ) return Opened.Stale;
+
+		Span<byte> nonce = stackalloc byte[12];
+		BinaryPrimitives.WriteUInt64LittleEndian( nonce, counter );
+
+		var opened = new byte[packet.Length - Overhead];
+
+		try
 		{
-			if ( !Fresh( counter ) ) return null;
-
-			try
-			{
-				receive.Decrypt( nonce, packet.Slice( 1 + CounterSize, plain.Length ), packet[^TagSize..], plain, packet[..( 1 + CounterSize )] );
-			}
-			catch ( AuthenticationTagMismatchException )
-			{
-				return null;
-			}
-
-			Mark( counter );
+			receive.Decrypt( nonce, packet.Slice( 1 + CounterSize, opened.Length ), packet[^TagSize..], opened, packet[..( 1 + CounterSize )] );
+		}
+		catch ( AuthenticationTagMismatchException )
+		{
+			return Opened.Forged;
 		}
 
-		return plain;
+		if ( ordered ) heardOrdered = number;
+		else Mark( number );
+
+		plain = opened;
+		return Opened.Ok;
 	}
 
 	bool Fresh( ulong counter )

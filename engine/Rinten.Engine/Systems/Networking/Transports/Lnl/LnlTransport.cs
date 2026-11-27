@@ -12,7 +12,7 @@ internal sealed partial class LnlTransport : INetEventListener, IDisposable
 	static readonly Logger log = new( "Udp" );
 
 	const string Magic = "RNTN";
-	const byte Version = 1;
+	const byte Version = 2;
 
 	//Peers one address may hold at once, so a single machine can't fill the server
 	const int MostPerAddress = 8;

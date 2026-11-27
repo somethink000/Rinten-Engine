@@ -93,14 +93,20 @@ internal sealed class LnlChannel : Connection
 		//Unreliable messages can beat the key; they are dropped
 		if ( session is null ) return;
 
-		if ( session.Open( packet ) is { } message )
+		switch ( session.Open( packet, out var message ) )
 		{
-			if ( received.Count >= MostReceived ) HangUp( 0, "Too many messages" );
-			else received.Enqueue( message );
-			return;
-		}
+			case WireSession.Opened.Ok when received.Count >= MostReceived:
+				HangUp( 0, "Too many messages" );
+				break;
 
-		if ( ++forged > MostForged ) HangUp( 0, "Too many damaged packets" );
+			case WireSession.Opened.Ok:
+				received.Enqueue( message );
+				break;
+
+			case WireSession.Opened.Forged when ++forged > MostForged:
+				HangUp( 0, "Too many damaged packets" );
+				break;
+		}
 	}
 
 	void Agree( ReadOnlySpan<byte> hostKey )
@@ -120,8 +126,7 @@ internal sealed class LnlChannel : Connection
 		}
 
 		session = WireSession.Create( secret, transport.Key.Public, hostKey, isServer: false );
-
-		while ( waiting.TryDequeue( out var queued ) ) SendSealed( queued.Data, queued.Flags );
+		Flush();
 	}
 
 	internal override void InternalSend( byte[] data, NetFlags flags )
@@ -137,37 +142,42 @@ internal sealed class LnlChannel : Connection
 		SendSealed( data, flags );
 	}
 
-	//Per sending thread; LiteNetLib copies what it is given, so one buffer serves every send
-	[ThreadStatic] static byte[] scratch;
+	//What was queued before the host's key arrived; the path is always chosen before it
+	void Flush()
+	{
+		if ( session is null || peer is null ) return;
+		while ( waiting.TryDequeue( out var queued ) ) SendSealed( queued.Data, queued.Flags );
+	}
+
+	readonly object sendLock = new();
+
+	//Room for the relay header in front, so a relayed packet needs no second copy; LiteNetLib copies what it is given
+	byte[] scratch = new byte[2048];
 
 	void SendSealed( byte[] data, NetFlags flags )
 	{
-		var needed = RelayHeader + WireSession.Overhead + data.Length;
-		if ( scratch is null || scratch.Length < needed ) scratch = new byte[Math.Max( needed, 2048 )];
-
-		//Room for the relay header in front, so a relayed packet needs no second copy
-		int length;
-
-		try
+		lock ( sendLock )
 		{
-			length = session.Seal( data, scratch.AsSpan( RelayHeader ) );
+			if ( session is not { } wire ) return;
+
+			var needed = RelayHeader + WireSession.Overhead + data.Length;
+			if ( scratch.Length < needed ) scratch = new byte[needed];
+
+			var method = ( flags & NetFlags.Unreliable ) != 0 ? DeliveryMethod.Unreliable : DeliveryMethod.ReliableOrdered;
+
+			//Only reliable messages are split into fragments; an unreliable one too big for a packet goes reliably, unordered
+			if ( method == DeliveryMethod.Unreliable && Header + WireSession.Overhead + data.Length > peer.GetMaxSinglePacketSize( method ) )
+				method = DeliveryMethod.ReliableUnordered;
+
+			var length = wire.Seal( data, scratch.AsSpan( RelayHeader ), ordered: method == DeliveryMethod.ReliableOrdered );
+			Transmit( scratch, RelayHeader, length, method );
 		}
-		catch ( ObjectDisposedException )
-		{
-			return;
-		}
-
-		var method = ( flags & NetFlags.Unreliable ) != 0 ? DeliveryMethod.Unreliable : DeliveryMethod.ReliableOrdered;
-
-		//Only reliable messages are split into fragments; an unreliable one too big for a packet goes reliably instead
-		if ( method == DeliveryMethod.Unreliable && length + RelayHeader > peer.GetMaxSinglePacketSize( DeliveryMethod.Unreliable ) )
-			method = DeliveryMethod.ReliableUnordered;
-
-		Transmit( scratch, RelayHeader, length, method );
 	}
 
-	//The packet sits at offset in buffer with RelayHeader free bytes before it. The host's end of a relayed channel
-	//names the client; the client's end has only the one host.
+	//Bytes the relay header takes: the host's end names the client, the client's end has only the one host
+	int Header => !relayed ? 0 : isHost ? 1 : RelayHeader;
+
+	//The packet sits at offset in buffer with RelayHeader free bytes before it
 	internal void Transmit( byte[] buffer, int offset, int length, DeliveryMethod method )
 	{
 		if ( !relayed )
@@ -176,7 +186,7 @@ internal sealed class LnlChannel : Connection
 			return;
 		}
 
-		var header = isHost ? 1 : RelayHeader;
+		var header = Header;
 		var start = offset - header;
 
 		buffer[start] = (byte)RelayProtocol.Op.Data;
@@ -202,25 +212,37 @@ internal sealed class LnlChannel : Connection
 		}
 	}
 
+	//A client's own transport goes here and not in HangUp, which can run inside its poll
 	internal override void InternalClose( int closeCode, string closeReason )
 	{
 		told = true;
 		HangUp( closeCode, closeReason );
+
+		if ( owned && !disposed )
+		{
+			disposed = true;
+			transport.Dispose();
+		}
 	}
+
+	bool hungUp;
+	bool disposed;
 
 	void HangUp( int code, string reason )
 	{
-		if ( IsGone && session is null ) return;
+		if ( hungUp ) return;
+		hungUp = true;
 
 		Gone( reason );
 
 		if ( relayed && !isHost ) transport.KickRelayed( relayId, reason );
 		else if ( peer is { ConnectionState: ConnectionState.Connected or ConnectionState.Outgoing } ) peer.Disconnect( Encoding.UTF8.GetBytes( reason ?? "" ) );
 
-		if ( owned ) transport.Dispose();
-
-		session?.Dispose();
-		session = null;
+		lock ( sendLock )
+		{
+			session?.Dispose();
+			session = null;
+		}
 	}
 
 	ConnectionStats stats;

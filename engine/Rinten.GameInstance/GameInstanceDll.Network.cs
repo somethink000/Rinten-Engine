@@ -165,7 +165,7 @@ internal partial class GameInstanceDll
 			serverCode?.Update( entry.Data );
 
 			//A build that joined with the server's code is left behind by a change to it.
-			if ( serverCode is null && WebCode.Refuses( [(entry.Name, entry.Data)] ) is { } refused )
+			if ( serverCode is null && !RunsHere( entry.Name, entry.Data ) && WebCode.Refuses( [(entry.Name, entry.Data)] ) is { } refused )
 				Disconnect( refused );
 		};
 
@@ -174,6 +174,26 @@ internal partial class GameInstanceDll
 		//Config
 		system.InstallTable( ConfigTable );
 		ConfigTable.PostNetworkUpdate = UpdateConfigFromNetworkTable;
+	}
+
+	//Game assemblies loaded here, by name, and whether one is the code a server sent - as it is, or as a dedicated server strips it
+	readonly Dictionary<string, LoadedAssembly> loadedCode = new( StringComparer.OrdinalIgnoreCase );
+
+	bool RunsHere( string name, byte[] archive )
+	{
+		if ( archive is null || !loadedCode.TryGetValue( name, out var loaded ) ) return false;
+
+		try
+		{
+			var sent = WebCode.Fingerprint( archive );
+			if ( WebCode.Fingerprint( loaded.CodeArchiveBytes ) == sent ) return true;
+
+			return ProjectCompiling.Current?.WithoutServerCode( name ) is { } stripped && WebCode.Fingerprint( stripped ) == sent;
+		}
+		catch ( Exception )
+		{
+			return false;
+		}
 	}
 
 	bool FinishLoadingCodeArchives()
@@ -193,15 +213,17 @@ internal partial class GameInstanceDll
 		//one whose code it was compiled from (see WebCode.Refuses); never a different one.
 		serverCode = ProjectCompiling.Current?.NewServerCode();
 
-		if ( serverCode is null && CodeArchiveTable.Entries.Any() )
-		{
-			if ( WebCode.Refuses( CodeArchiveTable.Entries.Select( x => (x.Key, x.Value.Data) ) ) is { } refused )
-			{
-				Disconnect( refused );
-				return false;
-			}
+		var sent = CodeArchiveTable.Entries.Select( x => (x.Key, x.Value.Data) ).ToList();
 
-			//Our own code is the server's: nothing to compile, nothing to load - the loop below hands the archives to no one.
+		//The code loaded here already is the server's (an editor with its project open): kept, not compiled over
+		if ( sent.Count > 0 && sent.All( x => RunsHere( x.Key, x.Data ) ) )
+		{
+			serverCode = null;
+		}
+		else if ( serverCode is null && sent.Count > 0 && WebCode.Refuses( sent ) is { } refused )
+		{
+			Disconnect( refused );
+			return false;
 		}
 
 		//Don't hotload while we're downloading stuff!

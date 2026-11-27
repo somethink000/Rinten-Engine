@@ -234,6 +234,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			if ( !a.IsEditorAssembly && a.CodeArchiveBytes is not null )
 			{
 				AddArchiveToCodeArchiveTable( a );
+				loadedCode[a.Name] = a;
 			}
 
 			ReplicatedConvars.OnAssembliesLoaded();
@@ -252,6 +253,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			JsonUpgrader.UpdateUpgraders( TypeLibrary );
 
 			CodeArchiveTable.Remove( a.Name );
+			loadedCode.Remove( a.Name );
 		};
 
 		AssemblyEnroller.OnAssemblyFastHotload += ( a ) =>
@@ -259,6 +261,7 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			if ( !a.IsEditorAssembly && a.CodeArchiveBytes is not null )
 			{
 				AddArchiveToCodeArchiveTable( a );
+				loadedCode[a.Name] = a;
 			}
 		};
 
@@ -470,8 +473,9 @@ internal partial class GameInstanceDll : Engine.IGameInstanceDll
 			return;
 		}
 
-		//A shipped game has no menu to fall back to, and closing it would quit: it stays, back in its startup scene
-		if ( Application.IsStandalone && gameInstance is not null )
+		//A shipped game has no menu to fall back to, and closing it would quit: it stays, back in its startup scene.
+		//An editor's -joinlocal instance closes with its host instead
+		if ( Application.IsStandalone && !Application.IsJoinLocal && gameInstance is not null )
 		{
 			Networking.Disconnect();
 			gameInstance.OpenStartupScene();

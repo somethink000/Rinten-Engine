@@ -100,12 +100,17 @@ internal class ToolsDll : IToolsDll
 			return;
 		}
 
-		//Just incase we are ingame currently using the "connect" command we just stop
-		//the current session and start a new one, so we dont end up with dupe GameSession
-		var sceneEditorSession = SceneEditorSession.All.FirstOrDefault( x => x.IsPlaying );
-		sceneEditorSession?.StopPlaying();
+		//A host's snapshot made this scene: the editor plays it as it is, loading nothing of its own over it
+		var session = SceneEditorSession.All.FirstOrDefault( x => x.GameSession is not null )
+			?? ( SceneEditorSession.Active is GameEditorSession game ? game.Parent : SceneEditorSession.Active );
 
-		EditorScene.Play( true );
+		if ( session is null || session.GameSession?.Scene == Game.ActiveScene ) return;
+
+		session.StopPlaying();
+
+		Game.IsPlaying = true;
+		session.SetPlaying( Game.ActiveScene );
+		EditorEvent.Run( "scene.play" );
 	}
 
 	/// <summary>Bootstrapping has finished. Close the splash screen and show the editor.</summary>

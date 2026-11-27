@@ -244,11 +244,6 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 		var loadedMsg = new SceneLoadedMsg { SceneId = msg.SceneId, Id = msg.Id };
 		connection.SendMessage( loadedMsg, NetFlags.Reliable );
 
-		if ( Application.IsEditor )
-		{
-			IToolsDll.Current?.SetPlaying();
-		}
-
 		LoadingScreen.IsVisible = false;
 	}
 
@@ -527,6 +522,9 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 		}
 
 		Game.IsPlaying = true;
+
+		//An editor joined as a client shows and runs the host's scene, on joining and on every scene change
+		if ( Application.IsEditor ) IToolsDll.Current?.SetPlaying();
 	}
 
 	//Read any snapshot data from Component.INetworkSnapshot for a GameObjectSystem.

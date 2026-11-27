@@ -62,7 +62,8 @@ internal partial class NetworkSystem
 			var flags = GameLoadingFlags.Remote | GameLoadingFlags.Reload;
 			if ( IsDeveloperHost ) flags |= GameLoadingFlags.Developer;
 
-			if ( !Application.IsStandalone )
+			//A shipped game, or an editor with the server's own project open, already has the game
+			if ( !Application.IsStandalone && !IsOpenGame( msg.GamePackage ) )
 			{
 				LaunchArguments.Map = msg.Map;
 
@@ -204,6 +205,14 @@ internal partial class NetworkSystem
 		GameSystem?.OnConnected( source );
 
 		source.SendMessage( output );
+	}
+
+	static bool IsOpenGame( string package )
+	{
+		var open = Application.GamePackage?.FullIdent;
+		if ( open is null || package is null ) return false;
+
+		return string.Equals( open.Split( '#' )[0], package.Split( '#' )[0], StringComparison.OrdinalIgnoreCase );
 	}
 
 	async Task On_Handshake_Welcome( Welcome msg, Connection source, Guid msgId )

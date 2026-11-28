@@ -9,8 +9,8 @@
 	align-items: center;
 	justify-content: center;
 	border-radius: 4px;
-	border: 1px solid $edge;
-	background-color: $window-ground;
+	border: 1px solid rgba( 255, 255, 255, 0.12 );
+	background-color: rgba( 0, 0, 0, 0.75 );
 	color: $ink;
 	cursor: pointer;
 	pointer-events: all;
@@ -38,30 +38,7 @@
 		pointer-events: none;
 	}
 
-	//The key this is on: a small pill in the bottom right corner, readable against both the plate and the picture behind the strip.
-	> .key
-	{
-		position: absolute;
-		right: 2px;
-		bottom: 2px;
-		padding: 0px 3px;
-		border-radius: 3px;
-		background-color: $veil;
-		font-size: $type-micro;
-		font-weight: 700;
-		letter-spacing: $tracking;
-		color: $ink;
-		pointer-events: none;
-	}
-
-	//With a key in the corner, the icon and the badge move up and left so the two are not on top of each other.
-	&.keyed
-	{
-		> .icon { margin: 0px 5px 5px 0px; }
-		> .badge { top: 0px; right: 6px; }
-	}
-
-	//Named in words: the icon, then the name, and the key at the end.
+	//Named in words: the icon, then the name.
 	&.labelled
 	{
 		flex-direction: row;
@@ -78,13 +55,12 @@
 			white-space: nowrap;
 			pointer-events: none;
 		}
-
-		> .key { right: 6px; bottom: auto; top: 6px; }
 	}
 
 	&:hover
 	{
-		background-color: $tile-hover;
+		background-color: rgba( 0, 0, 0, 0.85 );
+		border-color: rgba( 255, 255, 255, 0.24 );
 	}
 
 	//Active: accent background with the glyph kept white like all other icons
@@ -92,12 +68,6 @@
 	{
 		background-color: $accent;
 		color: $ink;
-
-		> .key
-		{
-			background-color: $solid;
-			color: $ink;
-		}
 	}
 
 	&.disabled

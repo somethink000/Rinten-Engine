@@ -2,15 +2,12 @@ using Rinten.UI;
 
 namespace Editor;
 
-/// <summary>Tool strip button: icon, key label and lit state; picture icons are tinted white</summary>
+/// <summary>Tool strip button: icon and lit state; picture icons are tinted white</summary>
 public sealed class ToolStripButton : Panel
 {
 	private readonly IToolCommand command;
 	private readonly IconPanel icon;
 	private readonly IconPanel badge;
-
-	//The panel label, spelt out: in the Editor namespace itself a using alias for it is refused, because Editor.Label is the widget.
-	private readonly Rinten.UI.Label key;
 
 	private string shownIcon;
 
@@ -33,18 +30,6 @@ public sealed class ToolStripButton : Panel
 		{
 			badge = AddChild<IconPanel>( "badge" );
 			badge.Text = command.Badge;
-		}
-
-		//Only where it is one key - see ToolCommandText.CornerKey.
-		var corner = ToolCommandText.CornerKey( command );
-
-		if ( corner is not null )
-		{
-			key = AddChild<Rinten.UI.Label>( "key" );
-			key.Text = corner;
-
-			//Up and to the left of centre, so the icon and the key are not on top of each other.
-			if ( !labelled ) AddClass( "keyed" );
 		}
 
 		Tooltip = command.ToolTip;

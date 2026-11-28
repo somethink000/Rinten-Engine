@@ -18,6 +18,15 @@ internal sealed class CoreUiWindow : IDisposable
 	//Whether windows are drawn as glass sheets read back each frame; off means every window is solid
 	internal static bool Sheets { get; set; }
 
+	//A sheet is the per-pixel alpha path, which is how Windows gets glass: there is no alpha on a Vulkan surface there.
+	static CoreUiWindow()
+	{
+		Sheets = OperatingSystem.IsWindows();
+	}
+
+	//Whether this window asked to be glass before the desktop was asked whether it could be.
+	private bool askedForGlass;
+
 	//The offscreen view the interface is drawn into, in sheet mode.
 	private ulong sheetView;
 
@@ -29,6 +38,9 @@ internal sealed class CoreUiWindow : IDisposable
 
 	/// <summary>Whether it got it. False until there is a swapchain to ask.</summary>
 	public bool Composited { get; private set; }
+
+	/// <summary>Whether the desktop is actually blurring what is behind the window - real glass, rather than a see-through window with a sharp desktop in it.</summary>
+	public bool Blurred { get; private set; }
 
 	/// <summary>Whether the desktop took the corners off it for us.</summary>
 	public bool Rounded { get; private set; }
@@ -57,9 +69,11 @@ internal sealed class CoreUiWindow : IDisposable
 	//When this window last drew, on the monotonic clock.
 	private long framedAt;
 
-	//See-through windows are off: blur only exists on Windows, so every window is opaque everywhere
-	//Not a const, or the compiler flags the glass path as unreachable code, an error in this build
-	internal static readonly bool GlassEnabled;
+	//Whether a window that asks may be glass where the desktop can blur behind it. A desktop that cannot is answered per
+	//window - see Blurred - and a window that gets nothing keeps the solid look rather than becoming a sharp hole.
+	[ConVar( "ui_glass", ConVarFlags.Saved, Help = "Frosted glass windows where the desktop can blur behind them; off keeps every window solid." )]
+	public static bool GlassEnabled { get; set; } = true;
+
 	private (int Width, int Height) attached;
 	private readonly UiWindowInput input = new();
 
@@ -838,7 +852,7 @@ internal sealed class CoreUiWindow : IDisposable
 		}
 
 		//Decided before creation: a sheet must be made without the desktop's cached client-area picture
-		var asSheet = Sheets && glass && OperatingSystem.IsWindows();
+		var asSheet = Sheets && GlassEnabled && glass && OperatingSystem.IsWindows();
 
 		//Own-caption windows are borderless and made hidden until the first frame is drawn (ShowOnceDrawn)
 		//Alpha must be requested at creation, or Wayland treats the window as opaque and corners turn black
@@ -894,9 +908,7 @@ internal sealed class CoreUiWindow : IDisposable
 			Root = new UiWindowRoot(),
 			sheet = asSheet,
 			named = title,
-
-			//A notice always wants it; anything else has to ask. Whether it can have it is the desktop's answer - see Composited.
-			wantsGlass = GlassEnabled && ( utility || ( glass && !asSheet ) ),
+			askedForGlass = utility || glass,
 
 			//The startup bar draws a rounded plate over the whole of itself, so there is nothing for this window to lay down under it.
 			shapedByContent = utility,
@@ -909,7 +921,18 @@ internal sealed class CoreUiWindow : IDisposable
 
 			//The blur behind the window, without the whole-window thinning - the see-through is the overlay's, per pixel.
 			window.MakeSheet( 0.0f );
+
+			//The overlay is the per-pixel alpha; the blur under it is the sheet's. A desktop that would not take the overlay is a solid window.
+			made.Blurred = made.Composited && GlassEnabled;
 		}
+		else if ( GlassEnabled && ( utility || glass ) )
+		{
+			//Elsewhere the desktop is asked for its own blur. A compositor that does not speak the protocol says so, and
+			//the window stays solid - see Blurred.
+			made.Blurred = window.MakeBlurBehind();
+		}
+
+		made.wantsGlass = made.Blurred;
 
 		//Round the corners wherever the desktop supports it; it squares them again while maximised
 		made.Rounded = window.RoundCorners();
@@ -922,7 +945,71 @@ internal sealed class CoreUiWindow : IDisposable
 		if ( captionByContent ) made.BareCaption();
 		else if ( ownCaption ) made.DressCaption( title );
 
+		made.DressGlass();
+
 		return made;
+	}
+
+	//Applies the one decision - real glass, or the solid ground - to the root's look. Called again when the swapchain says
+	//the alpha the blur was asked for was not given.
+	private void DressGlass()
+	{
+		if ( Root is null || !Root.IsValid ) return;
+
+		var glass = Blurred;
+
+		Root.SetClass( "glass", glass );
+		Root.SetClass( "solid", !glass );
+
+		if ( ownsGround )
+			Root.Style.BackgroundColor = glass ? WindowCaption.GlassGround : WindowCaption.Ground;
+	}
+
+	/// <summary>Turns the glass off again for this window: the desktop gave no blur, or the setting says not to ask.</summary>
+	private void ClearBlur()
+	{
+		if ( !Blurred ) return;
+
+		Blurred = false;
+		wantsGlass = false;
+
+		window?.ClearBlurBehind();
+		DressGlass();
+	}
+
+	//The setting changed: every open window takes it, where its desktop can still be asked. A Windows sheet is made
+	//with the window and cannot be remade under it, so that side of the toggle takes the next window.
+	internal static void RefreshGlass()
+	{
+		foreach ( var one in open )
+		{
+			if ( one is null || one.Root is null || !one.Root.IsValid ) continue;
+			one.ApplyGlassSetting();
+		}
+	}
+
+	private void ApplyGlassSetting()
+	{
+		if ( !GlassEnabled )
+		{
+			ClearBlur();
+			DressGlass();
+			return;
+		}
+
+		if ( !askedForGlass ) return;
+
+		if ( sheet )
+		{
+			Blurred = Composited;
+		}
+		else if ( Composited && !Blurred && window is not null )
+		{
+			Blurred = window.MakeBlurBehind();
+			wantsGlass = Blurred;
+		}
+
+		DressGlass();
 	}
 
 	//A window with no bar of ours: the ground and the column are still the window's, the caption is its content's.
@@ -976,7 +1063,7 @@ internal sealed class CoreUiWindow : IDisposable
 		//One that brought its own shape is left to it.
 		if ( !ownsGround ) return;
 
-		Root.Style.BackgroundColor = WindowCaption.Ground;
+		Root.Style.BackgroundColor = Blurred ? WindowCaption.GlassGround : WindowCaption.Ground;
 		Root.Style.OverflowX = OverflowMode.Hidden;
 		Root.Style.OverflowY = OverflowMode.Hidden;
 
@@ -1567,6 +1654,14 @@ internal sealed class CoreUiWindow : IDisposable
 			attached = (width, height);
 			Composited = wantsAlpha && CoreRenderDevice.IsComposited( swapchain );
 
+			//The blur was asked for before there was a surface to ask about; the alpha it needs is only known now.
+			//A desktop that will not look at the alpha cannot be showing a blurred desktop through it either.
+			if ( Blurred && !Composited ) ClearBlur();
+			else DressGlass();
+
+			//The region belongs to the surface, so the first attach brings it up to the size the window opened at.
+			window.UpdateBlurBehind();
+
 			//The first moment there is an answer, and the only thing waiting on it: a window cannot
 			//clear to nothing until the desktop has said it will look at what is in the alpha.
 			TakeCorners();
@@ -1591,6 +1686,9 @@ internal sealed class CoreUiWindow : IDisposable
 		{
 			//Remembered only once it took, so a size the window system refused mid-change is asked for again
 			if ( CoreRenderDevice.Resize( swapchain, width, height ) ) attached = (width, height);
+
+			//The blur belongs to the surface, not the swapchain, so it follows the size on its own.
+			window.UpdateBlurBehind();
 			windowStale = true;
 		}
 

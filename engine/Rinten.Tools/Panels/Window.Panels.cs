@@ -12,6 +12,21 @@ public partial class Window
 	private CoreUiWindow shell;
 	private string title = "rinten";
 
+	//The ground under everything below the caption. On a glass window the caption is see-through and this is what keeps the rest of
+	//the window solid: it is the first child of the surface, so every panel the window puts in lands on top of it.
+	private Panel ground;
+
+	private protected override void OnSurfaceCreated()
+	{
+		base.OnSurfaceCreated();
+
+		if ( Surface is null ) return;
+
+		ground = Surface.AddChild<Panel>( "window-ground" );
+		ground.Style.Position = PositionMode.Absolute;
+		ground.Style.PointerEvents = PointerEvents.None;
+	}
+
 	//Whether a window wears a caption of its own instead of the window system's. One bar - TitleBar - drawn by our renderer, the same
 	//on every platform: GNOME draws no caption for a Wayland window at all. Turn it off and the window system's own frame comes back.
 	internal static bool OwnCaption { get; set; } = true;
@@ -152,13 +167,8 @@ public partial class Window
 		//The look, once, on the root - everything in the window is under it and wears it without asking
 		EditorDesign.Apply( shell.Root );
 
-		//And what kind of window it is, so the sheet can tell. A surface in a window that is glass has to paint nothing, or the ground it
-		//would otherwise lay down covers the very blur the window was opened for - which is what made a see-through dialog come out black.
-		shell.Root.SetClass( "glass", shell.Composited );
-
-		//And the other way round, for the desktop that gave us nothing: there the window is solid, so
-		//the panels inside it lay down their own glass rather than showing a blur that is not there.
-		shell.Root.SetClass( "solid", !shell.Composited );
+		//What kind of window it is is the window's own answer, not this one's: CoreUiWindow dresses the root .glass or .solid
+		//from whether the desktop actually gave it a blur - see Blurred and DressGlass.
 
 		//First composited non-dialog window hosts dialogs, since stacked sheets can't blur each other
 		if ( shell.Composited && !IsDialog ) CoreUiWindow.Inside ??= shell;
@@ -429,12 +439,30 @@ public partial class Window
 	{
 		if ( !OnPanels ) return;
 
+		var barBottom = LocalRect.Top;
+
 		if ( _menu is not null && _menu.Visible )
 		{
 			var wanted = _menu.WantedSize();
 
 			_menu.Position = LocalRect.Position;
 			_menu.Size = new Vector2( LocalRect.Width, wanted.y );
+
+			barBottom = _menu.Position.y + _menu.Size.y;
+		}
+
+		//The caption is the only part of a glass window without a ground; this keeps everything under it solid. Its top edge is
+		//put on a whole device pixel: at a fractional desktop scale the bar's own bottom can fall in the middle of one, and an
+		//antialiased half-covered row under a glass bar reads as a seam that is neither blurred nor solid.
+		if ( ground is { IsValid: true } )
+		{
+			var scale = Surface?.DeviceScale ?? 1.0f;
+			var top = scale > 0.0f ? MathF.Round( barBottom * scale ) / scale : barBottom;
+
+			ground.Style.Left = LocalRect.Left;
+			ground.Style.Top = top;
+			ground.Style.Width = LocalRect.Width;
+			ground.Style.Height = MathF.Max( 0.0f, LocalRect.Bottom - top );
 		}
 
 		if ( _status is not null && _status.Visible )

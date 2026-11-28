@@ -24,6 +24,9 @@ $ground: #08080b;
 //The window ground behind all transparent docks and bars; the darkest thing
 $window-ground: #1f1f1f;
 
+//The window ground where the desktop is blurred behind it: the same grey, thin enough to see the blur through
+$window-glass: rgba( 31, 31, 31, 0.72 );
+
 //A pane laid on the page: a side, a bar, a surface with its own contents - the half of the launcher the projects are on.
 $panel-ground: #333333;
 

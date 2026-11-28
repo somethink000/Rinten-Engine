@@ -56,12 +56,30 @@ i,
 	background-color: $veil;
 }
 
-//── the window you can see through ── With desktop transparency, the floor is not drawn
+//── the window you can see through ── Only the caption is glass: the window paints nothing behind it, and the ground panel
+//under the bar lays the solid floor back down for everything else. A window the desktop would not blur is .solid and keeps
+//the old caption plate.
 .glass
 {
 	.surface
 	{
 		background-color: transparent;
+	}
+
+	.window
+	{
+		background-color: transparent;
+	}
+
+	.window-ground
+	{
+		background-color: $window-ground;
+	}
+
+	.window-caption
+	{
+		background-color: transparent;
+		border-bottom-color: rgba( 255, 255, 255, 0.06 );
 	}
 }
 
@@ -356,6 +374,17 @@ i,
 	height: 100%;
 	z-index: 1000;
 	pointer-events: none;
+}
+
+//One outline round a dock group - its tab strip and the dock under it - drawn above both so every dock is enclosed the same way.
+//Placed by code, from the group's own rectangle. See DockManager.SyncFrames.
+.dock-frame
+{
+	position: absolute;
+	pointer-events: none;
+	z-index: 1;
+	border: 2px solid $dock-border;
+	border-radius: $radius-3;
 }
 
 //The frame the eyedropper and the style picker draw round what they are aiming
@@ -1242,10 +1271,8 @@ $viewport-bar-control: 26px;
 	padding: 0px 6px;
 	gap: 6px;
 
-	//A plate: the bar the viewport's controls stand on is exactly where the hands keep going, and grey
-	//here means that. The viewport itself and the strip of open scenes stay on the window's ground.
-	background-color: $panel-ground;
-
+	//No plate on the bar itself: the scene runs on behind it, and what is solid is the glass each control stands
+	//on. The controls are reached for, so they are what a hand sees - not the strip between them.
 	pointer-events: all;
 
 	//The bar is part of the scene window rather than something lying over its neighbours. Buttons do not squeeze (the icon would stop
@@ -1292,7 +1319,8 @@ $viewport-bar-control: 26px;
 		&.right { justify-content: flex-end; }
 	}
 
-	//Several buttons side by side, close together. Each is a box of its own - below - so the group itself wears nothing.
+	//A run of controls: the glass is on each button below. No blur on the group - over a bright scene it shows
+	//as a blue patch around the plates, and the plates are dark enough to read without it.
 	.group
 	{
 		flex-direction: row;
@@ -1301,6 +1329,7 @@ $viewport-bar-control: 26px;
 		height: $viewport-bar-control;
 		padding: 0px;
 		gap: 2px;
+		border-radius: $radius-2;
 
 		//What the tool put on the bar itself: it has its own look and is given only the room.
 		&.plain
@@ -1319,9 +1348,8 @@ $viewport-bar-control: 26px;
 		background-color: $edge;
 	}
 
-	//Every button on the bar the height of the dropdown beside it, on the editor's black - a field's ground and edge - and a step up under the
-	//pointer, the way a field that is pressed does (10-07: the buttons were glyphs on a grey veil, a different size from everything else on the bar).
-	//The build menu's button stands in a panel of its own, and wears the same box
+	//Every control on the bar is a plate of dark glass: black enough for a glyph or a number to read on any picture.
+	//Active keeps the picked plate.
 	.group > .toolbarbutton,
 	.group > .build-menu-button > .toolbarbutton,
 	.snap-step,
@@ -1329,8 +1357,8 @@ $viewport-bar-control: 26px;
 	.tool-mode-picker
 	{
 		height: $viewport-bar-control;
-		background-color: $control-background;
-		border: 1px solid $border;
+		background-color: rgba( 0, 0, 0, 0.75 );
+		border: 1px solid rgba( 255, 255, 255, 0.12 );
 		border-radius: $control-radius;
 	}
 
@@ -1341,12 +1369,10 @@ $viewport-bar-control: 26px;
 	}
 
 	.group > .toolbarbutton:hover,
-	.group > .build-menu-button > .toolbarbutton:hover,
-	.snap-step:hover,
-	.resolution-mode:hover
+	.group > .build-menu-button > .toolbarbutton:hover
 	{
-		background-color: $control-background-light;
-		border-color: $edge-lit;
+		background-color: rgba( 0, 0, 0, 0.85 );
+		border-color: rgba( 255, 255, 255, 0.24 );
 	}
 
 	//On is still the picked plate, the same as everywhere else.
@@ -1805,6 +1831,30 @@ textentry,
 .treebrowserwidget
 {
 	background-color: $panel-ground;
+}
+
+//A dock is cut to the same corners as its outline, so the scene under it cannot show through the arc. The top corners stay
+//square where a tab strip sits over it - the strip is cut to those itself, and a rounded seam between them would be a notch.
+.dockwidget
+{
+	border-bottom-left-radius: $radius-3;
+	border-bottom-right-radius: $radius-3;
+	overflow: hidden;
+}
+
+//The dock that is the whole group, with no tab strip above it, wears all four corners.
+.dockwidget.notab
+{
+	border-top-left-radius: $radius-3;
+	border-top-right-radius: $radius-3;
+}
+
+//The strip over a tabbed group takes the outline's top corners as well; the dock below it takes the bottom ones.
+.tabstrip
+{
+	border-top-left-radius: $radius-3;
+	border-top-right-radius: $radius-3;
+	overflow: hidden;
 }
 
 //The inspector's dock has no ground of its own: its tab opens into the bar across its top, and the cards under that lie straight on the window's

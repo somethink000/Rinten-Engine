@@ -1,4 +1,5 @@
 ﻿using Rinten;
+using Rinten.UI;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -700,17 +701,28 @@ public partial class DockManager
 	//One interactive strip per tab group.
 	private readonly List<TabStrip> tabStrips = new();
 
+	//One outline per tab group, over the strip and the dock beneath it.
+	private readonly Dictionary<Side, Panel> frames = new();
+
 	/// <summary>Keeps the tab strips in step with the manager whose tabs they are.</summary>
 	[EditorEvent.Frame]
 	public void FollowVisibility()
 	{
-		if ( !OnPanels || tabStrips.Count == 0 ) return;
+		if ( !OnPanels ) return;
 
 		var showing = Visible;
 
-		foreach ( var strip in tabStrips )
+		if ( tabStrips.Count > 0 )
 		{
-			if ( strip.IsValid() ) strip.Visible = showing;
+			foreach ( var strip in tabStrips )
+			{
+				if ( strip.IsValid() ) strip.Visible = showing;
+			}
+		}
+
+		foreach ( var frame in frames.Values )
+		{
+			if ( frame.IsValid ) frame.SetClass( "hidden", !showing );
 		}
 	}
 
@@ -873,6 +885,11 @@ public partial class DockManager
 				strip.Destroy();
 
 			tabStrips.Clear();
+
+			foreach ( var frame in frames.Values )
+				frame.Delete();
+
+			frames.Clear();
 			return;
 		}
 
@@ -888,6 +905,14 @@ public partial class DockManager
 
 			tabStrips[i].Destroy();
 			tabStrips.RemoveAt( i );
+		}
+
+		foreach ( var (side, frame) in frames.ToArray() )
+		{
+			if ( sides.Contains( side ) ) continue;
+
+			frame.Delete();
+			frames.Remove( side );
 		}
 
 		var at = ScreenPosition;
@@ -921,6 +946,39 @@ public partial class DockManager
 			strip.Size = rect.Size;
 			strip.Visible = Visible;
 			strip.Update();
+		}
+
+		SyncFrames( layer, sides, at );
+	}
+
+	//One outline round each group, tab strip and all, so a dock is enclosed the same way at every edge of the window.
+	private void SyncFrames( EditorOverlay layer, List<Side> sides, Vector2 at )
+	{
+		foreach ( var side in sides )
+		{
+			var open = side.Open.ToList();
+
+			if ( open.Count == 0 )
+			{
+				if ( frames.Remove( side, out var gone ) ) gone.Delete();
+				continue;
+			}
+
+			if ( side.Rect.Width <= 0.0f || side.Rect.Height <= 0.0f ) continue;
+
+			if ( !frames.TryGetValue( side, out var frame ) || !frame.IsValid )
+			{
+				frame = new Panel();
+				frame.AddClass( "dock-frame" );
+				layer.AddChild( frame );
+				frames[side] = frame;
+			}
+
+			frame.Style.Left = at.x + side.Rect.Left;
+			frame.Style.Top = at.y + side.Rect.Top;
+			frame.Style.Width = side.Rect.Width;
+			frame.Style.Height = side.Rect.Height;
+			frame.SetClass( "hidden", !Visible );
 		}
 	}
 

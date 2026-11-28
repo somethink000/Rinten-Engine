@@ -376,6 +376,17 @@ i,
 	pointer-events: none;
 }
 
+//One outline round a dock group - its tab strip and the dock under it - drawn above both so every dock is enclosed the same way.
+//Placed by code, from the group's own rectangle. See DockManager.SyncFrames.
+.dock-frame
+{
+	position: absolute;
+	pointer-events: none;
+	z-index: 1;
+	border: 2px solid $dock-border;
+	border-radius: $radius-3;
+}
+
 //The frame the eyedropper and the style picker draw round what they are aiming
 //at. Placed by code - left, top and size come from the panel being outlined.
 .style-picker-highlight,
@@ -1820,6 +1831,30 @@ textentry,
 .treebrowserwidget
 {
 	background-color: $panel-ground;
+}
+
+//A dock is cut to the same corners as its outline, so the scene under it cannot show through the arc. The top corners stay
+//square where a tab strip sits over it - the strip is cut to those itself, and a rounded seam between them would be a notch.
+.dockwidget
+{
+	border-bottom-left-radius: $radius-3;
+	border-bottom-right-radius: $radius-3;
+	overflow: hidden;
+}
+
+//The dock that is the whole group, with no tab strip above it, wears all four corners.
+.dockwidget.notab
+{
+	border-top-left-radius: $radius-3;
+	border-top-right-radius: $radius-3;
+}
+
+//The strip over a tabbed group takes the outline's top corners as well; the dock below it takes the bottom ones.
+.tabstrip
+{
+	border-top-left-radius: $radius-3;
+	border-top-right-radius: $radius-3;
+	overflow: hidden;
 }
 
 //The inspector's dock has no ground of its own: its tab opens into the bar across its top, and the cards under that lie straight on the window's

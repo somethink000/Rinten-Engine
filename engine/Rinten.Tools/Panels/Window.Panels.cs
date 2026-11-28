@@ -152,13 +152,8 @@ public partial class Window
 		//The look, once, on the root - everything in the window is under it and wears it without asking
 		EditorDesign.Apply( shell.Root );
 
-		//And what kind of window it is, so the sheet can tell. A surface in a window that is glass has to paint nothing, or the ground it
-		//would otherwise lay down covers the very blur the window was opened for - which is what made a see-through dialog come out black.
-		shell.Root.SetClass( "glass", shell.Composited );
-
-		//And the other way round, for the desktop that gave us nothing: there the window is solid, so
-		//the panels inside it lay down their own glass rather than showing a blur that is not there.
-		shell.Root.SetClass( "solid", !shell.Composited );
+		//What kind of window it is is the window's own answer, not this one's: CoreUiWindow dresses the root .glass or .solid
+		//from whether the desktop actually gave it a blur - see Blurred and DressGlass.
 
 		//First composited non-dialog window hosts dialogs, since stacked sheets can't blur each other
 		if ( shell.Composited && !IsDialog ) CoreUiWindow.Inside ??= shell;

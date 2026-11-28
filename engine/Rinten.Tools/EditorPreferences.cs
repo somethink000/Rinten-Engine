@@ -44,6 +44,19 @@ public static class EditorPreferences
 	}
 
 	/// <summary>Serve the Model Context Protocol from inside the editor, letting AI agents like Claude Code read and drive the open project. Only ever reachable from this machine.</summary>
+	/// <summary>Frosted glass windows where the desktop can blur behind them. Off, or on a desktop that cannot, keeps the solid grey look.</summary>
+	[Title( "Frosted Glass" )]
+	[Description( "Make editor windows translucent, with the desktop blurred behind them. A desktop that cannot blur stays solid, and a Windows window picks the change up the next time it opens." )]
+	public static bool FrostedGlass
+	{
+		get => Rinten.CoreUiWindow.GlassEnabled;
+		set
+		{
+			Rinten.CoreUiWindow.GlassEnabled = value;
+			Rinten.CoreUiWindow.RefreshGlass();
+		}
+	}
+
 	public static bool McpServerEnabled
 	{
 		get => EditorCookie.Get<bool>( "McpServerEnabled", true );

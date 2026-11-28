@@ -593,6 +593,9 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 	/// <summary>The native display or connection, where the platform has one.</summary>
 	public ulong NativeDisplay { get; private set; }
 
+	//The desktop's blur behind this window, where the compositor has one - see WaylandBlur.
+	private WaylandBlur blur;
+
 	/// <summary>Why the last call failed, from SDL.</summary>
 	public static string LastError
 		=> HasSdl ? Marshal.PtrToStringUTF8( SDL_GetError() ) ?? string.Empty : string.Empty;
@@ -1303,6 +1306,43 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 		}
 	}
 
+	/// <summary>Asks the desktop to blur what is behind this window, so what it clears to nothing shows a frosted desktop rather than a sharp one. True where the compositor took the request.</summary>
+	public bool MakeBlurBehind()
+	{
+		if ( blur is not null )
+		{
+			UpdateBlurBehind();
+			return true;
+		}
+
+		//Linux's Wayland compositors - KWin among them - speak ext_background_effect_v1. Everywhere else the window is
+		//left solid: a see-through window with no blur behind it is a hole rather than glass.
+		if ( !OperatingSystem.IsLinux() || WindowKind != Kind.Wayland ) return false;
+
+		var (width, height) = Size;
+
+		blur = WaylandBlur.Create( (nint)NativeDisplay, (nint)NativeWindow, width, height );
+
+		return blur is not null;
+	}
+
+	/// <summary>Takes the desktop's blur off this window again, where it has one.</summary>
+	public void ClearBlurBehind()
+	{
+		blur?.Dispose();
+		blur = null;
+	}
+
+	/// <summary>The window has a new size: the blur behind it covers the new surface rather than the old one.</summary>
+	public void UpdateBlurBehind()
+	{
+		if ( blur is null ) return;
+
+		var (width, height) = Size;
+
+		blur.SetRegion( width, height );
+	}
+
 	//A window made of glass. The platform's, not ours: what is behind a window belongs to the desktop, and no amount of drawing inside one can see it.
 
 	[System.Runtime.InteropServices.DllImport( "gdi32.dll" )]
@@ -1932,6 +1972,10 @@ internal sealed unsafe partial class CoreWindow : IDisposable
 
 		live.Remove( this );
 		framed.TryRemove( Handle, out _ );
+
+		//The effect belongs to the surface under us: it has to be gone while that surface still exists.
+		blur?.Dispose();
+		blur = null;
 
 		if ( !Adopted )
 		{

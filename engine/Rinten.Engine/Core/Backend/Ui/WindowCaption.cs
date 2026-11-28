@@ -12,6 +12,9 @@ internal sealed class WindowCaption : Panel
 	//The window behind the bar: $window-ground, the same grey the editor sits on.
 	internal static Color Ground => EditorTokens.Colour( "window-ground", new Color( 42 / 255f, 42 / 255f, 42 / 255f ) );
 
+	//The same ground where the desktop blurs behind the window: thin enough to see the blur through, dark enough to read on.
+	internal static Color GlassGround => EditorTokens.Colour( "window-glass", Ground.WithAlpha( 0.72f ) );
+
 	private readonly CoreUiWindow window;
 	private readonly Panel drag;
 	private readonly Label title;

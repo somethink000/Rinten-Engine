@@ -936,21 +936,13 @@ public partial class DockManager
 		Paint.SetDefaultFont();
 		Paint.Antialiasing = true;
 
-		//A dock tab is the panel it opens. On a glass window that panel is glass too, so the tab is a thin plate
-		//over the blurred desktop rather than a block of panel grey sitting in the middle of it.
-		var glass = GetWindow() is Window { Shell: { Blurred: true } };
-		var tabPlate = glass ? Theme.TabBackground.WithAlpha( 0.35f ) : Theme.TabBackground;
-
 		var width = open[0].Size.x;
 		var strip = new Rect( 0, 0, width, TabHeight );
 
-		//On glass the strip is a bar of its own rather than a transparent gap above the dock.
-		var stripPlate = glass ? Theme.WindowBackground.WithAlpha( 0.28f ) : Theme.TabBarBackground;
-
-		if ( stripPlate.a > 0.0f )
+		if ( Theme.TabBarBackground.a > 0.0f )
 		{
 			Paint.ClearPen();
-			Paint.SetBrush( stripPlate );
+			Paint.SetBrush( Theme.TabBarBackground );
 			Paint.DrawRect( strip );
 		}
 
@@ -975,7 +967,7 @@ public partial class DockManager
 				//The open tab is the panel's grey joined to the panel, and that is all: no line of the accent along its top, the way nothing that is on in this
 				//editor wears a bar of colour. Edged by the same hairline the cards under it wear, and then opened along the bottom again, where it joins its panel.
 				Paint.SetPen( Theme.Border, 1.0f );
-				Paint.SetBrush( tabPlate );
+				Paint.SetBrush( Theme.TabBackground );
 				Paint.DrawRect( tab.Shrink( 0.5f, 0.5f, 0.5f, -1.0f ), round, round, 0.0f, 0.0f );
 
 				Paint.ClearPen();

@@ -27,12 +27,6 @@ $window-ground: #1f1f1f;
 //The window ground where the desktop is blurred behind it: the same grey, thin enough to see the blur through
 $window-glass: rgba( 31, 31, 31, 0.72 );
 
-//A well on that ground - a log, a profiler, a grid of tiles: darker so writing reads, still thin enough for the blur
-$well-glass: rgba( 0, 0, 0, 0.22 );
-
-//The strip over a scene: the toolbar and tabs stand on the window rather than beside it
-$bar-glass: rgba( 255, 255, 255, 0.045 );
-
 //A pane laid on the page: a side, a bar, a surface with its own contents - the half of the launcher the projects are on.
 $panel-ground: #333333;
 

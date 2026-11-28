@@ -118,13 +118,7 @@ internal sealed class EditorTabStrip : Widget
 
 	protected override void OnPaint()
 	{
-		//The strip is part of the window rather than a panel of its own. On a glass window it is given the same thin
-		//bar as the title above it, so the tabs stand on the window rather than in a hole between two pieces of chrome.
-		if ( GetWindow() is not Window { Shell: { Blurred: true } } ) return;
-
-		Paint.ClearPen();
-		Paint.SetBrush( Theme.WindowBackground.WithAlpha( 0.28f ) );
-		Paint.DrawRect( LocalRect );
+		//Nothing behind the tabs: the strip is part of the window, and the window is glass
 	}
 
 	sealed class TabWidget : Widget
@@ -171,13 +165,7 @@ internal sealed class EditorTabStrip : Widget
 		{
 			var hovered = Paint.HasMouseOver;
 			var accent = Item.Accent;
-			var glass = GetWindow() is Window { Shell: { Blurred: true } };
-
-			//A tab is a plate over the window. On a glass one that plate is glass as well: the open tab is a thin
-			//wash rather than the panel grey, so the blurred desktop still reads through it.
-			var background = IsCurrent
-				? ( glass ? Theme.TabBackground.WithAlpha( 0.35f ) : Theme.TabBackground )
-				: hovered ? Theme.Slab : Theme.TabInactiveBackground;
+			var background = IsCurrent ? Theme.TabBackground : hovered ? Theme.Slab : Theme.TabInactiveBackground;
 			var round = Theme.TabRadius;
 
 			//Round along the top, square where it meets the view under it

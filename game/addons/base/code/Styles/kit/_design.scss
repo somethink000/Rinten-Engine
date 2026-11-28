@@ -56,12 +56,30 @@ i,
 	background-color: $veil;
 }
 
-//── the window you can see through ── With desktop transparency, the floor is not drawn
+//── the window you can see through ── Only the caption is glass: the window paints nothing behind it, and the ground panel
+//under the bar lays the solid floor back down for everything else. A window the desktop would not blur is .solid and keeps
+//the old caption plate.
 .glass
 {
 	.surface
 	{
 		background-color: transparent;
+	}
+
+	.window
+	{
+		background-color: transparent;
+	}
+
+	.window-ground
+	{
+		background-color: $window-ground;
+	}
+
+	.window-caption
+	{
+		background-color: transparent;
+		border-bottom-color: rgba( 255, 255, 255, 0.06 );
 	}
 }
 
